@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"fmt"
+	"time"
 
 	"github.com/aceld/zinx/ziface"
 	"github.com/aceld/zinx/znet"
@@ -82,7 +83,9 @@ func (h *SettlementHandler) Handle(request ziface.IRequest) {
 	}
 
 	// 发送响应
-	if err := conn.SendMsg(dny_protocol.CmdSettlement, responseData); err != nil {
+	// 生成消息ID
+	messageID := uint16(time.Now().Unix() & 0xFFFF)
+	if err := zinx_server.SendDNYResponse(conn, physicalId, messageID, uint8(dny_protocol.CmdSettlement), responseData); err != nil {
 		logger.WithFields(logrus.Fields{
 			"connID":   conn.GetConnID(),
 			"deviceId": deviceId,

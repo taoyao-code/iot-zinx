@@ -78,7 +78,7 @@ func GenerateChargeControlData(rateMode byte, balance uint32, portNumber byte, c
 }
 
 // Handle 向设备发送充电控制命令
-func SendChargeControlCommand(conn ziface.IConnection, rateMode byte, balance uint32, portNumber byte, chargeCommand byte, chargeDuration uint16, orderNumber []byte, maxChargeDuration uint16, maxPower uint16, qrCodeLight byte) error {
+func SendChargeControlCommand(conn ziface.IConnection, physicalId uint32, rateMode byte, balance uint32, portNumber byte, chargeCommand byte, chargeDuration uint16, orderNumber []byte, maxChargeDuration uint16, maxPower uint16, qrCodeLight byte) error {
 	// 构建充电控制数据
 	data := GenerateChargeControlData(rateMode, balance, portNumber, chargeCommand, chargeDuration, orderNumber, maxChargeDuration, maxPower, qrCodeLight)
 
@@ -92,6 +92,7 @@ func SendChargeControlCommand(conn ziface.IConnection, rateMode byte, balance ui
 	logger.WithFields(logrus.Fields{
 		"connID":            conn.GetConnID(),
 		"deviceId":          deviceId,
+		"physicalId":        fmt.Sprintf("0x%08X", physicalId),
 		"rateMode":          rateMode,
 		"balance":           balance,
 		"portNumber":        portNumber,
@@ -103,8 +104,10 @@ func SendChargeControlCommand(conn ziface.IConnection, rateMode byte, balance ui
 		"qrCodeLight":       qrCodeLight,
 	}).Info("发送充电控制命令")
 
-	// 发送消息
-	return conn.SendMsg(dny_protocol.CmdChargeControl, data)
+	// 使用正确的DNY协议发送消息
+	// 生成消息ID
+	messageID := uint16(time.Now().Unix() & 0xFFFF)
+	return zinx_server.SendDNYResponse(conn, physicalId, messageID, uint8(dny_protocol.CmdChargeControl), data)
 }
 
 // Handle 处理充电控制命令的响应

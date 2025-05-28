@@ -3,6 +3,7 @@ package handlers
 import (
 	"encoding/binary"
 	"fmt"
+	"time"
 
 	"github.com/aceld/zinx/ziface"
 	"github.com/aceld/zinx/znet"
@@ -92,12 +93,12 @@ func (h *SwipeCardHandler) Handle(request ziface.IRequest) {
 	}
 
 	logger.WithFields(logrus.Fields{
-		"connID":     conn.GetConnID(),
-		"deviceId":   deviceId,
-		"cardNumber": swipeData.CardNumber,
-		"cardType":   swipeData.CardType,
-		"gunNumber":  swipeData.GunNumber,
-		"swipeTime":  swipeData.SwipeTime.Format("2006-01-02 15:04:05"),
+		"connID":       conn.GetConnID(),
+		"deviceId":     deviceId,
+		"cardNumber":   swipeData.CardNumber,
+		"cardType":     swipeData.CardType,
+		"gunNumber":    swipeData.GunNumber,
+		"swipeTime":    swipeData.SwipeTime.Format("2006-01-02 15:04:05"),
 		"deviceStatus": swipeData.DeviceStatus,
 	}).Info("收到刷卡请求")
 
@@ -131,7 +132,9 @@ func (h *SwipeCardHandler) Handle(request ziface.IRequest) {
 	}
 
 	// 发送响应
-	if err := conn.SendMsg(dny_protocol.CmdSwipeCard, responseData); err != nil {
+	// 生成消息ID
+	messageID := uint16(time.Now().Unix() & 0xFFFF)
+	if err := zinx_server.SendDNYResponse(conn, physicalId, messageID, uint8(dny_protocol.CmdSwipeCard), responseData); err != nil {
 		logger.WithFields(logrus.Fields{
 			"connID":     conn.GetConnID(),
 			"deviceId":   deviceId,

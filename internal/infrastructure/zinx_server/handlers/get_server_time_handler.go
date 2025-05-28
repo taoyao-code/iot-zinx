@@ -53,7 +53,9 @@ func (h *GetServerTimeHandler) Handle(request ziface.IRequest) {
 	binary.LittleEndian.PutUint32(timeBytes, uint32(now))
 
 	// 发送响应
-	if err := conn.SendMsg(dny_protocol.CmdGetServerTime, timeBytes); err != nil {
+	// 生成消息ID
+	messageID := uint16(time.Now().Unix() & 0xFFFF)
+	if err := zinx_server.SendDNYResponse(conn, physicalId, messageID, uint8(dny_protocol.CmdGetServerTime), timeBytes); err != nil {
 		logger.WithFields(logrus.Fields{
 			"connID":     conn.GetConnID(),
 			"physicalId": fmt.Sprintf("0x%08X", physicalId),

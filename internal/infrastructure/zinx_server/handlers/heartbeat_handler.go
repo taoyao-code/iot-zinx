@@ -65,8 +65,8 @@ func (h *HeartbeatHandler) Handle(request ziface.IRequest) {
 	// 构建响应数据 (此处简化，返回成功)
 	responseData := []byte{dny_protocol.ResponseSuccess} // 0x00 表示成功
 
-	// 发送响应
-	if err := conn.SendMsg(uint32(commandId), responseData); err != nil {
+	// 发送响应 - 使用DNY协议响应函数
+	if err := zinx_server.SendDNYResponse(conn, physicalId, uint16(dnyMessageId), uint8(commandId), responseData); err != nil {
 		logger.WithFields(logrus.Fields{
 			"connID":     conn.GetConnID(),
 			"physicalId": fmt.Sprintf("0x%08X", physicalId),

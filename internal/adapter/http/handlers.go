@@ -123,8 +123,20 @@ func HandleSendCommand(c *gin.Context) {
 		return
 	}
 
-	// 发送命令到设备
-	err := conn.SendMsg(uint32(req.Command), req.Data)
+	// 解析设备ID为物理ID
+	physicalID, err := strconv.ParseUint(req.DeviceID, 16, 32)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, APIResponse{
+			Code:    400,
+			Message: "设备ID格式错误",
+		})
+		return
+	}
+
+	// 发送命令到设备（使用正确的DNY协议）
+	// 生成消息ID
+	messageID := uint16(time.Now().Unix() & 0xFFFF)
+	err = zinx_server.SendDNYResponse(conn, uint32(physicalID), messageID, req.Command, req.Data)
 	if err != nil {
 		logger.WithFields(logrus.Fields{
 			"deviceId": req.DeviceID,

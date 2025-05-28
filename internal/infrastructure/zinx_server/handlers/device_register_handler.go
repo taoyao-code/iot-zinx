@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"fmt"
+	"time"
 
 	"github.com/aceld/zinx/ziface"
 	"github.com/aceld/zinx/znet"
@@ -51,11 +52,11 @@ func (h *DeviceRegisterHandler) Handle(request ziface.IRequest) {
 	}
 
 	logger.WithFields(logrus.Fields{
-		"connID":         conn.GetConnID(),
-		"physicalId":     fmt.Sprintf("0x%08X", physicalId),
-		"iccid":          registerData.ICCID,
-		"deviceType":     registerData.DeviceType,
-		"deviceVersion":  string(registerData.DeviceVersion[:]),
+		"connID":          conn.GetConnID(),
+		"physicalId":      fmt.Sprintf("0x%08X", physicalId),
+		"iccid":           registerData.ICCID,
+		"deviceType":      registerData.DeviceType,
+		"deviceVersion":   string(registerData.DeviceVersion[:]),
 		"heartbeatPeriod": registerData.HeartbeatPeriod,
 	}).Info("收到设备注册请求")
 
@@ -74,14 +75,16 @@ func (h *DeviceRegisterHandler) Handle(request ziface.IRequest) {
 
 	// 构建响应数据
 	responseData := make([]byte, 5)
-	responseData[0] = dny_protocol.ResponseSuccess         // 成功
+	responseData[0] = dny_protocol.ResponseSuccess        // 成功
 	responseData[1] = uint8(registerData.DeviceType)      // 设备类型
 	responseData[2] = uint8(registerData.DeviceType >> 8) // 设备类型高位
 	responseData[3] = 0                                   // 预留
 	responseData[4] = 0                                   // 预留
 
 	// 发送响应
-	if err := conn.SendMsg(dny_protocol.CmdDeviceRegister, responseData); err != nil {
+	// 生成消息ID
+	messageID := uint16(time.Now().Unix() & 0xFFFF)
+	if err := zinx_server.SendDNYResponse(conn, physicalId, messageID, uint8(dny_protocol.CmdDeviceRegister), responseData); err != nil {
 		logger.WithFields(logrus.Fields{
 			"connID":     conn.GetConnID(),
 			"physicalId": fmt.Sprintf("0x%08X", physicalId),

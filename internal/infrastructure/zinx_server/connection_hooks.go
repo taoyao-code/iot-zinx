@@ -680,6 +680,33 @@ func sendRegisterResponse(conn ziface.IConnection, physicalID uint32, messageID 
 	return true
 }
 
+// SendDNYResponse 发送DNY协议响应（供handlers使用的公共函数）
+func SendDNYResponse(conn ziface.IConnection, physicalID uint32, messageID uint16, command uint8, responseData []byte) error {
+	// 构建完整的DNY协议包
+	packet := buildDNYResponsePacket(physicalID, messageID, command, responseData)
+
+	// 使用SendBuffMsg发送完整的DNY协议包
+	if err := conn.SendBuffMsg(0, packet); err != nil {
+		logger.WithFields(logrus.Fields{
+			"connID":     conn.GetConnID(),
+			"physicalID": physicalID,
+			"messageID":  messageID,
+			"command":    fmt.Sprintf("0x%02X", command),
+			"error":      err.Error(),
+		}).Error("发送DNY响应失败")
+		return err
+	}
+
+	logger.WithFields(logrus.Fields{
+		"connID":     conn.GetConnID(),
+		"physicalID": physicalID,
+		"messageID":  messageID,
+		"command":    fmt.Sprintf("0x%02X", command),
+	}).Debug("已发送DNY响应")
+
+	return nil
+}
+
 // ConnectionInfo 连接信息结构体
 type ConnectionInfo struct {
 	ConnID        uint64
