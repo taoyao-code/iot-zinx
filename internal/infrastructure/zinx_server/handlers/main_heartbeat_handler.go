@@ -1,9 +1,7 @@
 package handlers
 
 import (
-	"encoding/binary"
 	"fmt"
-	"time"
 
 	"github.com/aceld/zinx/ziface"
 	"github.com/aceld/zinx/znet"
@@ -16,20 +14,6 @@ import (
 // MainHeartbeatHandler 处理主机心跳请求 (命令ID: 0x11)
 type MainHeartbeatHandler struct {
 	znet.BaseRouter
-}
-
-// 主机心跳包结构
-type MainHeartbeatData struct {
-	FirmwareVersion uint16   // 固件版本
-	HasRTC          byte     // 是否有RTC模块
-	Timestamp       uint32   // 主机当前时间戳
-	SignalStrength  byte     // 信号强度
-	ModuleType      byte     // 通讯模块类型
-	ICCID           [20]byte // SIM卡号
-	DeviceType      byte     // 主机类型
-	Frequency       uint16   // 频率
-	IMEI            [15]byte // IMEI号
-	ModuleVersion   [24]byte // 模块版本号
 }
 
 // Handle 处理主机心跳请求
@@ -59,43 +43,29 @@ func (h *MainHeartbeatHandler) Handle(request ziface.IRequest) {
 		zinx_server.BindDeviceIdToConnection(deviceIdStr, conn)
 	}
 
-	// 解析数据部分
+	// 解析主心跳数据
 	data := dnyMsg.GetData()
-	if len(data) < 2 {
+	heartbeatData := &dny_protocol.MainHeartbeatData{}
+	if err := heartbeatData.UnmarshalBinary(data); err != nil {
 		logger.WithFields(logrus.Fields{
 			"connID":     conn.GetConnID(),
 			"physicalId": fmt.Sprintf("0x%08X", physicalId),
 			"dataLen":    len(data),
-		}).Warn("主机心跳数据长度不足")
+			"error":      err.Error(),
+		}).Error("主机心跳数据解析失败")
 		return
 	}
 
-	// 提取固件版本
-	firmwareVersion := binary.LittleEndian.Uint16(data[0:2])
-
 	// 记录主机心跳
 	logger.WithFields(logrus.Fields{
-		"connID":          conn.GetConnID(),
-		"physicalId":      fmt.Sprintf("0x%08X", physicalId),
-		"dnyMessageId":    dnyMessageId,
-		"firmwareVersion": firmwareVersion,
+		"connID":         conn.GetConnID(),
+		"physicalId":     fmt.Sprintf("0x%08X", physicalId),
+		"dnyMessageId":   dnyMessageId,
+		"deviceStatus":   heartbeatData.DeviceStatus,
+		"gunCount":       heartbeatData.GunCount,
+		"temperature":    float64(heartbeatData.Temperature) / 10.0,
+		"signalStrength": heartbeatData.SignalStrength,
 	}).Debug("收到主机心跳")
-
-	// 如果数据长度足够，解析更多字段
-	if len(data) >= 5 {
-		hasRTC := data[2]
-		timestamp := uint32(0)
-		if len(data) >= 9 {
-			timestamp = binary.LittleEndian.Uint32(data[3:7])
-		}
-
-		// 记录更多信息
-		logger.WithFields(logrus.Fields{
-			"hasRTC":    hasRTC,
-			"timestamp": timestamp,
-			"time":      time.Unix(int64(timestamp), 0).Format("2006-01-02 15:04:05"),
-		}).Debug("主机心跳详情")
-	}
 
 	// 不需要应答主机心跳
 	// 主机每隔30分钟发送一次，服务器不用应答

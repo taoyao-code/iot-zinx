@@ -185,16 +185,24 @@ func (s *SettlementData) MarshalBinary() ([]byte, error) {
 	writeTimeBytes(buf, s.EndTime)
 
 	// 充电电量 (4字节, 小端序)
-	binary.Write(buf, binary.LittleEndian, s.ElectricEnergy)
+	if err := binary.Write(buf, binary.LittleEndian, s.ElectricEnergy); err != nil {
+		return nil, fmt.Errorf("write electric energy: %w", err)
+	}
 
 	// 充电费用 (4字节, 小端序)
-	binary.Write(buf, binary.LittleEndian, s.ChargeFee)
+	if err := binary.Write(buf, binary.LittleEndian, s.ChargeFee); err != nil {
+		return nil, fmt.Errorf("write charge fee: %w", err)
+	}
 
 	// 服务费 (4字节, 小端序)
-	binary.Write(buf, binary.LittleEndian, s.ServiceFee)
+	if err := binary.Write(buf, binary.LittleEndian, s.ServiceFee); err != nil {
+		return nil, fmt.Errorf("write service fee: %w", err)
+	}
 
 	// 总费用 (4字节, 小端序)
-	binary.Write(buf, binary.LittleEndian, s.TotalFee)
+	if err := binary.Write(buf, binary.LittleEndian, s.TotalFee); err != nil {
+		return nil, fmt.Errorf("write total fee: %w", err)
+	}
 
 	// 枪号 (1字节)
 	buf.WriteByte(s.GunNumber)
@@ -206,7 +214,7 @@ func (s *SettlementData) MarshalBinary() ([]byte, error) {
 }
 
 func (s *SettlementData) UnmarshalBinary(data []byte) error {
-	if len(data) < 70 {
+	if len(data) < 72 { // 增加了2字节
 		return fmt.Errorf("insufficient data length: %d", len(data))
 	}
 
@@ -222,23 +230,23 @@ func (s *SettlementData) UnmarshalBinary(data []byte) error {
 	// 结束时间 (6字节)
 	s.EndTime = readTimeBytes(data[46:52])
 
-	// 充电电量 (4字节, 小端序)
-	s.ElectricEnergy = binary.LittleEndian.Uint32(data[52:56])
+	// 充电电量 (4字节, 小端序) - 偏移2字节
+	s.ElectricEnergy = binary.LittleEndian.Uint32(data[54:58])
 
-	// 充电费用 (4字节, 小端序)
-	s.ChargeFee = binary.LittleEndian.Uint32(data[56:60])
+	// 充电费用 (4字节, 小端序) - 偏移2字节
+	s.ChargeFee = binary.LittleEndian.Uint32(data[58:62])
 
-	// 服务费 (4字节, 小端序)
-	s.ServiceFee = binary.LittleEndian.Uint32(data[60:64])
+	// 服务费 (4字节, 小端序) - 偏移2字节
+	s.ServiceFee = binary.LittleEndian.Uint32(data[62:66])
 
-	// 总费用 (4字节, 小端序)
-	s.TotalFee = binary.LittleEndian.Uint32(data[64:68])
+	// 总费用 (4字节, 小端序) - 偏移2字节
+	s.TotalFee = binary.LittleEndian.Uint32(data[66:70])
 
-	// 枪号 (1字节)
-	s.GunNumber = data[68]
+	// 枪号 (1字节) - 偏移2字节
+	s.GunNumber = data[70]
 
-	// 停止原因 (1字节)
-	s.StopReason = data[69]
+	// 停止原因 (1字节) - 偏移2字节
+	s.StopReason = data[71]
 
 	return nil
 }
@@ -562,7 +570,7 @@ func readTimeBytes(data []byte) time.Time {
 	day := data[3]
 	hour := data[4]
 	minute := data[5]
-	second := data[6]
+	second := uint8(0) // 当前实现中秒数设为0
 
 	return time.Date(int(year), time.Month(month), int(day),
 		int(hour), int(minute), int(second), 0, time.Local)

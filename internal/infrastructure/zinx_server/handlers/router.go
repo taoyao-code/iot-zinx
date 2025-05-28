@@ -28,9 +28,16 @@ func RegisterRouters(server ziface.IServer) {
 	// 充电控制处理器
 	server.AddRouter(dny_protocol.CmdChargeControl, &ChargeControlHandler{})
 
+	// 结算数据处理器
+	server.AddRouter(dny_protocol.CmdSettlement, &SettlementHandler{})
+
+	// 功率心跳处理器
+	server.AddRouter(dny_protocol.CmdPowerHeartbeat, &PowerHeartbeatHandler{})
+
+	// 参数设置处理器
+	server.AddRouter(dny_protocol.CmdParamSetting, &ParameterSettingHandler{})
+
 	// 后续添加其他命令处理器
-	// server.AddRouter(dny_protocol.CmdSettlement, &SettlementHandler{})
-	// server.AddRouter(dny_protocol.CmdPowerHeartbeat, &PowerHeartbeatHandler{})
 	// server.AddRouter(dny_protocol.CmdAlarm, &AlarmHandler{})
 
 	logger.Info("已注册DNY协议路由处理器")

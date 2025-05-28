@@ -1,6 +1,7 @@
 package service
 
 import (
+	"github.com/bujia-iot/iot-zinx/internal/domain/dny_protocol"
 	"github.com/bujia-iot/iot-zinx/internal/infrastructure/logger"
 	"github.com/sirupsen/logrus"
 )
@@ -37,10 +38,28 @@ func (s *DeviceService) HandleDeviceOffline(deviceId string, iccid string) {
 	// TODO: 调用业务平台API，通知设备离线
 }
 
-// ValidateCard 验证卡片
-func (s *DeviceService) ValidateCard(deviceId string, cardId uint32, cardType byte, portNumber byte) (bool, byte, byte, uint32) {
+// HandleDeviceStatusUpdate 处理设备状态更新
+func (s *DeviceService) HandleDeviceStatusUpdate(deviceId string, status string) {
+	// 记录设备状态更新
+	logger.WithFields(logrus.Fields{
+		"deviceId": deviceId,
+		"status":   status,
+	}).Info("设备状态更新")
+
+	// TODO: 调用业务平台API，更新设备状态
+}
+
+// ValidateCard 验证卡片 - 更新为支持字符串卡号
+func (s *DeviceService) ValidateCard(deviceId string, cardNumber string, cardType byte, gunNumber byte) (bool, byte, byte, uint32) {
 	// 这里应该调用业务平台API验证卡片
 	// 为了简化，假设卡片有效，返回正常状态和计时模式
+
+	logger.WithFields(logrus.Fields{
+		"deviceId":   deviceId,
+		"cardNumber": cardNumber,
+		"cardType":   cardType,
+		"gunNumber":  gunNumber,
+	}).Debug("验证卡片")
 
 	// 返回：是否有效，账户状态，费率模式，余额（分）
 	return true, 0x00, 0x00, 10000
@@ -74,4 +93,50 @@ func (s *DeviceService) StopCharging(deviceId string, portNumber byte, orderNumb
 	}).Info("停止充电")
 
 	return nil
+}
+
+// HandleSettlement 处理结算数据
+func (s *DeviceService) HandleSettlement(deviceId string, settlement *dny_protocol.SettlementData) bool {
+	logger.WithFields(logrus.Fields{
+		"deviceId":       deviceId,
+		"orderId":        settlement.OrderID,
+		"cardNumber":     settlement.CardNumber,
+		"gunNumber":      settlement.GunNumber,
+		"electricEnergy": settlement.ElectricEnergy,
+		"totalFee":       settlement.TotalFee,
+		"stopReason":     settlement.StopReason,
+	}).Info("处理结算数据")
+
+	// TODO: 调用业务平台API处理结算
+	return true
+}
+
+// HandlePowerHeartbeat 处理功率心跳数据
+func (s *DeviceService) HandlePowerHeartbeat(deviceId string, power *dny_protocol.PowerHeartbeatData) {
+	logger.WithFields(logrus.Fields{
+		"deviceId":       deviceId,
+		"gunNumber":      power.GunNumber,
+		"voltage":        power.Voltage,
+		"current":        float64(power.Current) / 100.0,
+		"power":          power.Power,
+		"electricEnergy": power.ElectricEnergy,
+		"temperature":    float64(power.Temperature) / 10.0,
+		"status":         power.Status,
+	}).Debug("处理功率心跳数据")
+
+	// TODO: 调用业务平台API更新功率数据
+}
+
+// HandleParameterSetting 处理参数设置
+func (s *DeviceService) HandleParameterSetting(deviceId string, param *dny_protocol.ParameterSettingData) (bool, []byte) {
+	logger.WithFields(logrus.Fields{
+		"deviceId":      deviceId,
+		"parameterType": param.ParameterType,
+		"parameterId":   param.ParameterID,
+		"valueLength":   len(param.Value),
+	}).Info("处理参数设置")
+
+	// TODO: 调用业务平台API处理参数设置
+	// 返回成功和空的结果值
+	return true, []byte{}
 }

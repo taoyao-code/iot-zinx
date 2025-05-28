@@ -78,63 +78,65 @@ func (h *SwipeCardHandler) Handle(request ziface.IRequest) {
 	physicalId := dnyMsg.GetPhysicalId()
 	deviceId := fmt.Sprintf("%08X", physicalId)
 
-	// 解析数据部分
+	// 解析刷卡请求数据
 	data := dnyMsg.GetData()
-	if len(data) < 9 {
+	swipeData := &dny_protocol.SwipeCardRequestData{}
+	if err := swipeData.UnmarshalBinary(data); err != nil {
 		logger.WithFields(logrus.Fields{
 			"connID":   conn.GetConnID(),
 			"deviceId": deviceId,
 			"dataLen":  len(data),
-		}).Warn("刷卡数据长度不足")
+			"error":    err.Error(),
+		}).Error("刷卡请求数据解析失败")
 		return
 	}
-
-	// 提取主要信息
-	cardId := binary.LittleEndian.Uint32(data[0:4])
-	cardType := data[4]
-	portNumber := data[5]
-	balance := binary.LittleEndian.Uint16(data[6:8])
 
 	logger.WithFields(logrus.Fields{
 		"connID":     conn.GetConnID(),
 		"deviceId":   deviceId,
-		"cardId":     cardId,
-		"cardType":   cardType,
-		"portNumber": portNumber,
-		"balance":    balance,
+		"cardNumber": swipeData.CardNumber,
+		"cardType":   swipeData.CardType,
+		"gunNumber":  swipeData.GunNumber,
+		"swipeTime":  swipeData.SwipeTime.Format("2006-01-02 15:04:05"),
+		"deviceStatus": swipeData.DeviceStatus,
 	}).Info("收到刷卡请求")
 
 	// 调用业务层验证卡片
 	deviceService := app.GetServiceManager().DeviceService
 	isValid, accountStatus, rateMode, cardBalance := deviceService.ValidateCard(
-		deviceId, cardId, cardType, portNumber)
+		deviceId, swipeData.CardNumber, swipeData.CardType, swipeData.GunNumber)
 
-	// 构建响应数据
-	responseData := make([]byte, 12)
-	// 卡片ID (4字节)
-	binary.LittleEndian.PutUint32(responseData[0:4], cardId)
+	// 构建响应数据 - 使用结构化方式
+	// 注意：这里需要根据实际协议调整响应格式
+	responseData := make([]byte, 32)
+	// 卡号 (20字节)
+	cardBytes := make([]byte, 20)
+	copy(cardBytes, []byte(swipeData.CardNumber))
+	copy(responseData[0:20], cardBytes)
 	// 账户状态 (1字节)
 	if !isValid {
-		responseData[4] = 0x01 // 未注册
+		responseData[20] = 0x01 // 未注册
 	} else {
-		responseData[4] = accountStatus
+		responseData[20] = accountStatus
 	}
 	// 费率模式 (1字节)
-	responseData[5] = rateMode
-	// 余额 (4字节)
-	binary.LittleEndian.PutUint32(responseData[6:10], cardBalance)
-	// 端口号 (1字节)
-	responseData[10] = portNumber
-	// 预留 (1字节)
-	responseData[11] = 0
+	responseData[21] = rateMode
+	// 余额 (4字节, 小端序)
+	binary.LittleEndian.PutUint32(responseData[22:26], cardBalance)
+	// 枪号 (1字节)
+	responseData[26] = swipeData.GunNumber
+	// 预留字段
+	for i := 27; i < 32; i++ {
+		responseData[i] = 0
+	}
 
 	// 发送响应
 	if err := conn.SendMsg(dny_protocol.CmdSwipeCard, responseData); err != nil {
 		logger.WithFields(logrus.Fields{
-			"connID":   conn.GetConnID(),
-			"deviceId": deviceId,
-			"cardId":   cardId,
-			"error":    err.Error(),
+			"connID":     conn.GetConnID(),
+			"deviceId":   deviceId,
+			"cardNumber": swipeData.CardNumber,
+			"error":      err.Error(),
 		}).Error("发送刷卡响应失败")
 		return
 	}
@@ -142,7 +144,7 @@ func (h *SwipeCardHandler) Handle(request ziface.IRequest) {
 	logger.WithFields(logrus.Fields{
 		"connID":        conn.GetConnID(),
 		"deviceId":      deviceId,
-		"cardId":        cardId,
+		"cardNumber":    swipeData.CardNumber,
 		"accountStatus": accountStatus,
 		"rateMode":      rateMode,
 		"balance":       cardBalance,

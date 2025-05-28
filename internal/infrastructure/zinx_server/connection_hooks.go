@@ -334,3 +334,24 @@ func UpdateLastHeartbeatTime(conn ziface.IConnection) {
 	now := time.Now().Unix()
 	conn.SetProperty(PropKeyLastHeartbeat, now)
 }
+
+// UpdateDeviceStatus 更新设备状态（online/offline）
+func UpdateDeviceStatus(deviceId string, status string) {
+	logger.WithFields(logrus.Fields{
+		"deviceId": deviceId,
+		"status":   status,
+	}).Debug("更新设备状态")
+
+	// 根据状态调用相应的业务层方法
+	deviceService := app.GetServiceManager().DeviceService
+	switch status {
+	case "online":
+		// 在线状态更新，通常在设备活跃时调用
+		go deviceService.HandleDeviceStatusUpdate(deviceId, status)
+	case "offline":
+		// 离线状态通常在连接断开时处理，这里主要用于记录
+		go deviceService.HandleDeviceStatusUpdate(deviceId, status)
+	default:
+		go deviceService.HandleDeviceStatusUpdate(deviceId, status)
+	}
+}
