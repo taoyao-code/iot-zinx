@@ -1,0 +1,61 @@
+# 充电设备网关配置文件
+# Gateway Configuration
+
+# TCP服务器配置 (Zinx)
+tcpServer:
+  host: "0.0.0.0"
+  port: 8888
+  zinx:
+    name: "Charging Gateway TCP Server"
+    version: "1.0"
+    tcpPort: 8888
+    maxConn: 3000               # 最大连接数
+    workerPoolSize: 10          # 工作池大小
+    maxWorkerTaskLen: 1024      # 任务队列长度
+    maxPacketSize: 2048         # 最大数据包大小
+    maxConn: 3000               # 允许的最大连接数
+
+# HTTP API服务器配置 (Gin)
+httpApiServer:
+  host: "0.0.0.0"
+  port: 8080
+  auth:
+    sharedKey: "changeme-in-production"  # 共享密钥，用于BP认证
+    allowedIPs: ["127.0.0.1", "localhost"] # 允许访问的IP列表
+  timeoutSeconds: 30
+
+# Redis配置
+redis:
+  address: "localhost:6379"
+  password: ""
+  db: 0
+  poolSize: 10
+  minIdleConns: 5
+  dialTimeout: 5
+  readTimeout: 3
+  writeTimeout: 3
+
+# 日志配置
+logger:
+  level: "debug"  # debug, info, warn, error, fatal, panic
+  format: "json"  # json, text
+  filePath: "./logs/gateway.log"
+  maxSizeMB: 100
+  maxBackups: 10
+  maxAgeDays: 30
+  logHexDump: true  # 是否记录DNY报文的HEX dump
+
+# 业务平台API配置
+businessPlatform:
+  apiUrl: "http://localhost:9000/api"
+  apiKey: "business-platform-api-key-change-me"
+  timeoutSeconds: 10
+  retryCount: 3
+  retryBaseIntervalMs: 1000
+  
+# 超时配置
+timeouts:
+  deviceInitSeconds: 30        # 设备初始化超时时间，在此时间内必须完成ICCID上报和注册
+  dnyResponseSeconds: 15       # DNY协议响应超时时间，超过后尝试重发
+  heartbeatIntervalSeconds: 300 # 心跳间隔
+  linkHeartbeatIntervalSeconds: 60 # "link"心跳间隔 
