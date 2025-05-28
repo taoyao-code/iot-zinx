@@ -553,35 +553,58 @@ func handleDeviceStatus(conn ziface.IConnection, data []byte, physicalID uint32,
 	return true
 }
 
-// sendHeartbeatResponse 发送心跳应答
-func sendHeartbeatResponse(conn ziface.IConnection, physicalID uint32, messageID uint16, command uint8) bool {
-	// 构造应答数据包
-	response := make([]byte, 0, 16)
+// buildDNYResponsePacket 构建DNY协议响应数据包
+func buildDNYResponsePacket(physicalID uint32, messageID uint16, command uint8, data []byte) []byte {
+	// 计算数据段长度（物理ID + 消息ID + 命令 + 数据 + 校验）
+	dataLen := 4 + 2 + 1 + len(data) + 2
 
-	// 包头
-	response = append(response, 'D', 'N', 'Y')
+	// 构建数据包
+	packet := make([]byte, 0, 5+dataLen) // 包头(3) + 长度(2) + 数据段
 
-	// 长度（固定10字节：物理ID+消息ID+命令+应答+校验）
-	response = append(response, 0x0A, 0x00)
+	// 包头 "DNY"
+	packet = append(packet, 'D', 'N', 'Y')
+
+	// 长度（小端模式）
+	packet = append(packet, byte(dataLen), byte(dataLen>>8))
 
 	// 物理ID（小端模式）
-	response = append(response, byte(physicalID), byte(physicalID>>8), byte(physicalID>>16), byte(physicalID>>24))
+	packet = append(packet, byte(physicalID), byte(physicalID>>8), byte(physicalID>>16), byte(physicalID>>24))
 
 	// 消息ID（小端模式）
-	response = append(response, byte(messageID), byte(messageID>>8))
+	packet = append(packet, byte(messageID), byte(messageID>>8))
 
 	// 命令
-	response = append(response, command)
+	packet = append(packet, command)
 
-	// 应答（0=成功）
-	response = append(response, 0x00)
+	// 数据
+	packet = append(packet, data...)
 
-	// 计算校验和
-	checksum := calculateChecksum(response)
-	response = append(response, byte(checksum), byte(checksum>>8))
+	// 计算校验和（从包头到数据的累加和）
+	checksum := calculateResponseChecksum(packet)
+	packet = append(packet, byte(checksum), byte(checksum>>8))
 
-	// 发送应答
-	if err := conn.SendMsg(0, response); err != nil {
+	return packet
+}
+
+// calculateResponseChecksum 计算响应数据包校验和
+func calculateResponseChecksum(data []byte) uint16 {
+	var sum uint16
+	for _, b := range data {
+		sum += uint16(b)
+	}
+	return sum
+}
+
+// sendHeartbeatResponse 发送心跳应答
+func sendHeartbeatResponse(conn ziface.IConnection, physicalID uint32, messageID uint16, command uint8) bool {
+	// 构建响应数据（仅包含应答码）
+	responseData := []byte{0x00} // 0x00 表示成功
+
+	// 构建完整的DNY协议包
+	packet := buildDNYResponsePacket(physicalID, messageID, command, responseData)
+
+	// 使用SendBuffMsg发送完整的DNY协议包
+	if err := conn.SendBuffMsg(0, packet); err != nil {
 		logger.WithFields(logrus.Fields{
 			"connID": conn.GetConnID(),
 			"error":  err.Error(),
@@ -593,6 +616,7 @@ func sendHeartbeatResponse(conn ziface.IConnection, physicalID uint32, messageID
 		"connID":     conn.GetConnID(),
 		"physicalID": physicalID,
 		"messageID":  messageID,
+		"command":    fmt.Sprintf("0x%02X", command),
 	}).Debug("已发送心跳应答")
 
 	return true
@@ -600,34 +624,19 @@ func sendHeartbeatResponse(conn ziface.IConnection, physicalID uint32, messageID
 
 // sendServerTimeResponse 发送服务器时间应答
 func sendServerTimeResponse(conn ziface.IConnection, physicalID uint32, messageID uint16) bool {
-	// 构造应答数据包
-	response := make([]byte, 0, 20)
-
-	// 包头
-	response = append(response, 'D', 'N', 'Y')
-
-	// 长度（固定13字节：物理ID+消息ID+命令+时间戳+校验）
-	response = append(response, 0x0D, 0x00)
-
-	// 物理ID（小端模式）
-	response = append(response, byte(physicalID), byte(physicalID>>8), byte(physicalID>>16), byte(physicalID>>24))
-
-	// 消息ID（小端模式）
-	response = append(response, byte(messageID), byte(messageID>>8))
-
-	// 命令
-	response = append(response, 0x12)
-
-	// 当前时间戳（小端模式）
+	// 构建响应数据（当前时间戳，4字节小端序）
 	timestamp := uint32(time.Now().Unix())
-	response = append(response, byte(timestamp), byte(timestamp>>8), byte(timestamp>>16), byte(timestamp>>24))
+	responseData := make([]byte, 4)
+	responseData[0] = byte(timestamp)
+	responseData[1] = byte(timestamp >> 8)
+	responseData[2] = byte(timestamp >> 16)
+	responseData[3] = byte(timestamp >> 24)
 
-	// 计算校验和
-	checksum := calculateChecksum(response)
-	response = append(response, byte(checksum), byte(checksum>>8))
+	// 构建完整的DNY协议包
+	packet := buildDNYResponsePacket(physicalID, messageID, 0x12, responseData)
 
-	// 发送应答
-	if err := conn.SendMsg(0, response); err != nil {
+	// 使用SendBuffMsg发送完整的DNY协议包
+	if err := conn.SendBuffMsg(0, packet); err != nil {
 		logger.WithFields(logrus.Fields{
 			"connID": conn.GetConnID(),
 			"error":  err.Error(),
@@ -647,33 +656,14 @@ func sendServerTimeResponse(conn ziface.IConnection, physicalID uint32, messageI
 
 // sendRegisterResponse 发送注册应答
 func sendRegisterResponse(conn ziface.IConnection, physicalID uint32, messageID uint16) bool {
-	// 构造应答数据包
-	response := make([]byte, 0, 16)
+	// 构建响应数据（仅包含应答码）
+	responseData := []byte{0x00} // 0x00 表示成功
 
-	// 包头
-	response = append(response, 'D', 'N', 'Y')
+	// 构建完整的DNY协议包
+	packet := buildDNYResponsePacket(physicalID, messageID, 0x20, responseData)
 
-	// 长度（固定10字节：物理ID+消息ID+命令+应答+校验）
-	response = append(response, 0x0A, 0x00)
-
-	// 物理ID（小端模式）
-	response = append(response, byte(physicalID), byte(physicalID>>8), byte(physicalID>>16), byte(physicalID>>24))
-
-	// 消息ID（小端模式）
-	response = append(response, byte(messageID), byte(messageID>>8))
-
-	// 命令
-	response = append(response, 0x20)
-
-	// 应答（0=成功）
-	response = append(response, 0x00)
-
-	// 计算校验和
-	checksum := calculateChecksum(response)
-	response = append(response, byte(checksum), byte(checksum>>8))
-
-	// 发送应答
-	if err := conn.SendMsg(0, response); err != nil {
+	// 使用SendBuffMsg发送完整的DNY协议包
+	if err := conn.SendBuffMsg(0, packet); err != nil {
 		logger.WithFields(logrus.Fields{
 			"connID": conn.GetConnID(),
 			"error":  err.Error(),

@@ -57,7 +57,7 @@ func (dp *DNYPacket) Pack(msg ziface.IMessage) ([]byte, error) {
 	}
 
 	// 写入物理ID (4字节，小端序)
-	if err := binary.Write(dataBuff, binary.LittleEndian, uint32(dnyMsg.GetPhysicalId())); err != nil {
+	if err := binary.Write(dataBuff, binary.LittleEndian, dnyMsg.GetPhysicalId()); err != nil {
 		return nil, err
 	}
 
@@ -153,9 +153,8 @@ func (dp *DNYPacket) Unpack(binaryData []byte) (ziface.IMessage, error) {
 		return nil, fmt.Errorf("数据长度不足以解析完整DNY消息, 期望: %d, 实际: %d", totalLen, len(actualData))
 	}
 
-	// 解析物理ID (第6-9字节，小端序) - 协议文档显示是4字节，但Message结构体期望2字节
-	physicalId32 := binary.LittleEndian.Uint32(actualData[5:9])
-	physicalId := uint16(physicalId32) // 暂时截取低16位，后续需要修改Message结构体
+	// 解析物理ID (第6-9字节，小端序) - 现在使用完整的4字节物理ID
+	physicalId := binary.LittleEndian.Uint32(actualData[5:9])
 
 	// 解析消息ID (第10-11字节，小端序)
 	messageId := binary.LittleEndian.Uint16(actualData[9:11])
@@ -179,8 +178,8 @@ func (dp *DNYPacket) Unpack(binaryData []byte) (ziface.IMessage, error) {
 
 	// 记录十六进制日志
 	if dp.logHexDump {
-		logger.Debugf("Unpack DNY消息 <- 命令: 0x%02X, 物理ID: 0x%08X->0x%04X, 消息ID: 0x%04X, 数据长度: %d, 数据: %s",
-			command, physicalId32, physicalId, messageId, payloadLen,
+		logger.Debugf("Unpack DNY消息 <- 命令: 0x%02X, 物理ID: 0x%08X, 消息ID: 0x%04X, 数据长度: %d, 数据: %s",
+			command, physicalId, messageId, payloadLen,
 			hex.EncodeToString(actualData[:totalLen]))
 	}
 

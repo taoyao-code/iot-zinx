@@ -13,7 +13,7 @@ type Message struct {
 	RawData []byte // 原始数据
 
 	// DNY协议特有字段
-	PhysicalId uint16 // 物理ID (2字节)
+	PhysicalId uint32 // 物理ID (4字节)
 }
 
 // GetMsgID 实现IMessage接口，获取消息ID
@@ -58,17 +58,17 @@ func (m *Message) SetRawData(rawData []byte) {
 }
 
 // GetPhysicalId 获取物理ID
-func (m *Message) GetPhysicalId() uint16 {
+func (m *Message) GetPhysicalId() uint32 {
 	return m.PhysicalId
 }
 
 // SetPhysicalId 设置物理ID
-func (m *Message) SetPhysicalId(physicalId uint16) {
+func (m *Message) SetPhysicalId(physicalId uint32) {
 	m.PhysicalId = physicalId
 }
 
 // NewMessage 创建一个新的DNY消息
-func NewMessage(id uint32, physicalId uint16, data []byte) *Message {
+func NewMessage(id uint32, physicalId uint32, data []byte) *Message {
 	return &Message{
 		Id:         id,
 		DataLen:    uint32(len(data)),
