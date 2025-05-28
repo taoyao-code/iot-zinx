@@ -30,15 +30,23 @@ func StartHTTPServer() error {
 
 // registerHTTPHandlers 注册HTTP处理器
 func registerHTTPHandlers(r *gin.Engine) {
+	// 健康检查（根路径）
+	r.GET("/health", http.HandleHealthCheck)
+
 	// API路由组
 	api := r.Group("/api")
 	{
-		// 健康检查
-		api.GET("/health", http.HandleHealthCheck)
-
 		// 设备相关API
+		api.GET("/devices", http.HandleDeviceList)
 		api.GET("/device/:deviceId/status", http.HandleDeviceStatus)
 		api.POST("/device/command", http.HandleSendCommand)
-		api.GET("/devices", http.HandleDeviceList)
+
+		// DNY协议命令API
+		api.POST("/command/dny", http.HandleSendDNYCommand)
+		api.GET("/device/:deviceId/query", http.HandleQueryDeviceStatus)
+
+		// 充电控制API
+		api.POST("/charging/start", http.HandleStartCharging)
+		api.POST("/charging/stop", http.HandleStopCharging)
 	}
 }
