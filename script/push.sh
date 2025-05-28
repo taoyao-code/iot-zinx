@@ -12,7 +12,6 @@ echo "发布到 Gitee "
 
 git push -f git@gitee.com:ling-cn/iot-zinx.git main
 
-echo "发布到 GitHub "
-
-git push -f git@github.com:taoyao-code/iot-zinx.git main
+# echo "发布到 GitHub "
+# git push -f git@github.com:taoyao-code/iot-zinx.git main
 echo "发布成功！"
