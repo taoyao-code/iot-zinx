@@ -214,6 +214,15 @@ func HandlePacket(conn ziface.IConnection, data []byte) bool {
 
 	// 处理十六进制编码的数据
 	if isHexEncodedData(data) {
+		// 记录详细的十六进制编码数据
+		logger.WithFields(logrus.Fields{
+			"connID":     conn.GetConnID(),
+			"remoteAddr": conn.RemoteAddr().String(),
+			"dataLen":    len(data),
+			"dataHex":    fmt.Sprintf("%X", data),
+			"dataStr":    string(data),
+		}).Debug("收到十六进制编码数据")
+
 		// 解码十六进制字符串
 		decoded, err := hex.DecodeString(string(data))
 		if err != nil {
@@ -226,9 +235,26 @@ func HandlePacket(conn ziface.IConnection, data []byte) bool {
 			return false
 		}
 
+		// 记录解码后的数据
+		logger.WithFields(logrus.Fields{
+			"connID":        conn.GetConnID(),
+			"remoteAddr":    conn.RemoteAddr().String(),
+			"decodedLen":    len(decoded),
+			"decodedHex":    fmt.Sprintf("%X", decoded),
+			"isDNYProtocol": len(decoded) >= 3 && string(decoded[:3]) == "DNY",
+		}).Debug("解码十六进制数据完成")
+
 		// 递归处理解码后的数据
 		return HandlePacket(conn, decoded)
 	}
+
+	// 记录原始数据的十六进制表示
+	logger.WithFields(logrus.Fields{
+		"connID":     conn.GetConnID(),
+		"remoteAddr": conn.RemoteAddr().String(),
+		"dataLen":    len(data),
+		"dataHex":    fmt.Sprintf("%X", data),
+	}).Debug("处理接收到的数据包")
 
 	// 尝试解析为ICCID (20字节ASCII数字字符串)
 	if len(data) == 20 {
@@ -241,8 +267,9 @@ func HandlePacket(conn ziface.IConnection, data []byte) bool {
 			BindDeviceIdToConnection(iccidStr, conn)
 
 			logger.WithFields(logrus.Fields{
-				"connID": conn.GetConnID(),
-				"iccid":  iccidStr,
+				"connID":     conn.GetConnID(),
+				"remoteAddr": conn.RemoteAddr().String(),
+				"iccid":      iccidStr,
 			}).Info("收到ICCID并绑定设备")
 			return true
 		}
@@ -261,6 +288,8 @@ func HandlePacket(conn ziface.IConnection, data []byte) bool {
 			"connID":     conn.GetConnID(),
 			"remoteAddr": conn.RemoteAddr().String(),
 			"dataLen":    len(data),
+			"timestamp":  now,
+			"timeStr":    time.Unix(now, 0).Format("2006-01-02 15:04:05"),
 		}).Debug("收到link心跳")
 		return true
 	}
@@ -276,7 +305,7 @@ func HandlePacket(conn ziface.IConnection, data []byte) bool {
 			"remoteAddr": conn.RemoteAddr().String(),
 			"dataLen":    len(data),
 			"dataHex":    fmt.Sprintf("%X", data),
-		}).Info("收到DNY协议数据")
+		}).Debug("收到DNY协议数据")
 
 		// 处理DNY协议数据
 		return handleDNYProtocol(conn, data)
@@ -303,7 +332,7 @@ func BindDeviceIdToConnection(deviceId string, conn ziface.IConnection) {
 		"deviceId":   deviceId,
 		"connID":     conn.GetConnID(),
 		"remoteAddr": conn.RemoteAddr().String(),
-	}).Info("Device ID bound to connection")
+	}).Info("设备ID已绑定到连接")
 }
 
 // GetConnectionByDeviceId 根据设备ID获取连接
@@ -345,6 +374,17 @@ func isValidICCIDBytes(data []byte) bool {
 
 // isHexEncodedData 检查数据是否为十六进制编码的字符串
 func isHexEncodedData(data []byte) bool {
+	// 特殊情况处理：很短的数据通常不是十六进制编码
+	// "link"心跳等短字符串应该排除
+	if len(data) < 6 {
+		return false
+	}
+
+	// 如果数据以"DNY"开头，不认为是十六进制编码
+	if len(data) >= 3 && string(data[:3]) == "DNY" {
+		return false
+	}
+
 	// 必须是偶数长度且长度大于0
 	if len(data) == 0 || len(data)%2 != 0 {
 		return false
@@ -355,6 +395,11 @@ func isHexEncodedData(data []byte) bool {
 		if !((b >= '0' && b <= '9') || (b >= 'A' && b <= 'F') || (b >= 'a' && b <= 'f')) {
 			return false
 		}
+	}
+
+	// 尝试将数据解码为十六进制，验证其有效性
+	if decoded, err := hex.DecodeString(string(data)); err != nil || len(decoded) == 0 {
+		return false
 	}
 
 	return true
@@ -483,16 +528,19 @@ func handleDNYProtocol(conn ziface.IConnection, data []byte) bool {
 		return handleDeviceHeartbeat(conn, data, physicalID, messageID)
 	case 0x11: // 主机状态心跳包
 		return handleHostHeartbeat(conn, data, physicalID, messageID)
-	case 0x12: // 主机获取服务器时间
-		return handleGetServerTime(conn, data, physicalID, messageID)
+	case 0x12, 0x22: // 主机/设备获取服务器时间 (支持0x12和0x22两种命令)
+		return handleGetServerTime(conn, data, physicalID, messageID, command)
 	case 0x20: // 设备注册包
 		return handleDeviceRegister(conn, data, physicalID, messageID)
 	case 0x21: // 设备状态包
 		return handleDeviceStatus(conn, data, physicalID, messageID)
 	default:
 		logger.WithFields(logrus.Fields{
-			"connID":  conn.GetConnID(),
-			"command": fmt.Sprintf("0x%02X", command),
+			"connID":     conn.GetConnID(),
+			"command":    fmt.Sprintf("0x%02X", command),
+			"physicalID": physicalID,
+			"messageID":  messageID,
+			"dataHex":    fmt.Sprintf("%X", data),
 		}).Debug("未知DNY协议命令")
 	}
 
@@ -524,15 +572,16 @@ func handleHostHeartbeat(conn ziface.IConnection, data []byte, physicalID uint32
 }
 
 // handleGetServerTime 处理获取服务器时间请求
-func handleGetServerTime(conn ziface.IConnection, data []byte, physicalID uint32, messageID uint16) bool {
+func handleGetServerTime(conn ziface.IConnection, data []byte, physicalID uint32, messageID uint16, command byte) bool {
 	logger.WithFields(logrus.Fields{
 		"connID":     conn.GetConnID(),
 		"physicalID": physicalID,
 		"messageID":  messageID,
+		"command":    fmt.Sprintf("0x%02X", command),
 	}).Info("处理获取服务器时间请求")
 
 	// 发送服务器时间应答
-	return sendServerTimeResponse(conn, physicalID, messageID)
+	return sendServerTimeResponse(conn, physicalID, messageID, command)
 }
 
 // handleDeviceRegister 处理设备注册包
@@ -541,11 +590,50 @@ func handleDeviceRegister(conn ziface.IConnection, data []byte, physicalID uint3
 		"connID":     conn.GetConnID(),
 		"physicalID": physicalID,
 		"messageID":  messageID,
+		"dataHex":    fmt.Sprintf("%X", data),
 	}).Info("处理设备注册包")
 
-	// 将物理ID作为设备ID进行绑定
+	// 检查数据长度是否符合要求
+	if len(data) < 14 {
+		logger.WithFields(logrus.Fields{
+			"connID":     conn.GetConnID(),
+			"physicalID": physicalID,
+			"dataLen":    len(data),
+		}).Error("设备注册数据长度不足")
+		return false
+	}
+
+	// 解析设备注册数据(根据实际协议格式)
+	// 示例：从数据中提取固件版本、端口数量等
+	firmwareVersion := uint16(0)
+	portCount := uint8(0)
+	virtualID := uint8(0)
+	deviceType := uint8(0)
+
+	// 如果数据长度足够，才进行解析
+	if len(data) >= 19 { // 14(基本头部) + 5(最少的注册数据)
+		firmwareVersion = uint16(data[12]) | uint16(data[13])<<8
+		portCount = data[14]
+		virtualID = data[15]
+		deviceType = data[16]
+	}
+
+	// 将物理ID转换为字符串
 	deviceIdStr := fmt.Sprintf("%d", physicalID)
+
+	// 将设备ID绑定到连接
 	BindDeviceIdToConnection(deviceIdStr, conn)
+
+	// 记录设备详细信息
+	logger.WithFields(logrus.Fields{
+		"connID":          conn.GetConnID(),
+		"physicalID":      physicalID,
+		"deviceIdStr":     deviceIdStr,
+		"firmwareVersion": firmwareVersion,
+		"portCount":       portCount,
+		"virtualID":       virtualID,
+		"deviceType":      deviceType,
+	}).Info("设备注册成功")
 
 	// 发送注册应答
 	return sendRegisterResponse(conn, physicalID, messageID)
@@ -633,7 +721,7 @@ func sendHeartbeatResponse(conn ziface.IConnection, physicalID uint32, messageID
 }
 
 // sendServerTimeResponse 发送服务器时间应答
-func sendServerTimeResponse(conn ziface.IConnection, physicalID uint32, messageID uint16) bool {
+func sendServerTimeResponse(conn ziface.IConnection, physicalID uint32, messageID uint16, command byte) bool {
 	// 构建响应数据（当前时间戳，4字节小端序）
 	timestamp := uint32(time.Now().Unix())
 	responseData := make([]byte, 4)
@@ -642,29 +730,36 @@ func sendServerTimeResponse(conn ziface.IConnection, physicalID uint32, messageI
 	responseData[2] = byte(timestamp >> 16)
 	responseData[3] = byte(timestamp >> 24)
 
-	// 构建完整的DNY协议包
-	packet := buildDNYResponsePacket(physicalID, messageID, 0x12, responseData)
+	// 构建完整的DNY协议包，使用原始命令
+	packet := buildDNYResponsePacket(physicalID, messageID, command, responseData)
 
 	// 使用SendBuffMsg发送完整的DNY协议包
 	if err := conn.SendBuffMsg(0, packet); err != nil {
 		logger.WithFields(logrus.Fields{
-			"connID": conn.GetConnID(),
-			"error":  err.Error(),
+			"connID":       conn.GetConnID(),
+			"error":        err.Error(),
+			"command":      fmt.Sprintf("0x%02X", command),
+			"physicalID":   physicalID,
+			"messageID":    messageID,
+			"timestamp":    timestamp,
+			"timestampStr": time.Unix(int64(timestamp), 0).Format("2006-01-02 15:04:05"),
 		}).Error("发送服务器时间应答失败")
 		return false
 	}
 
 	logger.WithFields(logrus.Fields{
-		"connID":     conn.GetConnID(),
-		"physicalID": physicalID,
-		"messageID":  messageID,
-		"timestamp":  timestamp,
+		"connID":       conn.GetConnID(),
+		"physicalID":   physicalID,
+		"messageID":    messageID,
+		"command":      fmt.Sprintf("0x%02X", command),
+		"timestamp":    timestamp,
+		"timestampStr": time.Unix(int64(timestamp), 0).Format("2006-01-02 15:04:05"),
 	}).Info("已发送服务器时间应答")
 
 	return true
 }
 
-// sendRegisterResponse 发送注册应答
+// sendRegisterResponse 发送设备注册应答
 func sendRegisterResponse(conn ziface.IConnection, physicalID uint32, messageID uint16) bool {
 	// 构建响应数据（仅包含应答码）
 	responseData := []byte{0x00} // 0x00 表示成功
@@ -675,9 +770,11 @@ func sendRegisterResponse(conn ziface.IConnection, physicalID uint32, messageID 
 	// 使用SendBuffMsg发送完整的DNY协议包
 	if err := conn.SendBuffMsg(0, packet); err != nil {
 		logger.WithFields(logrus.Fields{
-			"connID": conn.GetConnID(),
-			"error":  err.Error(),
-		}).Error("发送注册应答失败")
+			"connID":     conn.GetConnID(),
+			"error":      err.Error(),
+			"physicalID": physicalID,
+			"messageID":  messageID,
+		}).Error("发送设备注册应答失败")
 		return false
 	}
 
@@ -685,7 +782,8 @@ func sendRegisterResponse(conn ziface.IConnection, physicalID uint32, messageID 
 		"connID":     conn.GetConnID(),
 		"physicalID": physicalID,
 		"messageID":  messageID,
-	}).Info("已发送注册应答")
+		"response":   "success",
+	}).Info("已发送设备注册应答")
 
 	return true
 }
