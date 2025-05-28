@@ -25,10 +25,10 @@ func NewDNYPacket(logHexDump bool) ziface.IDataPack {
 }
 
 // GetHeadLen 获取消息头长度
-// DNY协议帧头长度为6字节
+// DNY协议头长度为5字节：包头(3) + 长度(2)
 func (dp *DNYPacket) GetHeadLen() uint32 {
-	// 帧头长度 = 帧头标识(1) + 命令码(1) + 数据长度(2) + 物理ID(2)
-	return 6
+	// DNY协议头长度 = 包头"DNY"(3) + 数据长度(2)
+	return dny_protocol.DnyHeaderLen
 }
 
 // Pack 封包方法
@@ -43,23 +43,31 @@ func (dp *DNYPacket) Pack(msg ziface.IMessage) ([]byte, error) {
 	// 创建缓冲区
 	dataBuff := bytes.NewBuffer([]byte{})
 
-	// 写入帧头标识 (1字节)
-	if err := dataBuff.WriteByte(dny_protocol.FrameHeader); err != nil {
+	// 写入包头"DNY" (3字节)
+	if _, err := dataBuff.WriteString(dny_protocol.DnyHeader); err != nil {
+		return nil, err
+	}
+
+	// 计算数据部分长度（物理ID + 消息ID + 命令 + 数据 + 校验）
+	dataPartLen := 4 + 2 + 1 + dnyMsg.GetDataLen() + 2
+
+	// 写入数据长度 (2字节，小端序)
+	if err := binary.Write(dataBuff, binary.LittleEndian, uint16(dataPartLen)); err != nil {
+		return nil, err
+	}
+
+	// 写入物理ID (4字节，小端序)
+	if err := binary.Write(dataBuff, binary.LittleEndian, uint32(dnyMsg.GetPhysicalId())); err != nil {
+		return nil, err
+	}
+
+	// 写入消息ID (2字节，小端序) - 目前设为0
+	if err := binary.Write(dataBuff, binary.LittleEndian, uint16(0)); err != nil {
 		return nil, err
 	}
 
 	// 写入命令码 (1字节)
 	if err := dataBuff.WriteByte(byte(dnyMsg.GetMsgID())); err != nil {
-		return nil, err
-	}
-
-	// 写入数据长度 (2字节，小端序)
-	if err := binary.Write(dataBuff, binary.LittleEndian, uint16(dnyMsg.GetDataLen())); err != nil {
-		return nil, err
-	}
-
-	// 写入物理ID (2字节，小端序)
-	if err := binary.Write(dataBuff, binary.LittleEndian, uint16(dnyMsg.GetPhysicalId())); err != nil {
 		return nil, err
 	}
 
@@ -70,14 +78,14 @@ func (dp *DNYPacket) Pack(msg ziface.IMessage) ([]byte, error) {
 		}
 	}
 
-	// 写入帧尾标识 (1字节)
-	if err := dataBuff.WriteByte(dny_protocol.FrameTail); err != nil {
+	// 写入校验码 (2字节，暂时设为0x00 0x00)
+	if err := binary.Write(dataBuff, binary.LittleEndian, uint16(0)); err != nil {
 		return nil, err
 	}
 
 	// 记录十六进制日志
 	if dp.logHexDump {
-		logger.Debugf("Pack消息 -> 命令: 0x%02X, 物理ID: 0x%04X, 数据长度: %d, 数据: %s",
+		logger.Debugf("Pack消息 -> 命令: 0x%02X, 物理ID: 0x%08X, 数据长度: %d, 数据: %s",
 			dnyMsg.GetMsgID(), dnyMsg.GetPhysicalId(), dnyMsg.GetDataLen(),
 			hex.EncodeToString(dataBuff.Bytes()))
 	}
@@ -125,50 +133,55 @@ func (dp *DNYPacket) Unpack(binaryData []byte) (ziface.IMessage, error) {
 	}
 
 	// 以下是DNY协议的正常解析逻辑
-	// 检查数据长度是否足够
-	if len(actualData) < int(dp.GetHeadLen())+1 { // +1是帧尾
-		return nil, fmt.Errorf("数据长度不足以解析消息头")
+	// 检查数据长度是否足够包含最小包长度
+	if len(actualData) < dny_protocol.MinPackageLen {
+		return nil, fmt.Errorf("数据长度不足以解析DNY协议包，最小长度: %d, 实际: %d",
+			dny_protocol.MinPackageLen, len(actualData))
 	}
 
-	// 检查帧头和帧尾标识
-	if actualData[0] != dny_protocol.FrameHeader {
-		return nil, fmt.Errorf("无效的帧头标识: 0x%02X", actualData[0])
+	// 检查包头是否为"DNY"
+	if !bytes.HasPrefix(actualData, []byte(dny_protocol.DnyHeader)) {
+		return nil, fmt.Errorf("无效的DNY协议包头: %s", hex.EncodeToString(actualData[:3]))
 	}
 
-	// 数据长度 (从第3-4字节)
+	// 解析数据长度 (第4-5字节，小端序)
 	dataLen := binary.LittleEndian.Uint16(actualData[3:5])
 
 	// 检查数据包长度是否完整
-	msgLen := int(dp.GetHeadLen()) + int(dataLen) + 1 // 帧头 + 数据 + 帧尾
-	if len(actualData) < msgLen {
-		return nil, fmt.Errorf("数据长度不足以解析完整消息, 期望: %d, 实际: %d", msgLen, len(actualData))
+	totalLen := dny_protocol.DnyHeaderLen + int(dataLen) // 包头(3) + 长度(2) + 数据部分
+	if len(actualData) < totalLen {
+		return nil, fmt.Errorf("数据长度不足以解析完整DNY消息, 期望: %d, 实际: %d", totalLen, len(actualData))
 	}
 
-	// 检查帧尾标识
-	if actualData[msgLen-1] != dny_protocol.FrameTail {
-		return nil, fmt.Errorf("无效的帧尾标识: 0x%02X", actualData[msgLen-1])
-	}
+	// 解析物理ID (第6-9字节，小端序) - 协议文档显示是4字节，但Message结构体期望2字节
+	physicalId32 := binary.LittleEndian.Uint32(actualData[5:9])
+	physicalId := uint16(physicalId32) // 暂时截取低16位，后续需要修改Message结构体
+
+	// 解析消息ID (第10-11字节，小端序)
+	messageId := binary.LittleEndian.Uint16(actualData[9:11])
+
+	// 解析命令码 (第12字节)
+	command := uint32(actualData[11])
+
+	// 计算数据部分长度（总数据长度 - 物理ID(4) - 消息ID(2) - 命令(1) - 校验(2)）
+	payloadLen := int(dataLen) - 4 - 2 - 1 - 2
 
 	// 创建DNY消息对象
-	msg := dny_protocol.NewMessage(
-		uint32(actualData[1]),                       // 命令码 (第2字节)
-		binary.LittleEndian.Uint16(actualData[5:7]), // 物理ID (第5-6字节)
-		make([]byte, dataLen),                       // 初始化数据切片
-	)
+	msg := dny_protocol.NewMessage(command, physicalId, make([]byte, payloadLen))
 
-	// 拷贝数据部分
-	if dataLen > 0 {
-		copy(msg.GetData(), actualData[7:7+dataLen])
+	// 拷贝数据部分（如果有）
+	if payloadLen > 0 {
+		copy(msg.GetData(), actualData[12:12+payloadLen])
 	}
 
 	// 保存原始数据
-	msg.SetRawData(actualData[:msgLen])
+	msg.SetRawData(actualData[:totalLen])
 
 	// 记录十六进制日志
 	if dp.logHexDump {
-		logger.Debugf("Unpack消息 <- 命令: 0x%02X, 物理ID: 0x%04X, 数据长度: %d, 数据: %s",
-			msg.GetMsgID(), msg.GetPhysicalId(), dataLen,
-			hex.EncodeToString(actualData[:msgLen]))
+		logger.Debugf("Unpack DNY消息 <- 命令: 0x%02X, 物理ID: 0x%08X->0x%04X, 消息ID: 0x%04X, 数据长度: %d, 数据: %s",
+			command, physicalId32, physicalId, messageId, payloadLen,
+			hex.EncodeToString(actualData[:totalLen]))
 	}
 
 	return msg, nil
@@ -176,26 +189,22 @@ func (dp *DNYPacket) Unpack(binaryData []byte) (ziface.IMessage, error) {
 
 // isDNYProtocolData 检查数据是否符合DNY协议格式
 func isDNYProtocolData(data []byte) bool {
-	// 检查最小长度和帧头
-	if len(data) < 7 { // 最小长度：帧头(1) + 命令(1) + 长度(2) + 物理ID(2) + 帧尾(1)
+	// 检查最小长度
+	if len(data) < dny_protocol.MinPackageLen {
 		return false
 	}
 
-	// 检查帧头标识
-	if data[0] != dny_protocol.FrameHeader {
+	// 检查包头是否为"DNY"
+	if !bytes.HasPrefix(data, []byte(dny_protocol.DnyHeader)) {
 		return false
 	}
 
-	// 检查数据长度字段
+	// 解析数据长度字段
 	dataLen := binary.LittleEndian.Uint16(data[3:5])
-	msgLen := 7 + int(dataLen) // 帧头(1) + 命令(1) + 长度(2) + 物理ID(2) + 数据 + 帧尾(1)
+	totalLen := dny_protocol.DnyHeaderLen + int(dataLen)
 
-	if len(data) < msgLen {
-		return false
-	}
-
-	// 检查帧尾标识
-	if data[msgLen-1] != dny_protocol.FrameTail {
+	// 检查实际长度是否匹配
+	if len(data) < totalLen {
 		return false
 	}
 
