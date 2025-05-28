@@ -1,4 +1,4 @@
-package port
+package ports
 
 import (
 	"path/filepath"
@@ -11,8 +11,8 @@ import (
 	"github.com/bujia-iot/iot-zinx/internal/infrastructure/zinx_server/handlers"
 )
 
-// StartZinxServer 配置并启动Zinx TCP服务器
-func StartZinxServer() error {
+// StartTCPServer 配置并启动Zinx TCP服务器
+func StartTCPServer() error {
 	// 获取配置
 	cfg := config.GetConfig()
 	zinxCfg := cfg.TCPServer.Zinx
@@ -56,7 +56,7 @@ func StartZinxServer() error {
 	server := znet.NewServer()
 
 	// 设置自定义数据包封包与解包器
-	dataPack := zinx_server.NewDnyDataPack(cfg.Logger.LogHexDump)
+	dataPack := zinx_server.NewDNYPacket(cfg.Logger.LogHexDump)
 	server.SetPacket(dataPack)
 
 	// 设置连接创建和销毁的钩子函数
@@ -65,6 +65,9 @@ func StartZinxServer() error {
 
 	// 注册路由处理器
 	handlers.RegisterRouters(server)
+
+	// 启动设备状态监控服务
+	zinx_server.StartDeviceMonitor()
 
 	// 记录服务器启动信息
 	logger.WithField("tcpPort", zinxCfg.TCPPort).Info("正在启动Zinx TCP服务器...")

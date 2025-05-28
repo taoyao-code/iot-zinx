@@ -115,3 +115,9 @@ func Load(configPath string) error {
 func GetConfig() *Config {
 	return &GlobalConfig
 }
+
+// FormatHTTPAddress 格式化HTTP服务器地址为host:port格式
+func FormatHTTPAddress() string {
+	cfg := GetConfig().HTTPAPIServer
+	return fmt.Sprintf("%s:%d", cfg.Host, cfg.Port)
+}

@@ -4,96 +4,83 @@ import (
 	"github.com/aceld/zinx/ziface"
 )
 
-// DnyMessage 实现了Zinx框架的IMessage接口，表示一个DNY协议帧
-type DnyMessage struct {
+// Message 实现了Zinx框架的IMessage接口，表示一个DNY协议帧
+type Message struct {
 	// Zinx IMessage基本字段
-	MsgId   uint32 // 命令ID (DNY commandId)
-	DataLen uint32 // 数据长度
+	Id      uint32 // 命令ID (1字节)
+	DataLen uint32 // 数据长度 (2字节)
 	Data    []byte // 数据内容
-	RawData []byte // 原始数据(完整的DNY帧)
+	RawData []byte // 原始数据
 
 	// DNY协议特有字段
-	PhysicalId   uint32 // 物理ID
-	DnyMessageId uint16 // DNY消息ID
+	PhysicalId uint16 // 物理ID (2字节)
 }
 
-// NewDnyMessage 创建一个新的DNY消息
-func NewDnyMessage(commandId uint32, physicalId uint32, dnyMessageId uint16, data []byte) *DnyMessage {
-	return &DnyMessage{
-		MsgId:        commandId,
-		DataLen:      uint32(len(data)),
-		Data:         data,
-		PhysicalId:   physicalId,
-		DnyMessageId: dnyMessageId,
-	}
-}
-
-// GetMsgID 实现IMessage接口，获取消息ID (注意：方法名使用ID大写以匹配接口)
-func (dm *DnyMessage) GetMsgID() uint32 {
-	return dm.MsgId
+// GetMsgID 实现IMessage接口，获取消息ID
+func (m *Message) GetMsgID() uint32 {
+	return m.Id
 }
 
 // GetDataLen 实现IMessage接口，获取数据长度
-func (dm *DnyMessage) GetDataLen() uint32 {
-	return dm.DataLen
+func (m *Message) GetDataLen() uint32 {
+	return m.DataLen
 }
 
 // GetData 实现IMessage接口，获取数据内容
-func (dm *DnyMessage) GetData() []byte {
-	return dm.Data
+func (m *Message) GetData() []byte {
+	return m.Data
 }
 
 // GetRawData 实现IMessage接口，获取原始数据
-func (dm *DnyMessage) GetRawData() []byte {
-	return dm.RawData
+func (m *Message) GetRawData() []byte {
+	return m.RawData
 }
 
-// SetMsgID 实现IMessage接口，设置消息ID (注意：方法名使用ID大写以匹配接口)
-func (dm *DnyMessage) SetMsgID(msgId uint32) {
-	dm.MsgId = msgId
+// SetMsgID 实现IMessage接口，设置消息ID
+func (m *Message) SetMsgID(id uint32) {
+	m.Id = id
 }
 
 // SetDataLen 实现IMessage接口，设置数据长度
-func (dm *DnyMessage) SetDataLen(dataLen uint32) {
-	dm.DataLen = dataLen
+func (m *Message) SetDataLen(dataLen uint32) {
+	m.DataLen = dataLen
 }
 
 // SetData 实现IMessage接口，设置数据内容
-func (dm *DnyMessage) SetData(data []byte) {
-	dm.Data = data
-	dm.DataLen = uint32(len(data))
+func (m *Message) SetData(data []byte) {
+	m.Data = data
+	m.DataLen = uint32(len(data))
 }
 
 // SetRawData 设置原始数据
-func (dm *DnyMessage) SetRawData(rawData []byte) {
-	dm.RawData = rawData
+func (m *Message) SetRawData(rawData []byte) {
+	m.RawData = rawData
 }
 
 // GetPhysicalId 获取物理ID
-func (dm *DnyMessage) GetPhysicalId() uint32 {
-	return dm.PhysicalId
+func (m *Message) GetPhysicalId() uint16 {
+	return m.PhysicalId
 }
 
 // SetPhysicalId 设置物理ID
-func (dm *DnyMessage) SetPhysicalId(physicalId uint32) {
-	dm.PhysicalId = physicalId
+func (m *Message) SetPhysicalId(physicalId uint16) {
+	m.PhysicalId = physicalId
 }
 
-// GetDnyMessageId 获取DNY消息ID
-func (dm *DnyMessage) GetDnyMessageId() uint16 {
-	return dm.DnyMessageId
+// NewMessage 创建一个新的DNY消息
+func NewMessage(id uint32, physicalId uint16, data []byte) *Message {
+	return &Message{
+		Id:         id,
+		DataLen:    uint32(len(data)),
+		Data:       data,
+		PhysicalId: physicalId,
+	}
 }
 
-// SetDnyMessageId 设置DNY消息ID
-func (dm *DnyMessage) SetDnyMessageId(dnyMessageId uint16) {
-	dm.DnyMessageId = dnyMessageId
-}
-
-// IMessageToDnyMessage 将Zinx IMessage转换为DnyMessage
-// 用于将解析后的通用消息转为DNY消息，方便获取PhysicalId和DnyMessageId
-func IMessageToDnyMessage(msg ziface.IMessage) (*DnyMessage, bool) {
-	if dm, ok := msg.(*DnyMessage); ok {
-		return dm, true
+// IMessageToDnyMessage 将Zinx IMessage转换为DNY Message
+func IMessageToDnyMessage(msg ziface.IMessage) (*Message, bool) {
+	if m, ok := msg.(*Message); ok {
+		return m, true
 	}
 	return nil, false
 }
@@ -107,13 +94,12 @@ type PhysicalIdInfo struct {
 // PhysicalIdString 将物理ID转换为可读字符串
 type PhysicalIdString string
 
-// DnyMessageInfo 包含DNY消息的完整信息，用于调试和日志记录
-type DnyMessageInfo struct {
-	PhysicalId   PhysicalIdString `json:"physical_id"`
-	DnyMessageId string           `json:"dny_message_id"`
-	CommandId    byte             `json:"command_id"`
-	CommandName  string           `json:"command_name"`
-	DataHex      string           `json:"data_hex,omitempty"`
-	RawHex       string           `json:"raw_hex,omitempty"`
-	Direction    string           `json:"direction"` // "ingress" 或 "egress"
+// MessageInfo 包含DNY消息的完整信息，用于调试和日志记录
+type MessageInfo struct {
+	PhysicalId  PhysicalIdString `json:"physical_id"`
+	CommandId   byte             `json:"command_id"`
+	CommandName string           `json:"command_name"`
+	DataHex     string           `json:"data_hex,omitempty"`
+	RawHex      string           `json:"raw_hex,omitempty"`
+	Direction   string           `json:"direction"` // "ingress" 或 "egress"
 }

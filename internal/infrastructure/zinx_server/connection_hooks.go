@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/aceld/zinx/ziface"
+	"github.com/bujia-iot/iot-zinx/internal/app"
 	"github.com/bujia-iot/iot-zinx/internal/infrastructure/config"
 	"github.com/bujia-iot/iot-zinx/internal/infrastructure/logger"
 	"github.com/sirupsen/logrus"
@@ -81,8 +82,9 @@ func OnConnectionStop(conn ziface.IConnection) {
 		deviceIdToConnMap.Delete(deviceIdStr)
 		connIdToDeviceIdMap.Delete(conn.GetConnID())
 
-		// 在这里应该通知业务平台设备离线
-		// TODO: 调用app.DeviceService.HandleDeviceOffline(deviceIdStr, iccid)
+		// 通知业务层设备离线
+		deviceService := app.GetServiceManager().DeviceService
+		go deviceService.HandleDeviceOffline(deviceIdStr, iccid)
 	} else {
 		// 未绑定设备ID的连接断开
 		logger.WithFields(logrus.Fields{
@@ -124,8 +126,17 @@ func handlePreConnectionPhase(conn ziface.IConnection) {
 	for {
 		select {
 		case <-ctx.Done():
-			// 初始化超时
-			logger.WithField("connID", conn.GetConnID()).Warn("Connection initialization timeout")
+			// 初始化超时，但如果收到过ICCID，我们不应断开连接
+			if iccidReceived {
+				iccidVal, _ := conn.GetProperty(PropKeyICCID)
+				logger.WithFields(logrus.Fields{
+					"connID": conn.GetConnID(),
+					"iccid":  iccidVal,
+				}).Info("连接初始化完成（只收到ICCID，未检测到DNY协议头）")
+				return
+			}
+			// 如果既没有收到ICCID，也没有检测到DNY协议头，则断开连接
+			logger.WithField("connID", conn.GetConnID()).Warn("连接初始化超时，未收到ICCID和DNY协议头")
 			conn.Stop()
 			return
 		default:
@@ -141,12 +152,29 @@ func handlePreConnectionPhase(conn ziface.IConnection) {
 				continue // 超时，继续尝试读取
 			}
 
+			// 处理EOF错误
+			if err == io.EOF {
+				// 连接可能已关闭，但如果已经收到ICCID，我们可以保持连接
+				if iccidReceived {
+					iccidVal, _ := conn.GetProperty(PropKeyICCID)
+					logger.WithFields(logrus.Fields{
+						"connID": conn.GetConnID(),
+						"iccid":  iccidVal,
+					}).Info("收到EOF，但已完成ICCID初始化")
+					return
+				}
+				// 否则断开连接
+				logger.WithField("connID", conn.GetConnID()).Warn("收到EOF，未完成初始化")
+				conn.Stop()
+				return
+			}
+
 			// 处理其他错误
-			if err != nil && err != io.EOF {
+			if err != nil {
 				logger.WithFields(logrus.Fields{
 					"connID": conn.GetConnID(),
 					"error":  err.Error(),
-				}).Error("Error reading from connection")
+				}).Error("从连接读取数据出错")
 				conn.Stop()
 				return
 			}
@@ -157,7 +185,7 @@ func handlePreConnectionPhase(conn ziface.IConnection) {
 				if n == 4 && string(data[:4]) == LinkHeartbeat {
 					now := time.Now().Unix()
 					conn.SetProperty(PropKeyLastLink, now)
-					logger.WithField("connID", conn.GetConnID()).Debug("Received 'link' heartbeat")
+					logger.WithField("connID", conn.GetConnID()).Debug("收到'link'心跳")
 					continue
 				}
 
@@ -181,16 +209,19 @@ func handlePreConnectionPhase(conn ziface.IConnection) {
 						logger.WithFields(logrus.Fields{
 							"connID": conn.GetConnID(),
 							"iccid":  potentialICCID,
-						}).Info("ICCID received")
+						}).Info("收到ICCID")
 
-						// 可以继续等待注册包或者直接返回，让Zinx正常处理后续数据
-						// 这里选择继续等待，以便处理后续可能的"link"心跳
+						// 设置一个临时物理ID，防止连接因"no property found"错误而关闭
+						// 等待真正的注册包到来时会更新此值
+						conn.SetProperty(PropKeyDeviceId, "TempID-"+potentialICCID)
+
+						// 不返回，继续等待后续数据
 					}
 				}
 
-				// 检查是否为DNY协议头，如果是则返回让Zinx正常处理
+				// 检查是否为DNY协议头
 				if n >= 3 && string(data[:3]) == "DNY" {
-					logger.WithField("connID", conn.GetConnID()).Debug("DNY protocol header detected, returning control to Zinx")
+					logger.WithField("connID", conn.GetConnID()).Debug("检测到DNY协议头，返回控制权给Zinx")
 					return
 				}
 			}

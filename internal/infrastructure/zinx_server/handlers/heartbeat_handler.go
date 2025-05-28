@@ -34,7 +34,7 @@ func (h *HeartbeatHandler) Handle(request ziface.IRequest) {
 
 	// 提取关键信息
 	physicalId := dnyMsg.GetPhysicalId()
-	dnyMessageId := dnyMsg.GetDnyMessageId()
+	dnyMessageId := dnyMsg.GetMsgID()
 	commandId := dnyMsg.GetMsgID()
 
 	// 心跳类型描述

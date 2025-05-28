@@ -12,24 +12,29 @@ const (
 
 	// 最小包长度（3包头+2长度+4物理ID+2消息ID+1命令+0数据+2校验 = 14字节）
 	MinPackageLen = 14
+
+	// 帧标识符
+	FrameHeader byte = 0x68 // 帧头标识
+	FrameTail   byte = 0x16 // 帧尾标识
 )
 
 // DNY命令ID定义
 const (
 	// 设备上报命令
-	CmdHeartbeat      = 0x01 // 心跳
-	CmdSwipeCard      = 0x02 // 刷卡
-	CmdSettlement     = 0x03 // 结算
-	CmdPowerHeartbeat = 0x06 // 功率心跳
-	CmdMainHeartbeat  = 0x11 // 主机心跳
-	CmdSlaveHeartbeat = 0x21 // 分机心跳
-	CmdDeviceRegister = 0x20 // 设备注册
-	CmdAlarm          = 0x42 // 报警
+	CmdHeartbeat      uint32 = 0x01 // 标准心跳
+	CmdSwipeCard      uint32 = 0x02 // 刷卡请求
+	CmdSettlement     uint32 = 0x03 // 结算
+	CmdPowerHeartbeat uint32 = 0x06 // 功率心跳
+	CmdMainHeartbeat  uint32 = 0x11 // 主机心跳
+	CmdGetServerTime  uint32 = 0x12 // 获取服务器时间
+	CmdSlaveHeartbeat uint32 = 0x21 // 分机心跳
+	CmdDeviceRegister uint32 = 0x20 // 设备注册
+	CmdAlarm          uint32 = 0x42 // 报警
 
 	// 服务器下发命令
-	CmdChargeControl   = 0x82 // 充电控制
-	CmdParamSetting    = 0x83 // 参数设置
-	CmdFirmwareUpgrade = 0xE0 // 固件升级
+	CmdChargeControl   uint32 = 0x82 // 充电控制
+	CmdParamSetting    uint32 = 0x83 // 参数设置
+	CmdFirmwareUpgrade uint32 = 0xE0 // 固件升级
 )
 
 // 设备类型定义
