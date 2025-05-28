@@ -535,7 +535,7 @@ func showServerHealth() {
 // monitorDevices 实时监控设备
 func monitorDevices() {
 	fmt.Println("\n开始实时监控设备状态...")
-	fmt.Println("按 Ctrl+C 停止监控\n")
+	fmt.Println("按 Ctrl+C 停止监控")
 
 	for i := 0; i < 10; i++ { // 监控10次
 		fmt.Printf("\n========== 第 %d 次刷新 ==========\n", i+1)
