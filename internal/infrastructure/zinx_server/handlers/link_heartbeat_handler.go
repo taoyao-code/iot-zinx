@@ -23,6 +23,9 @@ func (h *LinkHeartbeatHandler) Handle(request ziface.IRequest) {
 	now := time.Now().Unix()
 	conn.SetProperty(zinx_server.PropKeyLastLink, now)
 
+	// 同时更新通用心跳时间，确保读取超时正确重置
+	zinx_server.UpdateLastHeartbeatTime(conn)
+
 	logger.WithFields(logrus.Fields{
 		"connID":     conn.GetConnID(),
 		"remoteAddr": conn.RemoteAddr().String(),

@@ -9,6 +9,7 @@ import (
 	"github.com/aceld/zinx/znet"
 	"github.com/bujia-iot/iot-zinx/internal/domain/dny_protocol"
 	"github.com/bujia-iot/iot-zinx/internal/infrastructure/logger"
+	"github.com/bujia-iot/iot-zinx/internal/infrastructure/zinx_server"
 	"github.com/bujia-iot/iot-zinx/internal/infrastructure/zinx_server/common"
 	"github.com/sirupsen/logrus"
 )
@@ -253,5 +254,5 @@ func (h *ChargeControlHandler) Handle(request ziface.IRequest) {
 	// 例如：更新订单状态、记录充电开始时间等
 
 	// 更新心跳时间
-	h.monitor.UpdateLastHeartbeatTime(conn)
+	zinx_server.UpdateLastHeartbeatTime(conn)
 }

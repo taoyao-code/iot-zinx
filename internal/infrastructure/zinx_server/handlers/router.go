@@ -32,7 +32,7 @@ func RegisterRouters(server ziface.IServer) {
 	server.AddRouter(dny_protocol.CmdSwipeCard, &SwipeCardHandler{})
 
 	// 充电控制处理器
-	server.AddRouter(dny_protocol.CmdChargeControl, &ChargeControlHandler{})
+	server.AddRouter(dny_protocol.CmdChargeControl, NewChargeControlHandler(zinx_server.GetGlobalMonitor()))
 
 	// 结算数据处理器
 	server.AddRouter(dny_protocol.CmdSettlement, &SettlementHandler{})

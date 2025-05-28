@@ -42,10 +42,10 @@ var (
 	connIdToDeviceIdMap sync.Map // map[uint64]string
 )
 
-// 初始化超时和心跳配置
+// 使用common包中定义的超时常量
 var (
-	readDeadLine    = time.Second * 60 // 增加读取超时时间到60秒
-	keepAlivePeriod = time.Second * 30 // 减少keepalive间隔到30秒
+	readDeadLine    = common.TCPReadDeadLine    // TCP读取超时时间
+	keepAlivePeriod = common.TCPKeepAlivePeriod // TCP keepalive间隔
 )
 
 // OnConnectionStart 当连接建立时的钩子函数
@@ -253,6 +253,9 @@ func HandlePacket(conn ziface.IConnection, data []byte) bool {
 		now := time.Now().Unix()
 		conn.SetProperty(PropKeyLastLink, now)
 		conn.SetProperty(PropKeyConnStatus, ConnStatusActive)
+
+		// 同时更新通用心跳时间，确保读取超时正确重置
+		UpdateLastHeartbeatTime(conn)
 
 		logger.WithFields(logrus.Fields{
 			"connID":     conn.GetConnID(),

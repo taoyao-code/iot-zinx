@@ -6,8 +6,8 @@ import (
 	"time"
 
 	"github.com/aceld/zinx/ziface"
-	"github.com/bujia-iot/iot-zinx/internal/infrastructure/config"
 	"github.com/bujia-iot/iot-zinx/internal/infrastructure/logger"
+	"github.com/bujia-iot/iot-zinx/internal/infrastructure/zinx_server/common"
 	"github.com/sirupsen/logrus"
 )
 
@@ -23,22 +23,18 @@ func StartDeviceMonitor() {
 		return
 	}
 
-	// 获取配置的心跳超时时间
-	heartbeatInterval := config.GlobalConfig.Timeouts.HeartbeatIntervalSeconds
-	if heartbeatInterval <= 0 {
-		heartbeatInterval = 300 // 默认5分钟
-	}
+	// 使用common包中定义的超时常量
+	heartbeatTimeout := common.TCPReadDeadLine
 
-	// 超时时间设为心跳间隔的3倍
-	heartbeatTimeout := time.Duration(heartbeatInterval*3) * time.Second
-
-	// 检查周期设为心跳间隔的一半
-	checkInterval := time.Duration(heartbeatInterval/2) * time.Second
+	// 使用common包中定义的检查间隔
+	checkInterval := common.HeartbeatCheckInterval
 
 	logger.WithFields(logrus.Fields{
-		"heartbeatInterval": heartbeatInterval,
-		"checkInterval":     checkInterval / time.Second,
-		"heartbeatTimeout":  heartbeatTimeout / time.Second,
+		"checkInterval":       checkInterval / time.Second,
+		"heartbeatTimeout":    heartbeatTimeout / time.Second,
+		"warningThreshold":    common.HeartbeatWarningThreshold / time.Second,
+		"readDeadlineSeconds": common.ReadDeadlineSeconds,
+		"keepAlivePeriodSecs": common.KeepAlivePeriodSeconds,
 	}).Info("设备状态监控服务启动")
 
 	// 启动定时检查
@@ -56,6 +52,8 @@ func StartDeviceMonitor() {
 func checkDeviceHeartbeats(timeout time.Duration) {
 	now := time.Now().Unix()
 	timeoutThreshold := now - int64(timeout/time.Second)
+	// 使用common包中定义的警告阈值
+	warningThreshold := now - int64(common.HeartbeatWarningThreshold/time.Second)
 
 	// 遍历设备连接映射
 	deviceIdToConnMap.Range(func(key, value interface{}) bool {
@@ -82,6 +80,7 @@ func checkDeviceHeartbeats(timeout time.Duration) {
 
 		lastHeartbeat := lastHeartbeatVal.(int64)
 		if lastHeartbeat < timeoutThreshold {
+			// 已经超时，关闭连接
 			logger.WithFields(logrus.Fields{
 				"connID":          conn.GetConnID(),
 				"deviceId":        deviceId,
@@ -90,6 +89,16 @@ func checkDeviceHeartbeats(timeout time.Duration) {
 				"timeoutSeconds":  timeout / time.Second,
 			}).Warn("设备心跳超时，关闭连接")
 			conn.Stop()
+		} else if lastHeartbeat < warningThreshold {
+			// 接近超时但尚未超时，记录警告
+			logger.WithFields(logrus.Fields{
+				"connID":           conn.GetConnID(),
+				"deviceId":         deviceId,
+				"lastHeartbeatAt":  time.Unix(lastHeartbeat, 0).Format("2006-01-02 15:04:05"),
+				"nowAt":            time.Unix(now, 0).Format("2006-01-02 15:04:05"),
+				"timeoutSeconds":   timeout / time.Second,
+				"remainingSeconds": timeoutThreshold - lastHeartbeat,
+			}).Warn("设备心跳接近超时")
 		}
 
 		return true

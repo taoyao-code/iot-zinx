@@ -158,11 +158,12 @@ func (m *TCPMonitor) UpdateLastHeartbeatTime(conn ziface.IConnection) {
 
 	// 更新 TCP 读取超时
 	if tcpConn, ok := conn.GetTCPConnection().(*net.TCPConn); ok {
-		if err := tcpConn.SetReadDeadline(now.Add(60 * time.Second)); err != nil {
+		// 使用common包中定义的超时常量
+		if err := tcpConn.SetReadDeadline(now.Add(common.TCPReadDeadLine)); err != nil {
 			logger.WithFields(logrus.Fields{
 				"error":    err.Error(),
 				"connID":   conn.GetConnID(),
-				"deadline": now.Add(60 * time.Second).Format("2006-01-02 15:04:05"),
+				"deadline": now.Add(common.TCPReadDeadLine).Format("2006-01-02 15:04:05"),
 			}).Error("设置读取超时失败")
 		}
 	}
@@ -179,7 +180,7 @@ func (m *TCPMonitor) UpdateLastHeartbeatTime(conn ziface.IConnection) {
 		"deviceId":      deviceID,
 		"remoteAddr":    conn.RemoteAddr().String(),
 		"heartbeatTime": now.Format("2006-01-02 15:04:05"),
-		"nextDeadline":  now.Add(60 * time.Second).Format("2006-01-02 15:04:05"),
+		"nextDeadline":  now.Add(common.TCPReadDeadLine).Format("2006-01-02 15:04:05"),
 		"connStatus":    common.ConnStatusActive,
 	}).Debug("已更新心跳时间")
 }

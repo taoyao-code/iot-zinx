@@ -1,6 +1,8 @@
 package common
 
 import (
+	"time"
+
 	"github.com/aceld/zinx/ziface"
 )
 
@@ -26,6 +28,35 @@ const (
 // 心跳常量
 const (
 	LinkHeartbeat = "link" // Link心跳字符串
+)
+
+// 超时相关常量
+// 重要：修改这些值时需同步更新所有使用它们的地方
+// 相关文件：
+// - connection_hooks.go
+// - monitor.go
+// - device_monitor.go
+const (
+	// TCP读取超时秒数，是Link心跳间隔的4倍
+	ReadDeadlineSeconds = 120
+
+	// TCP保活间隔秒数
+	KeepAlivePeriodSeconds = 30
+)
+
+// 超时时间常量
+var (
+	// TCP读取超时时间，是Link心跳间隔的4倍
+	TCPReadDeadLine = time.Duration(ReadDeadlineSeconds) * time.Second
+
+	// TCP KeepAlive间隔
+	TCPKeepAlivePeriod = time.Duration(KeepAlivePeriodSeconds) * time.Second
+
+	// 心跳检测间隔，是读取超时的1/6
+	HeartbeatCheckInterval = TCPReadDeadLine / 6
+
+	// 心跳警告阈值，是读取超时的2/3
+	HeartbeatWarningThreshold = TCPReadDeadLine * 2 / 3
 )
 
 // IConnectionMonitor 连接监控接口
