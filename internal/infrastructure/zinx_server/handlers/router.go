@@ -2,12 +2,18 @@ package handlers
 
 import (
 	"github.com/aceld/zinx/ziface"
+	"github.com/aceld/zinx/znet"
 	"github.com/bujia-iot/iot-zinx/internal/domain/dny_protocol"
 	"github.com/bujia-iot/iot-zinx/internal/infrastructure/logger"
+	"github.com/bujia-iot/iot-zinx/internal/infrastructure/zinx_server"
 )
 
 // RegisterRouters 注册所有路由处理器
 func RegisterRouters(server ziface.IServer) {
+	// 注册通用数据处理器 - 处理ICCID识别和未知数据
+	// 消息ID 0 用于处理所有未路由的数据（包括ICCID、十六进制编码数据等）
+	server.AddRouter(0, &UniversalDataHandler{})
+
 	// 设备注册请求处理器
 	server.AddRouter(dny_protocol.CmdDeviceRegister, &DeviceRegisterHandler{})
 
@@ -41,4 +47,27 @@ func RegisterRouters(server ziface.IServer) {
 	// server.AddRouter(dny_protocol.CmdAlarm, &AlarmHandler{})
 
 	logger.Info("已注册DNY协议路由处理器")
+}
+
+// UniversalDataHandler 通用数据处理器
+// 处理ICCID识别、link心跳等非DNY协议数据
+type UniversalDataHandler struct {
+	znet.BaseRouter
+}
+
+// Handle 处理所有未路由的数据，包括ICCID、十六进制编码数据、link心跳等
+func (u *UniversalDataHandler) Handle(request ziface.IRequest) {
+	conn := request.GetConnection()
+	data := request.GetData()
+
+	// 调用现有的HandlePacket函数进行处理
+	// 这个函数包含了ICCID识别、十六进制解码等逻辑
+	processed := zinx_server.HandlePacket(conn, data)
+	if !processed {
+		logger.WithFields(map[string]interface{}{
+			"connID":     conn.GetConnID(),
+			"remoteAddr": conn.RemoteAddr().String(),
+			"dataLen":    len(data),
+		}).Debug("通用处理器：数据未被处理")
+	}
 }

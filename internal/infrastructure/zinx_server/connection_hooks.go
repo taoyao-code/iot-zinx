@@ -48,6 +48,7 @@ var (
 )
 
 // OnConnectionStart 当连接建立时的钩子函数
+// 按照 Zinx 生命周期最佳实践，在连接建立时设置 TCP 参数和连接属性
 func OnConnectionStart(conn ziface.IConnection) {
 	// 获取TCP连接并设置选项
 	tcpConn, ok := conn.GetTCPConnection().(*net.TCPConn)
@@ -89,97 +90,12 @@ func OnConnectionStart(conn ziface.IConnection) {
 		"connID":     conn.GetConnID(),
 	}).Info("新连接已建立")
 
-	// 启动自定义数据处理协程
-	go handleCustomDataStream(conn)
+	// 注意：Zinx 框架会自动处理消息路由，不需要额外的协程
+	// 数据包处理会通过注册的路由器自动处理
 }
 
-// handleCustomDataStream 处理原始TCP数据流
-func handleCustomDataStream(conn ziface.IConnection) {
-	// 获取底层TCP连接
-	tcpConn, ok := conn.GetTCPConnection().(*net.TCPConn)
-	if !ok {
-		logger.Error("Failed to get TCP connection for custom data stream")
-		return
-	}
-
-	logger.WithFields(logrus.Fields{
-		"connID":     conn.GetConnID(),
-		"remoteAddr": conn.RemoteAddr().String(),
-	}).Info("启动自定义数据流处理")
-
-	// 创建缓冲区
-	buffer := make([]byte, 4096)
-
-	for {
-		// 设置读取超时
-		if err := tcpConn.SetReadDeadline(time.Now().Add(readDeadLine)); err != nil {
-			logger.WithFields(logrus.Fields{
-				"connID": conn.GetConnID(),
-				"error":  err.Error(),
-			}).Error("设置读取超时失败")
-			break
-		}
-
-		// 读取数据
-		n, err := tcpConn.Read(buffer)
-		if err != nil {
-			if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
-				logger.WithFields(logrus.Fields{
-					"connID":     conn.GetConnID(),
-					"remoteAddr": conn.RemoteAddr().String(),
-				}).Warn("读取数据超时")
-			} else {
-				logger.WithFields(logrus.Fields{
-					"connID":     conn.GetConnID(),
-					"remoteAddr": conn.RemoteAddr().String(),
-					"error":      err.Error(),
-				}).Error("读取数据失败")
-			}
-			break
-		}
-
-		if n == 0 {
-			continue
-		}
-
-		// 创建数据副本
-		data := make([]byte, n)
-		copy(data, buffer[:n])
-
-		logger.WithFields(logrus.Fields{
-			"connID":     conn.GetConnID(),
-			"remoteAddr": conn.RemoteAddr().String(),
-			"dataLen":    n,
-			"dataHex":    fmt.Sprintf("%X", data),
-			"dataString": string(data),
-		}).Debug("收到原始数据")
-
-		// 调用现有的数据处理逻辑
-		processed := HandlePacket(conn, data)
-		if !processed {
-			logger.WithFields(logrus.Fields{
-				"connID":     conn.GetConnID(),
-				"remoteAddr": conn.RemoteAddr().String(),
-				"dataLen":    n,
-				"dataHex":    fmt.Sprintf("%X", data),
-			}).Warn("数据包未被处理")
-		} else {
-			logger.WithFields(logrus.Fields{
-				"connID":     conn.GetConnID(),
-				"remoteAddr": conn.RemoteAddr().String(),
-				"dataLen":    n,
-			}).Debug("数据包处理成功")
-		}
-	}
-
-	logger.WithFields(logrus.Fields{
-		"connID":     conn.GetConnID(),
-		"remoteAddr": conn.RemoteAddr().String(),
-	}).Info("自定义数据流处理结束")
-
-	// 关闭连接
-	conn.Stop()
-}
+// 移除自定义数据流处理函数，因为 Zinx 框架已经通过其内部机制处理数据流
+// 数据会通过 Packet.Unpack 方法解析，然后路由到相应的处理器
 
 // OnConnectionStop 当连接断开时的钩子函数
 func OnConnectionStop(conn ziface.IConnection) {

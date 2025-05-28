@@ -86,7 +86,7 @@ func (dp *DNYPacket) Pack(msg ziface.IMessage) ([]byte, error) {
 }
 
 // Unpack 拆包方法
-// 将二进制数据解析为IMessage对象，如果数据不完整或无效则返回错误
+// 将二进制数据解析为IMessage对象，支持十六进制编码和原始数据
 func (dp *DNYPacket) Unpack(binaryData []byte) (ziface.IMessage, error) {
 	// 首先尝试检测数据是否为十六进制编码字符串
 	actualData := binaryData
@@ -105,6 +105,26 @@ func (dp *DNYPacket) Unpack(binaryData []byte) (ziface.IMessage, error) {
 		}
 	}
 
+	// 特殊处理：如果数据不符合DNY协议格式，返回通用消息让路由器处理
+	// 这包括ICCID (20字节数字)、link心跳等
+	if !isDNYProtocolData(actualData) {
+		// 创建消息ID为0的通用消息，交给UniversalDataHandler处理
+		msg := &dny_protocol.Message{
+			Id:      0, // 消息ID 0 表示通用数据
+			DataLen: uint32(len(actualData)),
+			Data:    actualData,
+			RawData: binaryData, // 保存原始数据
+		}
+
+		if dp.logHexDump {
+			logger.Debugf("检测到非DNY协议数据，长度: %d, 数据: %s",
+				len(actualData), hex.EncodeToString(actualData))
+		}
+
+		return msg, nil
+	}
+
+	// 以下是DNY协议的正常解析逻辑
 	// 检查数据长度是否足够
 	if len(actualData) < int(dp.GetHeadLen())+1 { // +1是帧尾
 		return nil, fmt.Errorf("数据长度不足以解析消息头")
@@ -152,6 +172,34 @@ func (dp *DNYPacket) Unpack(binaryData []byte) (ziface.IMessage, error) {
 	}
 
 	return msg, nil
+}
+
+// isDNYProtocolData 检查数据是否符合DNY协议格式
+func isDNYProtocolData(data []byte) bool {
+	// 检查最小长度和帧头
+	if len(data) < 7 { // 最小长度：帧头(1) + 命令(1) + 长度(2) + 物理ID(2) + 帧尾(1)
+		return false
+	}
+
+	// 检查帧头标识
+	if data[0] != dny_protocol.FrameHeader {
+		return false
+	}
+
+	// 检查数据长度字段
+	dataLen := binary.LittleEndian.Uint16(data[3:5])
+	msgLen := 7 + int(dataLen) // 帧头(1) + 命令(1) + 长度(2) + 物理ID(2) + 数据 + 帧尾(1)
+
+	if len(data) < msgLen {
+		return false
+	}
+
+	// 检查帧尾标识
+	if data[msgLen-1] != dny_protocol.FrameTail {
+		return false
+	}
+
+	return true
 }
 
 // isHexString 检查字节数组是否为有效的十六进制字符串

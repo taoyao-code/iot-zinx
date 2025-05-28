@@ -133,11 +133,23 @@ func listDevices() {
 	}
 
 	data := apiResp.Data.(map[string]interface{})
-	devices := data["devices"].([]interface{})
-	total := int(data["total"].(float64))
+
+	// 安全获取devices和total
+	var devices []interface{}
+	var total int
+
+	if devicesList, ok := data["devices"]; ok && devicesList != nil {
+		devices, _ = devicesList.([]interface{})
+	}
+
+	if totalVal, ok := data["total"]; ok && totalVal != nil {
+		if t, ok := totalVal.(float64); ok {
+			total = int(t)
+		}
+	}
 
 	fmt.Printf("\n在线设备总数: %d\n", total)
-	if total == 0 {
+	if total == 0 || len(devices) == 0 {
 		fmt.Println("暂无在线设备")
 		return
 	}
@@ -224,7 +236,12 @@ func queryDeviceStatus(scanner *bufio.Scanner) {
 		return
 	}
 
-	data := apiResp.Data.(map[string]interface{})
+	// 安全地获取数据
+	data, ok := apiResp.Data.(map[string]interface{})
+	if !ok || data == nil {
+		fmt.Println("返回的数据格式无效")
+		return
+	}
 
 	fmt.Println("\n设备详细状态:")
 	fmt.Println("==========================================")
@@ -561,8 +578,8 @@ func sendCommand(reqData map[string]interface{}) bool {
 	}
 
 	// 显示发送的数据包信息
-	if data, ok := apiResp.Data.(map[string]interface{}); ok {
-		if packetHex, exists := data["packetHex"]; exists {
+	if data, ok := apiResp.Data.(map[string]interface{}); ok && data != nil {
+		if packetHex, exists := data["packetHex"]; exists && packetHex != nil {
 			fmt.Printf("发送的数据包: %s\n", packetHex)
 		}
 	}
