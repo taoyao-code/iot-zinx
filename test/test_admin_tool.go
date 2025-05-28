@@ -16,7 +16,7 @@ import (
 
 // 服务器地址配置
 const (
-	HTTPServerAddr = "http://localhost:8080"
+	HTTPServerAddr = "http://localhost:7055"
 	TCPServerAddr  = "localhost:7054"
 )
 
