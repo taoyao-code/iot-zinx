@@ -2,6 +2,8 @@
 GO_PKG_MOD=iot-platform
 # Go 项目的二进制文件名称
 BINARY_NAME=iot_gateway
+# DNY解析器工具名称
+DNY_PARSER_NAME=dny-parser
 # Go 编译器
 GO=go
 # Go 构建命令
@@ -31,10 +33,12 @@ TARGET_PLATFORM ?=
 
 # 主程序入口
 MAIN_GO_FILE=./cmd/server/main.go
+# DNY解析器入口
+DNY_PARSER_GO_FILE=./cmd/dny-parser/main.go
 # 输出目录
 OUTPUT_DIR=./bin
 
-.PHONY: all build clean test help swagger
+.PHONY: all build clean test help swagger dny-parser
 
 all: build
 
@@ -61,6 +65,12 @@ build-default:
 	@echo "==> Building for default platform ($(DEFAULT_GOOS)/$(DEFAULT_GOARCH))..."
 	@env CGO_ENABLED=0 GOOS=$(DEFAULT_GOOS) GOARCH=$(DEFAULT_GOARCH) $(GOBUILD) -o $(OUTPUT_DIR)/$(BINARY_NAME)_$(DEFAULT_GOOS)_$(DEFAULT_GOARCH) -ldflags="-s -w" -trimpath $(MAIN_GO_FILE)
 	@echo "==> Build complete."
+
+# 构建DNY解析器工具
+dny-parser: $(OUTPUT_DIR)
+	@echo "==> Building DNY parser tool..."
+	@$(GOBUILD) -o $(OUTPUT_DIR)/$(DNY_PARSER_NAME) $(DNY_PARSER_GO_FILE)
+	@echo "==> DNY parser tool built: $(OUTPUT_DIR)/$(DNY_PARSER_NAME)"
 
 # 清理构建产物
 clean:
@@ -98,6 +108,7 @@ help:
 	@echo "                     Example: make build TARGET_PLATFORM=linux/arm64"
 	@echo "                     Default platforms: $(PLATFORMS)"
 	@echo "  build-default      Builds the application for the default platform ($(DEFAULT_GOOS)/$(DEFAULT_GOARCH))"
+	@echo "  dny-parser         Builds the DNY protocol parser tool"
 	@echo "  clean              Cleans build artifacts"
 	@echo "  test               Runs tests"
 	@echo "  tidy               Tidies go.mod file"

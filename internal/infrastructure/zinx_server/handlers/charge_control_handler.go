@@ -9,13 +9,21 @@ import (
 	"github.com/aceld/zinx/znet"
 	"github.com/bujia-iot/iot-zinx/internal/domain/dny_protocol"
 	"github.com/bujia-iot/iot-zinx/internal/infrastructure/logger"
-	"github.com/bujia-iot/iot-zinx/internal/infrastructure/zinx_server"
+	"github.com/bujia-iot/iot-zinx/internal/infrastructure/zinx_server/common"
 	"github.com/sirupsen/logrus"
 )
 
 // ChargeControlHandler 处理充电控制命令 (命令ID: 0x82)
 type ChargeControlHandler struct {
 	znet.BaseRouter
+	monitor common.IConnectionMonitor
+}
+
+// NewChargeControlHandler 创建充电控制处理器
+func NewChargeControlHandler(monitor common.IConnectionMonitor) *ChargeControlHandler {
+	return &ChargeControlHandler{
+		monitor: monitor,
+	}
 }
 
 // 充电控制命令定义
@@ -77,14 +85,14 @@ func GenerateChargeControlData(rateMode byte, balance uint32, portNumber byte, c
 	return data
 }
 
-// Handle 向设备发送充电控制命令
-func SendChargeControlCommand(conn ziface.IConnection, physicalId uint32, rateMode byte, balance uint32, portNumber byte, chargeCommand byte, chargeDuration uint16, orderNumber []byte, maxChargeDuration uint16, maxPower uint16, qrCodeLight byte) error {
+// SendChargeControlCommand 向设备发送充电控制命令
+func (h *ChargeControlHandler) SendChargeControlCommand(conn ziface.IConnection, physicalId uint32, rateMode byte, balance uint32, portNumber byte, chargeCommand byte, chargeDuration uint16, orderNumber []byte, maxChargeDuration uint16, maxPower uint16, qrCodeLight byte) error {
 	// 构建充电控制数据
 	data := GenerateChargeControlData(rateMode, balance, portNumber, chargeCommand, chargeDuration, orderNumber, maxChargeDuration, maxPower, qrCodeLight)
 
 	// 获取设备ID（如有）
 	deviceId := "Unknown"
-	if deviceIdVal, err := conn.GetProperty(zinx_server.PropKeyDeviceId); err == nil {
+	if deviceIdVal, err := conn.GetProperty(common.PropKeyDeviceId); err == nil {
 		deviceId = deviceIdVal.(string)
 	}
 
@@ -104,10 +112,43 @@ func SendChargeControlCommand(conn ziface.IConnection, physicalId uint32, rateMo
 		"qrCodeLight":       qrCodeLight,
 	}).Info("发送充电控制命令")
 
-	// 使用正确的DNY协议发送消息
-	// 生成消息ID
-	messageID := uint16(time.Now().Unix() & 0xFFFF)
-	return zinx_server.SendDNYResponse(conn, physicalId, messageID, uint8(dny_protocol.CmdChargeControl), data)
+	// 构建完整的DNY协议包
+	dnyMsg := dny_protocol.NewMessage(uint32(dny_protocol.CmdChargeControl), physicalId, data)
+
+	// 通知监视器发送数据
+	// 由于没有Pack方法，我们手动构建包
+	packet := make([]byte, 0)
+
+	// 包头 "DNY"
+	packet = append(packet, 'D', 'N', 'Y')
+
+	// 长度 (小端模式，临时占位)
+	packet = append(packet, 0, 0)
+
+	// 物理ID (小端模式)
+	packet = append(packet, byte(physicalId), byte(physicalId>>8), byte(physicalId>>16), byte(physicalId>>24))
+
+	// 消息ID (小端模式，临时设为0)
+	packet = append(packet, 0, 0)
+
+	// 命令
+	packet = append(packet, byte(dny_protocol.CmdChargeControl))
+
+	// 数据
+	packet = append(packet, data...)
+
+	// 校验和 (小端模式，临时设为0)
+	packet = append(packet, 0, 0)
+
+	// 通知监视器发送数据
+	h.monitor.OnRawDataSent(conn, packet)
+
+	// 发送数据
+	if err := conn.SendMsg(dnyMsg.GetMsgID(), dnyMsg.GetData()); err != nil {
+		return err
+	}
+
+	return nil
 }
 
 // Handle 处理充电控制命令的响应
@@ -212,5 +253,5 @@ func (h *ChargeControlHandler) Handle(request ziface.IRequest) {
 	// 例如：更新订单状态、记录充电开始时间等
 
 	// 更新心跳时间
-	zinx_server.UpdateLastHeartbeatTime(conn)
+	h.monitor.UpdateLastHeartbeatTime(conn)
 }

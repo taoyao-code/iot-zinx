@@ -19,6 +19,9 @@ type DNYPacket struct {
 
 // NewDNYPacket 创建一个新的DNY协议数据包处理器
 func NewDNYPacket(logHexDump bool) ziface.IDataPack {
+	// 初始化TCP监视器
+	InitTCPMonitor()
+
 	return &DNYPacket{
 		logHexDump: logHexDump,
 	}
@@ -83,19 +86,31 @@ func (dp *DNYPacket) Pack(msg ziface.IMessage) ([]byte, error) {
 		return nil, err
 	}
 
+	// 获取完整的数据包
+	packetData := dataBuff.Bytes()
+
+	// 在发送数据前调用钩子函数
+	// 注意：这里缺少连接对象，因为Pack方法没有连接参数
+	// 实际发送时会在连接层调用OnRawDataSent
+
 	// 记录十六进制日志
 	if dp.logHexDump {
 		logger.Debugf("Pack消息 -> 命令: 0x%02X, 物理ID: 0x%08X, 数据长度: %d, 数据: %s",
 			dnyMsg.GetMsgID(), dnyMsg.GetPhysicalId(), dnyMsg.GetDataLen(),
-			hex.EncodeToString(dataBuff.Bytes()))
+			hex.EncodeToString(packetData))
 	}
 
-	return dataBuff.Bytes(), nil
+	return packetData, nil
 }
 
 // Unpack 拆包方法
 // 将二进制数据解析为IMessage对象，支持十六进制编码和原始数据
 func (dp *DNYPacket) Unpack(binaryData []byte) (ziface.IMessage, error) {
+	// 传入的binaryData是可能来自网络的原始数据
+	// 在这里调用我们的数据接收钩子（当连接可用时）
+	// 注意：这里缺少连接对象，因为Unpack方法没有连接参数
+	// 收到数据后，会在connection.go的StartReader方法中调用OnRawDataReceived
+
 	// 首先尝试检测数据是否为十六进制编码字符串
 	actualData := binaryData
 
@@ -148,7 +163,7 @@ func (dp *DNYPacket) Unpack(binaryData []byte) (ziface.IMessage, error) {
 	dataLen := binary.LittleEndian.Uint16(actualData[3:5])
 
 	// 检查数据包长度是否完整
-	totalLen := dny_protocol.DnyHeaderLen + int(dataLen) // 包头(3) + 长度(2) + 数据部分
+	totalLen := dny_protocol.DnyHeaderLen + int(dataLen)
 	if len(actualData) < totalLen {
 		return nil, fmt.Errorf("数据长度不足以解析完整DNY消息, 期望: %d, 实际: %d", totalLen, len(actualData))
 	}
@@ -212,14 +227,14 @@ func isDNYProtocolData(data []byte) bool {
 
 // isHexString 检查字节数组是否为有效的十六进制字符串
 func isHexString(data []byte) bool {
-	// 空数据或长度为奇数不是有效的十六进制字符串
+	// 检查是否为合适的十六进制长度
 	if len(data) == 0 || len(data)%2 != 0 {
 		return false
 	}
 
-	// 检查每个字节是否为ASCII十六进制字符
+	// 检查是否都是十六进制字符
 	for _, b := range data {
-		if !((b >= '0' && b <= '9') || (b >= 'A' && b <= 'F') || (b >= 'a' && b <= 'f')) {
+		if !((b >= '0' && b <= '9') || (b >= 'a' && b <= 'f') || (b >= 'A' && b <= 'F')) {
 			return false
 		}
 	}

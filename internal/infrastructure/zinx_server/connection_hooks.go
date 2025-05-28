@@ -10,26 +10,27 @@ import (
 	"github.com/aceld/zinx/ziface"
 	"github.com/bujia-iot/iot-zinx/internal/app"
 	"github.com/bujia-iot/iot-zinx/internal/infrastructure/logger"
+	"github.com/bujia-iot/iot-zinx/internal/infrastructure/zinx_server/common"
 	"github.com/sirupsen/logrus"
 )
 
 const (
 	// 连接属性键
-	PropKeyDeviceId         = "deviceId"         // 物理ID
-	PropKeyICCID            = "iccid"            // ICCID
-	PropKeyLastHeartbeat    = "lastHeartbeat"    // 最后一次DNY心跳时间（Unix时间戳）
-	PropKeyLastHeartbeatStr = "lastHeartbeatStr" // 最后一次DNY心跳时间（格式化字符串）
-	PropKeyLastLink         = "lastLink"         // 最后一次"link"心跳时间
-	PropKeyRemoteAddr       = "remoteAddr"       // 远程地址
-	PropKeyConnStatus       = "connStatus"       // 连接状态
+	PropKeyDeviceId         = common.PropKeyDeviceId
+	PropKeyICCID            = common.PropKeyICCID
+	PropKeyLastHeartbeat    = common.PropKeyLastHeartbeat
+	PropKeyLastHeartbeatStr = common.PropKeyLastHeartbeatStr
+	PropKeyLastLink         = common.PropKeyLastLink
+	PropKeyRemoteAddr       = common.PropKeyRemoteAddr
+	PropKeyConnStatus       = common.PropKeyConnStatus
 
 	// 连接状态
-	ConnStatusActive   = "active"   // 活跃
-	ConnStatusInactive = "inactive" // 不活跃
-	ConnStatusClosed   = "closed"   // 已关闭
+	ConnStatusActive   = common.ConnStatusActive
+	ConnStatusInactive = common.ConnStatusInactive
+	ConnStatusClosed   = common.ConnStatusClosed
 
 	// Link心跳字符串
-	LinkHeartbeat = "link"
+	LinkHeartbeat = common.LinkHeartbeat
 )
 
 // 存储所有设备ID到连接的映射，用于消息转发
@@ -90,8 +91,8 @@ func OnConnectionStart(conn ziface.IConnection) {
 		"connID":     conn.GetConnID(),
 	}).Info("新连接已建立")
 
-	// 注意：Zinx 框架会自动处理消息路由，不需要额外的协程
-	// 数据包处理会通过注册的路由器自动处理
+	// 通知TCP监视器连接已建立
+	GetGlobalMonitor().OnConnectionEstablished(conn)
 }
 
 // 移除自定义数据流处理函数，因为 Zinx 框架已经通过其内部机制处理数据流
@@ -101,6 +102,9 @@ func OnConnectionStart(conn ziface.IConnection) {
 func OnConnectionStop(conn ziface.IConnection) {
 	connID := conn.GetConnID()
 	remoteAddr := conn.RemoteAddr().String()
+
+	// 通知TCP监视器连接已断开
+	GetGlobalMonitor().OnConnectionClosed(conn)
 
 	// 更新连接状态
 	conn.SetProperty(PropKeyConnStatus, ConnStatusClosed)
@@ -159,6 +163,9 @@ func HandlePacket(conn ziface.IConnection, data []byte) bool {
 	if len(data) == 0 {
 		return false
 	}
+
+	// 通知TCP监视器收到数据
+	GetGlobalMonitor().OnRawDataReceived(conn, data)
 
 	// 检查心跳状态
 	now := time.Now()
@@ -684,6 +691,9 @@ func sendRegisterResponse(conn ziface.IConnection, physicalID uint32, messageID 
 func SendDNYResponse(conn ziface.IConnection, physicalID uint32, messageID uint16, command uint8, responseData []byte) error {
 	// 构建完整的DNY协议包
 	packet := buildDNYResponsePacket(physicalID, messageID, command, responseData)
+
+	// 通知TCP监视器发送数据
+	GetGlobalMonitor().OnRawDataSent(conn, packet)
 
 	// 使用SendBuffMsg发送完整的DNY协议包
 	if err := conn.SendBuffMsg(0, packet); err != nil {
