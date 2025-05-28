@@ -75,10 +75,43 @@ func (m *TCPMonitor) OnRawDataReceived(conn ziface.IConnection, data []byte) {
 		fmt.Printf("\n[%s] 接收数据 - ConnID: %d, 远程地址: %s\n", timestamp, connID, remoteAddr)
 		fmt.Printf("数据(HEX): %s\n", hex.EncodeToString(data))
 
+		// 使用logger记录接收的数据，确保INFO级别
+		logger.WithFields(logrus.Fields{
+			"connID":     connID,
+			"remoteAddr": remoteAddr,
+			"dataLen":    len(data),
+			"dataHex":    hex.EncodeToString(data),
+			"timestamp":  timestamp,
+		}).Info("接收数据 - read buffer")
+
 		// 解析DNY协议数据
 		if len(data) >= 3 && data[0] == 0x44 && data[1] == 0x4E && data[2] == 0x59 {
+			// 如果是DNY协议数据，解析并显示详细信息
 			if result := ParseDNYProtocol(data); result != "" {
 				fmt.Println(result)
+
+				// 解析命令字段进行更详细的记录
+				if len(data) >= 12 {
+					command := data[11]
+					// 解析物理ID（小端模式）
+					physicalID := uint32(0)
+					if len(data) >= 9 {
+						physicalID = uint32(data[5]) | uint32(data[6])<<8 | uint32(data[7])<<16 | uint32(data[8])<<24
+					}
+					// 解析消息ID（小端模式）
+					messageID := uint16(0)
+					if len(data) >= 11 {
+						messageID = uint16(data[9]) | uint16(data[10])<<8
+					}
+
+					logger.WithFields(logrus.Fields{
+						"connID":     connID,
+						"command":    fmt.Sprintf("0x%02X", command),
+						"physicalID": physicalID,
+						"messageID":  messageID,
+						"dataHex":    hex.EncodeToString(data),
+					}).Info("接收DNY协议数据")
+				}
 			}
 		}
 
@@ -98,10 +131,43 @@ func (m *TCPMonitor) OnRawDataSent(conn ziface.IConnection, data []byte) {
 		fmt.Printf("\n[%s] 发送数据 - ConnID: %d, 远程地址: %s\n", timestamp, connID, remoteAddr)
 		fmt.Printf("数据(HEX): %s\n", hex.EncodeToString(data))
 
+		// 使用logger记录发送的数据，确保INFO级别
+		logger.WithFields(logrus.Fields{
+			"connID":     connID,
+			"remoteAddr": remoteAddr,
+			"dataLen":    len(data),
+			"dataHex":    hex.EncodeToString(data),
+			"timestamp":  timestamp,
+		}).Info("发送数据 - write buffer")
+
 		// 解析DNY协议数据
 		if len(data) >= 3 && data[0] == 0x44 && data[1] == 0x4E && data[2] == 0x59 {
+			// 如果是DNY协议数据，解析并显示详细信息
 			if result := ParseDNYProtocol(data); result != "" {
 				fmt.Println(result)
+
+				// 解析命令字段进行更详细的记录
+				if len(data) >= 12 {
+					command := data[11]
+					// 解析物理ID（小端模式）
+					physicalID := uint32(0)
+					if len(data) >= 9 {
+						physicalID = uint32(data[5]) | uint32(data[6])<<8 | uint32(data[7])<<16 | uint32(data[8])<<24
+					}
+					// 解析消息ID（小端模式）
+					messageID := uint16(0)
+					if len(data) >= 11 {
+						messageID = uint16(data[9]) | uint16(data[10])<<8
+					}
+
+					logger.WithFields(logrus.Fields{
+						"connID":     connID,
+						"command":    fmt.Sprintf("0x%02X", command),
+						"physicalID": physicalID,
+						"messageID":  messageID,
+						"dataHex":    hex.EncodeToString(data),
+					}).Info("发送DNY协议数据")
+				}
 			}
 		}
 

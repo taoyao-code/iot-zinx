@@ -483,6 +483,7 @@ func handleDNYProtocol(conn ziface.IConnection, data []byte) bool {
 		logger.WithFields(logrus.Fields{
 			"connID":  conn.GetConnID(),
 			"dataLen": len(data),
+			"dataHex": fmt.Sprintf("%X", data),
 		}).Warn("DNY协议数据包长度不足")
 		return false
 	}
@@ -501,6 +502,7 @@ func handleDNYProtocol(conn ziface.IConnection, data []byte) bool {
 			"connID":         conn.GetConnID(),
 			"expectedLength": length,
 			"actualLength":   expectedLength,
+			"dataHex":        fmt.Sprintf("%X", data),
 		}).Warn("DNY协议数据包长度不匹配")
 		return false
 	}
@@ -520,12 +522,27 @@ func handleDNYProtocol(conn ziface.IConnection, data []byte) bool {
 		"messageID":  messageID,
 		"command":    fmt.Sprintf("0x%02X", command),
 		"dataLen":    len(data),
+		"dataHex":    fmt.Sprintf("%X", data),
 	}).Info("解析DNY协议数据")
+
+	// 将物理ID字符串形式保存到连接属性中
+	// 这有助于确保在处理所有命令时，连接都有设备ID关联
+	deviceIdStr := fmt.Sprintf("%d", physicalID)
+	conn.SetProperty(PropKeyDeviceId, deviceIdStr)
 
 	// 根据命令类型进行处理
 	switch command {
 	case 0x01: // 设备心跳包
 		return handleDeviceHeartbeat(conn, data, physicalID, messageID)
+	case 0x02: // 刷卡操作
+		logger.WithFields(logrus.Fields{
+			"connID":     conn.GetConnID(),
+			"physicalID": physicalID,
+			"messageID":  messageID,
+			"command":    "0x02",
+			"dataHex":    fmt.Sprintf("%X", data),
+		}).Info("收到刷卡操作请求，暂不处理")
+		return true
 	case 0x11: // 主机状态心跳包
 		return handleHostHeartbeat(conn, data, physicalID, messageID)
 	case 0x12, 0x22: // 主机/设备获取服务器时间 (支持0x12和0x22两种命令)
@@ -534,6 +551,15 @@ func handleDNYProtocol(conn ziface.IConnection, data []byte) bool {
 		return handleDeviceRegister(conn, data, physicalID, messageID)
 	case 0x21: // 设备状态包
 		return handleDeviceStatus(conn, data, physicalID, messageID)
+	case 0x03, 0x04, 0x05, 0x06: // 其他设备上报指令
+		logger.WithFields(logrus.Fields{
+			"connID":     conn.GetConnID(),
+			"physicalID": physicalID,
+			"messageID":  messageID,
+			"command":    fmt.Sprintf("0x%02X", command),
+			"dataHex":    fmt.Sprintf("%X", data),
+		}).Info("收到设备上报指令，暂不处理")
+		return true
 	default:
 		logger.WithFields(logrus.Fields{
 			"connID":     conn.GetConnID(),
@@ -541,7 +567,20 @@ func handleDNYProtocol(conn ziface.IConnection, data []byte) bool {
 			"physicalID": physicalID,
 			"messageID":  messageID,
 			"dataHex":    fmt.Sprintf("%X", data),
-		}).Debug("未知DNY协议命令")
+		}).Info("收到未处理的DNY协议命令")
+
+		// 对未知命令也发送一个通用应答，避免设备重复发送请求
+		if command >= 0x01 && command <= 0x22 {
+			// 只对可能需要响应的命令发送应答
+			responseData := []byte{0x00} // 0x00表示成功
+			SendDNYResponse(conn, physicalID, messageID, command, responseData)
+			logger.WithFields(logrus.Fields{
+				"connID":     conn.GetConnID(),
+				"command":    fmt.Sprintf("0x%02X", command),
+				"physicalID": physicalID,
+				"messageID":  messageID,
+			}).Info("发送了通用应答")
+		}
 	}
 
 	return true
@@ -701,6 +740,16 @@ func sendHeartbeatResponse(conn ziface.IConnection, physicalID uint32, messageID
 	// 构建完整的DNY协议包
 	packet := buildDNYResponsePacket(physicalID, messageID, command, responseData)
 
+	// 记录要发送的响应数据包
+	logger.WithFields(logrus.Fields{
+		"connID":     conn.GetConnID(),
+		"physicalID": physicalID,
+		"messageID":  messageID,
+		"command":    fmt.Sprintf("0x%02X", command),
+		"dataHex":    fmt.Sprintf("%X", packet),
+		"dataLen":    len(packet),
+	}).Info("发送心跳应答数据包")
+
 	// 使用SendBuffMsg发送完整的DNY协议包
 	if err := conn.SendBuffMsg(0, packet); err != nil {
 		logger.WithFields(logrus.Fields{
@@ -732,6 +781,18 @@ func sendServerTimeResponse(conn ziface.IConnection, physicalID uint32, messageI
 
 	// 构建完整的DNY协议包，使用原始命令
 	packet := buildDNYResponsePacket(physicalID, messageID, command, responseData)
+
+	// 记录要发送的响应数据包
+	logger.WithFields(logrus.Fields{
+		"connID":       conn.GetConnID(),
+		"physicalID":   physicalID,
+		"messageID":    messageID,
+		"command":      fmt.Sprintf("0x%02X", command),
+		"timestamp":    timestamp,
+		"timestampStr": time.Unix(int64(timestamp), 0).Format("2006-01-02 15:04:05"),
+		"dataHex":      fmt.Sprintf("%X", packet),
+		"dataLen":      len(packet),
+	}).Info("发送服务器时间应答数据包")
 
 	// 使用SendBuffMsg发送完整的DNY协议包
 	if err := conn.SendBuffMsg(0, packet); err != nil {
@@ -767,6 +828,16 @@ func sendRegisterResponse(conn ziface.IConnection, physicalID uint32, messageID 
 	// 构建完整的DNY协议包
 	packet := buildDNYResponsePacket(physicalID, messageID, 0x20, responseData)
 
+	// 记录要发送的响应数据包
+	logger.WithFields(logrus.Fields{
+		"connID":     conn.GetConnID(),
+		"physicalID": physicalID,
+		"messageID":  messageID,
+		"command":    "0x20",
+		"dataHex":    fmt.Sprintf("%X", packet),
+		"dataLen":    len(packet),
+	}).Info("发送设备注册应答数据包")
+
 	// 使用SendBuffMsg发送完整的DNY协议包
 	if err := conn.SendBuffMsg(0, packet); err != nil {
 		logger.WithFields(logrus.Fields{
@@ -792,6 +863,16 @@ func sendRegisterResponse(conn ziface.IConnection, physicalID uint32, messageID 
 func SendDNYResponse(conn ziface.IConnection, physicalID uint32, messageID uint16, command uint8, responseData []byte) error {
 	// 构建完整的DNY协议包
 	packet := buildDNYResponsePacket(physicalID, messageID, command, responseData)
+
+	// 记录要发送的响应数据包
+	logger.WithFields(logrus.Fields{
+		"connID":     conn.GetConnID(),
+		"physicalID": physicalID,
+		"messageID":  messageID,
+		"command":    fmt.Sprintf("0x%02X", command),
+		"dataHex":    fmt.Sprintf("%X", packet),
+		"dataLen":    len(packet),
+	}).Info("发送响应数据包")
 
 	// 通知TCP监视器发送数据
 	GetGlobalMonitor().OnRawDataSent(conn, packet)
