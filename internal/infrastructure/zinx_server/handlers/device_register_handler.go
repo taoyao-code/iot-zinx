@@ -1,7 +1,6 @@
 package handlers
 
 import (
-	"encoding/binary"
 	"fmt"
 
 	"github.com/aceld/zinx/ziface"
@@ -38,39 +37,36 @@ func (h *DeviceRegisterHandler) Handle(request ziface.IRequest) {
 	physicalId := dnyMsg.GetPhysicalId()
 	// dnyMessageId := dnyMsg.GetDnyMessageId() // 暂不使用
 
-	// 解析数据部分
+	// 解析设备注册数据
 	data := dnyMsg.GetData()
-	if len(data) < 6 {
+	registerData := &dny_protocol.DeviceRegisterData{}
+	if err := registerData.UnmarshalBinary(data); err != nil {
 		logger.WithFields(logrus.Fields{
 			"connID":     conn.GetConnID(),
 			"physicalId": fmt.Sprintf("0x%08X", physicalId),
 			"dataLen":    len(data),
-		}).Warn("设备注册数据长度不足")
+			"error":      err.Error(),
+		}).Error("设备注册数据解析失败")
 		return
 	}
 
-	// 提取主要信息
-	deviceType := data[0]
-	moduleType := data[1]
-	deviceIpsLength := binary.LittleEndian.Uint16(data[2:4]) // 数组长度
-
 	logger.WithFields(logrus.Fields{
-		"connID":     conn.GetConnID(),
-		"physicalId": fmt.Sprintf("0x%08X", physicalId),
-		"deviceType": deviceType,
-		"moduleType": moduleType,
-		"ipsLength":  deviceIpsLength,
+		"connID":         conn.GetConnID(),
+		"physicalId":     fmt.Sprintf("0x%08X", physicalId),
+		"iccid":          registerData.ICCID,
+		"deviceType":     registerData.DeviceType,
+		"deviceVersion":  string(registerData.DeviceVersion[:]),
+		"heartbeatPeriod": registerData.HeartbeatPeriod,
 	}).Info("收到设备注册请求")
 
 	// 将设备ID绑定到连接
 	deviceIdStr := fmt.Sprintf("%08X", physicalId)
 	zinx_server.BindDeviceIdToConnection(deviceIdStr, conn)
 
-	// 获取ICCID (如有)
-	iccid := ""
-	if iccidVal, err := conn.GetProperty(zinx_server.PropKeyICCID); err == nil {
-		iccid = iccidVal.(string)
-	}
+	// 使用解析出的ICCID
+	iccid := registerData.ICCID
+	// 将ICCID存储到连接属性中
+	conn.SetProperty(zinx_server.PropKeyICCID, iccid)
 
 	// 通知业务层设备上线
 	deviceService := app.GetServiceManager().DeviceService
@@ -78,11 +74,11 @@ func (h *DeviceRegisterHandler) Handle(request ziface.IRequest) {
 
 	// 构建响应数据
 	responseData := make([]byte, 5)
-	responseData[0] = dny_protocol.ResponseSuccess // 成功
-	responseData[1] = deviceType                   // 设备类型
-	responseData[2] = moduleType                   // 模块类型
-	responseData[3] = 0                            // 预留
-	responseData[4] = 0                            // 预留
+	responseData[0] = dny_protocol.ResponseSuccess         // 成功
+	responseData[1] = uint8(registerData.DeviceType)      // 设备类型
+	responseData[2] = uint8(registerData.DeviceType >> 8) // 设备类型高位
+	responseData[3] = 0                                   // 预留
+	responseData[4] = 0                                   // 预留
 
 	// 发送响应
 	if err := conn.SendMsg(dny_protocol.CmdDeviceRegister, responseData); err != nil {
