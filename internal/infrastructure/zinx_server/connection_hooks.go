@@ -14,12 +14,13 @@ import (
 
 const (
 	// 连接属性键
-	PropKeyDeviceId      = "deviceId"      // 物理ID
-	PropKeyICCID         = "iccid"         // ICCID
-	PropKeyLastHeartbeat = "lastHeartbeat" // 最后一次DNY心跳时间
-	PropKeyLastLink      = "lastLink"      // 最后一次"link"心跳时间
-	PropKeyRemoteAddr    = "remoteAddr"    // 远程地址
-	PropKeyConnStatus    = "connStatus"    // 连接状态
+	PropKeyDeviceId         = "deviceId"         // 物理ID
+	PropKeyICCID            = "iccid"            // ICCID
+	PropKeyLastHeartbeat    = "lastHeartbeat"    // 最后一次DNY心跳时间（Unix时间戳）
+	PropKeyLastHeartbeatStr = "lastHeartbeatStr" // 最后一次DNY心跳时间（格式化字符串）
+	PropKeyLastLink         = "lastLink"         // 最后一次"link"心跳时间
+	PropKeyRemoteAddr       = "remoteAddr"       // 远程地址
+	PropKeyConnStatus       = "connStatus"       // 连接状态
 
 	// 连接状态
 	ConnStatusActive   = "active"   // 活跃
@@ -96,10 +97,24 @@ func OnConnectionStop(conn ziface.IConnection) {
 	// 更新连接状态
 	conn.SetProperty(PropKeyConnStatus, ConnStatusClosed)
 
-	// 获取最后的心跳时间
-	var lastHeartbeat int64
-	if val, err := conn.GetProperty(PropKeyLastHeartbeat); err == nil && val != nil {
-		lastHeartbeat = val.(int64)
+	// 获取最后的心跳时间（优先使用格式化的字符串）
+	var lastHeartbeatStr string
+	var timeSinceHeart float64
+
+	if val, err := conn.GetProperty(PropKeyLastHeartbeatStr); err == nil && val != nil {
+		lastHeartbeatStr = val.(string)
+	} else {
+		// 降级使用时间戳
+		if val, err := conn.GetProperty(PropKeyLastHeartbeat); err == nil && val != nil {
+			if ts, ok := val.(int64); ok {
+				lastHeartbeatStr = time.Unix(ts, 0).Format("2006-01-02 15:04:05")
+				timeSinceHeart = time.Since(time.Unix(ts, 0)).Seconds()
+			} else {
+				lastHeartbeatStr = "unknown"
+			}
+		} else {
+			lastHeartbeatStr = "never"
+		}
 	}
 
 	// 尝试获取设备信息并清理
@@ -116,15 +131,17 @@ func OnConnectionStop(conn ziface.IConnection) {
 			"deviceId":       deviceIdStr,
 			"remoteAddr":     remoteAddr,
 			"connID":         connID,
-			"lastHeartbeat":  time.Unix(lastHeartbeat, 0).Format("2006-01-02 15:04:05"),
-			"timeSinceHeart": time.Since(time.Unix(lastHeartbeat, 0)).Seconds(),
+			"lastHeartbeat":  lastHeartbeatStr,
+			"timeSinceHeart": timeSinceHeart,
+			"connStatus":     ConnStatusClosed,
 		}).Info("设备连接断开")
 	} else {
 		logger.WithFields(logrus.Fields{
 			"remoteAddr":     remoteAddr,
 			"connID":         connID,
-			"lastHeartbeat":  time.Unix(lastHeartbeat, 0).Format("2006-01-02 15:04:05"),
-			"timeSinceHeart": time.Since(time.Unix(lastHeartbeat, 0)).Seconds(),
+			"lastHeartbeat":  lastHeartbeatStr,
+			"timeSinceHeart": timeSinceHeart,
+			"connStatus":     ConnStatusClosed,
 		}).Info("未知设备连接断开")
 	}
 }
@@ -135,26 +152,49 @@ func HandlePacket(conn ziface.IConnection, data []byte) bool {
 		return false
 	}
 
-	// 更新读取超时时间和处理错误
-	if tcpConn, ok := conn.GetTCPConnection().(*net.TCPConn); ok {
-		if err := tcpConn.SetReadDeadline(time.Now().Add(readDeadLine)); err != nil {
-			conn.SetProperty(PropKeyConnStatus, ConnStatusInactive)
+	// 检查心跳状态
+	now := time.Now()
+	var lastHeartbeatStr string
+	var timeSinceHeart float64
 
-			// 获取最后的心跳时间
-			var lastHeartbeat int64
-			if val, err := conn.GetProperty(PropKeyLastHeartbeat); err == nil && val != nil {
-				lastHeartbeat = val.(int64)
+	// 优先获取格式化的时间字符串
+	if val, err := conn.GetProperty(PropKeyLastHeartbeatStr); err == nil && val != nil {
+		lastHeartbeatStr = val.(string)
+	} else {
+		// 降级使用时间戳
+		if val, err := conn.GetProperty(PropKeyLastHeartbeat); err == nil && val != nil {
+			if ts, ok := val.(int64); ok {
+				lastHeartbeatStr = time.Unix(ts, 0).Format("2006-01-02 15:04:05")
+				timeSinceHeart = now.Sub(time.Unix(ts, 0)).Seconds()
 			}
+		}
+	}
+
+	// 更新读取超时时间
+	if tcpConn, ok := conn.GetTCPConnection().(*net.TCPConn); ok {
+		deadline := now.Add(readDeadLine)
+		if err := tcpConn.SetReadDeadline(deadline); err != nil {
+			conn.SetProperty(PropKeyConnStatus, ConnStatusInactive)
 
 			logger.WithFields(logrus.Fields{
 				"error":          err.Error(),
 				"connID":         conn.GetConnID(),
 				"remoteAddr":     conn.RemoteAddr().String(),
-				"lastHeartbeat":  time.Unix(lastHeartbeat, 0).Format("2006-01-02 15:04:05"),
-				"timeSinceHeart": time.Since(time.Unix(lastHeartbeat, 0)).Seconds(),
-			}).Error("Failed to update TCP read deadline")
+				"lastHeartbeat":  lastHeartbeatStr,
+				"timeSinceHeart": timeSinceHeart,
+				"deadline":       deadline.Format("2006-01-02 15:04:05"),
+				"connStatus":     ConnStatusInactive,
+			}).Error("设置 TCP 读取超时失败")
 			return false
 		}
+
+		logger.WithFields(logrus.Fields{
+			"connID":         conn.GetConnID(),
+			"lastHeartbeat":  lastHeartbeatStr,
+			"timeSinceHeart": timeSinceHeart,
+			"deadline":       deadline.Format("2006-01-02 15:04:05"),
+			"connStatus":     ConnStatusActive,
+		}).Debug("更新读取超时时间成功")
 	}
 
 	// 尝试解析为ICCID (20字节ASCII数字字符串)
@@ -286,17 +326,43 @@ func isValidICCID(str string) bool {
 
 // UpdateLastHeartbeatTime 更新最后一次DNY心跳时间、连接状态并更新设备状态
 func UpdateLastHeartbeatTime(conn ziface.IConnection) {
-	now := time.Now().Unix()
-	conn.SetProperty(PropKeyLastHeartbeat, now)
+	now := time.Now()
+
+	// 更新心跳时间（时间戳）
+	conn.SetProperty(PropKeyLastHeartbeat, now.Unix())
+
+	// 更新心跳时间（格式化字符串）
+	conn.SetProperty(PropKeyLastHeartbeatStr, now.Format("2006-01-02 15:04:05"))
 
 	// 更新连接状态
 	conn.SetProperty(PropKeyConnStatus, ConnStatusActive)
 
-	// 获取设备ID并更新在线状态
-	if deviceId, err := conn.GetProperty(PropKeyDeviceId); err == nil && deviceId != nil {
-		deviceIdStr := deviceId.(string)
-		UpdateDeviceStatus(deviceIdStr, "online")
+	// 更新 TCP 读取超时
+	if tcpConn, ok := conn.GetTCPConnection().(*net.TCPConn); ok {
+		if err := tcpConn.SetReadDeadline(now.Add(readDeadLine)); err != nil {
+			logger.WithFields(logrus.Fields{
+				"error":    err.Error(),
+				"connID":   conn.GetConnID(),
+				"deadline": now.Add(readDeadLine).Format("2006-01-02 15:04:05"),
+			}).Error("设置读取超时失败")
+		}
 	}
+
+	// 获取设备ID并更新在线状态
+	deviceID := "unknown"
+	if val, err := conn.GetProperty(PropKeyDeviceId); err == nil && val != nil {
+		deviceID = val.(string)
+		UpdateDeviceStatus(deviceID, "online")
+	}
+
+	logger.WithFields(logrus.Fields{
+		"connID":        conn.GetConnID(),
+		"deviceId":      deviceID,
+		"remoteAddr":    conn.RemoteAddr().String(),
+		"heartbeatTime": now.Format("2006-01-02 15:04:05"),
+		"nextDeadline":  now.Add(readDeadLine).Format("2006-01-02 15:04:05"),
+		"connStatus":    ConnStatusActive,
+	}).Debug("更新心跳时间成功")
 }
 
 // UpdateDeviceStatus 更新设备在线状态
@@ -579,6 +645,62 @@ func sendRegisterResponse(conn ziface.IConnection, physicalID uint32, messageID 
 	}).Info("已发送注册应答")
 
 	return true
+}
+
+// ConnectionInfo 连接信息结构体
+type ConnectionInfo struct {
+	ConnID        uint64
+	DeviceID      string
+	ICCID         string
+	LastHeartbeat int64
+	RemoteAddr    string
+	ConnStatus    string
+}
+
+// RangeDeviceConnections 遍历所有设备连接
+func RangeDeviceConnections(fn func(deviceId string, connInfo ConnectionInfo) bool) {
+	deviceIdToConnMap.Range(func(key, value interface{}) bool {
+		deviceId := key.(string)
+		conn := value.(ziface.IConnection)
+
+		// 构造连接信息
+		connInfo := ConnectionInfo{
+			ConnID:   conn.GetConnID(),
+			DeviceID: deviceId,
+		}
+
+		// 获取ICCID
+		if iccidVal, err := conn.GetProperty(PropKeyICCID); err == nil && iccidVal != nil {
+			connInfo.ICCID = iccidVal.(string)
+		}
+
+		// 获取最后心跳时间
+		if timeVal, err := conn.GetProperty(PropKeyLastHeartbeat); err == nil && timeVal != nil {
+			connInfo.LastHeartbeat = timeVal.(int64)
+		}
+
+		// 获取远程地址
+		if addrVal, err := conn.GetProperty(PropKeyRemoteAddr); err == nil && addrVal != nil {
+			connInfo.RemoteAddr = addrVal.(string)
+		}
+
+		// 获取连接状态
+		if statusVal, err := conn.GetProperty(PropKeyConnStatus); err == nil && statusVal != nil {
+			connInfo.ConnStatus = statusVal.(string)
+		}
+
+		return fn(deviceId, connInfo)
+	})
+}
+
+// GetConnectionCount 获取当前连接数量
+func GetConnectionCount() int {
+	count := 0
+	deviceIdToConnMap.Range(func(key, value interface{}) bool {
+		count++
+		return true
+	})
+	return count
 }
 
 // calculateChecksum 计算校验和
