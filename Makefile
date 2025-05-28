@@ -32,7 +32,7 @@ PLATFORMS ?= "linux/amd64 linux/arm64 darwin/amd64 darwin/arm64 windows/amd64"
 TARGET_PLATFORM ?=
 
 # 主程序入口
-MAIN_GO_FILE=./cmd/server/main.go
+MAIN_GO_FILE=./cmd/gateway/main.go
 # DNY解析器入口
 DNY_PARSER_GO_FILE=./cmd/dny-parser/main.go
 # 输出目录

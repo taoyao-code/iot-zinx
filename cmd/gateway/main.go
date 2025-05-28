@@ -28,7 +28,9 @@ func main() {
 
 	// 初始化日志
 	loggerConfig := config.GetConfig().Logger
-	if err := logger.Init(&loggerConfig); err != nil {
+
+	// 确保同时输出到控制台和文件
+	if err := logger.InitWithConsole(&loggerConfig); err != nil {
 		fmt.Printf("初始化日志系统失败: %v\n", err)
 		os.Exit(1)
 	}

@@ -2,6 +2,7 @@ package logger
 
 import (
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -52,6 +53,56 @@ func Init(cfg *config.LoggerConfig) error {
 		// 默认输出到标准输出
 		log.SetOutput(os.Stdout)
 	}
+
+	return nil
+}
+
+// InitWithConsole 初始化日志系统，同时输出到控制台和文件
+func InitWithConsole(cfg *config.LoggerConfig) error {
+	// 设置日志级别
+	level, err := logrus.ParseLevel(cfg.Level)
+	if err != nil {
+		return fmt.Errorf("invalid log level: %s, %w", cfg.Level, err)
+	}
+	log.SetLevel(level)
+
+	// 设置日志格式
+	if strings.ToLower(cfg.Format) == "json" {
+		log.SetFormatter(&logrus.JSONFormatter{
+			TimestampFormat: "2006-01-02 15:04:05",
+		})
+	} else {
+		log.SetFormatter(&logrus.TextFormatter{
+			TimestampFormat: "2006-01-02 15:04:05",
+			FullTimestamp:   true,
+		})
+	}
+
+	// 设置同时输出到控制台和文件
+	writers := []io.Writer{os.Stdout}
+
+	// 如果配置了文件路径，添加文件输出
+	if cfg.FilePath != "" {
+		logDir := filepath.Dir(cfg.FilePath)
+		if err := os.MkdirAll(logDir, 0o755); err != nil {
+			return fmt.Errorf("failed to create log directory: %w", err)
+		}
+
+		// 创建日志文件
+		file, err := os.OpenFile(cfg.FilePath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o666)
+		if err != nil {
+			return fmt.Errorf("failed to open log file: %w", err)
+		}
+
+		writers = append(writers, file)
+	}
+
+	// 创建多路输出
+	multiWriter := io.MultiWriter(writers...)
+	log.SetOutput(multiWriter)
+
+	// 确保日志立即可见
+	log.Info("日志系统初始化完成，同时输出到控制台和文件")
 
 	return nil
 }

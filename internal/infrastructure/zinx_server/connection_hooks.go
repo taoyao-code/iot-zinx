@@ -516,6 +516,12 @@ func handleDNYProtocol(conn ziface.IConnection, data []byte) bool {
 	// 解析命令
 	command := data[11]
 
+	// 在标准输出直接打印明显的命令信息
+	fmt.Printf("\n[RECEIVED_COMMAND] ConnID: %d, Command: 0x%02X, PhysicalID: %d, MessageID: %d\n",
+		conn.GetConnID(), command, physicalID, messageID)
+	fmt.Printf("数据(HEX): %X\n", data)
+	fmt.Println("----------------------------------------")
+
 	logger.WithFields(logrus.Fields{
 		"connID":     conn.GetConnID(),
 		"physicalID": physicalID,
@@ -559,6 +565,10 @@ func handleDNYProtocol(conn ziface.IConnection, data []byte) bool {
 			"command":    fmt.Sprintf("0x%02X", command),
 			"dataHex":    fmt.Sprintf("%X", data),
 		}).Info("收到设备上报指令，暂不处理")
+
+		// 对上报指令发送通用应答
+		responseData := []byte{0x00} // 0x00表示成功
+		SendDNYResponse(conn, physicalID, messageID, command, responseData)
 		return true
 	default:
 		logger.WithFields(logrus.Fields{
@@ -863,6 +873,12 @@ func sendRegisterResponse(conn ziface.IConnection, physicalID uint32, messageID 
 func SendDNYResponse(conn ziface.IConnection, physicalID uint32, messageID uint16, command uint8, responseData []byte) error {
 	// 构建完整的DNY协议包
 	packet := buildDNYResponsePacket(physicalID, messageID, command, responseData)
+
+	// 直接写入标准输出，确保在控制台可见
+	fmt.Printf("\n[SEND_DATA] ConnID: %d, Command: 0x%02X, PhysicalID: %d, MessageID: %d\n",
+		conn.GetConnID(), command, physicalID, messageID)
+	fmt.Printf("Response Data(HEX): %X\n", packet)
+	fmt.Println("----------------------------------------")
 
 	// 记录要发送的响应数据包
 	logger.WithFields(logrus.Fields{

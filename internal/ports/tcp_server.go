@@ -1,6 +1,7 @@
 package ports
 
 import (
+	"fmt"
 	"path/filepath"
 
 	"github.com/aceld/zinx/zconf"
@@ -9,6 +10,7 @@ import (
 	"github.com/bujia-iot/iot-zinx/internal/infrastructure/logger"
 	"github.com/bujia-iot/iot-zinx/internal/infrastructure/zinx_server"
 	"github.com/bujia-iot/iot-zinx/internal/infrastructure/zinx_server/handlers"
+	"github.com/sirupsen/logrus"
 )
 
 // StartTCPServer 配置并启动Zinx TCP服务器
@@ -16,6 +18,22 @@ func StartTCPServer() error {
 	// 获取配置
 	cfg := config.GetConfig()
 	zinxCfg := cfg.TCPServer.Zinx
+
+	// 测试日志输出
+	logger.Debug("这是DEBUG级别日志测试")
+	logger.Info("这是INFO级别日志测试")
+	logger.Warn("这是WARN级别日志测试")
+	logger.Error("这是ERROR级别日志测试")
+
+	// 测试WithFields日志
+	logger.WithFields(logrus.Fields{
+		"field1": "value1",
+		"field2": 123,
+		"field3": true,
+	}).Info("这是带字段的INFO日志测试")
+
+	// 打印一个明显的分隔符
+	fmt.Println("\n===== 日志测试完成，开始初始化服务器 =====\n")
 
 	// 直接设置Zinx全局对象配置
 	zconf.GlobalObject.Name = zinxCfg.Name
