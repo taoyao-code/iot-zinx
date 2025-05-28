@@ -1,6 +1,7 @@
 package zinx_server
 
 import (
+	"encoding/hex"
 	"fmt"
 	"net"
 	"sync"
@@ -197,6 +198,24 @@ func HandlePacket(conn ziface.IConnection, data []byte) bool {
 		}).Debug("更新读取超时时间成功")
 	}
 
+	// 处理十六进制编码的数据
+	if isHexEncodedData(data) {
+		// 解码十六进制字符串
+		decoded, err := hex.DecodeString(string(data))
+		if err != nil {
+			logger.WithFields(logrus.Fields{
+				"connID":     conn.GetConnID(),
+				"remoteAddr": conn.RemoteAddr().String(),
+				"error":      err.Error(),
+				"dataHex":    fmt.Sprintf("%X", data),
+			}).Error("十六进制解码失败")
+			return false
+		}
+
+		// 递归处理解码后的数据
+		return HandlePacket(conn, decoded)
+	}
+
 	// 尝试解析为ICCID (20字节ASCII数字字符串)
 	if len(data) == 20 {
 		// 检查是否都是ASCII数字字符
@@ -300,6 +319,23 @@ func isValidICCIDBytes(data []byte) bool {
 	// 检查每个字节是否为ASCII数字字符
 	for _, b := range data {
 		if b < '0' || b > '9' {
+			return false
+		}
+	}
+
+	return true
+}
+
+// isHexEncodedData 检查数据是否为十六进制编码的字符串
+func isHexEncodedData(data []byte) bool {
+	// 必须是偶数长度且长度大于0
+	if len(data) == 0 || len(data)%2 != 0 {
+		return false
+	}
+
+	// 检查是否都是ASCII十六进制字符
+	for _, b := range data {
+		if !((b >= '0' && b <= '9') || (b >= 'A' && b <= 'F') || (b >= 'a' && b <= 'f')) {
 			return false
 		}
 	}

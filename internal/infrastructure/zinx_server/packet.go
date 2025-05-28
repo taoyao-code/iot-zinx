@@ -88,51 +88,85 @@ func (dp *DNYPacket) Pack(msg ziface.IMessage) ([]byte, error) {
 // Unpack 拆包方法
 // 将二进制数据解析为IMessage对象，如果数据不完整或无效则返回错误
 func (dp *DNYPacket) Unpack(binaryData []byte) (ziface.IMessage, error) {
+	// 首先尝试检测数据是否为十六进制编码字符串
+	actualData := binaryData
+
+	// 检查是否为十六进制字符串（所有字节都是ASCII十六进制字符）
+	if isHexString(binaryData) {
+		// 解码十六进制字符串为字节数组
+		decoded, err := hex.DecodeString(string(binaryData))
+		if err != nil {
+			return nil, fmt.Errorf("十六进制解码失败: %v", err)
+		}
+		actualData = decoded
+
+		if dp.logHexDump {
+			logger.Debugf("检测到十六进制编码数据，解码后长度: %d -> %d", len(binaryData), len(actualData))
+		}
+	}
+
 	// 检查数据长度是否足够
-	if len(binaryData) < int(dp.GetHeadLen())+1 { // +1是帧尾
+	if len(actualData) < int(dp.GetHeadLen())+1 { // +1是帧尾
 		return nil, fmt.Errorf("数据长度不足以解析消息头")
 	}
 
 	// 检查帧头和帧尾标识
-	if binaryData[0] != dny_protocol.FrameHeader {
-		return nil, fmt.Errorf("无效的帧头标识: 0x%02X", binaryData[0])
+	if actualData[0] != dny_protocol.FrameHeader {
+		return nil, fmt.Errorf("无效的帧头标识: 0x%02X", actualData[0])
 	}
 
 	// 数据长度 (从第3-4字节)
-	dataLen := binary.LittleEndian.Uint16(binaryData[3:5])
+	dataLen := binary.LittleEndian.Uint16(actualData[3:5])
 
 	// 检查数据包长度是否完整
 	msgLen := int(dp.GetHeadLen()) + int(dataLen) + 1 // 帧头 + 数据 + 帧尾
-	if len(binaryData) < msgLen {
-		return nil, fmt.Errorf("数据长度不足以解析完整消息, 期望: %d, 实际: %d", msgLen, len(binaryData))
+	if len(actualData) < msgLen {
+		return nil, fmt.Errorf("数据长度不足以解析完整消息, 期望: %d, 实际: %d", msgLen, len(actualData))
 	}
 
 	// 检查帧尾标识
-	if binaryData[msgLen-1] != dny_protocol.FrameTail {
-		return nil, fmt.Errorf("无效的帧尾标识: 0x%02X", binaryData[msgLen-1])
+	if actualData[msgLen-1] != dny_protocol.FrameTail {
+		return nil, fmt.Errorf("无效的帧尾标识: 0x%02X", actualData[msgLen-1])
 	}
 
 	// 创建DNY消息对象
 	msg := dny_protocol.NewMessage(
-		uint32(binaryData[1]),                       // 命令码 (第2字节)
-		binary.LittleEndian.Uint16(binaryData[5:7]), // 物理ID (第5-6字节)
+		uint32(actualData[1]),                       // 命令码 (第2字节)
+		binary.LittleEndian.Uint16(actualData[5:7]), // 物理ID (第5-6字节)
 		make([]byte, dataLen),                       // 初始化数据切片
 	)
 
 	// 拷贝数据部分
 	if dataLen > 0 {
-		copy(msg.GetData(), binaryData[7:7+dataLen])
+		copy(msg.GetData(), actualData[7:7+dataLen])
 	}
 
 	// 保存原始数据
-	msg.SetRawData(binaryData[:msgLen])
+	msg.SetRawData(actualData[:msgLen])
 
 	// 记录十六进制日志
 	if dp.logHexDump {
 		logger.Debugf("Unpack消息 <- 命令: 0x%02X, 物理ID: 0x%04X, 数据长度: %d, 数据: %s",
 			msg.GetMsgID(), msg.GetPhysicalId(), dataLen,
-			hex.EncodeToString(binaryData[:msgLen]))
+			hex.EncodeToString(actualData[:msgLen]))
 	}
 
 	return msg, nil
+}
+
+// isHexString 检查字节数组是否为有效的十六进制字符串
+func isHexString(data []byte) bool {
+	// 空数据或长度为奇数不是有效的十六进制字符串
+	if len(data) == 0 || len(data)%2 != 0 {
+		return false
+	}
+
+	// 检查每个字节是否为ASCII十六进制字符
+	for _, b := range data {
+		if !((b >= '0' && b <= '9') || (b >= 'A' && b <= 'F') || (b >= 'a' && b <= 'f')) {
+			return false
+		}
+	}
+
+	return true
 }
