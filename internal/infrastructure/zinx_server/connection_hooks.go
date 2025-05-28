@@ -88,6 +88,97 @@ func OnConnectionStart(conn ziface.IConnection) {
 		"remoteAddr": remoteAddr,
 		"connID":     conn.GetConnID(),
 	}).Info("新连接已建立")
+
+	// 启动自定义数据处理协程
+	go handleCustomDataStream(conn)
+}
+
+// handleCustomDataStream 处理原始TCP数据流
+func handleCustomDataStream(conn ziface.IConnection) {
+	// 获取底层TCP连接
+	tcpConn, ok := conn.GetTCPConnection().(*net.TCPConn)
+	if !ok {
+		logger.Error("Failed to get TCP connection for custom data stream")
+		return
+	}
+
+	logger.WithFields(logrus.Fields{
+		"connID":     conn.GetConnID(),
+		"remoteAddr": conn.RemoteAddr().String(),
+	}).Info("启动自定义数据流处理")
+
+	// 创建缓冲区
+	buffer := make([]byte, 4096)
+
+	for {
+		// 设置读取超时
+		if err := tcpConn.SetReadDeadline(time.Now().Add(readDeadLine)); err != nil {
+			logger.WithFields(logrus.Fields{
+				"connID": conn.GetConnID(),
+				"error":  err.Error(),
+			}).Error("设置读取超时失败")
+			break
+		}
+
+		// 读取数据
+		n, err := tcpConn.Read(buffer)
+		if err != nil {
+			if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
+				logger.WithFields(logrus.Fields{
+					"connID":     conn.GetConnID(),
+					"remoteAddr": conn.RemoteAddr().String(),
+				}).Warn("读取数据超时")
+			} else {
+				logger.WithFields(logrus.Fields{
+					"connID":     conn.GetConnID(),
+					"remoteAddr": conn.RemoteAddr().String(),
+					"error":      err.Error(),
+				}).Error("读取数据失败")
+			}
+			break
+		}
+
+		if n == 0 {
+			continue
+		}
+
+		// 创建数据副本
+		data := make([]byte, n)
+		copy(data, buffer[:n])
+
+		logger.WithFields(logrus.Fields{
+			"connID":     conn.GetConnID(),
+			"remoteAddr": conn.RemoteAddr().String(),
+			"dataLen":    n,
+			"dataHex":    fmt.Sprintf("%X", data),
+			"dataString": string(data),
+		}).Debug("收到原始数据")
+
+		// 调用现有的数据处理逻辑
+		processed := HandlePacket(conn, data)
+		if !processed {
+			logger.WithFields(logrus.Fields{
+				"connID":     conn.GetConnID(),
+				"remoteAddr": conn.RemoteAddr().String(),
+				"dataLen":    n,
+				"dataHex":    fmt.Sprintf("%X", data),
+			}).Warn("数据包未被处理")
+		} else {
+			logger.WithFields(logrus.Fields{
+				"connID":     conn.GetConnID(),
+				"remoteAddr": conn.RemoteAddr().String(),
+				"dataLen":    n,
+			}).Debug("数据包处理成功")
+		}
+	}
+
+	logger.WithFields(logrus.Fields{
+		"connID":     conn.GetConnID(),
+		"remoteAddr": conn.RemoteAddr().String(),
+	}).Info("自定义数据流处理结束")
+
+	// 关闭连接
+	conn.Stop()
 }
 
 // OnConnectionStop 当连接断开时的钩子函数
