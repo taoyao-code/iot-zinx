@@ -3,8 +3,10 @@ package zinx_server
 import (
 	"bufio"
 	"context"
+	"fmt"
 	"io"
 	"net"
+	"strings"
 	"sync"
 	"time"
 
@@ -53,20 +55,27 @@ func OnConnectionStart(conn ziface.IConnection) {
 	// 记录远程地址到连接属性
 	conn.SetProperty(PropKeyRemoteAddr, remoteAddr)
 
+	// 设置一个默认的临时设备ID，避免"no property found"错误
+	tempDeviceId := fmt.Sprintf("TempID-Conn-%d", conn.GetConnID())
+	conn.SetProperty(PropKeyDeviceId, tempDeviceId)
+
 	// 启动一个goroutine处理特殊情况（如ICCID上报和"link"心跳）
 	go handlePreConnectionPhase(conn)
 }
 
 // OnConnectionStop 当连接断开时的钩子函数
 func OnConnectionStop(conn ziface.IConnection) {
+	connID := conn.GetConnID()
+	remoteAddr := conn.RemoteAddr().String()
+
 	// 尝试获取设备ID
 	deviceId, err := conn.GetProperty(PropKeyDeviceId)
-	if err == nil {
+	if err == nil && deviceId != nil {
 		deviceIdStr := deviceId.(string)
 
 		// 获取ICCID（如果有）
 		iccid := ""
-		if iccidVal, err := conn.GetProperty(PropKeyICCID); err == nil {
+		if iccidVal, err := conn.GetProperty(PropKeyICCID); err == nil && iccidVal != nil {
 			iccid = iccidVal.(string)
 		}
 
@@ -74,24 +83,33 @@ func OnConnectionStop(conn ziface.IConnection) {
 		logger.WithFields(logrus.Fields{
 			"deviceId":   deviceIdStr,
 			"iccid":      iccid,
-			"remoteAddr": conn.RemoteAddr().String(),
-			"connID":     conn.GetConnID(),
-		}).Info("Connection closed")
+			"remoteAddr": remoteAddr,
+			"connID":     connID,
+		}).Info("设备连接断开")
 
-		// 从映射中移除
-		deviceIdToConnMap.Delete(deviceIdStr)
-		connIdToDeviceIdMap.Delete(conn.GetConnID())
+		// 只有非临时设备ID才从映射中移除
+		if !strings.HasPrefix(deviceIdStr, "TempID-") {
+			deviceIdToConnMap.Delete(deviceIdStr)
+			connIdToDeviceIdMap.Delete(connID)
 
-		// 通知业务层设备离线
-		deviceService := app.GetServiceManager().DeviceService
-		go deviceService.HandleDeviceOffline(deviceIdStr, iccid)
+			// 通知业务层设备离线
+			deviceService := app.GetServiceManager().DeviceService
+			go deviceService.HandleDeviceOffline(deviceIdStr, iccid)
+		} else {
+			// 临时连接断开
+			logger.WithFields(logrus.Fields{
+				"deviceId":   deviceIdStr,
+				"remoteAddr": remoteAddr,
+				"connID":     connID,
+			}).Debug("临时连接断开")
+		}
 	} else {
-		// 未绑定设备ID的连接断开
+		// 未绑定设备ID的连接断开（这种情况现在应该很少见）
 		logger.WithFields(logrus.Fields{
-			"remoteAddr": conn.RemoteAddr().String(),
-			"connID":     conn.GetConnID(),
-			"error":      err.Error(),
-		}).Info("Unregistered connection closed")
+			"remoteAddr": remoteAddr,
+			"connID":     connID,
+			"error":      "no property found",
+		}).Info("未注册连接断开")
 	}
 }
 
@@ -122,6 +140,12 @@ func handlePreConnectionPhase(conn ziface.IConnection) {
 	// 标记是否已获取ICCID
 	var iccidReceived bool
 
+	logger.WithFields(logrus.Fields{
+		"connID":     conn.GetConnID(),
+		"remoteAddr": conn.RemoteAddr().String(),
+		"timeout":    timeoutSec,
+	}).Debug("开始处理连接初始化阶段")
+
 	// 循环读取数据，直到获取到ICCID或者超时
 	for {
 		select {
@@ -132,16 +156,19 @@ func handlePreConnectionPhase(conn ziface.IConnection) {
 				logger.WithFields(logrus.Fields{
 					"connID": conn.GetConnID(),
 					"iccid":  iccidVal,
-				}).Info("连接初始化完成（只收到ICCID，未检测到DNY协议头）")
+				}).Info("连接初始化完成（收到ICCID，等待DNY协议数据）")
 				return
 			}
-			// 如果既没有收到ICCID，也没有检测到DNY协议头，则断开连接
-			logger.WithField("connID", conn.GetConnID()).Warn("连接初始化超时，未收到ICCID和DNY协议头")
-			conn.Stop()
+			// 如果既没有收到ICCID，也没有检测到DNY协议头，记录但不断开连接
+			// 可能是客户端连接后需要时间发送数据
+			logger.WithFields(logrus.Fields{
+				"connID":     conn.GetConnID(),
+				"remoteAddr": conn.RemoteAddr().String(),
+			}).Warn("连接初始化超时，但保持连接等待后续数据")
 			return
 		default:
-			// 设置读取超时，避免阻塞
-			_ = tcpConn.SetReadDeadline(time.Now().Add(500 * time.Millisecond))
+			// 设置读取超时，避免长时间阻塞
+			_ = tcpConn.SetReadDeadline(time.Now().Add(1 * time.Second))
 
 			// 尝试读取数据
 			data := make([]byte, 1024)
@@ -160,32 +187,53 @@ func handlePreConnectionPhase(conn ziface.IConnection) {
 					logger.WithFields(logrus.Fields{
 						"connID": conn.GetConnID(),
 						"iccid":  iccidVal,
-					}).Info("收到EOF，但已完成ICCID初始化")
+					}).Debug("收到EOF，已完成ICCID初始化")
 					return
 				}
-				// 否则断开连接
-				logger.WithField("connID", conn.GetConnID()).Warn("收到EOF，未完成初始化")
-				conn.Stop()
+				// 客户端断开连接，记录但不主动断开
+				logger.WithFields(logrus.Fields{
+					"connID":     conn.GetConnID(),
+					"remoteAddr": conn.RemoteAddr().String(),
+				}).Debug("客户端断开连接（EOF）")
 				return
 			}
 
 			// 处理其他错误
 			if err != nil {
+				// 检查连接是否仍然有效
+				if _, getErr := conn.GetProperty(PropKeyRemoteAddr); getErr != nil {
+					// 连接已无效
+					logger.WithFields(logrus.Fields{
+						"connID": conn.GetConnID(),
+						"error":  err.Error(),
+					}).Debug("连接已关闭，停止读取")
+					return
+				}
+
 				logger.WithFields(logrus.Fields{
-					"connID": conn.GetConnID(),
-					"error":  err.Error(),
-				}).Error("从连接读取数据出错")
-				conn.Stop()
-				return
+					"connID":     conn.GetConnID(),
+					"remoteAddr": conn.RemoteAddr().String(),
+					"error":      err.Error(),
+				}).Warn("读取连接数据时出现错误，继续等待")
+				continue
 			}
 
 			// 处理读取到的数据
 			if n > 0 {
+				logger.WithFields(logrus.Fields{
+					"connID":     conn.GetConnID(),
+					"dataLength": n,
+					"dataHex":    fmt.Sprintf("%X", data[:n]),
+				}).Debug("接收到数据")
+
 				// 检查是否为"link"心跳
 				if n == 4 && string(data[:4]) == LinkHeartbeat {
 					now := time.Now().Unix()
 					conn.SetProperty(PropKeyLastLink, now)
-					logger.WithField("connID", conn.GetConnID()).Debug("收到'link'心跳")
+					logger.WithFields(logrus.Fields{
+						"connID":     conn.GetConnID(),
+						"remoteAddr": conn.RemoteAddr().String(),
+					}).Debug("收到'link'心跳")
 					continue
 				}
 
@@ -207,22 +255,37 @@ func handlePreConnectionPhase(conn ziface.IConnection) {
 						iccidReceived = true
 
 						logger.WithFields(logrus.Fields{
-							"connID": conn.GetConnID(),
-							"iccid":  potentialICCID,
+							"connID":     conn.GetConnID(),
+							"remoteAddr": conn.RemoteAddr().String(),
+							"iccid":      potentialICCID,
 						}).Info("收到ICCID")
 
-						// 设置一个临时物理ID，防止连接因"no property found"错误而关闭
-						// 等待真正的注册包到来时会更新此值
-						conn.SetProperty(PropKeyDeviceId, "TempID-"+potentialICCID)
+						// 更新设备ID，使用ICCID作为临时标识
+						tempDeviceId := "TempID-" + potentialICCID
+						conn.SetProperty(PropKeyDeviceId, tempDeviceId)
 
 						// 不返回，继续等待后续数据
+						continue
 					}
 				}
 
 				// 检查是否为DNY协议头
 				if n >= 3 && string(data[:3]) == "DNY" {
-					logger.WithField("connID", conn.GetConnID()).Debug("检测到DNY协议头，返回控制权给Zinx")
+					logger.WithFields(logrus.Fields{
+						"connID":     conn.GetConnID(),
+						"remoteAddr": conn.RemoteAddr().String(),
+					}).Debug("检测到DNY协议头，转交给Zinx处理")
 					return
+				}
+
+				// 记录未识别的数据
+				if n <= 100 {
+					logger.WithFields(logrus.Fields{
+						"connID":     conn.GetConnID(),
+						"remoteAddr": conn.RemoteAddr().String(),
+						"dataText":   string(data[:n]),
+						"dataHex":    fmt.Sprintf("%X", data[:n]),
+					}).Debug("收到未识别数据")
 				}
 			}
 		}

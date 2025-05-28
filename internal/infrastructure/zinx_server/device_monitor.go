@@ -1,6 +1,7 @@
 package zinx_server
 
 import (
+	"strings"
 	"sync/atomic"
 	"time"
 
@@ -61,9 +62,15 @@ func checkDeviceHeartbeats(timeout time.Duration) {
 		deviceId := key.(string)
 		conn := value.(ziface.IConnection)
 
+		// 跳过临时连接
+		if strings.HasPrefix(deviceId, "TempID-") {
+			return true
+		}
+
 		// 获取最后一次心跳时间
 		lastHeartbeatVal, err := conn.GetProperty(PropKeyLastHeartbeat)
 		if err != nil {
+			// 对于正式注册的设备，如果没有心跳时间属性，说明可能有问题
 			logger.WithFields(logrus.Fields{
 				"connID":   conn.GetConnID(),
 				"deviceId": deviceId,
