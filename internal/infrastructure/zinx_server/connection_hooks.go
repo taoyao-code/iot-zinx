@@ -19,6 +19,12 @@ const (
 	PropKeyLastHeartbeat = "lastHeartbeat" // 最后一次DNY心跳时间
 	PropKeyLastLink      = "lastLink"      // 最后一次"link"心跳时间
 	PropKeyRemoteAddr    = "remoteAddr"    // 远程地址
+	PropKeyConnStatus    = "connStatus"    // 连接状态
+
+	// 连接状态
+	ConnStatusActive   = "active"   // 活跃
+	ConnStatusInactive = "inactive" // 不活跃
+	ConnStatusClosed   = "closed"   // 已关闭
 
 	// Link心跳字符串
 	LinkHeartbeat = "link"
@@ -33,8 +39,11 @@ var (
 	connIdToDeviceIdMap sync.Map // map[uint64]string
 )
 
-// 初始化读取超时时间
-var readDeadLine = time.Second * 30 // 增加超时时间到30秒
+// 初始化超时和心跳配置
+var (
+	readDeadLine    = time.Second * 60 // 增加读取超时时间到60秒
+	keepAlivePeriod = time.Second * 30 // 减少keepalive间隔到30秒
+)
 
 // OnConnectionStart 当连接建立时的钩子函数
 func OnConnectionStart(conn ziface.IConnection) {
@@ -47,14 +56,31 @@ func OnConnectionStart(conn ziface.IConnection) {
 	}
 
 	// 设置TCP选项
-	_ = tcpConn.SetKeepAlive(true)
-	_ = tcpConn.SetKeepAlivePeriod(time.Second * 60)
-	_ = tcpConn.SetReadDeadline(time.Now().Add(readDeadLine))
-	_ = tcpConn.SetNoDelay(true)
+	if err := tcpConn.SetKeepAlive(true); err != nil {
+		logger.WithFields(logrus.Fields{
+			"error": err.Error(),
+		}).Error("Failed to set TCP keepalive")
+	}
+	if err := tcpConn.SetKeepAlivePeriod(keepAlivePeriod); err != nil {
+		logger.WithFields(logrus.Fields{
+			"error": err.Error(),
+		}).Error("Failed to set TCP keepalive period")
+	}
+	if err := tcpConn.SetReadDeadline(time.Now().Add(readDeadLine)); err != nil {
+		logger.WithFields(logrus.Fields{
+			"error": err.Error(),
+		}).Error("Failed to set TCP read deadline")
+	}
+	if err := tcpConn.SetNoDelay(true); err != nil {
+		logger.WithFields(logrus.Fields{
+			"error": err.Error(),
+		}).Error("Failed to set TCP nodelay")
+	}
 
 	// 记录连接信息
 	remoteAddr := conn.RemoteAddr().String()
 	conn.SetProperty(PropKeyRemoteAddr, remoteAddr)
+	conn.SetProperty(PropKeyConnStatus, ConnStatusActive)
 
 	logger.WithFields(logrus.Fields{
 		"remoteAddr": remoteAddr,
@@ -67,6 +93,15 @@ func OnConnectionStop(conn ziface.IConnection) {
 	connID := conn.GetConnID()
 	remoteAddr := conn.RemoteAddr().String()
 
+	// 更新连接状态
+	conn.SetProperty(PropKeyConnStatus, ConnStatusClosed)
+
+	// 获取最后的心跳时间
+	var lastHeartbeat int64
+	if val, err := conn.GetProperty(PropKeyLastHeartbeat); err == nil && val != nil {
+		lastHeartbeat = val.(int64)
+	}
+
 	// 尝试获取设备信息并清理
 	if deviceId, err := conn.GetProperty(PropKeyDeviceId); err == nil && deviceId != nil {
 		deviceIdStr := deviceId.(string)
@@ -78,10 +113,19 @@ func OnConnectionStop(conn ziface.IConnection) {
 		UpdateDeviceStatus(deviceIdStr, "offline")
 
 		logger.WithFields(logrus.Fields{
-			"deviceId":   deviceIdStr,
-			"remoteAddr": remoteAddr,
-			"connID":     connID,
+			"deviceId":       deviceIdStr,
+			"remoteAddr":     remoteAddr,
+			"connID":         connID,
+			"lastHeartbeat":  time.Unix(lastHeartbeat, 0).Format("2006-01-02 15:04:05"),
+			"timeSinceHeart": time.Since(time.Unix(lastHeartbeat, 0)).Seconds(),
 		}).Info("设备连接断开")
+	} else {
+		logger.WithFields(logrus.Fields{
+			"remoteAddr":     remoteAddr,
+			"connID":         connID,
+			"lastHeartbeat":  time.Unix(lastHeartbeat, 0).Format("2006-01-02 15:04:05"),
+			"timeSinceHeart": time.Since(time.Unix(lastHeartbeat, 0)).Seconds(),
+		}).Info("未知设备连接断开")
 	}
 }
 
@@ -91,9 +135,26 @@ func HandlePacket(conn ziface.IConnection, data []byte) bool {
 		return false
 	}
 
-	// 更新读取超时时间
+	// 更新读取超时时间和处理错误
 	if tcpConn, ok := conn.GetTCPConnection().(*net.TCPConn); ok {
-		_ = tcpConn.SetReadDeadline(time.Now().Add(readDeadLine))
+		if err := tcpConn.SetReadDeadline(time.Now().Add(readDeadLine)); err != nil {
+			conn.SetProperty(PropKeyConnStatus, ConnStatusInactive)
+
+			// 获取最后的心跳时间
+			var lastHeartbeat int64
+			if val, err := conn.GetProperty(PropKeyLastHeartbeat); err == nil && val != nil {
+				lastHeartbeat = val.(int64)
+			}
+
+			logger.WithFields(logrus.Fields{
+				"error":          err.Error(),
+				"connID":         conn.GetConnID(),
+				"remoteAddr":     conn.RemoteAddr().String(),
+				"lastHeartbeat":  time.Unix(lastHeartbeat, 0).Format("2006-01-02 15:04:05"),
+				"timeSinceHeart": time.Since(time.Unix(lastHeartbeat, 0)).Seconds(),
+			}).Error("Failed to update TCP read deadline")
+			return false
+		}
 	}
 
 	// 尝试解析为ICCID (20字节ASCII数字字符串)
@@ -118,6 +179,7 @@ func HandlePacket(conn ziface.IConnection, data []byte) bool {
 	if len(data) == 4 && string(data) == LinkHeartbeat {
 		now := time.Now().Unix()
 		conn.SetProperty(PropKeyLastLink, now)
+		conn.SetProperty(PropKeyConnStatus, ConnStatusActive)
 
 		logger.WithFields(logrus.Fields{
 			"connID":     conn.GetConnID(),
@@ -129,8 +191,9 @@ func HandlePacket(conn ziface.IConnection, data []byte) bool {
 
 	// 处理DNY协议数据
 	if len(data) >= 3 && string(data[:3]) == "DNY" {
-		// 更新心跳时间
+		// 更新心跳时间和连接状态
 		UpdateLastHeartbeatTime(conn)
+		conn.SetProperty(PropKeyConnStatus, ConnStatusActive)
 
 		logger.WithFields(logrus.Fields{
 			"connID":     conn.GetConnID(),
@@ -221,10 +284,13 @@ func isValidICCID(str string) bool {
 	return true
 }
 
-// UpdateLastHeartbeatTime 更新最后一次DNY心跳时间并更新设备状态
+// UpdateLastHeartbeatTime 更新最后一次DNY心跳时间、连接状态并更新设备状态
 func UpdateLastHeartbeatTime(conn ziface.IConnection) {
 	now := time.Now().Unix()
 	conn.SetProperty(PropKeyLastHeartbeat, now)
+
+	// 更新连接状态
+	conn.SetProperty(PropKeyConnStatus, ConnStatusActive)
 
 	// 获取设备ID并更新在线状态
 	if deviceId, err := conn.GetProperty(PropKeyDeviceId); err == nil && deviceId != nil {
