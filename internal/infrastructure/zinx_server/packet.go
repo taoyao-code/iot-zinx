@@ -5,10 +5,12 @@ import (
 	"encoding/binary"
 	"encoding/hex"
 	"fmt"
+	"os"
 
 	"github.com/aceld/zinx/ziface"
 	"github.com/bujia-iot/iot-zinx/internal/domain/dny_protocol"
 	"github.com/bujia-iot/iot-zinx/internal/infrastructure/logger"
+	"github.com/sirupsen/logrus"
 )
 
 // DNYPacket 是DNY协议的数据封包和拆包处理器
@@ -107,9 +109,18 @@ func (dp *DNYPacket) Pack(msg ziface.IMessage) ([]byte, error) {
 // 将二进制数据解析为IMessage对象，支持十六进制编码和原始数据
 func (dp *DNYPacket) Unpack(binaryData []byte) (ziface.IMessage, error) {
 	// 传入的binaryData是可能来自网络的原始数据
-	// 在这里调用我们的数据接收钩子（当连接可用时）
-	// 注意：这里缺少连接对象，因为Unpack方法没有连接参数
-	// 收到数据后，会在connection.go的StartReader方法中调用OnRawDataReceived
+	// 数据监控在HandlePacket函数中处理，避免重复调用
+
+	// 强制输出到控制台和日志
+	fmt.Printf("\n🔥🔥🔥 DNYPacket.Unpack被调用! 数据长度: %d 🔥🔥🔥\n", len(binaryData))
+	fmt.Printf("原始数据: %s\n", hex.EncodeToString(binaryData))
+	os.Stdout.Sync()
+
+	// 强制输出Unpack被调用的信息
+	logger.WithFields(logrus.Fields{
+		"dataLen": len(binaryData),
+		"dataHex": hex.EncodeToString(binaryData),
+	}).Error("DNYPacket.Unpack被调用") // 使用ERROR级别确保输出
 
 	// 首先尝试检测数据是否为十六进制编码字符串
 	actualData := binaryData
@@ -138,6 +149,12 @@ func (dp *DNYPacket) Unpack(binaryData []byte) (ziface.IMessage, error) {
 			Data:    actualData,
 			RawData: binaryData, // 保存原始数据
 		}
+
+		logger.WithFields(logrus.Fields{
+			"msgID":   0,
+			"dataLen": len(actualData),
+			"dataHex": hex.EncodeToString(actualData),
+		}).Error("创建通用消息(msgID=0)，将路由到UniversalDataHandler")
 
 		if dp.logHexDump {
 			logger.Debugf("检测到非DNY协议数据，长度: %d, 数据: %s",
@@ -179,6 +196,15 @@ func (dp *DNYPacket) Unpack(binaryData []byte) (ziface.IMessage, error) {
 
 	// 计算数据部分长度（总数据长度 - 物理ID(4) - 消息ID(2) - 命令(1) - 校验(2)）
 	payloadLen := int(dataLen) - 4 - 2 - 1 - 2
+
+	// 输出DNY协议解析信息
+	logger.WithFields(logrus.Fields{
+		"command":    fmt.Sprintf("0x%02X", command),
+		"physicalID": physicalId,
+		"messageID":  messageId,
+		"payloadLen": payloadLen,
+		"totalLen":   len(actualData),
+	}).Error("解析DNY协议数据，将路由到对应处理器")
 
 	// 创建DNY消息对象
 	msg := dny_protocol.NewMessage(command, physicalId, make([]byte, payloadLen))

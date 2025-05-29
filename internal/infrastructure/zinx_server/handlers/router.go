@@ -1,6 +1,8 @@
 package handlers
 
 import (
+	"fmt"
+
 	"github.com/aceld/zinx/ziface"
 	"github.com/aceld/zinx/znet"
 	"github.com/bujia-iot/iot-zinx/internal/domain/dny_protocol"
@@ -59,6 +61,19 @@ type UniversalDataHandler struct {
 func (u *UniversalDataHandler) Handle(request ziface.IRequest) {
 	conn := request.GetConnection()
 	data := request.GetData()
+
+	// 强制输出到控制台
+	fmt.Printf("\n🎯🎯🎯 UniversalDataHandler被调用! ConnID: %d, 数据长度: %d 🎯🎯🎯\n",
+		conn.GetConnID(), len(data))
+	fmt.Printf("数据内容: %X\n", data)
+
+	// 强制输出处理器被调用的信息
+	logger.WithFields(map[string]interface{}{
+		"connID":     conn.GetConnID(),
+		"remoteAddr": conn.RemoteAddr().String(),
+		"dataLen":    len(data),
+		"msgID":      request.GetMsgID(),
+	}).Error("UniversalDataHandler被调用") // 使用ERROR级别确保输出
 
 	// 调用现有的HandlePacket函数进行处理
 	// 这个函数包含了ICCID识别、十六进制解码等逻辑

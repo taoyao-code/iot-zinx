@@ -165,14 +165,26 @@ func HandlePacket(conn ziface.IConnection, data []byte) bool {
 		return false
 	}
 
-	// 强制输出接收数据信息到控制台
+	// 使用logger强制输出，确保一定会被看到
 	timestamp := time.Now().Format("2006-01-02 15:04:05.000")
-	fmt.Printf("\n========== 数据包处理开始 ==========\n")
+
+	// 同时使用logger和fmt输出确保可见
+	logger.WithFields(logrus.Fields{
+		"connID":     conn.GetConnID(),
+		"remoteAddr": conn.RemoteAddr().String(),
+		"dataLen":    len(data),
+		"dataHex":    hex.EncodeToString(data),
+		"timestamp":  timestamp,
+	}).Error("HandlePacket被调用 - 数据包处理开始") // 使用ERROR级别确保输出
+
+	// 强制输出接收数据信息到控制台
+	fmt.Printf("\n========== HandlePacket被调用 ==========\n")
 	fmt.Printf("[%s] 处理数据包 - ConnID: %d, 远程地址: %s\n",
 		timestamp, conn.GetConnID(), conn.RemoteAddr().String())
 	fmt.Printf("数据长度: %d 字节\n", len(data))
 	fmt.Printf("数据(HEX): %X\n", data)
 	fmt.Printf("数据(ASCII): %s\n", string(data))
+	fmt.Printf("==========================================\n")
 	os.Stdout.Sync()
 
 	// 通知TCP监视器收到数据
