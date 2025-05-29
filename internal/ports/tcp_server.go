@@ -57,13 +57,8 @@ func StartTCPServer() error {
 	// 创建自定义数据包封包与解包器
 	dataPack := zinx_server.NewDNYPacket(cfg.Logger.LogHexDump)
 
-	// 添加调试输出确认数据包处理器创建和设置
-	fmt.Printf("\n🔧🔧🔧 创建DNYPacket数据包处理器成功! 对象地址: %p 🔧🔧🔧\n", dataPack)
-
 	// 使用选项创建服务器实例 - 使用WithPacket选项设置自定义解析器
-	fmt.Printf("🔧🔧🔧 使用WithPacket选项设置自定义数据包处理器 🔧🔧🔧\n")
 	server := znet.NewServer(znet.WithPacket(dataPack))
-	fmt.Printf("🔧🔧🔧 服务器创建完成，使用了自定义解析器 🔧🔧🔧\n\n")
 
 	// 验证数据包处理器是否正确设置
 	packet := server.GetPacket()
@@ -91,14 +86,9 @@ func StartTCPServer() error {
 	// 初始化命令管理器
 	cmdManager := zinx_server.GetCommandManager()
 	cmdManager.Start()
-	logger.Info("命令管理器已启动")
 
 	// 启动设备状态监控服务
 	zinx_server.StartDeviceMonitor()
-
-	// 记录服务器启动信息
-	logger.WithField("tcpPort", zinxCfg.TCPPort).Info("正在启动Zinx TCP服务器...")
-	logger.WithField("serverName", server.ServerName()).Info("服务器名称")
 
 	// 启动服务器
 	fmt.Printf("⭐⭐⭐ 启动Zinx服务器，监听端口: %d ⭐⭐⭐\n", zinxCfg.TCPPort)
@@ -110,7 +100,6 @@ func StartTCPServer() error {
 
 // 检查注册的路由数量
 func checkRouterCount(server ziface.IServer) {
-	// 这里需要通过反射或其他方式获取路由数量
-	// 由于Zinx框架限制，可能无法直接获取，可以尝试获取server内部的msgHandler
+	// TODO: 检查路由数量
 	fmt.Println("路由注册验证完成")
 }
