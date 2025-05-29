@@ -43,14 +43,6 @@ func NewDNYPacket(logHexDump bool) ziface.IDataPack {
 // GetHeadLen 获取消息头长度
 // DNY协议头长度为5字节：包头(3) + 长度(2)
 func (dp *DNYPacket) GetHeadLen() uint32 {
-	// 打印调用栈，帮助诊断此方法是否被调用以及由谁调用
-	fmt.Printf("\n🔍 调用栈信息: \n%s\n", debug.Stack())
-
-	// 强制输出调试信息
-	fmt.Printf("\n🚀🚀🚀 DNYPacket.GetHeadLen被调用! 返回头长度: %d 🚀🚀🚀\n", dny_protocol.DnyHeaderLen)
-	fmt.Printf("调用栈: DNYPacket.GetHeadLen()\n")
-	os.Stdout.Sync()
-
 	// 记录到日志
 	logger.WithFields(logrus.Fields{
 		"headLen": dny_protocol.DnyHeaderLen,

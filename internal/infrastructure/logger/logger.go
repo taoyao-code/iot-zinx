@@ -6,7 +6,6 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"time"
 
 	"github.com/bujia-iot/iot-zinx/internal/infrastructure/config"
 	"github.com/sirupsen/logrus"
@@ -133,17 +132,6 @@ func InitWithConsole(cfg *config.LoggerConfig) error {
 	// 创建多路输出
 	multiWriter := io.MultiWriter(writers...)
 	log.SetOutput(multiWriter)
-
-	// 测试直接写入
-	fmt.Println("===== 测试直接写入 =====")
-	testString := fmt.Sprintf("测试日志时间: %s\n", time.Now().Format("2006-01-02 15:04:05.000"))
-	multiWriter.Write([]byte(testString))
-	fmt.Printf("测试写入完成: %s\n", testString)
-
-	fmt.Println("===== 日志系统初始化完成 =====\n")
-
-	// 确保日志立即可见
-	log.Info("日志系统初始化完成，同时输出到控制台和文件")
 
 	return nil
 }
