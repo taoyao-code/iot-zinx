@@ -61,17 +61,16 @@ func StartTCPServer() error {
 		zconf.GlobalObject.LogIsolationLevel = 0
 	}
 
-	// 创建服务器实例
-	server := znet.NewServer()
-
-	// 设置自定义数据包封包与解包器
+	// 创建自定义数据包封包与解包器
 	dataPack := zinx_server.NewDNYPacket(cfg.Logger.LogHexDump)
 
 	// 添加调试输出确认数据包处理器创建和设置
 	fmt.Printf("\n🔧🔧🔧 创建DNYPacket数据包处理器成功! 对象地址: %p 🔧🔧🔧\n", dataPack)
-	fmt.Printf("🔧🔧🔧 调用server.SetPacket()设置自定义数据包处理器 🔧🔧🔧\n")
-	server.SetPacket(dataPack)
-	fmt.Printf("🔧🔧🔧 server.SetPacket()调用完成 🔧🔧🔧\n\n")
+
+	// 使用选项创建服务器实例 - 使用WithPacket选项设置自定义解析器
+	fmt.Printf("🔧🔧🔧 使用WithPacket选项设置自定义数据包处理器 🔧🔧🔧\n")
+	server := znet.NewServer(znet.WithPacket(dataPack))
+	fmt.Printf("🔧🔧🔧 服务器创建完成，使用了自定义解析器 🔧🔧🔧\n\n")
 
 	// 验证数据包处理器是否正确设置
 	packet := server.GetPacket()

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/binary"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"os"
 	"runtime/debug"
@@ -12,6 +13,13 @@ import (
 	"github.com/bujia-iot/iot-zinx/internal/domain/dny_protocol"
 	"github.com/bujia-iot/iot-zinx/internal/infrastructure/logger"
 	"github.com/sirupsen/logrus"
+)
+
+// 自定义错误
+var (
+	// ErrNotEnoughData 表示数据不足以解析完整消息
+	// 当连接接收到不完整的数据包时，返回此错误告知Zinx框架需要继续等待更多数据
+	ErrNotEnoughData = errors.New("not enough data")
 )
 
 // DNYPacket 是DNY协议的数据封包和拆包处理器
@@ -176,6 +184,17 @@ func (dp *DNYPacket) Unpack(binaryData []byte) (ziface.IMessage, error) {
 	// 特殊处理：如果数据不符合DNY协议格式，我们创建一个特殊的消息类型来处理
 	// 这样可以让非DNY协议数据（ICCID、link心跳等）通过正常的路由机制处理
 	if !isDNYProtocolData(actualData) {
+		// 检查数据长度是否足够包含最小包长度
+		if len(actualData) < dny_protocol.DnyHeaderLen {
+			// 注意：使用自定义的ErrNotEnoughData错误
+			// 这确保了zinx框架可以正确处理不完整数据的情况
+			logger.WithFields(logrus.Fields{
+				"dataLen": len(actualData),
+				"minLen":  dny_protocol.DnyHeaderLen,
+			}).Debug("数据不足以解析头部，等待更多数据")
+			return nil, ErrNotEnoughData
+		}
+
 		// 创建一个特殊的消息类型（msgID=0）来处理非DNY协议数据
 		// 这些数据将被路由到一个特殊的处理器
 		logger.WithFields(logrus.Fields{
@@ -191,8 +210,11 @@ func (dp *DNYPacket) Unpack(binaryData []byte) (ziface.IMessage, error) {
 	// 以下是DNY协议的正常解析逻辑
 	// 检查数据长度是否足够包含最小包长度
 	if len(actualData) < dny_protocol.MinPackageLen {
-		return nil, fmt.Errorf("数据长度不足以解析DNY协议包，最小长度: %d, 实际: %d",
-			dny_protocol.MinPackageLen, len(actualData))
+		logger.WithFields(logrus.Fields{
+			"dataLen": len(actualData),
+			"minLen":  dny_protocol.MinPackageLen,
+		}).Debug("数据不足以解析DNY协议包，等待更多数据")
+		return nil, ErrNotEnoughData
 	}
 
 	// 检查包头是否为"DNY"
@@ -206,7 +228,11 @@ func (dp *DNYPacket) Unpack(binaryData []byte) (ziface.IMessage, error) {
 	// 检查数据包长度是否完整
 	totalLen := dny_protocol.DnyHeaderLen + int(dataLen)
 	if len(actualData) < totalLen {
-		return nil, fmt.Errorf("数据长度不足以解析完整DNY消息, 期望: %d, 实际: %d", totalLen, len(actualData))
+		logger.WithFields(logrus.Fields{
+			"dataLen":  len(actualData),
+			"totalLen": totalLen,
+		}).Debug("数据不足以解析完整DNY消息，等待更多数据")
+		return nil, ErrNotEnoughData
 	}
 
 	// 解析物理ID (第6-9字节，小端序) - 现在使用完整的4字节物理ID
