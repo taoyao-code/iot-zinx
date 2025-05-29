@@ -12,6 +12,9 @@ import (
 // MakeDNYProtocolHeartbeatMsg 创建符合DNY协议的心跳检测消息
 // 该函数实现zinx框架心跳机制的MakeMsg接口，生成的消息会发送给客户端
 func MakeDNYProtocolHeartbeatMsg(conn ziface.IConnection) []byte {
+	// 强制输出被调用的信息
+	fmt.Printf("\n💓💓💓 MakeDNYProtocolHeartbeatMsg被调用! 💓💓💓\n")
+
 	// 尝试获取设备ID
 	deviceID := "unknown"
 	physicalID := uint32(0)

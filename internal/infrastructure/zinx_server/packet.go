@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"runtime/debug"
+	"time"
 
 	"github.com/aceld/zinx/ziface"
 	"github.com/bujia-iot/iot-zinx/internal/domain/dny_protocol"
@@ -67,6 +68,90 @@ func (dp *DNYPacket) Pack(msg ziface.IMessage) ([]byte, error) {
 		"msgID":   msg.GetMsgID(),
 		"dataLen": msg.GetDataLen(),
 	}).Error("DNYPacket.Pack被调用")
+
+	// 特殊处理心跳消息 (0xF001 = 61441)
+	if msg.GetMsgID() == uint32(0xF001) {
+		// 心跳消息通常由Zinx框架直接生成，非DNY消息类型
+		logger.WithFields(logrus.Fields{
+			"msgID":   msg.GetMsgID(),
+			"dataLen": msg.GetDataLen(),
+			"dataHex": hex.EncodeToString(msg.GetData()),
+		}).Info("处理Zinx心跳消息，特殊转换为DNY格式")
+
+		// 创建一个DNY消息对象
+		physicalID := uint32(1) // 默认物理ID
+
+		// 提取心跳消息数据中的命令ID
+		cmdData := msg.GetData()
+		cmdID := byte(0xF0)          // 默认命令ID
+		innerCmdData := []byte{0x81} // 默认内部命令
+
+		if len(cmdData) > 0 {
+			innerCmdData = cmdData
+		}
+
+		// 创建缓冲区
+		dataBuff := bytes.NewBuffer([]byte{})
+
+		// 写入包头"DNY" (3字节)
+		if _, err := dataBuff.WriteString(dny_protocol.DnyHeader); err != nil {
+			return nil, err
+		}
+
+		// 计算数据部分长度（物理ID + 消息ID + 命令 + 数据 + 校验）
+		dataPartLen := 4 + 2 + 1 + uint32(len(innerCmdData)) + 2
+
+		// 写入数据长度 (2字节，小端序)
+		if err := binary.Write(dataBuff, binary.LittleEndian, uint16(dataPartLen)); err != nil {
+			return nil, err
+		}
+
+		// 写入物理ID (4字节，小端序)
+		if err := binary.Write(dataBuff, binary.LittleEndian, physicalID); err != nil {
+			return nil, err
+		}
+
+		// 写入消息ID (2字节，小端序) - 使用时间戳低16位作为消息ID
+		messageID := uint16(time.Now().Unix() & 0xFFFF)
+		if err := binary.Write(dataBuff, binary.LittleEndian, messageID); err != nil {
+			return nil, err
+		}
+
+		// 写入命令码 (1字节)
+		if err := dataBuff.WriteByte(cmdID); err != nil {
+			return nil, err
+		}
+
+		// 写入内部命令数据
+		if len(innerCmdData) > 0 {
+			if _, err := dataBuff.Write(innerCmdData); err != nil {
+				return nil, err
+			}
+		}
+
+		// 获取完整的数据包（不包含校验和）
+		packetData := dataBuff.Bytes()
+
+		// 计算校验和（从包头到数据的累加和）
+		var checksum uint16
+		for _, b := range packetData {
+			checksum += uint16(b)
+		}
+
+		// 写入校验码 (2字节，小端模式)
+		if err := binary.Write(dataBuff, binary.LittleEndian, checksum); err != nil {
+			return nil, err
+		}
+
+		// 获取完整的数据包（包含校验和）
+		packetData = dataBuff.Bytes()
+
+		// 记录十六进制日志
+		logger.Debugf("Pack心跳消息 -> 命令: 0x%02X, 物理ID: 0x%08X, 数据长度: %d, 数据: %s",
+			cmdID, physicalID, len(innerCmdData), hex.EncodeToString(packetData))
+
+		return packetData, nil
+	}
 
 	// 转换为DNY消息
 	dnyMsg, ok := dny_protocol.IMessageToDnyMessage(msg)
