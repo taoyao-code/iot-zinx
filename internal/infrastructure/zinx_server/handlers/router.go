@@ -28,6 +28,9 @@ func RegisterRouters(server ziface.IServer) {
 	server.AddRouter(dny_protocol.CmdDeviceTime, &GetServerTimeHandler{})
 	server.AddRouter(dny_protocol.CmdGetServerTime, &GetServerTimeHandler{})
 
+	// 主机心跳处理器（需要特殊处理，包含更多信息）
+	server.AddRouter(dny_protocol.CmdMainHeartbeat, &MainHeartbeatHandler{}) // 主机心跳 0x11
+
 	// 刷卡操作处理器
 	server.AddRouter(dny_protocol.CmdSwipeCard, &SwipeCardHandler{})
 
@@ -42,14 +45,6 @@ func RegisterRouters(server ziface.IServer) {
 
 	// 参数设置处理器
 	server.AddRouter(dny_protocol.CmdParamSetting, &ParameterSettingHandler{})
-
-	// 普通心跳和分机心跳处理器
-	heartbeatHandler := &HeartbeatHandler{}
-	server.AddRouter(dny_protocol.CmdHeartbeat, heartbeatHandler)      // 普通心跳 0x01
-	server.AddRouter(dny_protocol.CmdSlaveHeartbeat, heartbeatHandler) // 分机心跳 0x21
-
-	// 主机心跳处理器（需要特殊处理，包含更多信息）
-	server.AddRouter(dny_protocol.CmdMainHeartbeat, &MainHeartbeatHandler{}) // 主机心跳 0x11
 
 	// 后续添加其他命令处理器
 	// server.AddRouter(dny_protocol.CmdAlarm, &AlarmHandler{})
