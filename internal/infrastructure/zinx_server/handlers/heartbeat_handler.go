@@ -64,7 +64,16 @@ func (h *HeartbeatHandler) Handle(request ziface.IRequest) {
 
 	// 生成心跳响应
 	messageID := uint16(time.Now().Unix() & 0xFFFF)
-	zinx_server.SendDNYResponse(conn, physicalId, messageID, uint8(commandId), nil)
+	responseData := []byte{0x00} // 0x00表示成功
+	zinx_server.SendDNYResponse(conn, physicalId, messageID, uint8(commandId), responseData)
+
+	logger.WithFields(logrus.Fields{
+		"connID":     conn.GetConnID(),
+		"physicalId": fmt.Sprintf("0x%08X", physicalId),
+		"messageID":  messageID,
+		"command":    fmt.Sprintf("0x%02X", commandId),
+		"response":   "0x00", // 成功
+	}).Info("发送心跳应答")
 }
 
 // getCommandName 获取命令名称
