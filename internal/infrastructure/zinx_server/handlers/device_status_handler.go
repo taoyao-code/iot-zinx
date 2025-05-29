@@ -36,7 +36,24 @@ func (h *DeviceStatusHandler) Handle(request ziface.IRequest) {
 
 	// 提取关键信息
 	physicalId := dnyMsg.GetPhysicalId()
-	messageId := uint16(0) // 从消息中提取，现在暂时设为0
+	messageId := uint16(dnyMsg.GetMsgID()) // 转换为uint16类型
+
+	// 获取设备ID用于日志记录
+	deviceID := "unknown"
+	if val, err := conn.GetProperty(zinx_server.PropKeyDeviceId); err == nil && val != nil {
+		deviceID = val.(string)
+	}
+
+	logger.WithFields(logrus.Fields{
+		"connID":     conn.GetConnID(),
+		"deviceID":   deviceID,
+		"physicalId": fmt.Sprintf("0x%08X", physicalId),
+		"messageId":  messageId,
+		"source":     "zinx_heartbeat_check",
+	}).Debug("收到设备状态查询请求")
+
+	// 更新心跳时间
+	zinx_server.UpdateLastHeartbeatTime(conn)
 
 	// 构建设备状态响应数据
 	responseData := h.buildDeviceStatusResponse(conn)
@@ -46,6 +63,7 @@ func (h *DeviceStatusHandler) Handle(request ziface.IRequest) {
 		logger.WithFields(logrus.Fields{
 			"connID":     conn.GetConnID(),
 			"physicalId": fmt.Sprintf("0x%08X", physicalId),
+			"deviceID":   deviceID,
 			"error":      err.Error(),
 		}).Error("发送设备状态查询响应失败")
 		return
@@ -54,6 +72,7 @@ func (h *DeviceStatusHandler) Handle(request ziface.IRequest) {
 	logger.WithFields(logrus.Fields{
 		"connID":     conn.GetConnID(),
 		"physicalId": fmt.Sprintf("0x%08X", physicalId),
+		"deviceID":   deviceID,
 	}).Debug("设备状态查询响应发送成功")
 }
 

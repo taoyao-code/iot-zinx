@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/aceld/zinx/ziface"
@@ -58,6 +59,47 @@ func (h *HeartbeatHandler) Handle(request ziface.IRequest) {
 	// 更新心跳时间
 	zinx_server.UpdateLastHeartbeatTime(conn)
 
+	// 特殊处理0x21心跳包，解析更多设备状态信息
+	if commandId == dny_protocol.CmdDeviceHeart {
+		// 解析心跳数据
+		heartbeatData := &dny_protocol.DeviceHeartbeatData{}
+		data := dnyMsg.GetData()
+
+		if err := heartbeatData.UnmarshalBinary(data); err != nil {
+			logger.WithFields(logrus.Fields{
+				"connID":    conn.GetConnID(),
+				"deviceId":  deviceIdStr,
+				"commandId": fmt.Sprintf("0x%02X", commandId),
+				"dataLen":   len(data),
+				"error":     err.Error(),
+			}).Error("解析设备心跳数据失败")
+		} else {
+			// 记录设备状态信息
+			deviceStatusInfo := formatDeviceHeartbeatInfo(heartbeatData)
+
+			logger.WithFields(logrus.Fields{
+				"connID":         conn.GetConnID(),
+				"deviceId":       deviceIdStr,
+				"voltage":        heartbeatData.Voltage,
+				"portCount":      heartbeatData.PortCount,
+				"portStatuses":   deviceStatusInfo,
+				"signalStrength": heartbeatData.SignalStrength,
+				"temperature":    heartbeatData.Temperature,
+			}).Info("设备心跳状态")
+
+			// 保存设备状态信息到连接属性
+			conn.SetProperty("DeviceVoltage", heartbeatData.Voltage)
+			conn.SetProperty("DevicePortCount", heartbeatData.PortCount)
+			conn.SetProperty("DevicePortStatuses", heartbeatData.PortStatuses)
+			conn.SetProperty("DeviceSignalStrength", heartbeatData.SignalStrength)
+			conn.SetProperty("DeviceTemperature", heartbeatData.Temperature)
+
+			// 通知业务层设备状态更新
+			deviceService := app.GetServiceManager().DeviceService
+			go deviceService.HandleDeviceStatusUpdate(deviceIdStr, "online")
+		}
+	}
+
 	// 更新设备状态为在线
 	deviceService := app.GetServiceManager().DeviceService
 	deviceService.HandleDeviceStatusUpdate(deviceIdStr, "online")
@@ -74,6 +116,62 @@ func (h *HeartbeatHandler) Handle(request ziface.IRequest) {
 		"command":    fmt.Sprintf("0x%02X", commandId),
 		"response":   "0x00", // 成功
 	}).Info("发送心跳应答")
+}
+
+// formatDeviceHeartbeatInfo 格式化设备心跳状态信息
+func formatDeviceHeartbeatInfo(data *dny_protocol.DeviceHeartbeatData) string {
+	if data == nil || len(data.PortStatuses) == 0 {
+		return "无端口状态信息"
+	}
+
+	var result strings.Builder
+	for i, status := range data.PortStatuses {
+		if i > 0 {
+			result.WriteString(", ")
+		}
+		result.WriteString(fmt.Sprintf("端口%d: %s", i+1, getPortStatusDesc(status)))
+	}
+	return result.String()
+}
+
+// getPortStatusDesc 获取端口状态描述
+func getPortStatusDesc(status uint8) string {
+	switch status {
+	case 0:
+		return "空闲"
+	case 1:
+		return "充电中"
+	case 2:
+		return "有充电器但未充电(未启动)"
+	case 3:
+		return "有充电器但未充电(已充满)"
+	case 4:
+		return "该路无法计量"
+	case 5:
+		return "浮充"
+	case 6:
+		return "存储器损坏"
+	case 7:
+		return "插座弹片卡住故障"
+	case 8:
+		return "接触不良或保险丝烧断故障"
+	case 9:
+		return "继电器粘连"
+	case 0x0A:
+		return "霍尔开关损坏"
+	case 0x0B:
+		return "继电器坏或保险丝断"
+	case 0x0D:
+		return "负载短路"
+	case 0x0E:
+		return "继电器粘连(预检)"
+	case 0x0F:
+		return "刷卡芯片损坏故障"
+	case 0x10:
+		return "检测电路故障"
+	default:
+		return fmt.Sprintf("未知状态(0x%02X)", status)
+	}
 }
 
 // getCommandName 获取命令名称

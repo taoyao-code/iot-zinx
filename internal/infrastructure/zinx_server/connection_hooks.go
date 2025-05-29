@@ -54,31 +54,58 @@ var (
 // OnConnectionStart 当连接建立时的钩子函数
 // 按照 Zinx 生命周期最佳实践，在连接建立时设置 TCP 参数和连接属性
 func OnConnectionStart(conn ziface.IConnection) {
-	// 获取TCP连接并设置选项
-	tcpConn := conn.GetConnection()
-	tcpConn.SetReadDeadline(time.Now().Add(readDeadLine))
-	tcpConn.SetWriteDeadline(time.Now().Add(writeDeadLine))
-
-	// 记录连接信息
+	// 获取连接信息
+	connID := conn.GetConnID()
 	remoteAddr := conn.RemoteAddr().String()
-	conn.SetProperty(PropKeyRemoteAddr, remoteAddr)
-	conn.SetProperty(PropKeyConnStatus, ConnStatusActive)
-
-	logger.WithFields(logrus.Fields{
-		"remoteAddr": remoteAddr,
-		"connID":     conn.GetConnID(),
-	}).Info("新连接已建立")
 
 	// 通知TCP监视器连接已建立
 	GetGlobalMonitor().OnConnectionEstablished(conn)
 
-	// 移除直接读取TCP连接的逻辑，让Zinx框架通过正常的数据流处理所有数据
-	// 这样可以确保 DNYPacket.GetHeadLen() 和 Unpack() 方法被正确调用
-	// ICCID和link心跳等非DNY数据将通过 NonDNYDataHandler 处理
+	// 设置连接属性
+	now := time.Now()
+	conn.SetProperty(PropKeyLastHeartbeat, now.Unix())
+	conn.SetProperty(PropKeyLastHeartbeatStr, now.Format("2006-01-02 15:04:05"))
+	conn.SetProperty(PropKeyRemoteAddr, remoteAddr)
+	conn.SetProperty(PropKeyConnStatus, ConnStatusActive)
+
+	// 获取TCP连接并设置TCP参数
+	if tcpConn, ok := conn.GetTCPConnection().(*net.TCPConn); ok {
+		// 设置TCP KeepAlive
+		tcpConn.SetKeepAlive(true)
+		tcpConn.SetKeepAlivePeriod(keepAlivePeriod)
+
+		// 设置读取超时
+		deadline := now.Add(readDeadLine)
+		if err := tcpConn.SetReadDeadline(deadline); err != nil {
+			logger.WithFields(logrus.Fields{
+				"error":      err.Error(),
+				"connID":     connID,
+				"remoteAddr": remoteAddr,
+				"deadline":   deadline.Format("2006-01-02 15:04:05"),
+			}).Error("设置TCP读取超时失败")
+		}
+
+		// 设置写入超时
+		if err := tcpConn.SetWriteDeadline(deadline); err != nil {
+			logger.WithFields(logrus.Fields{
+				"error":      err.Error(),
+				"connID":     connID,
+				"remoteAddr": remoteAddr,
+				"deadline":   deadline.Format("2006-01-02 15:04:05"),
+			}).Error("设置TCP写入超时失败")
+		}
+	}
+
+	// 记录连接信息
 	logger.WithFields(logrus.Fields{
-		"connID":     conn.GetConnID(),
+		"connID":     connID,
 		"remoteAddr": remoteAddr,
-	}).Info("连接建立完成，等待Zinx框架处理数据流")
+		"timestamp":  now.Format("2006-01-02 15:04:05"),
+		"connStatus": ConnStatusActive,
+	}).Info("新连接已建立")
+
+	// 尝试从连接中读取初始化数据
+	go tryReadInitialData(conn)
 }
 
 // 移除自定义数据流处理函数，因为 Zinx 框架已经通过其内部机制处理数据流
@@ -1218,4 +1245,16 @@ func handleInitialDataContent(conn ziface.IConnection, data []byte) bool {
 	}
 
 	return false
+}
+
+// tryReadInitialData 尝试从连接中读取初始化数据
+func tryReadInitialData(conn ziface.IConnection) {
+	if tcpConn, ok := conn.GetTCPConnection().(*net.TCPConn); ok {
+		handleConnectionInitialData(conn, tcpConn)
+	} else {
+		logger.WithFields(logrus.Fields{
+			"connID":     conn.GetConnID(),
+			"remoteAddr": conn.RemoteAddr().String(),
+		}).Error("无法获取TCP连接，跳过初始化数据读取")
+	}
 }

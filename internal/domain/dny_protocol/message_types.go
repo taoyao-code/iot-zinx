@@ -501,42 +501,66 @@ func (p *ParameterSettingData) UnmarshalBinary(data []byte) error {
 
 // DeviceHeartbeatData 设备心跳数据 (0x21)
 type DeviceHeartbeatData struct {
-	DeviceID       string // 设备ID
-	DeviceStatus   uint8  // 设备状态
-	OnlineGunCount uint8  // 在线枪数量
+	Voltage        uint16  // 电压 (2字节)
+	PortCount      uint8   // 端口数量 (1字节)
+	PortStatuses   []uint8 // 各端口状态 (n字节，由PortCount决定)
+	SignalStrength uint8   // 信号强度 (1字节)
+	Temperature    uint8   // 当前环境温度 (1字节)
 	Timestamp      time.Time
 }
 
 func (d *DeviceHeartbeatData) MarshalBinary() ([]byte, error) {
-	buf := bytes.NewBuffer(make([]byte, 0, 22))
+	buf := bytes.NewBuffer(make([]byte, 0, 5+len(d.PortStatuses)))
 
-	// 设备ID (20字节)
-	deviceBytes := make([]byte, 20)
-	copy(deviceBytes, []byte(d.DeviceID))
-	buf.Write(deviceBytes)
+	// 电压 (2字节，小端序)
+	binary.Write(buf, binary.LittleEndian, d.Voltage)
 
-	// 设备状态 (1字节)
-	buf.WriteByte(d.DeviceStatus)
+	// 端口数量 (1字节)
+	buf.WriteByte(d.PortCount)
 
-	// 在线枪数量 (1字节)
-	buf.WriteByte(d.OnlineGunCount)
+	// 各端口状态 (n字节)
+	for _, status := range d.PortStatuses {
+		buf.WriteByte(status)
+	}
+
+	// 信号强度 (1字节)
+	buf.WriteByte(d.SignalStrength)
+
+	// 当前环境温度 (1字节)
+	buf.WriteByte(d.Temperature)
 
 	return buf.Bytes(), nil
 }
 
 func (d *DeviceHeartbeatData) UnmarshalBinary(data []byte) error {
-	if len(data) < 22 {
-		return fmt.Errorf("insufficient data length: %d", len(data))
+	if len(data) < 5 {
+		return fmt.Errorf("insufficient data length: %d, minimum required: 5", len(data))
 	}
 
-	// 设备ID (20字节)
-	d.DeviceID = string(bytes.TrimRight(data[0:20], "\x00"))
+	// 电压 (2字节，小端序)
+	d.Voltage = binary.LittleEndian.Uint16(data[0:2])
 
-	// 设备状态 (1字节)
-	d.DeviceStatus = data[20]
+	// 端口数量 (1字节)
+	d.PortCount = data[2]
 
-	// 在线枪数量 (1字节)
-	d.OnlineGunCount = data[21]
+	// 验证数据长度是否满足端口数量要求
+	minLength := 5 + int(d.PortCount) // 2(电压) + 1(端口数) + n(端口状态) + 1(信号) + 1(温度)
+	if len(data) < minLength {
+		return fmt.Errorf("insufficient data length: %d, required for %d ports: %d",
+			len(data), d.PortCount, minLength)
+	}
+
+	// 各端口状态 (n字节)
+	d.PortStatuses = make([]uint8, d.PortCount)
+	for i := 0; i < int(d.PortCount); i++ {
+		d.PortStatuses[i] = data[3+i]
+	}
+
+	// 信号强度 (1字节)
+	d.SignalStrength = data[3+d.PortCount]
+
+	// 当前环境温度 (1字节)
+	d.Temperature = data[4+d.PortCount]
 
 	d.Timestamp = time.Now()
 	return nil

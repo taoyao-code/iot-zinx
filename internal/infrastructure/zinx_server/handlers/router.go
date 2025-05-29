@@ -46,6 +46,9 @@ func RegisterRouters(server ziface.IServer) {
 	// 参数设置处理器
 	server.AddRouter(dny_protocol.CmdParamSetting, &ParameterSettingHandler{})
 
+	// 注意：心跳检测路由(0xF001)由Zinx框架的StartHeartBeatWithOption自动注册
+	// 请勿在此处重复注册，否则会导致路由冲突
+
 	// 后续添加其他命令处理器
 	// server.AddRouter(dny_protocol.CmdAlarm, &AlarmHandler{})
 

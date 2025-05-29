@@ -80,27 +80,40 @@ func (h *NonDNYDataHandler) processICCID(conn ziface.IConnection, data []byte) b
 	iccidStr := string(data)
 	conn.SetProperty(zinx_server.PropKeyICCID, iccidStr)
 
-	// 将ICCID作为设备ID进行绑定
-	zinx_server.BindDeviceIdToConnection(iccidStr, conn)
+	// 将ICCID作为设备ID进行绑定（临时ID，格式为TempID-ICCID）
+	tempDeviceId := "TempID-" + iccidStr
+	conn.SetProperty(zinx_server.PropKeyDeviceId, tempDeviceId)
 
 	logger.WithFields(logrus.Fields{
 		"connID":     conn.GetConnID(),
 		"remoteAddr": conn.RemoteAddr().String(),
 		"iccid":      iccidStr,
+		"deviceId":   tempDeviceId,
 	}).Info("收到并处理ICCID数据")
+
+	// 按照协议要求，向设备返回确认消息，通知已收到ICCID
+	if err := conn.SendMsg(0, []byte("ICCID_OK")); err != nil {
+		logger.WithFields(logrus.Fields{
+			"connID": conn.GetConnID(),
+			"error":  err.Error(),
+		}).Error("发送ICCID确认消息失败")
+	}
 
 	// 通知业务层
 	deviceService := app.GetServiceManager().DeviceService
 	if deviceService != nil {
-		go deviceService.HandleDeviceOnline(iccidStr, iccidStr)
+		go deviceService.HandleDeviceOnline(tempDeviceId, iccidStr)
 	}
+
+	// 更新心跳时间
+	zinx_server.UpdateLastHeartbeatTime(conn)
 
 	return true
 }
 
 // processLinkHeartbeat 处理link心跳
 func (h *NonDNYDataHandler) processLinkHeartbeat(conn ziface.IConnection, data []byte) bool {
-	// 更新心跳时间（无返回值）
+	// 更新心跳时间
 	zinx_server.UpdateLastHeartbeatTime(conn)
 
 	// 手动获取当前时间戳用于设置link属性
@@ -108,12 +121,27 @@ func (h *NonDNYDataHandler) processLinkHeartbeat(conn ziface.IConnection, data [
 	conn.SetProperty(zinx_server.PropKeyLastLink, now)
 	conn.SetProperty(zinx_server.PropKeyConnStatus, zinx_server.ConnStatusActive)
 
+	// 获取设备ID信息用于日志记录
+	deviceID := "unknown"
+	if val, err := conn.GetProperty(zinx_server.PropKeyDeviceId); err == nil && val != nil {
+		deviceID = val.(string)
+	}
+
 	logger.WithFields(logrus.Fields{
 		"connID":     conn.GetConnID(),
 		"remoteAddr": conn.RemoteAddr().String(),
 		"heartbeat":  string(data),
+		"deviceID":   deviceID,
 		"timestamp":  now,
 	}).Debug("收到并处理link心跳")
+
+	// 按照协议要求，向设备回复相同的link字符串作为心跳确认
+	if err := conn.SendMsg(0, []byte("link")); err != nil {
+		logger.WithFields(logrus.Fields{
+			"connID": conn.GetConnID(),
+			"error":  err.Error(),
+		}).Error("发送link心跳确认失败")
+	}
 
 	return true
 }

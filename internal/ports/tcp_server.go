@@ -3,6 +3,7 @@ package ports
 import (
 	"fmt"
 	"path/filepath"
+	"time"
 
 	"github.com/aceld/zinx/zconf"
 	"github.com/aceld/zinx/ziface"
@@ -18,6 +19,10 @@ func StartTCPServer() error {
 	// 获取配置
 	cfg := config.GetConfig()
 	zinxCfg := cfg.TCPServer.Zinx
+
+	// 设置Zinx使用我们的日志系统
+	zinx_server.SetupZinxLogger()
+	logger.Info("已设置Zinx框架使用自定义日志系统")
 
 	// 直接设置Zinx全局对象配置
 	zconf.GlobalObject.Name = zinxCfg.Name
@@ -57,8 +62,13 @@ func StartTCPServer() error {
 	// 创建自定义数据包封包与解包器
 	dataPack := zinx_server.NewDNYPacket(cfg.Logger.LogHexDump)
 
+	// 添加调试输出确认数据包处理器创建和设置
+	fmt.Printf("\n🔧🔧🔧 创建DNYPacket数据包处理器成功! 对象地址: %p 🔧🔧🔧\n", dataPack)
+
 	// 使用选项创建服务器实例 - 使用WithPacket选项设置自定义解析器
+	fmt.Printf("🔧🔧🔧 使用WithPacket选项设置自定义数据包处理器 🔧🔧🔧\n")
 	server := znet.NewServer(znet.WithPacket(dataPack))
+	fmt.Printf("🔧🔧🔧 服务器创建完成，使用了自定义解析器 🔧🔧🔧\n\n")
 
 	// 验证数据包处理器是否正确设置
 	packet := server.GetPacket()
@@ -90,10 +100,23 @@ func StartTCPServer() error {
 	// 启动设备状态监控服务
 	zinx_server.StartDeviceMonitor()
 
+	// 使用zinx框架的心跳检测机制，与当前项目的协议结合
+	// 心跳间隔设置为30秒，符合项目的协议要求
+	heartbeatInterval := 30 * time.Second
+	server.StartHeartBeatWithOption(heartbeatInterval, &ziface.HeartBeatOption{
+		// 使用符合当前协议的心跳消息生成函数
+		MakeMsg: zinx_server.MakeDNYProtocolHeartbeatMsg,
+		// 使用符合当前协议的断开连接处理函数
+		OnRemoteNotAlive: zinx_server.OnDeviceNotAlive,
+		// 使用自定义的心跳路由处理器
+		Router: &handlers.HeartbeatCheckRouter{},
+		// 使用自定义的心跳消息ID（0xF001为自定义未使用ID，避免与现有命令冲突）
+		HeartBeatMsgID: uint32(0xF001),
+	})
+	logger.Info("已启用Zinx心跳检测机制，间隔30秒，使用DNY协议消息格式")
+
 	// 启动服务器
-	fmt.Printf("⭐⭐⭐ 启动Zinx服务器，监听端口: %d ⭐⭐⭐\n", zinxCfg.TCPPort)
 	go server.Serve()
-	fmt.Printf("✅✅✅ Zinx服务器启动完成 ✅✅✅\n\n")
 
 	return nil
 }
