@@ -13,7 +13,7 @@ func RegisterRouters(server ziface.IServer) {
 	server.AddRouter(0, &NonDNYDataHandler{})
 
 	// 2. 设备心跳包（旧版）
-	server.AddRouter(dny_protocol.CmdHeartbeat, &HeartbeatHandler{})
+	// server.AddRouter(dny_protocol.CmdHeartbeat, &HeartbeatHandler{})
 
 	// 3. 设备心跳包（新版）
 	server.AddRouter(dny_protocol.CmdDeviceHeart, &HeartbeatHandler{})
