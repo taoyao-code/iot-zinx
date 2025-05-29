@@ -6,8 +6,6 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
-	"os"
-	"runtime/debug"
 	"time"
 
 	"github.com/aceld/zinx/ziface"
@@ -56,13 +54,6 @@ func (dp *DNYPacket) GetHeadLen() uint32 {
 // Pack 封包方法
 // 将IMessage数据包封装成二进制数据
 func (dp *DNYPacket) Pack(msg ziface.IMessage) ([]byte, error) {
-	// 打印调用栈，帮助诊断此方法是否被调用以及由谁调用
-	fmt.Printf("\n🔍 Pack调用栈信息: \n%s\n", debug.Stack())
-
-	// 强制输出调试信息
-	fmt.Printf("\n📦📦📦 DNYPacket.Pack被调用! 消息ID: %d 📦📦📦\n", msg.GetMsgID())
-	os.Stdout.Sync()
-
 	// 记录到日志
 	logger.WithFields(logrus.Fields{
 		"msgID":   msg.GetMsgID(),
@@ -229,23 +220,6 @@ func (dp *DNYPacket) Pack(msg ziface.IMessage) ([]byte, error) {
 // Unpack 拆包方法
 // 将二进制数据解析为IMessage对象，支持十六进制编码和原始数据
 func (dp *DNYPacket) Unpack(binaryData []byte) (ziface.IMessage, error) {
-	// 打印调用栈，帮助诊断此方法是否被调用以及由谁调用
-	fmt.Printf("\n🔍 Unpack调用栈信息: \n%s\n", debug.Stack())
-
-	// 传入的binaryData是可能来自网络的原始数据
-	// 数据监控在HandlePacket函数中处理，避免重复调用
-
-	// 强制输出到控制台和日志
-	fmt.Printf("\n🔥🔥🔥 DNYPacket.Unpack被调用! 数据长度: %d 🔥🔥🔥\n", len(binaryData))
-	fmt.Printf("原始数据: %s\n", hex.EncodeToString(binaryData))
-	os.Stdout.Sync()
-
-	// 强制输出Unpack被调用的信息
-	logger.WithFields(logrus.Fields{
-		"dataLen": len(binaryData),
-		"dataHex": hex.EncodeToString(binaryData),
-	}).Error("DNYPacket.Unpack被调用") // 使用ERROR级别确保输出
-
 	// 首先尝试检测数据是否为十六进制编码字符串
 	actualData := binaryData
 

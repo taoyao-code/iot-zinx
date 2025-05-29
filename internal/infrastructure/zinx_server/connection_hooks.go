@@ -4,7 +4,6 @@ import (
 	"encoding/hex"
 	"fmt"
 	"net"
-	"os"
 	"sync"
 	"time"
 
@@ -177,28 +176,6 @@ func HandlePacket(conn ziface.IConnection, data []byte) bool {
 		return false
 	}
 
-	// 使用logger强制输出，确保一定会被看到
-	timestamp := time.Now().Format("2006-01-02 15:04:05.000")
-
-	// 同时使用logger和fmt输出确保可见
-	logger.WithFields(logrus.Fields{
-		"connID":     conn.GetConnID(),
-		"remoteAddr": conn.RemoteAddr().String(),
-		"dataLen":    len(data),
-		"dataHex":    hex.EncodeToString(data),
-		"timestamp":  timestamp,
-	}).Error("HandlePacket被调用 - 数据包处理开始") // 使用ERROR级别确保输出
-
-	// 强制输出接收数据信息到控制台
-	fmt.Printf("\n========== HandlePacket被调用 ==========\n")
-	fmt.Printf("[%s] 处理数据包 - ConnID: %d, 远程地址: %s\n",
-		timestamp, conn.GetConnID(), conn.RemoteAddr().String())
-	fmt.Printf("数据长度: %d 字节\n", len(data))
-	fmt.Printf("数据(HEX): %X\n", data)
-	fmt.Printf("数据(ASCII): %s\n", string(data))
-	fmt.Printf("==========================================\n")
-	os.Stdout.Sync()
-
 	// 通知TCP监视器收到数据
 	GetGlobalMonitor().OnRawDataReceived(conn, data)
 
@@ -249,14 +226,6 @@ func HandlePacket(conn ziface.IConnection, data []byte) bool {
 
 	// 处理十六进制编码的数据
 	if isHexEncodedData(data) {
-		// 记录详细的十六进制编码数据
-		logger.WithFields(logrus.Fields{
-			"connID":     conn.GetConnID(),
-			"remoteAddr": conn.RemoteAddr().String(),
-			"dataLen":    len(data),
-			"dataHex":    fmt.Sprintf("%X", data),
-			"dataStr":    string(data),
-		}).Debug("收到十六进制编码数据")
 
 		// 解码十六进制字符串
 		decoded, err := hex.DecodeString(string(data))
@@ -282,14 +251,6 @@ func HandlePacket(conn ziface.IConnection, data []byte) bool {
 		// 递归处理解码后的数据
 		return HandlePacket(conn, decoded)
 	}
-
-	// 记录原始数据的十六进制表示
-	logger.WithFields(logrus.Fields{
-		"connID":     conn.GetConnID(),
-		"remoteAddr": conn.RemoteAddr().String(),
-		"dataLen":    len(data),
-		"dataHex":    fmt.Sprintf("%X", data),
-	}).Debug("处理接收到的数据包")
 
 	// 尝试解析为ICCID (20字节ASCII数字字符串)
 	if len(data) == 20 {
@@ -550,29 +511,6 @@ func handleDNYProtocol(conn ziface.IConnection, data []byte) bool {
 
 	// 解析命令
 	command := data[11]
-
-	// 直接输出到控制台
-	now := time.Now().Format("2006-01-02 15:04:05.000")
-	fmt.Printf("\n[%s] [REQUEST_DATA] 收到请求 - ConnID: %d, Remote: %s\n",
-		now, conn.GetConnID(), conn.RemoteAddr().String())
-	fmt.Printf("命令: 0x%02X, 物理ID: %d, 消息ID: %d\n", command, physicalID, messageID)
-	fmt.Printf("数据(HEX): %X\n", data)
-	fmt.Println("---------------------")
-
-	// 在标准输出直接打印明显的命令信息
-	fmt.Printf("\n[RECEIVED_COMMAND] ConnID: %d, Command: 0x%02X, PhysicalID: %d, MessageID: %d\n",
-		conn.GetConnID(), command, physicalID, messageID)
-	fmt.Printf("数据(HEX): %X\n", data)
-	fmt.Println("----------------------------------------")
-
-	logger.WithFields(logrus.Fields{
-		"connID":     conn.GetConnID(),
-		"physicalID": physicalID,
-		"messageID":  messageID,
-		"command":    fmt.Sprintf("0x%02X", command),
-		"dataLen":    len(data),
-		"dataHex":    fmt.Sprintf("%X", data),
-	}).Info("解析DNY协议数据")
 
 	// 将物理ID字符串形式保存到连接属性中
 	// 这有助于确保在处理所有命令时，连接都有设备ID关联

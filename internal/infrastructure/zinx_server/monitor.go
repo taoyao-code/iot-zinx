@@ -4,7 +4,6 @@ import (
 	"encoding/hex"
 	"fmt"
 	"net"
-	"os"
 	"sync"
 	"time"
 
@@ -73,14 +72,6 @@ func (m *TCPMonitor) OnRawDataReceived(conn ziface.IConnection, data []byte) {
 
 		// 强制打印到控制台和标准输出，确保可见性
 		timestamp := time.Now().Format("2006-01-02 15:04:05.000")
-		fmt.Printf("\n==========================================================\n")
-		fmt.Printf("[%s] 【TCP接收】 ConnID: %d, 远程地址: %s\n", timestamp, connID, remoteAddr)
-		fmt.Printf("数据长度: %d 字节\n", len(data))
-		fmt.Printf("数据(HEX): %s\n", hex.EncodeToString(data))
-		fmt.Printf("数据(ASCII): %s\n", string(data))
-
-		// 强制写入到标准输出并刷新
-		os.Stdout.Sync()
 
 		// 使用logger记录接收的数据，确保INFO级别
 		logger.WithFields(logrus.Fields{
