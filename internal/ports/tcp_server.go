@@ -10,7 +10,6 @@ import (
 	"github.com/bujia-iot/iot-zinx/internal/infrastructure/logger"
 	"github.com/bujia-iot/iot-zinx/internal/infrastructure/zinx_server"
 	"github.com/bujia-iot/iot-zinx/internal/infrastructure/zinx_server/handlers"
-	"github.com/sirupsen/logrus"
 )
 
 // StartTCPServer 配置并启动Zinx TCP服务器
@@ -18,22 +17,6 @@ func StartTCPServer() error {
 	// 获取配置
 	cfg := config.GetConfig()
 	zinxCfg := cfg.TCPServer.Zinx
-
-	// 测试日志输出
-	logger.Debug("这是DEBUG级别日志测试")
-	logger.Info("这是INFO级别日志测试")
-	logger.Warn("这是WARN级别日志测试")
-	logger.Error("这是ERROR级别日志测试")
-
-	// 测试WithFields日志
-	logger.WithFields(logrus.Fields{
-		"field1": "value1",
-		"field2": 123,
-		"field3": true,
-	}).Info("这是带字段的INFO日志测试")
-
-	// 打印一个明显的分隔符
-	fmt.Println("\n===== 日志测试完成，开始初始化服务器 =====\n")
 
 	// 直接设置Zinx全局对象配置
 	zconf.GlobalObject.Name = zinxCfg.Name
@@ -44,6 +27,10 @@ func StartTCPServer() error {
 	zconf.GlobalObject.MaxPacketSize = uint32(zinxCfg.MaxPacketSize)
 	zconf.GlobalObject.WorkerPoolSize = uint32(zinxCfg.WorkerPoolSize)
 	zconf.GlobalObject.MaxWorkerTaskLen = uint32(zinxCfg.MaxWorkerTaskLen)
+
+	// 强制确保使用自定义数据包处理器
+	fmt.Printf("🔧🔧🔧 设置Zinx配置: WorkerPoolSize=%d 🔧🔧🔧\n", zconf.GlobalObject.WorkerPoolSize)
+	fmt.Printf("🔧🔧🔧 设置Zinx配置: MaxPacketSize=%d 🔧🔧🔧\n", zconf.GlobalObject.MaxPacketSize)
 
 	// 设置日志配置 - 简化路径处理
 	if len(cfg.Logger.FilePath) > 0 {
@@ -75,7 +62,17 @@ func StartTCPServer() error {
 
 	// 设置自定义数据包封包与解包器
 	dataPack := zinx_server.NewDNYPacket(cfg.Logger.LogHexDump)
+
+	// 添加调试输出确认数据包处理器创建和设置
+	fmt.Printf("\n🔧🔧🔧 创建DNYPacket数据包处理器成功! 对象地址: %p 🔧🔧🔧\n", dataPack)
+	fmt.Printf("🔧🔧🔧 调用server.SetPacket()设置自定义数据包处理器 🔧🔧🔧\n")
 	server.SetPacket(dataPack)
+	fmt.Printf("🔧🔧🔧 server.SetPacket()调用完成 🔧🔧🔧\n\n")
+
+	// 验证数据包处理器是否正确设置
+	fmt.Printf("🔧🔧🔧 验证 GetHeadLen(): %d 🔧🔧🔧\n", dataPack.GetHeadLen())
+	fmt.Printf("🔧🔧🔧 WorkerPoolSize: %d 🔧🔧🔧\n", zinxCfg.WorkerPoolSize)
+	fmt.Printf("🔧🔧🔧 MaxConn: %d 🔧🔧🔧\n\n", zinxCfg.MaxConn)
 
 	// 设置连接创建和销毁的钩子函数
 	server.SetOnConnStart(zinx_server.OnConnectionStart)

@@ -32,6 +32,16 @@ func NewDNYPacket(logHexDump bool) ziface.IDataPack {
 // GetHeadLen 获取消息头长度
 // DNY协议头长度为5字节：包头(3) + 长度(2)
 func (dp *DNYPacket) GetHeadLen() uint32 {
+	// 强制输出调试信息
+	fmt.Printf("\n🚀🚀🚀 DNYPacket.GetHeadLen被调用! 返回头长度: %d 🚀🚀🚀\n", dny_protocol.DnyHeaderLen)
+	fmt.Printf("调用栈: DNYPacket.GetHeadLen()\n")
+	os.Stdout.Sync()
+
+	// 记录到日志
+	logger.WithFields(logrus.Fields{
+		"headLen": dny_protocol.DnyHeaderLen,
+	}).Error("DNYPacket.GetHeadLen被调用")
+
 	// DNY协议头长度 = 包头"DNY"(3) + 数据长度(2)
 	return dny_protocol.DnyHeaderLen
 }
@@ -39,6 +49,9 @@ func (dp *DNYPacket) GetHeadLen() uint32 {
 // Pack 封包方法
 // 将IMessage数据包封装成二进制数据
 func (dp *DNYPacket) Pack(msg ziface.IMessage) ([]byte, error) {
+	// 强制输出调试信息
+	fmt.Printf("\n📦📦📦 DNYPacket.Pack被调用! 消息ID: %d 📦📦📦\n", msg.GetMsgID())
+	os.Stdout.Sync()
 	// 转换为DNY消息
 	dnyMsg, ok := dny_protocol.IMessageToDnyMessage(msg)
 	if !ok {
@@ -138,29 +151,18 @@ func (dp *DNYPacket) Unpack(binaryData []byte) (ziface.IMessage, error) {
 			logger.Debugf("检测到十六进制编码数据，解码后长度: %d -> %d", len(binaryData), len(actualData))
 		}
 	}
-
-	// 特殊处理：如果数据不符合DNY协议格式，返回通用消息让路由器处理
-	// 这包括ICCID (20字节数字)、link心跳等
+	// 特殊处理：如果数据不符合DNY协议格式，我们创建一个特殊的消息类型来处理
+	// 这样可以让非DNY协议数据（ICCID、link心跳等）通过正常的路由机制处理
 	if !isDNYProtocolData(actualData) {
-		// 创建消息ID为0的通用消息，交给UniversalDataHandler处理
-		msg := &dny_protocol.Message{
-			Id:      0, // 消息ID 0 表示通用数据
-			DataLen: uint32(len(actualData)),
-			Data:    actualData,
-			RawData: binaryData, // 保存原始数据
-		}
-
+		// 创建一个特殊的消息类型（msgID=0）来处理非DNY协议数据
+		// 这些数据将被路由到一个特殊的处理器
 		logger.WithFields(logrus.Fields{
-			"msgID":   0,
 			"dataLen": len(actualData),
 			"dataHex": hex.EncodeToString(actualData),
-		}).Error("创建通用消息(msgID=0)，将路由到UniversalDataHandler")
+		}).Info("检测到非DNY协议数据，创建特殊消息进行处理")
 
-		if dp.logHexDump {
-			logger.Debugf("检测到非DNY协议数据，长度: %d, 数据: %s",
-				len(actualData), hex.EncodeToString(actualData))
-		}
-
+		// 创建一个特殊消息，msgID=0表示非DNY协议数据
+		msg := dny_protocol.NewMessage(0, 0, actualData)
 		return msg, nil
 	}
 

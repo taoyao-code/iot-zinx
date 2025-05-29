@@ -94,6 +94,10 @@ func OnConnectionStart(conn ziface.IConnection) {
 
 	// 通知TCP监视器连接已建立
 	GetGlobalMonitor().OnConnectionEstablished(conn)
+
+	// 启动连接初始化数据处理goroutine
+	// 这个goroutine会在连接建立后的前几秒内监听非DNY协议数据（如ICCID、link心跳）
+	go handleConnectionInitialData(conn, tcpConn)
 }
 
 // 移除自定义数据流处理函数，因为 Zinx 框架已经通过其内部机制处理数据流
@@ -1017,4 +1021,212 @@ func calculateChecksum(data []byte) uint16 {
 		sum += uint16(b)
 	}
 	return sum
+}
+
+// handleConnectionInitialData 处理连接建立初期的非DNY协议数据
+// 这个函数在连接建立后的前几秒内监听和处理ICCID、link心跳等数据
+func handleConnectionInitialData(conn ziface.IConnection, tcpConn *net.TCPConn) {
+	const initialDataTimeout = 10 * time.Second // 10秒初始化超时
+	const readBufferSize = 1024                 // 读取缓冲区大小
+
+	connID := conn.GetConnID()
+	remoteAddr := conn.RemoteAddr().String()
+
+	logger.WithFields(logrus.Fields{
+		"connID":     connID,
+		"remoteAddr": remoteAddr,
+		"timeout":    initialDataTimeout,
+	}).Debug("开始监听连接初始化数据")
+
+	// 设置初始化阶段的读取超时
+	deadline := time.Now().Add(initialDataTimeout)
+	if err := tcpConn.SetReadDeadline(deadline); err != nil {
+		logger.WithFields(logrus.Fields{
+			"connID": connID,
+			"error":  err.Error(),
+		}).Error("设置初始化数据读取超时失败")
+		return
+	}
+
+	buffer := make([]byte, readBufferSize)
+	initialDataProcessed := false
+
+	for time.Now().Before(deadline) && !initialDataProcessed {
+		// 尝试读取数据
+		n, err := tcpConn.Read(buffer)
+		if err != nil {
+			if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
+				// 读取超时，继续循环直到总体超时
+				logger.WithFields(logrus.Fields{
+					"connID":     connID,
+					"remoteAddr": remoteAddr,
+				}).Debug("初始化数据读取超时，继续等待")
+				time.Sleep(100 * time.Millisecond)
+				continue
+			} else {
+				// 其他错误，可能是连接断开
+				logger.WithFields(logrus.Fields{
+					"connID":     connID,
+					"remoteAddr": remoteAddr,
+					"error":      err.Error(),
+				}).Debug("初始化数据读取失败，连接可能已断开")
+				return
+			}
+		}
+
+		if n > 0 {
+			data := buffer[:n]
+
+			// 记录接收到的初始化数据
+			logger.WithFields(logrus.Fields{
+				"connID":     connID,
+				"remoteAddr": remoteAddr,
+				"dataLen":    n,
+				"dataHex":    hex.EncodeToString(data),
+				"dataStr":    string(data),
+			}).Info("收到连接初始化数据")
+
+			// 通知监视器收到原始数据
+			GetGlobalMonitor().OnRawDataReceived(conn, data)
+
+			// 处理不同类型的初始化数据
+			processed := false
+
+			// 1. 处理ICCID (20字节数字字符串)
+			if n == 20 && isValidICCIDBytes(data) {
+				iccidStr := string(data)
+				conn.SetProperty(PropKeyICCID, iccidStr)
+				BindDeviceIdToConnection(iccidStr, conn)
+
+				logger.WithFields(logrus.Fields{
+					"connID":     connID,
+					"remoteAddr": remoteAddr,
+					"iccid":      iccidStr,
+				}).Info("处理连接初始化ICCID数据")
+				processed = true
+			}
+
+			// 2. 处理link心跳
+			if n == 4 && string(data) == LinkHeartbeat {
+				now := time.Now().Unix()
+				conn.SetProperty(PropKeyLastLink, now)
+				conn.SetProperty(PropKeyConnStatus, ConnStatusActive)
+				UpdateLastHeartbeatTime(conn)
+
+				logger.WithFields(logrus.Fields{
+					"connID":     connID,
+					"remoteAddr": remoteAddr,
+					"timestamp":  now,
+				}).Info("处理连接初始化link心跳")
+				processed = true
+			}
+
+			// 3. 处理十六进制编码数据
+			if !processed && isHexEncodedData(data) {
+				decoded, err := hex.DecodeString(string(data))
+				if err == nil {
+					logger.WithFields(logrus.Fields{
+						"connID":      connID,
+						"remoteAddr":  remoteAddr,
+						"originalLen": n,
+						"decodedLen":  len(decoded),
+						"decodedHex":  hex.EncodeToString(decoded),
+					}).Info("处理连接初始化十六进制编码数据")
+
+					// 递归处理解码后的数据
+					if handleInitialDataContent(conn, decoded) {
+						processed = true
+					}
+				}
+			}
+
+			// 4. 检查是否为DNY协议数据
+			if !processed && len(data) >= 3 && string(data[:3]) == "DNY" {
+				logger.WithFields(logrus.Fields{
+					"connID":     connID,
+					"remoteAddr": remoteAddr,
+					"dataLen":    n,
+				}).Info("连接初始化阶段收到DNY协议数据，结束初始化处理")
+
+				// 将DNY数据推回给Zinx处理（这需要特殊处理）
+				// 由于我们已经从TCP连接中读取了数据，需要确保这些数据能被Zinx处理
+				// 这里我们设置一个标记，让后续的正常消息处理流程知道初始化已完成
+				conn.SetProperty("InitialDataProcessed", true)
+				initialDataProcessed = true
+
+				// 重新设置正常的读取超时
+				if err := tcpConn.SetReadDeadline(time.Now().Add(readDeadLine)); err != nil {
+					logger.WithFields(logrus.Fields{
+						"connID": connID,
+						"error":  err.Error(),
+					}).Error("重新设置正常读取超时失败")
+				}
+
+				// 由于我们无法直接将数据推回给Zinx，我们将数据保存起来
+				// 并修改Unpack方法来检查这种情况
+				conn.SetProperty("PendingDNYData", data)
+
+				logger.WithFields(logrus.Fields{
+					"connID":     connID,
+					"remoteAddr": remoteAddr,
+				}).Debug("初始化数据处理完成，移交给正常消息处理流程")
+				return
+			}
+
+			// 如果数据已处理，继续监听更多初始化数据
+			// 如果是未知数据，记录并继续
+			if !processed {
+				logger.WithFields(logrus.Fields{
+					"connID":     connID,
+					"remoteAddr": remoteAddr,
+					"dataLen":    n,
+					"dataHex":    hex.EncodeToString(data),
+				}).Debug("收到未知初始化数据，继续监听")
+			}
+		}
+	}
+
+	// 初始化超时或完成，设置标记并恢复正常读取超时
+	conn.SetProperty("InitialDataProcessed", true)
+	if err := tcpConn.SetReadDeadline(time.Now().Add(readDeadLine)); err != nil {
+		logger.WithFields(logrus.Fields{
+			"connID": connID,
+			"error":  err.Error(),
+		}).Error("恢复正常读取超时失败")
+	}
+
+	logger.WithFields(logrus.Fields{
+		"connID":     connID,
+		"remoteAddr": remoteAddr,
+		"processed":  initialDataProcessed,
+	}).Debug("连接初始化数据处理完成")
+}
+
+// handleInitialDataContent 处理初始化数据内容
+func handleInitialDataContent(conn ziface.IConnection, data []byte) bool {
+	// 处理解码后的初始化数据
+
+	// 检查ICCID
+	if len(data) == 20 && isValidICCIDBytes(data) {
+		iccidStr := string(data)
+		conn.SetProperty(PropKeyICCID, iccidStr)
+		BindDeviceIdToConnection(iccidStr, conn)
+		return true
+	}
+
+	// 检查link心跳
+	if len(data) == 4 && string(data) == LinkHeartbeat {
+		now := time.Now().Unix()
+		conn.SetProperty(PropKeyLastLink, now)
+		conn.SetProperty(PropKeyConnStatus, ConnStatusActive)
+		UpdateLastHeartbeatTime(conn)
+		return true
+	}
+
+	// 检查是否为DNY协议数据（这种情况下不在初始化阶段处理）
+	if len(data) >= 3 && string(data[:3]) == "DNY" {
+		return false // 让正常流程处理
+	}
+
+	return false
 }
