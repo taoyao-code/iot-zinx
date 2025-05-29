@@ -5,7 +5,6 @@ import (
 
 	"github.com/aceld/zinx/ziface"
 	"github.com/bujia-iot/iot-zinx/internal/domain/dny_protocol"
-	"github.com/bujia-iot/iot-zinx/internal/infrastructure/logger"
 	"github.com/bujia-iot/iot-zinx/internal/infrastructure/zinx_server"
 )
 
@@ -59,7 +58,4 @@ func RegisterRouters(server ziface.IServer) {
 
 	// 后续添加其他命令处理器
 	// server.AddRouter(dny_protocol.CmdAlarm, &AlarmHandler{})
-
-	fmt.Printf("🛣️🛣️🛣️ 路由处理器注册完成 🛣️🛣️🛣️\n\n")
-	logger.Info("已注册DNY协议路由处理器")
 }

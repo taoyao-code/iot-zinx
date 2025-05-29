@@ -19,9 +19,6 @@ func StartTCPServer() error {
 	cfg := config.GetConfig()
 	zinxCfg := cfg.TCPServer.Zinx
 
-	fmt.Printf("\n======== Zinx服务启动 ========\n")
-	fmt.Printf("Zinx版本信息: %+v\n", zconf.GlobalObject)
-
 	// 直接设置Zinx全局对象配置
 	zconf.GlobalObject.Name = zinxCfg.Name
 	zconf.GlobalObject.Host = cfg.TCPServer.Host
@@ -31,10 +28,6 @@ func StartTCPServer() error {
 	zconf.GlobalObject.MaxPacketSize = uint32(zinxCfg.MaxPacketSize)
 	zconf.GlobalObject.WorkerPoolSize = uint32(zinxCfg.WorkerPoolSize)
 	zconf.GlobalObject.MaxWorkerTaskLen = uint32(zinxCfg.MaxWorkerTaskLen)
-
-	// 强制确保使用自定义数据包处理器
-	fmt.Printf("🔧🔧🔧 设置Zinx配置: WorkerPoolSize=%d 🔧🔧🔧\n", zconf.GlobalObject.WorkerPoolSize)
-	fmt.Printf("🔧🔧🔧 设置Zinx配置: MaxPacketSize=%d 🔧🔧🔧\n", zconf.GlobalObject.MaxPacketSize)
 
 	// 设置日志配置 - 简化路径处理
 	if len(cfg.Logger.FilePath) > 0 {
@@ -85,26 +78,18 @@ func StartTCPServer() error {
 		return fmt.Errorf("数据包处理器设置失败")
 	}
 
-	fmt.Printf("🔧🔧🔧 验证 GetHeadLen(): %d 🔧🔧🔧\n", dataPack.GetHeadLen())
-	fmt.Printf("🔧🔧🔧 WorkerPoolSize: %d 🔧🔧🔧\n", zinxCfg.WorkerPoolSize)
-	fmt.Printf("🔧🔧🔧 MaxConn: %d 🔧🔧🔧\n\n", zinxCfg.MaxConn)
-
 	// 设置连接创建和销毁的钩子函数
 	server.SetOnConnStart(zinx_server.OnConnectionStart)
 	server.SetOnConnStop(zinx_server.OnConnectionStop)
 
 	// 注册路由处理器
-	fmt.Println("开始注册路由处理器...")
 	handlers.RegisterRouters(server)
-	fmt.Println("路由处理器注册完成")
 
 	// 检查注册的路由数量
 	checkRouterCount(server)
 
 	// 启动设备状态监控服务
-	fmt.Println("启动设备状态监控服务...")
 	zinx_server.StartDeviceMonitor()
-	fmt.Println("设备状态监控服务启动完成")
 
 	// 记录服务器启动信息
 	logger.WithField("tcpPort", zinxCfg.TCPPort).Info("正在启动Zinx TCP服务器...")
