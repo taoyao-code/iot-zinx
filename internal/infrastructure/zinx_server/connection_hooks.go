@@ -47,6 +47,7 @@ var (
 // 使用common包中定义的超时常量
 var (
 	readDeadLine    = common.TCPReadDeadLine    // TCP读取超时时间
+	writeDeadLine   = common.TCPReadDeadLine    // TCP写入超时时间
 	keepAlivePeriod = common.TCPKeepAlivePeriod // TCP keepalive间隔
 )
 
@@ -54,34 +55,9 @@ var (
 // 按照 Zinx 生命周期最佳实践，在连接建立时设置 TCP 参数和连接属性
 func OnConnectionStart(conn ziface.IConnection) {
 	// 获取TCP连接并设置选项
-	tcpConn, ok := conn.GetTCPConnection().(*net.TCPConn)
-	if !ok {
-		logger.Error("Failed to get TCP connection")
-		conn.Stop()
-		return
-	}
-
-	// 设置TCP选项
-	if err := tcpConn.SetKeepAlive(true); err != nil {
-		logger.WithFields(logrus.Fields{
-			"error": err.Error(),
-		}).Error("Failed to set TCP keepalive")
-	}
-	if err := tcpConn.SetKeepAlivePeriod(keepAlivePeriod); err != nil {
-		logger.WithFields(logrus.Fields{
-			"error": err.Error(),
-		}).Error("Failed to set TCP keepalive period")
-	}
-	if err := tcpConn.SetReadDeadline(time.Now().Add(readDeadLine)); err != nil {
-		logger.WithFields(logrus.Fields{
-			"error": err.Error(),
-		}).Error("Failed to set TCP read deadline")
-	}
-	if err := tcpConn.SetNoDelay(true); err != nil {
-		logger.WithFields(logrus.Fields{
-			"error": err.Error(),
-		}).Error("Failed to set TCP nodelay")
-	}
+	tcpConn := conn.GetConnection()
+	tcpConn.SetReadDeadline(time.Now().Add(readDeadLine))
+	tcpConn.SetWriteDeadline(time.Now().Add(writeDeadLine))
 
 	// 记录连接信息
 	remoteAddr := conn.RemoteAddr().String()

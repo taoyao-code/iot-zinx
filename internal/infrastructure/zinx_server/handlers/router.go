@@ -4,6 +4,7 @@ import (
 	"github.com/aceld/zinx/ziface"
 	"github.com/bujia-iot/iot-zinx/internal/domain/dny_protocol"
 	"github.com/bujia-iot/iot-zinx/internal/infrastructure/logger"
+	"github.com/bujia-iot/iot-zinx/internal/infrastructure/zinx_server"
 )
 
 // RegisterRouters 注册所有路由
@@ -26,6 +27,32 @@ func RegisterRouters(server ziface.IServer) {
 	// 6. 设备获取服务器时间
 	server.AddRouter(dny_protocol.CmdDeviceTime, &GetServerTimeHandler{})
 	server.AddRouter(dny_protocol.CmdGetServerTime, &GetServerTimeHandler{})
+
+	// 刷卡操作处理器
+	server.AddRouter(dny_protocol.CmdSwipeCard, &SwipeCardHandler{})
+
+	// 充电控制处理器
+	server.AddRouter(dny_protocol.CmdChargeControl, NewChargeControlHandler(zinx_server.GetGlobalMonitor()))
+
+	// 结算数据处理器
+	server.AddRouter(dny_protocol.CmdSettlement, &SettlementHandler{})
+
+	// 功率心跳处理器
+	server.AddRouter(dny_protocol.CmdPowerHeartbeat, &PowerHeartbeatHandler{})
+
+	// 参数设置处理器
+	server.AddRouter(dny_protocol.CmdParamSetting, &ParameterSettingHandler{})
+
+	// 普通心跳和分机心跳处理器
+	heartbeatHandler := &HeartbeatHandler{}
+	server.AddRouter(dny_protocol.CmdHeartbeat, heartbeatHandler)      // 普通心跳 0x01
+	server.AddRouter(dny_protocol.CmdSlaveHeartbeat, heartbeatHandler) // 分机心跳 0x21
+
+	// 主机心跳处理器（需要特殊处理，包含更多信息）
+	server.AddRouter(dny_protocol.CmdMainHeartbeat, &MainHeartbeatHandler{}) // 主机心跳 0x11
+
+	// 后续添加其他命令处理器
+	// server.AddRouter(dny_protocol.CmdAlarm, &AlarmHandler{})
 
 	// 日志输出已注册的路由
 	logger.Info("已注册所有路由处理器")
