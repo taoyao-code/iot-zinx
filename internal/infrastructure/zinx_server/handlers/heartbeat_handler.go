@@ -2,16 +2,18 @@ package handlers
 
 import (
 	"fmt"
+	"time"
 
 	"github.com/aceld/zinx/ziface"
 	"github.com/aceld/zinx/znet"
+	"github.com/bujia-iot/iot-zinx/internal/app"
 	"github.com/bujia-iot/iot-zinx/internal/domain/dny_protocol"
 	"github.com/bujia-iot/iot-zinx/internal/infrastructure/logger"
 	"github.com/bujia-iot/iot-zinx/internal/infrastructure/zinx_server"
 	"github.com/sirupsen/logrus"
 )
 
-// HeartbeatHandler 处理设备心跳请求 (命令ID: 0x01-普通心跳，0x11-主机心跳，0x21-分机心跳)
+// HeartbeatHandler 处理设备心跳 (命令ID: 0x01, 0x21)
 type HeartbeatHandler struct {
 	znet.BaseRouter
 }
@@ -34,46 +36,45 @@ func (h *HeartbeatHandler) Handle(request ziface.IRequest) {
 
 	// 提取关键信息
 	physicalId := dnyMsg.GetPhysicalId()
-	dnyMessageId := dnyMsg.GetMsgID()
-	commandId := dnyMsg.GetMsgID()
+	commandId := msg.GetMsgID()
 
-	// 心跳类型描述
-	var heartbeatType string
-	switch commandId {
-	case dny_protocol.CmdHeartbeat:
-		heartbeatType = "普通心跳"
-	case dny_protocol.CmdMainHeartbeat:
-		heartbeatType = "主机心跳"
-	case dny_protocol.CmdSlaveHeartbeat:
-		heartbeatType = "分机心跳"
-	default:
-		heartbeatType = "未知心跳类型"
-	}
+	// 获取设备ID
+	deviceIdStr := fmt.Sprintf("%08X", physicalId)
 
-	// 记录心跳请求（仅在Debug级别记录，避免日志过多）
+	// 记录心跳
 	logger.WithFields(logrus.Fields{
-		"connID":       conn.GetConnID(),
-		"physicalId":   fmt.Sprintf("0x%08X", physicalId),
-		"dnyMessageId": dnyMessageId,
-		"type":         heartbeatType,
-		"commandId":    fmt.Sprintf("0x%02X", commandId),
+		"connID":      conn.GetConnID(),
+		"physicalId":  fmt.Sprintf("0x%08X", physicalId),
+		"deviceId":    deviceIdStr,
+		"commandId":   fmt.Sprintf("0x%02X", commandId),
+		"commandName": getCommandName(commandId),
 	}).Debug("收到设备心跳")
+
+	// 如果还没有关联设备ID，就进行关联
+	if _, err := conn.GetProperty(zinx_server.PropKeyDeviceId); err != nil {
+		zinx_server.BindDeviceIdToConnection(deviceIdStr, conn)
+	}
 
 	// 更新心跳时间
 	zinx_server.UpdateLastHeartbeatTime(conn)
 
-	// 构建响应数据 (此处简化，返回成功)
-	responseData := []byte{dny_protocol.ResponseSuccess} // 0x00 表示成功
+	// 更新设备状态为在线
+	deviceService := app.GetServiceManager().DeviceService
+	deviceService.HandleDeviceStatusUpdate(deviceIdStr, "online")
 
-	// 发送响应 - 使用DNY协议响应函数
-	if err := zinx_server.SendDNYResponse(conn, physicalId, uint16(dnyMessageId), uint8(commandId), responseData); err != nil {
-		logger.WithFields(logrus.Fields{
-			"connID":     conn.GetConnID(),
-			"physicalId": fmt.Sprintf("0x%08X", physicalId),
-			"error":      err.Error(),
-		}).Error("发送心跳响应失败")
-		return
+	// 生成心跳响应
+	messageID := uint16(time.Now().Unix() & 0xFFFF)
+	zinx_server.SendDNYResponse(conn, physicalId, messageID, uint8(commandId), nil)
+}
+
+// getCommandName 获取命令名称
+func getCommandName(commandId uint32) string {
+	switch commandId {
+	case dny_protocol.CmdHeartbeat:
+		return "心跳(0x01)"
+	case dny_protocol.CmdSlaveHeartbeat:
+		return "分机心跳(0x21)"
+	default:
+		return fmt.Sprintf("未知心跳(0x%02X)", commandId)
 	}
-
-	// TODO: 可能需要定期向业务平台报告设备在线状态
 }

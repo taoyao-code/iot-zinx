@@ -1,6 +1,9 @@
 package service
 
 import (
+	"sync"
+	"time"
+
 	"github.com/bujia-iot/iot-zinx/internal/domain/dny_protocol"
 	"github.com/bujia-iot/iot-zinx/internal/infrastructure/logger"
 	"github.com/sirupsen/logrus"
@@ -8,7 +11,17 @@ import (
 
 // DeviceService 设备服务，处理设备业务逻辑
 type DeviceService struct {
-	// 依赖其他服务或存储库
+	// 设备状态存储
+	deviceStatus     sync.Map // map[string]string - deviceId -> status
+	deviceLastUpdate sync.Map // map[string]int64 - deviceId -> timestamp
+}
+
+// DeviceInfo 设备信息结构体
+type DeviceInfo struct {
+	DeviceID string `json:"deviceId"`
+	ICCID    string `json:"iccid,omitempty"`
+	Status   string `json:"status"`
+	LastSeen int64  `json:"lastSeen,omitempty"`
 }
 
 // NewDeviceService 创建设备服务实例
@@ -24,6 +37,9 @@ func (s *DeviceService) HandleDeviceOnline(deviceId string, iccid string) {
 		"iccid":    iccid,
 	}).Info("设备上线")
 
+	// 更新设备状态为在线
+	s.HandleDeviceStatusUpdate(deviceId, "online")
+
 	// TODO: 调用业务平台API，通知设备上线
 }
 
@@ -34,6 +50,9 @@ func (s *DeviceService) HandleDeviceOffline(deviceId string, iccid string) {
 		"deviceId": deviceId,
 		"iccid":    iccid,
 	}).Info("设备离线")
+
+	// 更新设备状态为离线
+	s.HandleDeviceStatusUpdate(deviceId, "offline")
 
 	// TODO: 调用业务平台API，通知设备离线
 }
@@ -46,7 +65,46 @@ func (s *DeviceService) HandleDeviceStatusUpdate(deviceId string, status string)
 		"status":   status,
 	}).Info("设备状态更新")
 
+	// 更新设备状态到内存存储
+	s.deviceStatus.Store(deviceId, status)
+	s.deviceLastUpdate.Store(deviceId, NowUnix())
+
 	// TODO: 调用业务平台API，更新设备状态
+}
+
+// GetDeviceStatus 获取设备状态
+func (s *DeviceService) GetDeviceStatus(deviceId string) (string, bool) {
+	value, exists := s.deviceStatus.Load(deviceId)
+	if !exists {
+		return "", false
+	}
+	status, ok := value.(string)
+	return status, ok
+}
+
+// GetAllDevices 获取所有设备状态
+func (s *DeviceService) GetAllDevices() []DeviceInfo {
+	var devices []DeviceInfo
+
+	s.deviceStatus.Range(func(key, value interface{}) bool {
+		deviceId := key.(string)
+		status := value.(string)
+
+		device := DeviceInfo{
+			DeviceID: deviceId,
+			Status:   status,
+		}
+
+		// 获取最后更新时间
+		if lastUpdate, ok := s.deviceLastUpdate.Load(deviceId); ok {
+			device.LastSeen = lastUpdate.(int64)
+		}
+
+		devices = append(devices, device)
+		return true
+	})
+
+	return devices
 }
 
 // ValidateCard 验证卡片 - 更新为支持字符串卡号
@@ -124,6 +182,9 @@ func (s *DeviceService) HandlePowerHeartbeat(deviceId string, power *dny_protoco
 		"status":         power.Status,
 	}).Debug("处理功率心跳数据")
 
+	// 更新设备状态为在线
+	s.HandleDeviceStatusUpdate(deviceId, "online")
+
 	// TODO: 调用业务平台API更新功率数据
 }
 
@@ -139,4 +200,9 @@ func (s *DeviceService) HandleParameterSetting(deviceId string, param *dny_proto
 	// TODO: 调用业务平台API处理参数设置
 	// 返回成功和空的结果值
 	return true, []byte{}
+}
+
+// NowUnix 获取当前时间戳
+func NowUnix() int64 {
+	return time.Now().Unix()
 }

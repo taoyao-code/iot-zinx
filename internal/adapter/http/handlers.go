@@ -9,6 +9,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/bujia-iot/iot-zinx/internal/app"
 	"github.com/bujia-iot/iot-zinx/internal/infrastructure/logger"
 	"github.com/bujia-iot/iot-zinx/internal/infrastructure/zinx_server"
 	"github.com/gin-gonic/gin"
@@ -163,22 +164,60 @@ func HandleDeviceList(c *gin.Context) {
 	var devices []gin.H
 	var mu sync.Mutex
 
-	// 遍历所有在线设备连接
+	// 获取设备服务
+	deviceService := app.GetServiceManager().DeviceService
+
+	// 从设备服务获取所有设备状态
+	allDevices := deviceService.GetAllDevices()
+
+	// 创建设备ID映射，用于后续合并连接信息
+	deviceMap := make(map[string]gin.H)
+	for _, device := range allDevices {
+		deviceInfo := gin.H{
+			"deviceId": device.DeviceID,
+			"isOnline": device.Status == "online",
+			"status":   device.Status,
+		}
+
+		// 添加ICCID（如果有）
+		if device.ICCID != "" {
+			deviceInfo["iccid"] = device.ICCID
+		}
+
+		// 添加最后更新时间
+		if device.LastSeen > 0 {
+			deviceInfo["lastUpdate"] = device.LastSeen
+			deviceInfo["lastUpdateTime"] = time.Unix(device.LastSeen, 0).Format("2006-01-02 15:04:05")
+		}
+
+		deviceMap[device.DeviceID] = deviceInfo
+	}
+
+	// 从连接管理器获取连接信息并合并
 	zinx_server.RangeDeviceConnections(func(deviceId string, connInfo zinx_server.ConnectionInfo) bool {
 		mu.Lock()
 		defer mu.Unlock()
 
-		// 构造设备信息
-		deviceInfo := gin.H{
-			"deviceId":   deviceId,
-			"connId":     connInfo.ConnID,
-			"isOnline":   connInfo.ConnStatus == zinx_server.ConnStatusActive,
-			"status":     connInfo.ConnStatus,
-			"remoteAddr": connInfo.RemoteAddr,
+		// 检查设备是否已经在map中
+		deviceInfo, exists := deviceMap[deviceId]
+		if !exists {
+			// 如果不存在，创建新的设备信息
+			deviceInfo = gin.H{
+				"deviceId":   deviceId,
+				"isOnline":   connInfo.ConnStatus == zinx_server.ConnStatusActive,
+				"status":     connInfo.ConnStatus,
+				"remoteAddr": connInfo.RemoteAddr,
+			}
+		} else {
+			// 如果存在，添加连接信息
+			deviceInfo["remoteAddr"] = connInfo.RemoteAddr
+			deviceInfo["connId"] = connInfo.ConnID
+			deviceInfo["isOnline"] = connInfo.ConnStatus == zinx_server.ConnStatusActive
+			deviceInfo["status"] = connInfo.ConnStatus
 		}
 
 		// 添加ICCID（如果有）
-		if connInfo.ICCID != "" {
+		if connInfo.ICCID != "" && deviceInfo["iccid"] == nil {
 			deviceInfo["iccid"] = connInfo.ICCID
 		}
 
@@ -189,9 +228,14 @@ func HandleDeviceList(c *gin.Context) {
 			deviceInfo["timeSinceHeart"] = time.Since(time.Unix(connInfo.LastHeartbeat, 0)).Seconds()
 		}
 
-		devices = append(devices, deviceInfo)
+		deviceMap[deviceId] = deviceInfo
 		return true
 	})
+
+	// 将映射转换为切片
+	for _, deviceInfo := range deviceMap {
+		devices = append(devices, deviceInfo)
+	}
 
 	c.JSON(http.StatusOK, APIResponse{
 		Code:    0,
