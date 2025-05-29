@@ -4,6 +4,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"net"
+	"os"
 	"sync"
 	"time"
 
@@ -70,10 +71,16 @@ func (m *TCPMonitor) OnRawDataReceived(conn ziface.IConnection, data []byte) {
 		remoteAddr := conn.RemoteAddr().String()
 		connID := conn.GetConnID()
 
-		// 打印数据日志
+		// 强制打印到控制台和标准输出，确保可见性
 		timestamp := time.Now().Format("2006-01-02 15:04:05.000")
-		fmt.Printf("\n[%s] 接收数据 - ConnID: %d, 远程地址: %s\n", timestamp, connID, remoteAddr)
+		fmt.Printf("\n==========================================================\n")
+		fmt.Printf("[%s] 【TCP接收】 ConnID: %d, 远程地址: %s\n", timestamp, connID, remoteAddr)
+		fmt.Printf("数据长度: %d 字节\n", len(data))
 		fmt.Printf("数据(HEX): %s\n", hex.EncodeToString(data))
+		fmt.Printf("数据(ASCII): %s\n", string(data))
+
+		// 强制写入到标准输出并刷新
+		os.Stdout.Sync()
 
 		// 使用logger记录接收的数据，确保INFO级别
 		logger.WithFields(logrus.Fields{
@@ -82,10 +89,11 @@ func (m *TCPMonitor) OnRawDataReceived(conn ziface.IConnection, data []byte) {
 			"dataLen":    len(data),
 			"dataHex":    hex.EncodeToString(data),
 			"timestamp":  timestamp,
-		}).Info("接收数据 - read buffer")
+		}).Info("TCP数据接收 - 原始数据包")
 
 		// 解析DNY协议数据
 		if len(data) >= 3 && data[0] == 0x44 && data[1] == 0x4E && data[2] == 0x59 {
+			fmt.Printf("【DNY协议】检测到DNY协议数据包\n")
 			// 如果是DNY协议数据，解析并显示详细信息
 			if result := ParseDNYProtocol(data); result != "" {
 				fmt.Println(result)
