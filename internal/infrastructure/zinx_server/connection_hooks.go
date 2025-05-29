@@ -267,6 +267,13 @@ func HandlePacket(conn ziface.IConnection, data []byte) bool {
 				"remoteAddr": conn.RemoteAddr().String(),
 				"iccid":      iccidStr,
 			}).Info("收到ICCID并绑定设备")
+
+			// 更新设备状态为在线
+			UpdateDeviceStatus(iccidStr, "online")
+
+			// 更新最后心跳时间
+			UpdateLastHeartbeatTime(conn)
+
 			return true
 		}
 	}
@@ -517,6 +524,9 @@ func handleDNYProtocol(conn ziface.IConnection, data []byte) bool {
 	deviceIdStr := fmt.Sprintf("%d", physicalID)
 	conn.SetProperty(PropKeyDeviceId, deviceIdStr)
 
+	// 将设备ID绑定到连接
+	BindDeviceIdToConnection(deviceIdStr, conn)
+
 	// 根据命令类型进行处理
 	switch command {
 	case 0x01: // 设备心跳包
@@ -585,6 +595,16 @@ func handleDeviceHeartbeat(conn ziface.IConnection, data []byte, physicalID uint
 		"messageID":  messageID,
 	}).Debug("处理设备心跳包")
 
+	// 将物理ID字符串形式保存到连接属性中
+	deviceIdStr := fmt.Sprintf("%d", physicalID)
+	conn.SetProperty(PropKeyDeviceId, deviceIdStr)
+
+	// 更新设备状态为在线
+	UpdateDeviceStatus(deviceIdStr, "online")
+
+	// 更新最后心跳时间
+	UpdateLastHeartbeatTime(conn)
+
 	// 发送心跳应答
 	return sendHeartbeatResponse(conn, physicalID, messageID, 0x01)
 }
@@ -597,8 +617,18 @@ func handleHostHeartbeat(conn ziface.IConnection, data []byte, physicalID uint32
 		"messageID":  messageID,
 	}).Info("处理主机状态心跳包")
 
+	// 将物理ID字符串形式保存到连接属性中
+	deviceIdStr := fmt.Sprintf("%d", physicalID)
+	conn.SetProperty(PropKeyDeviceId, deviceIdStr)
+
+	// 更新设备状态为在线
+	UpdateDeviceStatus(deviceIdStr, "online")
+
+	// 更新最后心跳时间
+	UpdateLastHeartbeatTime(conn)
+
 	// 主机状态心跳包无需应答
-	return sendHeartbeatResponse(conn, physicalID, messageID, 0x11)
+	return true
 }
 
 // handleGetServerTime 处理获取服务器时间请求
@@ -677,8 +707,18 @@ func handleDeviceStatus(conn ziface.IConnection, data []byte, physicalID uint32,
 		"messageID":  messageID,
 	}).Info("处理设备状态包")
 
+	// 将物理ID字符串形式保存到连接属性中
+	deviceIdStr := fmt.Sprintf("%d", physicalID)
+	conn.SetProperty(PropKeyDeviceId, deviceIdStr)
+
+	// 更新设备状态为在线
+	UpdateDeviceStatus(deviceIdStr, "online")
+
+	// 更新最后心跳时间
+	UpdateLastHeartbeatTime(conn)
+
 	// 设备状态包无需应答
-	return sendHeartbeatResponse(conn, physicalID, messageID, 0x21)
+	return true
 }
 
 // buildDNYResponsePacket 构建DNY协议响应数据包
@@ -1051,6 +1091,8 @@ func handleConnectionInitialData(conn ziface.IConnection, tcpConn *net.TCPConn) 
 				iccidStr := string(data)
 				conn.SetProperty(PropKeyICCID, iccidStr)
 				BindDeviceIdToConnection(iccidStr, conn)
+				UpdateDeviceStatus(iccidStr, "online")
+				UpdateLastHeartbeatTime(conn)
 
 				logger.WithFields(logrus.Fields{
 					"connID":     connID,
@@ -1058,6 +1100,7 @@ func handleConnectionInitialData(conn ziface.IConnection, tcpConn *net.TCPConn) 
 					"iccid":      iccidStr,
 				}).Info("处理连接初始化ICCID数据")
 				processed = true
+				initialDataProcessed = true
 			}
 
 			// 2. 处理link心跳
@@ -1165,6 +1208,8 @@ func handleInitialDataContent(conn ziface.IConnection, data []byte) bool {
 		iccidStr := string(data)
 		conn.SetProperty(PropKeyICCID, iccidStr)
 		BindDeviceIdToConnection(iccidStr, conn)
+		UpdateDeviceStatus(iccidStr, "online")
+		UpdateLastHeartbeatTime(conn)
 		return true
 	}
 
@@ -1177,9 +1222,11 @@ func handleInitialDataContent(conn ziface.IConnection, data []byte) bool {
 		return true
 	}
 
-	// 检查是否为DNY协议数据（这种情况下不在初始化阶段处理）
+	// 检查是否为DNY协议数据
 	if len(data) >= 3 && string(data[:3]) == "DNY" {
-		return false // 让正常流程处理
+		// 处理DNY协议数据
+		handleDNYProtocol(conn, data)
+		return true
 	}
 
 	return false
