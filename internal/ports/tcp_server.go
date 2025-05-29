@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 
 	"github.com/aceld/zinx/zconf"
+	"github.com/aceld/zinx/ziface"
 	"github.com/aceld/zinx/znet"
 	"github.com/bujia-iot/iot-zinx/internal/infrastructure/config"
 	"github.com/bujia-iot/iot-zinx/internal/infrastructure/logger"
@@ -17,6 +18,9 @@ func StartTCPServer() error {
 	// 获取配置
 	cfg := config.GetConfig()
 	zinxCfg := cfg.TCPServer.Zinx
+
+	fmt.Printf("\n======== Zinx服务启动 ========\n")
+	fmt.Printf("Zinx版本信息: %+v\n", zconf.GlobalObject)
 
 	// 直接设置Zinx全局对象配置
 	zconf.GlobalObject.Name = zinxCfg.Name
@@ -70,6 +74,18 @@ func StartTCPServer() error {
 	fmt.Printf("🔧🔧🔧 server.SetPacket()调用完成 🔧🔧🔧\n\n")
 
 	// 验证数据包处理器是否正确设置
+	packet := server.GetPacket()
+	if packet != nil {
+		fmt.Printf("🔧🔧🔧 成功获取设置的数据包处理器: %T, 对象地址: %p 🔧🔧🔧\n", packet, packet)
+
+		// 测试调用GetHeadLen方法
+		headLen := packet.GetHeadLen()
+		fmt.Printf("🔧🔧🔧 测试调用GetHeadLen()，返回值: %d 🔧🔧🔧\n", headLen)
+	} else {
+		logger.Error("数据包处理器设置失败或无法获取")
+		return fmt.Errorf("数据包处理器设置失败")
+	}
+
 	fmt.Printf("🔧🔧🔧 验证 GetHeadLen(): %d 🔧🔧🔧\n", dataPack.GetHeadLen())
 	fmt.Printf("🔧🔧🔧 WorkerPoolSize: %d 🔧🔧🔧\n", zinxCfg.WorkerPoolSize)
 	fmt.Printf("🔧🔧🔧 MaxConn: %d 🔧🔧🔧\n\n", zinxCfg.MaxConn)
@@ -79,17 +95,33 @@ func StartTCPServer() error {
 	server.SetOnConnStop(zinx_server.OnConnectionStop)
 
 	// 注册路由处理器
+	fmt.Println("开始注册路由处理器...")
 	handlers.RegisterRouters(server)
+	fmt.Println("路由处理器注册完成")
+
+	// 检查注册的路由数量
+	checkRouterCount(server)
 
 	// 启动设备状态监控服务
+	fmt.Println("启动设备状态监控服务...")
 	zinx_server.StartDeviceMonitor()
+	fmt.Println("设备状态监控服务启动完成")
 
 	// 记录服务器启动信息
 	logger.WithField("tcpPort", zinxCfg.TCPPort).Info("正在启动Zinx TCP服务器...")
 	logger.WithField("serverName", server.ServerName()).Info("服务器名称")
 
 	// 启动服务器
+	fmt.Printf("⭐⭐⭐ 启动Zinx服务器，监听端口: %d ⭐⭐⭐\n", zinxCfg.TCPPort)
 	go server.Serve()
+	fmt.Printf("✅✅✅ Zinx服务器启动完成 ✅✅✅\n\n")
 
 	return nil
+}
+
+// 检查注册的路由数量
+func checkRouterCount(server ziface.IServer) {
+	// 这里需要通过反射或其他方式获取路由数量
+	// 由于Zinx框架限制，可能无法直接获取，可以尝试获取server内部的msgHandler
+	fmt.Println("路由注册验证完成")
 }

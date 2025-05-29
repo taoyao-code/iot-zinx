@@ -95,9 +95,13 @@ func OnConnectionStart(conn ziface.IConnection) {
 	// 通知TCP监视器连接已建立
 	GetGlobalMonitor().OnConnectionEstablished(conn)
 
-	// 启动连接初始化数据处理goroutine
-	// 这个goroutine会在连接建立后的前几秒内监听非DNY协议数据（如ICCID、link心跳）
-	go handleConnectionInitialData(conn, tcpConn)
+	// 移除直接读取TCP连接的逻辑，让Zinx框架通过正常的数据流处理所有数据
+	// 这样可以确保 DNYPacket.GetHeadLen() 和 Unpack() 方法被正确调用
+	// ICCID和link心跳等非DNY数据将通过 NonDNYDataHandler 处理
+	logger.WithFields(logrus.Fields{
+		"connID":     conn.GetConnID(),
+		"remoteAddr": remoteAddr,
+	}).Info("连接建立完成，等待Zinx框架处理数据流")
 }
 
 // 移除自定义数据流处理函数，因为 Zinx 框架已经通过其内部机制处理数据流

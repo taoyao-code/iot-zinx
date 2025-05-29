@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"os"
+	"runtime/debug"
 
 	"github.com/aceld/zinx/ziface"
 	"github.com/bujia-iot/iot-zinx/internal/domain/dny_protocol"
@@ -24,6 +25,8 @@ func NewDNYPacket(logHexDump bool) ziface.IDataPack {
 	// 初始化TCP监视器
 	InitTCPMonitor()
 
+	fmt.Printf("🚀🚀🚀 NewDNYPacket创建新的数据包处理器，logHexDump=%v 🚀🚀🚀\n", logHexDump)
+
 	return &DNYPacket{
 		logHexDump: logHexDump,
 	}
@@ -32,6 +35,9 @@ func NewDNYPacket(logHexDump bool) ziface.IDataPack {
 // GetHeadLen 获取消息头长度
 // DNY协议头长度为5字节：包头(3) + 长度(2)
 func (dp *DNYPacket) GetHeadLen() uint32 {
+	// 打印调用栈，帮助诊断此方法是否被调用以及由谁调用
+	fmt.Printf("\n🔍 调用栈信息: \n%s\n", debug.Stack())
+
 	// 强制输出调试信息
 	fmt.Printf("\n🚀🚀🚀 DNYPacket.GetHeadLen被调用! 返回头长度: %d 🚀🚀🚀\n", dny_protocol.DnyHeaderLen)
 	fmt.Printf("调用栈: DNYPacket.GetHeadLen()\n")
@@ -49,13 +55,25 @@ func (dp *DNYPacket) GetHeadLen() uint32 {
 // Pack 封包方法
 // 将IMessage数据包封装成二进制数据
 func (dp *DNYPacket) Pack(msg ziface.IMessage) ([]byte, error) {
+	// 打印调用栈，帮助诊断此方法是否被调用以及由谁调用
+	fmt.Printf("\n🔍 Pack调用栈信息: \n%s\n", debug.Stack())
+
 	// 强制输出调试信息
 	fmt.Printf("\n📦📦📦 DNYPacket.Pack被调用! 消息ID: %d 📦📦📦\n", msg.GetMsgID())
 	os.Stdout.Sync()
+
+	// 记录到日志
+	logger.WithFields(logrus.Fields{
+		"msgID":   msg.GetMsgID(),
+		"dataLen": msg.GetDataLen(),
+	}).Error("DNYPacket.Pack被调用")
+
 	// 转换为DNY消息
 	dnyMsg, ok := dny_protocol.IMessageToDnyMessage(msg)
 	if !ok {
-		return nil, fmt.Errorf("消息类型转换失败")
+		errMsg := "消息类型转换失败，无法转换为DNY消息"
+		logger.Error(errMsg)
+		return nil, fmt.Errorf(errMsg)
 	}
 
 	// 创建缓冲区
@@ -121,6 +139,9 @@ func (dp *DNYPacket) Pack(msg ziface.IMessage) ([]byte, error) {
 // Unpack 拆包方法
 // 将二进制数据解析为IMessage对象，支持十六进制编码和原始数据
 func (dp *DNYPacket) Unpack(binaryData []byte) (ziface.IMessage, error) {
+	// 打印调用栈，帮助诊断此方法是否被调用以及由谁调用
+	fmt.Printf("\n🔍 Unpack调用栈信息: \n%s\n", debug.Stack())
+
 	// 传入的binaryData是可能来自网络的原始数据
 	// 数据监控在HandlePacket函数中处理，避免重复调用
 
@@ -151,6 +172,7 @@ func (dp *DNYPacket) Unpack(binaryData []byte) (ziface.IMessage, error) {
 			logger.Debugf("检测到十六进制编码数据，解码后长度: %d -> %d", len(binaryData), len(actualData))
 		}
 	}
+
 	// 特殊处理：如果数据不符合DNY协议格式，我们创建一个特殊的消息类型来处理
 	// 这样可以让非DNY协议数据（ICCID、link心跳等）通过正常的路由机制处理
 	if !isDNYProtocolData(actualData) {
