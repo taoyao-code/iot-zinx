@@ -62,38 +62,10 @@ func OnConnectionStart(conn ziface.IConnection) {
 
 	// 设置连接属性
 	now := time.Now()
-	conn.SetProperty(PropKeyLastHeartbeat, now.Unix())
-	conn.SetProperty(PropKeyLastHeartbeatStr, now.Format("2006-01-02 15:04:05"))
-	conn.SetProperty(PropKeyRemoteAddr, remoteAddr)
-	conn.SetProperty(PropKeyConnStatus, ConnStatusActive)
+	setConnectionInitialProperties(conn, now, remoteAddr)
 
 	// 获取TCP连接并设置TCP参数
-	if tcpConn, ok := conn.GetTCPConnection().(*net.TCPConn); ok {
-		// 设置TCP KeepAlive
-		tcpConn.SetKeepAlive(true)
-		tcpConn.SetKeepAlivePeriod(keepAlivePeriod)
-
-		// 设置读取超时
-		deadline := now.Add(readDeadLine)
-		if err := tcpConn.SetReadDeadline(deadline); err != nil {
-			logger.WithFields(logrus.Fields{
-				"error":      err.Error(),
-				"connID":     connID,
-				"remoteAddr": remoteAddr,
-				"deadline":   deadline.Format("2006-01-02 15:04:05"),
-			}).Error("设置TCP读取超时失败")
-		}
-
-		// 设置写入超时
-		if err := tcpConn.SetWriteDeadline(deadline); err != nil {
-			logger.WithFields(logrus.Fields{
-				"error":      err.Error(),
-				"connID":     connID,
-				"remoteAddr": remoteAddr,
-				"deadline":   deadline.Format("2006-01-02 15:04:05"),
-			}).Error("设置TCP写入超时失败")
-		}
-	}
+	setupTCPParameters(conn, now)
 
 	// 记录连接信息
 	logger.WithFields(logrus.Fields{
@@ -107,8 +79,53 @@ func OnConnectionStart(conn ziface.IConnection) {
 	go tryReadInitialData(conn)
 }
 
-// 移除自定义数据流处理函数，因为 Zinx 框架已经通过其内部机制处理数据流
-// 数据会通过 Packet.Unpack 方法解析，然后路由到相应的处理器
+// 设置连接初始属性
+func setConnectionInitialProperties(conn ziface.IConnection, now time.Time, remoteAddr string) {
+	conn.SetProperty(PropKeyLastHeartbeat, now.Unix())
+	conn.SetProperty(PropKeyLastHeartbeatStr, now.Format("2006-01-02 15:04:05"))
+	conn.SetProperty(PropKeyRemoteAddr, remoteAddr)
+	conn.SetProperty(PropKeyConnStatus, ConnStatusActive)
+}
+
+// 设置TCP连接参数
+func setupTCPParameters(conn ziface.IConnection, now time.Time) {
+	if tcpConn, ok := conn.GetTCPConnection().(*net.TCPConn); ok {
+		// 设置TCP KeepAlive
+		tcpConn.SetKeepAlive(true)
+		tcpConn.SetKeepAlivePeriod(keepAlivePeriod)
+
+		// 设置读写超时
+		deadline := now.Add(readDeadLine)
+		setTCPDeadlines(conn, tcpConn, deadline)
+	}
+}
+
+// 设置TCP读写超时
+func setTCPDeadlines(conn ziface.IConnection, tcpConn *net.TCPConn, deadline time.Time) {
+	connID := conn.GetConnID()
+	remoteAddr := conn.RemoteAddr().String()
+	deadlineStr := deadline.Format("2006-01-02 15:04:05")
+
+	// 设置读取超时
+	if err := tcpConn.SetReadDeadline(deadline); err != nil {
+		logger.WithFields(logrus.Fields{
+			"error":      err.Error(),
+			"connID":     connID,
+			"remoteAddr": remoteAddr,
+			"deadline":   deadlineStr,
+		}).Error("设置TCP读取超时失败")
+	}
+
+	// 设置写入超时
+	if err := tcpConn.SetWriteDeadline(deadline); err != nil {
+		logger.WithFields(logrus.Fields{
+			"error":      err.Error(),
+			"connID":     connID,
+			"remoteAddr": remoteAddr,
+			"deadline":   deadlineStr,
+		}).Error("设置TCP写入超时失败")
+	}
+}
 
 // OnConnectionStop 当连接断开时的钩子函数
 func OnConnectionStop(conn ziface.IConnection) {
@@ -121,25 +138,8 @@ func OnConnectionStop(conn ziface.IConnection) {
 	// 更新连接状态
 	conn.SetProperty(PropKeyConnStatus, ConnStatusClosed)
 
-	// 获取最后的心跳时间（优先使用格式化的字符串）
-	var lastHeartbeatStr string
-	var timeSinceHeart float64
-
-	if val, err := conn.GetProperty(PropKeyLastHeartbeatStr); err == nil && val != nil {
-		lastHeartbeatStr = val.(string)
-	} else {
-		// 降级使用时间戳
-		if val, err := conn.GetProperty(PropKeyLastHeartbeat); err == nil && val != nil {
-			if ts, ok := val.(int64); ok {
-				lastHeartbeatStr = time.Unix(ts, 0).Format("2006-01-02 15:04:05")
-				timeSinceHeart = time.Since(time.Unix(ts, 0)).Seconds()
-			} else {
-				lastHeartbeatStr = "unknown"
-			}
-		} else {
-			lastHeartbeatStr = "never"
-		}
-	}
+	// 获取心跳信息
+	lastHeartbeatStr, timeSinceHeart := getHeartbeatInfo(conn)
 
 	// 尝试获取设备信息并清理
 	if deviceId, err := conn.GetProperty(PropKeyDeviceId); err == nil && deviceId != nil {
@@ -170,6 +170,30 @@ func OnConnectionStop(conn ziface.IConnection) {
 	}
 }
 
+// 获取心跳信息
+func getHeartbeatInfo(conn ziface.IConnection) (string, float64) {
+	var lastHeartbeatStr string
+	var timeSinceHeart float64
+
+	if val, err := conn.GetProperty(PropKeyLastHeartbeatStr); err == nil && val != nil {
+		lastHeartbeatStr = val.(string)
+	} else {
+		// 降级使用时间戳
+		if val, err := conn.GetProperty(PropKeyLastHeartbeat); err == nil && val != nil {
+			if ts, ok := val.(int64); ok {
+				lastHeartbeatStr = time.Unix(ts, 0).Format("2006-01-02 15:04:05")
+				timeSinceHeart = time.Since(time.Unix(ts, 0)).Seconds()
+			} else {
+				lastHeartbeatStr = "unknown"
+			}
+		} else {
+			lastHeartbeatStr = "never"
+		}
+	}
+
+	return lastHeartbeatStr, timeSinceHeart
+}
+
 // HandlePacket 处理接收到的数据包
 func HandlePacket(conn ziface.IConnection, data []byte) bool {
 	if len(data) == 0 {
@@ -179,23 +203,40 @@ func HandlePacket(conn ziface.IConnection, data []byte) bool {
 	// 通知TCP监视器收到数据
 	GetGlobalMonitor().OnRawDataReceived(conn, data)
 
-	// 检查心跳状态
-	now := time.Now()
-	var lastHeartbeatStr string
-	var timeSinceHeart float64
+	// 检查心跳状态并更新读取超时时间
+	updateConnectionHeartbeat(conn)
 
-	// 优先获取格式化的时间字符串
-	if val, err := conn.GetProperty(PropKeyLastHeartbeatStr); err == nil && val != nil {
-		lastHeartbeatStr = val.(string)
-	} else {
-		// 降级使用时间戳
-		if val, err := conn.GetProperty(PropKeyLastHeartbeat); err == nil && val != nil {
-			if ts, ok := val.(int64); ok {
-				lastHeartbeatStr = time.Unix(ts, 0).Format("2006-01-02 15:04:05")
-				timeSinceHeart = now.Sub(time.Unix(ts, 0)).Seconds()
-			}
-		}
+	// 处理十六进制编码的数据
+	if isHexEncodedData(data) {
+		return handleHexEncodedData(conn, data)
 	}
+
+	// 尝试解析为ICCID (20字节ASCII数字字符串)
+	if len(data) == 20 && isValidICCIDBytes(data) {
+		return handleICCID(conn, data)
+	}
+
+	// 处理link心跳
+	if len(data) == 4 && string(data) == LinkHeartbeat {
+		return handleLinkHeartbeat(conn)
+	}
+
+	// 处理DNY协议数据
+	if len(data) >= 3 && string(data[:3]) == "DNY" {
+		return handleDNYProtocol(conn, data)
+	}
+
+	// 记录未知数据包
+	logUnknownPacket(conn, data)
+	return false
+}
+
+// 更新连接心跳状态
+func updateConnectionHeartbeat(conn ziface.IConnection) {
+	now := time.Now()
+
+	// 获取心跳信息用于日志记录
+	lastHeartbeatStr, timeSinceHeart := getHeartbeatInfo(conn)
 
 	// 更新读取超时时间
 	if tcpConn, ok := conn.GetTCPConnection().(*net.TCPConn); ok {
@@ -212,7 +253,7 @@ func HandlePacket(conn ziface.IConnection, data []byte) bool {
 				"deadline":       deadline.Format("2006-01-02 15:04:05"),
 				"connStatus":     ConnStatusInactive,
 			}).Error("设置 TCP 读取超时失败")
-			return false
+			return
 		}
 
 		logger.WithFields(logrus.Fields{
@@ -223,105 +264,85 @@ func HandlePacket(conn ziface.IConnection, data []byte) bool {
 			"connStatus":     ConnStatusActive,
 		}).Debug("更新读取超时时间成功")
 	}
+}
 
-	// 处理十六进制编码的数据
-	if isHexEncodedData(data) {
-
-		// 解码十六进制字符串
-		decoded, err := hex.DecodeString(string(data))
-		if err != nil {
-			logger.WithFields(logrus.Fields{
-				"connID":     conn.GetConnID(),
-				"remoteAddr": conn.RemoteAddr().String(),
-				"error":      err.Error(),
-				"dataHex":    fmt.Sprintf("%X", data),
-			}).Error("十六进制解码失败")
-			return false
-		}
-
-		// 记录解码后的数据
-		logger.WithFields(logrus.Fields{
-			"connID":        conn.GetConnID(),
-			"remoteAddr":    conn.RemoteAddr().String(),
-			"decodedLen":    len(decoded),
-			"decodedHex":    fmt.Sprintf("%X", decoded),
-			"isDNYProtocol": len(decoded) >= 3 && string(decoded[:3]) == "DNY",
-		}).Debug("解码十六进制数据完成")
-
-		// 递归处理解码后的数据
-		return HandlePacket(conn, decoded)
-	}
-
-	// 尝试解析为ICCID (20字节ASCII数字字符串)
-	if len(data) == 20 {
-		// 检查是否都是ASCII数字字符
-		if isValidICCIDBytes(data) {
-			iccidStr := string(data)
-			conn.SetProperty(PropKeyICCID, iccidStr)
-
-			// 将ICCID作为设备ID进行绑定
-			BindDeviceIdToConnection(iccidStr, conn)
-
-			logger.WithFields(logrus.Fields{
-				"connID":     conn.GetConnID(),
-				"remoteAddr": conn.RemoteAddr().String(),
-				"iccid":      iccidStr,
-			}).Info("收到ICCID并绑定设备")
-
-			// 更新设备状态为在线
-			UpdateDeviceStatus(iccidStr, "online")
-
-			// 更新最后心跳时间
-			UpdateLastHeartbeatTime(conn)
-
-			return true
-		}
-	}
-
-	// 处理link心跳
-	if len(data) == 4 && string(data) == LinkHeartbeat {
-		now := time.Now().Unix()
-		conn.SetProperty(PropKeyLastLink, now)
-		conn.SetProperty(PropKeyConnStatus, ConnStatusActive)
-
-		// 同时更新通用心跳时间，确保读取超时正确重置
-		UpdateLastHeartbeatTime(conn)
-
+// 处理十六进制编码的数据
+func handleHexEncodedData(conn ziface.IConnection, data []byte) bool {
+	// 解码十六进制字符串
+	decoded, err := hex.DecodeString(string(data))
+	if err != nil {
 		logger.WithFields(logrus.Fields{
 			"connID":     conn.GetConnID(),
 			"remoteAddr": conn.RemoteAddr().String(),
-			"dataLen":    len(data),
-			"timestamp":  now,
-			"timeStr":    time.Unix(now, 0).Format("2006-01-02 15:04:05"),
-		}).Debug("收到link心跳")
-		return true
-	}
-
-	// 处理DNY协议数据
-	if len(data) >= 3 && string(data[:3]) == "DNY" {
-		// 更新心跳时间和连接状态
-		UpdateLastHeartbeatTime(conn)
-		conn.SetProperty(PropKeyConnStatus, ConnStatusActive)
-
-		logger.WithFields(logrus.Fields{
-			"connID":     conn.GetConnID(),
-			"remoteAddr": conn.RemoteAddr().String(),
-			"dataLen":    len(data),
+			"error":      err.Error(),
 			"dataHex":    fmt.Sprintf("%X", data),
-		}).Debug("收到DNY协议数据")
-
-		// 处理DNY协议数据
-		return handleDNYProtocol(conn, data)
+		}).Error("十六进制解码失败")
+		return false
 	}
 
-	// 记录未知数据包
+	// 记录解码后的数据
+	logger.WithFields(logrus.Fields{
+		"connID":        conn.GetConnID(),
+		"remoteAddr":    conn.RemoteAddr().String(),
+		"decodedLen":    len(decoded),
+		"decodedHex":    fmt.Sprintf("%X", decoded),
+		"isDNYProtocol": len(decoded) >= 3 && string(decoded[:3]) == "DNY",
+	}).Debug("解码十六进制数据完成")
+
+	// 递归处理解码后的数据
+	return HandlePacket(conn, decoded)
+}
+
+// 处理ICCID
+func handleICCID(conn ziface.IConnection, data []byte) bool {
+	iccidStr := string(data)
+	conn.SetProperty(PropKeyICCID, iccidStr)
+
+	// 将ICCID作为设备ID进行绑定
+	BindDeviceIdToConnection(iccidStr, conn)
+
+	// 更新设备状态为在线
+	UpdateDeviceStatus(iccidStr, "online")
+
+	// 更新最后心跳时间
+	UpdateLastHeartbeatTime(conn)
+
+	logger.WithFields(logrus.Fields{
+		"connID":     conn.GetConnID(),
+		"remoteAddr": conn.RemoteAddr().String(),
+		"iccid":      iccidStr,
+	}).Info("收到ICCID并绑定设备")
+
+	return true
+}
+
+// 处理link心跳
+func handleLinkHeartbeat(conn ziface.IConnection) bool {
+	now := time.Now().Unix()
+	conn.SetProperty(PropKeyLastLink, now)
+	conn.SetProperty(PropKeyConnStatus, ConnStatusActive)
+
+	// 同时更新通用心跳时间，确保读取超时正确重置
+	UpdateLastHeartbeatTime(conn)
+
+	logger.WithFields(logrus.Fields{
+		"connID":     conn.GetConnID(),
+		"remoteAddr": conn.RemoteAddr().String(),
+		"dataLen":    4,
+		"timestamp":  now,
+		"timeStr":    time.Unix(now, 0).Format("2006-01-02 15:04:05"),
+	}).Debug("收到link心跳")
+	return true
+}
+
+// 记录未知数据包
+func logUnknownPacket(conn ziface.IConnection, data []byte) {
 	logger.WithFields(logrus.Fields{
 		"connID":     conn.GetConnID(),
 		"remoteAddr": conn.RemoteAddr().String(),
 		"dataLen":    len(data),
 		"dataHex":    fmt.Sprintf("%X", data),
 	}).Debug("收到未知数据包")
-	return false
 }
 
 // BindDeviceIdToConnection 绑定设备ID到连接并更新在线状态
@@ -479,9 +500,38 @@ func UpdateDeviceStatus(deviceId string, status string) {
 
 // handleDNYProtocol 处理DNY协议数据
 func handleDNYProtocol(conn ziface.IConnection, data []byte) bool {
-	// 根据文档中的DNY协议格式进行解析
-	// DNY协议格式：包头(3字节) + 长度(2字节) + 物理ID(4字节) + 消息ID(2字节) + 命令(1字节) + 数据(n字节) + 校验(2字节)
+	// 更新心跳时间和连接状态
+	UpdateLastHeartbeatTime(conn)
+	conn.SetProperty(PropKeyConnStatus, ConnStatusActive)
 
+	logger.WithFields(logrus.Fields{
+		"connID":     conn.GetConnID(),
+		"remoteAddr": conn.RemoteAddr().String(),
+		"dataLen":    len(data),
+		"dataHex":    fmt.Sprintf("%X", data),
+	}).Debug("收到DNY协议数据")
+
+	// 检查数据包长度是否合法
+	if !isValidDNYPacketLength(conn, data) {
+		return false
+	}
+
+	// 解析DNY协议基本信息
+	physicalID, messageID, command := parseDNYHeader(data)
+
+	// 将物理ID字符串形式保存到连接属性中
+	deviceIdStr := fmt.Sprintf("%d", physicalID)
+	conn.SetProperty(PropKeyDeviceId, deviceIdStr)
+
+	// 将设备ID绑定到连接
+	BindDeviceIdToConnection(deviceIdStr, conn)
+
+	// 根据命令类型进行处理
+	return dispatchDNYCommand(conn, data, physicalID, messageID, command)
+}
+
+// 验证DNY数据包长度
+func isValidDNYPacketLength(conn ziface.IConnection, data []byte) bool {
 	if len(data) < 14 { // 最小包长度：3+2+4+2+1+0+2 = 14
 		logger.WithFields(logrus.Fields{
 			"connID":  conn.GetConnID(),
@@ -510,6 +560,11 @@ func handleDNYProtocol(conn ziface.IConnection, data []byte) bool {
 		return false
 	}
 
+	return true
+}
+
+// 解析DNY协议头部
+func parseDNYHeader(data []byte) (uint32, uint16, byte) {
 	// 解析物理ID（小端模式）
 	physicalID := uint32(data[5]) | uint32(data[6])<<8 | uint32(data[7])<<16 | uint32(data[8])<<24
 
@@ -519,15 +574,11 @@ func handleDNYProtocol(conn ziface.IConnection, data []byte) bool {
 	// 解析命令
 	command := data[11]
 
-	// 将物理ID字符串形式保存到连接属性中
-	// 这有助于确保在处理所有命令时，连接都有设备ID关联
-	deviceIdStr := fmt.Sprintf("%d", physicalID)
-	conn.SetProperty(PropKeyDeviceId, deviceIdStr)
+	return physicalID, messageID, command
+}
 
-	// 将设备ID绑定到连接
-	BindDeviceIdToConnection(deviceIdStr, conn)
-
-	// 根据命令类型进行处理
+// 根据命令类型分发处理
+func dispatchDNYCommand(conn ziface.IConnection, data []byte, physicalID uint32, messageID uint16, command byte) bool {
 	switch command {
 	case 0x01: // 设备心跳包
 		return handleDeviceHeartbeat(conn, data, physicalID, messageID)
@@ -549,39 +600,49 @@ func handleDNYProtocol(conn ziface.IConnection, data []byte) bool {
 	case 0x21: // 设备状态包
 		return handleDeviceStatus(conn, data, physicalID, messageID)
 	case 0x03, 0x04, 0x05, 0x06: // 其他设备上报指令
-		logger.WithFields(logrus.Fields{
-			"connID":     conn.GetConnID(),
-			"physicalID": physicalID,
-			"messageID":  messageID,
-			"command":    fmt.Sprintf("0x%02X", command),
-			"dataHex":    fmt.Sprintf("%X", data),
-		}).Info("收到设备上报指令，暂不处理")
+		return handleDeviceReport(conn, data, physicalID, messageID, command)
+	default:
+		return handleUnknownCommand(conn, data, physicalID, messageID, command)
+	}
+}
 
-		// 对上报指令发送通用应答
+// 处理设备上报指令
+func handleDeviceReport(conn ziface.IConnection, data []byte, physicalID uint32, messageID uint16, command byte) bool {
+	logger.WithFields(logrus.Fields{
+		"connID":     conn.GetConnID(),
+		"physicalID": physicalID,
+		"messageID":  messageID,
+		"command":    fmt.Sprintf("0x%02X", command),
+		"dataHex":    fmt.Sprintf("%X", data),
+	}).Info("收到设备上报指令，暂不处理")
+
+	// 对上报指令发送通用应答
+	responseData := []byte{0x00} // 0x00表示成功
+	SendDNYResponse(conn, physicalID, messageID, command, responseData)
+	return true
+}
+
+// 处理未知命令
+func handleUnknownCommand(conn ziface.IConnection, data []byte, physicalID uint32, messageID uint16, command byte) bool {
+	logger.WithFields(logrus.Fields{
+		"connID":     conn.GetConnID(),
+		"command":    fmt.Sprintf("0x%02X", command),
+		"physicalID": physicalID,
+		"messageID":  messageID,
+		"dataHex":    fmt.Sprintf("%X", data),
+	}).Info("收到未处理的DNY协议命令")
+
+	// 对未知命令也发送一个通用应答，避免设备重复发送请求
+	if command >= 0x01 && command <= 0x22 {
+		// 只对可能需要响应的命令发送应答
 		responseData := []byte{0x00} // 0x00表示成功
 		SendDNYResponse(conn, physicalID, messageID, command, responseData)
-		return true
-	default:
 		logger.WithFields(logrus.Fields{
 			"connID":     conn.GetConnID(),
 			"command":    fmt.Sprintf("0x%02X", command),
 			"physicalID": physicalID,
 			"messageID":  messageID,
-			"dataHex":    fmt.Sprintf("%X", data),
-		}).Info("收到未处理的DNY协议命令")
-
-		// 对未知命令也发送一个通用应答，避免设备重复发送请求
-		if command >= 0x01 && command <= 0x22 {
-			// 只对可能需要响应的命令发送应答
-			responseData := []byte{0x00} // 0x00表示成功
-			SendDNYResponse(conn, physicalID, messageID, command, responseData)
-			logger.WithFields(logrus.Fields{
-				"connID":     conn.GetConnID(),
-				"command":    fmt.Sprintf("0x%02X", command),
-				"physicalID": physicalID,
-				"messageID":  messageID,
-			}).Info("发送了通用应答")
-		}
+		}).Info("发送了通用应答")
 	}
 
 	return true
@@ -768,36 +829,8 @@ func sendHeartbeatResponse(conn ziface.IConnection, physicalID uint32, messageID
 	// 构建响应数据（仅包含应答码）
 	responseData := []byte{0x00} // 0x00 表示成功
 
-	// 构建完整的DNY协议包
-	packet := buildDNYResponsePacket(physicalID, messageID, command, responseData)
-
-	// 记录要发送的响应数据包
-	logger.WithFields(logrus.Fields{
-		"connID":     conn.GetConnID(),
-		"physicalID": physicalID,
-		"messageID":  messageID,
-		"command":    fmt.Sprintf("0x%02X", command),
-		"dataHex":    fmt.Sprintf("%X", packet),
-		"dataLen":    len(packet),
-	}).Info("发送心跳应答数据包")
-
-	// 使用SendBuffMsg发送完整的DNY协议包
-	if err := conn.SendBuffMsg(0, packet); err != nil {
-		logger.WithFields(logrus.Fields{
-			"connID": conn.GetConnID(),
-			"error":  err.Error(),
-		}).Error("发送心跳应答失败")
-		return false
-	}
-
-	logger.WithFields(logrus.Fields{
-		"connID":     conn.GetConnID(),
-		"physicalID": physicalID,
-		"messageID":  messageID,
-		"command":    fmt.Sprintf("0x%02X", command),
-	}).Debug("已发送心跳应答")
-
-	return true
+	// 发送DNY响应
+	return sendDNYResponse(conn, physicalID, messageID, command, responseData, "心跳应答")
 }
 
 // sendServerTimeResponse 发送服务器时间应答
@@ -810,45 +843,12 @@ func sendServerTimeResponse(conn ziface.IConnection, physicalID uint32, messageI
 	responseData[2] = byte(timestamp >> 16)
 	responseData[3] = byte(timestamp >> 24)
 
-	// 构建完整的DNY协议包，使用原始命令
-	packet := buildDNYResponsePacket(physicalID, messageID, command, responseData)
+	// 记录额外的时间信息用于日志
+	timestampStr := time.Unix(int64(timestamp), 0).Format("2006-01-02 15:04:05")
 
-	// 记录要发送的响应数据包
-	logger.WithFields(logrus.Fields{
-		"connID":       conn.GetConnID(),
-		"physicalID":   physicalID,
-		"messageID":    messageID,
-		"command":      fmt.Sprintf("0x%02X", command),
-		"timestamp":    timestamp,
-		"timestampStr": time.Unix(int64(timestamp), 0).Format("2006-01-02 15:04:05"),
-		"dataHex":      fmt.Sprintf("%X", packet),
-		"dataLen":      len(packet),
-	}).Info("发送服务器时间应答数据包")
-
-	// 使用SendBuffMsg发送完整的DNY协议包
-	if err := conn.SendBuffMsg(0, packet); err != nil {
-		logger.WithFields(logrus.Fields{
-			"connID":       conn.GetConnID(),
-			"error":        err.Error(),
-			"command":      fmt.Sprintf("0x%02X", command),
-			"physicalID":   physicalID,
-			"messageID":    messageID,
-			"timestamp":    timestamp,
-			"timestampStr": time.Unix(int64(timestamp), 0).Format("2006-01-02 15:04:05"),
-		}).Error("发送服务器时间应答失败")
-		return false
-	}
-
-	logger.WithFields(logrus.Fields{
-		"connID":       conn.GetConnID(),
-		"physicalID":   physicalID,
-		"messageID":    messageID,
-		"command":      fmt.Sprintf("0x%02X", command),
-		"timestamp":    timestamp,
-		"timestampStr": time.Unix(int64(timestamp), 0).Format("2006-01-02 15:04:05"),
-	}).Info("已发送服务器时间应答")
-
-	return true
+	// 构建并发送响应
+	return sendDNYResponse(conn, physicalID, messageID, command, responseData,
+		fmt.Sprintf("服务器时间应答 [%s]", timestampStr))
 }
 
 // sendRegisterResponse 发送设备注册应答
@@ -856,18 +856,27 @@ func sendRegisterResponse(conn ziface.IConnection, physicalID uint32, messageID 
 	// 构建响应数据（仅包含应答码）
 	responseData := []byte{0x00} // 0x00 表示成功
 
+	// 发送DNY响应
+	return sendDNYResponse(conn, physicalID, messageID, 0x20, responseData, "设备注册应答")
+}
+
+// sendDNYResponse 发送DNY协议响应（内部通用方法）
+func sendDNYResponse(conn ziface.IConnection, physicalID uint32, messageID uint16,
+	command uint8, responseData []byte, responseType string,
+) bool {
 	// 构建完整的DNY协议包
-	packet := buildDNYResponsePacket(physicalID, messageID, 0x20, responseData)
+	packet := buildDNYResponsePacket(physicalID, messageID, command, responseData)
 
 	// 记录要发送的响应数据包
 	logger.WithFields(logrus.Fields{
 		"connID":     conn.GetConnID(),
 		"physicalID": physicalID,
 		"messageID":  messageID,
-		"command":    "0x20",
+		"command":    fmt.Sprintf("0x%02X", command),
 		"dataHex":    fmt.Sprintf("%X", packet),
 		"dataLen":    len(packet),
-	}).Info("发送设备注册应答数据包")
+		"respType":   responseType,
+	}).Info("发送DNY响应数据包")
 
 	// 使用SendBuffMsg发送完整的DNY协议包
 	if err := conn.SendBuffMsg(0, packet); err != nil {
@@ -876,7 +885,9 @@ func sendRegisterResponse(conn ziface.IConnection, physicalID uint32, messageID 
 			"error":      err.Error(),
 			"physicalID": physicalID,
 			"messageID":  messageID,
-		}).Error("发送设备注册应答失败")
+			"command":    fmt.Sprintf("0x%02X", command),
+			"respType":   responseType,
+		}).Error("发送DNY响应失败")
 		return false
 	}
 
@@ -884,13 +895,14 @@ func sendRegisterResponse(conn ziface.IConnection, physicalID uint32, messageID 
 		"connID":     conn.GetConnID(),
 		"physicalID": physicalID,
 		"messageID":  messageID,
-		"response":   "success",
-	}).Info("已发送设备注册应答")
+		"command":    fmt.Sprintf("0x%02X", command),
+		"respType":   responseType,
+	}).Debug("已发送DNY响应")
 
 	return true
 }
 
-// SendDNYResponse 发送DNY协议响应
+// SendDNYResponse 发送DNY协议响应（公开方法）
 func SendDNYResponse(conn ziface.IConnection, physicalId uint32, messageId uint16, command uint8, data []byte) error {
 	// 构建响应数据包
 	packet := buildDNYResponsePacket(physicalId, messageId, command, data)
@@ -1045,146 +1057,185 @@ func handleConnectionInitialData(conn ziface.IConnection, tcpConn *net.TCPConn) 
 	buffer := make([]byte, readBufferSize)
 	initialDataProcessed := false
 
+	// 尝试读取初始化数据，直到超时或数据处理完成
 	for time.Now().Before(deadline) && !initialDataProcessed {
-		// 尝试读取数据
-		n, err := tcpConn.Read(buffer)
-		if err != nil {
-			if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
-				// 读取超时，继续循环直到总体超时
-				logger.WithFields(logrus.Fields{
-					"connID":     connID,
-					"remoteAddr": remoteAddr,
-				}).Debug("初始化数据读取超时，继续等待")
-				time.Sleep(100 * time.Millisecond)
-				continue
-			} else {
-				// 其他错误，可能是连接断开
-				logger.WithFields(logrus.Fields{
-					"connID":     connID,
-					"remoteAddr": remoteAddr,
-					"error":      err.Error(),
-				}).Debug("初始化数据读取失败，连接可能已断开")
-				return
-			}
-		}
-
-		if n > 0 {
-			data := buffer[:n]
-
-			// 记录接收到的初始化数据
-			logger.WithFields(logrus.Fields{
-				"connID":     connID,
-				"remoteAddr": remoteAddr,
-				"dataLen":    n,
-				"dataHex":    hex.EncodeToString(data),
-				"dataStr":    string(data),
-			}).Info("收到连接初始化数据")
-
-			// 通知监视器收到原始数据
-			GetGlobalMonitor().OnRawDataReceived(conn, data)
-
-			// 处理不同类型的初始化数据
-			processed := false
-
-			// 1. 处理ICCID (20字节数字字符串)
-			if n == 20 && isValidICCIDBytes(data) {
-				iccidStr := string(data)
-				conn.SetProperty(PropKeyICCID, iccidStr)
-				BindDeviceIdToConnection(iccidStr, conn)
-				UpdateDeviceStatus(iccidStr, "online")
-				UpdateLastHeartbeatTime(conn)
-
-				logger.WithFields(logrus.Fields{
-					"connID":     connID,
-					"remoteAddr": remoteAddr,
-					"iccid":      iccidStr,
-				}).Info("处理连接初始化ICCID数据")
-				processed = true
-				initialDataProcessed = true
-			}
-
-			// 2. 处理link心跳
-			if n == 4 && string(data) == LinkHeartbeat {
-				now := time.Now().Unix()
-				conn.SetProperty(PropKeyLastLink, now)
-				conn.SetProperty(PropKeyConnStatus, ConnStatusActive)
-				UpdateLastHeartbeatTime(conn)
-
-				logger.WithFields(logrus.Fields{
-					"connID":     connID,
-					"remoteAddr": remoteAddr,
-					"timestamp":  now,
-				}).Info("处理连接初始化link心跳")
-				processed = true
-			}
-
-			// 3. 处理十六进制编码数据
-			if !processed && isHexEncodedData(data) {
-				decoded, err := hex.DecodeString(string(data))
-				if err == nil {
-					logger.WithFields(logrus.Fields{
-						"connID":      connID,
-						"remoteAddr":  remoteAddr,
-						"originalLen": n,
-						"decodedLen":  len(decoded),
-						"decodedHex":  hex.EncodeToString(decoded),
-					}).Info("处理连接初始化十六进制编码数据")
-
-					// 递归处理解码后的数据
-					if handleInitialDataContent(conn, decoded) {
-						processed = true
-					}
-				}
-			}
-
-			// 4. 检查是否为DNY协议数据
-			if !processed && len(data) >= 3 && string(data[:3]) == "DNY" {
-				logger.WithFields(logrus.Fields{
-					"connID":     connID,
-					"remoteAddr": remoteAddr,
-					"dataLen":    n,
-				}).Info("连接初始化阶段收到DNY协议数据，结束初始化处理")
-
-				// 将DNY数据推回给Zinx处理（这需要特殊处理）
-				// 由于我们已经从TCP连接中读取了数据，需要确保这些数据能被Zinx处理
-				// 这里我们设置一个标记，让后续的正常消息处理流程知道初始化已完成
-				conn.SetProperty("InitialDataProcessed", true)
-				initialDataProcessed = true
-
-				// 重新设置正常的读取超时
-				if err := tcpConn.SetReadDeadline(time.Now().Add(readDeadLine)); err != nil {
-					logger.WithFields(logrus.Fields{
-						"connID": connID,
-						"error":  err.Error(),
-					}).Error("重新设置正常读取超时失败")
-				}
-
-				// 由于我们无法直接将数据推回给Zinx，我们将数据保存起来
-				// 并修改Unpack方法来检查这种情况
-				conn.SetProperty("PendingDNYData", data)
-
-				logger.WithFields(logrus.Fields{
-					"connID":     connID,
-					"remoteAddr": remoteAddr,
-				}).Debug("初始化数据处理完成，移交给正常消息处理流程")
-				return
-			}
-
-			// 如果数据已处理，继续监听更多初始化数据
-			// 如果是未知数据，记录并继续
-			if !processed {
-				logger.WithFields(logrus.Fields{
-					"connID":     connID,
-					"remoteAddr": remoteAddr,
-					"dataLen":    n,
-					"dataHex":    hex.EncodeToString(data),
-				}).Debug("收到未知初始化数据，继续监听")
-			}
-		}
+		initialDataProcessed = tryReadInitialDataWithTimeout(conn, tcpConn, buffer, deadline, &initialDataProcessed)
 	}
 
 	// 初始化超时或完成，设置标记并恢复正常读取超时
+	finalizeInitialDataProcessing(conn, tcpConn, connID, remoteAddr, initialDataProcessed)
+}
+
+// 尝试读取初始化数据，并处理超时情况
+func tryReadInitialDataWithTimeout(conn ziface.IConnection, tcpConn *net.TCPConn, buffer []byte, deadline time.Time, initialDataProcessed *bool) bool {
+	connID := conn.GetConnID()
+	remoteAddr := conn.RemoteAddr().String()
+
+	// 尝试读取数据
+	n, err := tcpConn.Read(buffer)
+	if err != nil {
+		if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
+			// 读取超时，继续循环直到总体超时
+			logger.WithFields(logrus.Fields{
+				"connID":     connID,
+				"remoteAddr": remoteAddr,
+			}).Debug("初始化数据读取超时，继续等待")
+			time.Sleep(100 * time.Millisecond)
+			return false
+		} else {
+			// 其他错误，可能是连接断开
+			logger.WithFields(logrus.Fields{
+				"connID":     connID,
+				"remoteAddr": remoteAddr,
+				"error":      err.Error(),
+			}).Debug("初始化数据读取失败，连接可能已断开")
+			return true // 结束循环
+		}
+	}
+
+	if n > 0 {
+		data := buffer[:n]
+		return processInitialData(conn, data, initialDataProcessed)
+	}
+
+	return false
+}
+
+// 处理读取到的初始化数据
+func processInitialData(conn ziface.IConnection, data []byte, initialDataProcessed *bool) bool {
+	connID := conn.GetConnID()
+	remoteAddr := conn.RemoteAddr().String()
+
+	// 记录接收到的初始化数据
+	logger.WithFields(logrus.Fields{
+		"connID":     connID,
+		"remoteAddr": remoteAddr,
+		"dataLen":    len(data),
+		"dataHex":    hex.EncodeToString(data),
+		"dataStr":    string(data),
+	}).Info("收到连接初始化数据")
+
+	// 通知监视器收到原始数据
+	GetGlobalMonitor().OnRawDataReceived(conn, data)
+
+	// 处理不同类型的初始化数据
+	processed := false
+
+	// 1. 处理ICCID (20字节数字字符串)
+	if len(data) == 20 && isValidICCIDBytes(data) {
+		iccidStr := string(data)
+		conn.SetProperty(PropKeyICCID, iccidStr)
+		BindDeviceIdToConnection(iccidStr, conn)
+		UpdateDeviceStatus(iccidStr, "online")
+		UpdateLastHeartbeatTime(conn)
+
+		logger.WithFields(logrus.Fields{
+			"connID":     connID,
+			"remoteAddr": remoteAddr,
+			"iccid":      iccidStr,
+		}).Info("处理连接初始化ICCID数据")
+		processed = true
+		*initialDataProcessed = true
+	}
+
+	// 2. 处理link心跳
+	if len(data) == 4 && string(data) == LinkHeartbeat {
+		now := time.Now().Unix()
+		conn.SetProperty(PropKeyLastLink, now)
+		conn.SetProperty(PropKeyConnStatus, ConnStatusActive)
+		UpdateLastHeartbeatTime(conn)
+
+		logger.WithFields(logrus.Fields{
+			"connID":     connID,
+			"remoteAddr": remoteAddr,
+			"timestamp":  now,
+		}).Info("处理连接初始化link心跳")
+		processed = true
+	}
+
+	// 3. 处理十六进制编码数据
+	if !processed && isHexEncodedData(data) {
+		processed = processHexEncodedInitialData(conn, data)
+	}
+
+	// 4. 检查是否为DNY协议数据
+	if !processed && len(data) >= 3 && string(data[:3]) == "DNY" {
+		return handleDNYProtocolDuringInitialization(conn, data, initialDataProcessed)
+	}
+
+	// 如果数据已处理，继续监听更多初始化数据
+	// 如果是未知数据，记录并继续
+	if !processed {
+		logger.WithFields(logrus.Fields{
+			"connID":     connID,
+			"remoteAddr": remoteAddr,
+			"dataLen":    len(data),
+			"dataHex":    hex.EncodeToString(data),
+		}).Debug("收到未知初始化数据，继续监听")
+	}
+
+	return *initialDataProcessed
+}
+
+// 处理十六进制编码的初始化数据
+func processHexEncodedInitialData(conn ziface.IConnection, data []byte) bool {
+	connID := conn.GetConnID()
+	remoteAddr := conn.RemoteAddr().String()
+
+	decoded, err := hex.DecodeString(string(data))
+	if err == nil {
+		logger.WithFields(logrus.Fields{
+			"connID":      connID,
+			"remoteAddr":  remoteAddr,
+			"originalLen": len(data),
+			"decodedLen":  len(decoded),
+			"decodedHex":  hex.EncodeToString(decoded),
+		}).Info("处理连接初始化十六进制编码数据")
+
+		// 递归处理解码后的数据
+		if handleInitialDataContent(conn, decoded) {
+			return true
+		}
+	}
+
+	return false
+}
+
+// 处理初始化阶段的DNY协议数据
+func handleDNYProtocolDuringInitialization(conn ziface.IConnection, data []byte, initialDataProcessed *bool) bool {
+	connID := conn.GetConnID()
+	remoteAddr := conn.RemoteAddr().String()
+
+	logger.WithFields(logrus.Fields{
+		"connID":     connID,
+		"remoteAddr": remoteAddr,
+		"dataLen":    len(data),
+	}).Info("连接初始化阶段收到DNY协议数据，结束初始化处理")
+
+	// 将DNY数据推回给Zinx处理（这需要特殊处理）
+	// 由于我们已经从TCP连接中读取了数据，需要确保这些数据能被Zinx处理
+	// 这里我们设置一个标记，让后续的正常消息处理流程知道初始化已完成
 	conn.SetProperty("InitialDataProcessed", true)
+	*initialDataProcessed = true
+
+	// 由于我们无法直接将数据推回给Zinx，我们将数据保存起来
+	// 并修改Unpack方法来检查这种情况
+	conn.SetProperty("PendingDNYData", data)
+
+	logger.WithFields(logrus.Fields{
+		"connID":     connID,
+		"remoteAddr": remoteAddr,
+	}).Debug("初始化数据处理完成，移交给正常消息处理流程")
+
+	return true
+}
+
+// 结束初始化数据处理
+func finalizeInitialDataProcessing(conn ziface.IConnection, tcpConn *net.TCPConn, connID uint64, remoteAddr string, initialDataProcessed bool) {
+	// 初始化超时或完成，设置标记
+	conn.SetProperty("InitialDataProcessed", true)
+
+	// 恢复正常读取超时
 	if err := tcpConn.SetReadDeadline(time.Now().Add(readDeadLine)); err != nil {
 		logger.WithFields(logrus.Fields{
 			"connID": connID,
@@ -1197,6 +1248,18 @@ func handleConnectionInitialData(conn ziface.IConnection, tcpConn *net.TCPConn) 
 		"remoteAddr": remoteAddr,
 		"processed":  initialDataProcessed,
 	}).Debug("连接初始化数据处理完成")
+}
+
+// tryReadInitialData 尝试从连接中读取初始化数据
+func tryReadInitialData(conn ziface.IConnection) {
+	if tcpConn, ok := conn.GetTCPConnection().(*net.TCPConn); ok {
+		handleConnectionInitialData(conn, tcpConn)
+	} else {
+		logger.WithFields(logrus.Fields{
+			"connID":     conn.GetConnID(),
+			"remoteAddr": conn.RemoteAddr().String(),
+		}).Error("无法获取TCP连接，跳过初始化数据读取")
+	}
 }
 
 // handleInitialDataContent 处理初始化数据内容
@@ -1230,16 +1293,4 @@ func handleInitialDataContent(conn ziface.IConnection, data []byte) bool {
 	}
 
 	return false
-}
-
-// tryReadInitialData 尝试从连接中读取初始化数据
-func tryReadInitialData(conn ziface.IConnection) {
-	if tcpConn, ok := conn.GetTCPConnection().(*net.TCPConn); ok {
-		handleConnectionInitialData(conn, tcpConn)
-	} else {
-		logger.WithFields(logrus.Fields{
-			"connID":     conn.GetConnID(),
-			"remoteAddr": conn.RemoteAddr().String(),
-		}).Error("无法获取TCP连接，跳过初始化数据读取")
-	}
 }

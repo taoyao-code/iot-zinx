@@ -62,88 +62,96 @@ func (dp *DNYPacket) Pack(msg ziface.IMessage) ([]byte, error) {
 
 	// 特殊处理心跳消息 (0xF001 = 61441)
 	if msg.GetMsgID() == uint32(0xF001) {
-		// 心跳消息通常由Zinx框架直接生成，非DNY消息类型
-		logger.WithFields(logrus.Fields{
-			"msgID":   msg.GetMsgID(),
-			"dataLen": msg.GetDataLen(),
-			"dataHex": hex.EncodeToString(msg.GetData()),
-		}).Info("处理Zinx心跳消息，特殊转换为DNY格式")
-
-		// 创建一个DNY消息对象
-		physicalID := uint32(1) // 默认物理ID
-
-		// 提取心跳消息数据中的命令ID
-		cmdData := msg.GetData()
-		cmdID := byte(0xF0)          // 默认命令ID
-		innerCmdData := []byte{0x81} // 默认内部命令
-
-		if len(cmdData) > 0 {
-			innerCmdData = cmdData
-		}
-
-		// 创建缓冲区
-		dataBuff := bytes.NewBuffer([]byte{})
-
-		// 写入包头"DNY" (3字节)
-		if _, err := dataBuff.WriteString(dny_protocol.DnyHeader); err != nil {
-			return nil, err
-		}
-
-		// 计算数据部分长度（物理ID + 消息ID + 命令 + 数据 + 校验）
-		dataPartLen := 4 + 2 + 1 + uint32(len(innerCmdData)) + 2
-
-		// 写入数据长度 (2字节，小端序)
-		if err := binary.Write(dataBuff, binary.LittleEndian, uint16(dataPartLen)); err != nil {
-			return nil, err
-		}
-
-		// 写入物理ID (4字节，小端序)
-		if err := binary.Write(dataBuff, binary.LittleEndian, physicalID); err != nil {
-			return nil, err
-		}
-
-		// 写入消息ID (2字节，小端序) - 使用时间戳低16位作为消息ID
-		messageID := uint16(time.Now().Unix() & 0xFFFF)
-		if err := binary.Write(dataBuff, binary.LittleEndian, messageID); err != nil {
-			return nil, err
-		}
-
-		// 写入命令码 (1字节)
-		if err := dataBuff.WriteByte(cmdID); err != nil {
-			return nil, err
-		}
-
-		// 写入内部命令数据
-		if len(innerCmdData) > 0 {
-			if _, err := dataBuff.Write(innerCmdData); err != nil {
-				return nil, err
-			}
-		}
-
-		// 获取完整的数据包（不包含校验和）
-		packetData := dataBuff.Bytes()
-
-		// 计算校验和（从包头到数据的累加和）
-		var checksum uint16
-		for _, b := range packetData {
-			checksum += uint16(b)
-		}
-
-		// 写入校验码 (2字节，小端模式)
-		if err := binary.Write(dataBuff, binary.LittleEndian, checksum); err != nil {
-			return nil, err
-		}
-
-		// 获取完整的数据包（包含校验和）
-		packetData = dataBuff.Bytes()
-
-		// 记录十六进制日志
-		logger.Debugf("Pack心跳消息 -> 命令: 0x%02X, 物理ID: 0x%08X, 数据长度: %d, 数据: %s",
-			cmdID, physicalID, len(innerCmdData), hex.EncodeToString(packetData))
-
-		return packetData, nil
+		return dp.packHeartbeatMessage(msg)
 	}
 
+	// 处理常规DNY消息
+	return dp.packDNYMessage(msg)
+}
+
+// packHeartbeatMessage 处理心跳消息的封包
+func (dp *DNYPacket) packHeartbeatMessage(msg ziface.IMessage) ([]byte, error) {
+	// 心跳消息通常由Zinx框架直接生成，非DNY消息类型
+	logger.WithFields(logrus.Fields{
+		"msgID":   msg.GetMsgID(),
+		"dataLen": msg.GetDataLen(),
+		"dataHex": hex.EncodeToString(msg.GetData()),
+	}).Info("处理Zinx心跳消息，特殊转换为DNY格式")
+
+	// 创建一个DNY消息对象
+	physicalID := uint32(1) // 默认物理ID
+
+	// 提取心跳消息数据中的命令ID
+	cmdData := msg.GetData()
+	cmdID := byte(0xF0)          // 默认命令ID
+	innerCmdData := []byte{0x81} // 默认内部命令
+
+	if len(cmdData) > 0 {
+		innerCmdData = cmdData
+	}
+
+	// 创建缓冲区
+	dataBuff := bytes.NewBuffer([]byte{})
+
+	// 写入包头"DNY" (3字节)
+	if _, err := dataBuff.WriteString(dny_protocol.DnyHeader); err != nil {
+		return nil, err
+	}
+
+	// 计算数据部分长度（物理ID + 消息ID + 命令 + 数据 + 校验）
+	dataPartLen := 4 + 2 + 1 + uint32(len(innerCmdData)) + 2
+
+	// 写入数据长度 (2字节，小端序)
+	if err := binary.Write(dataBuff, binary.LittleEndian, uint16(dataPartLen)); err != nil {
+		return nil, err
+	}
+
+	// 写入物理ID (4字节，小端序)
+	if err := binary.Write(dataBuff, binary.LittleEndian, physicalID); err != nil {
+		return nil, err
+	}
+
+	// 写入消息ID (2字节，小端序) - 使用时间戳低16位作为消息ID
+	messageID := uint16(time.Now().Unix() & 0xFFFF)
+	if err := binary.Write(dataBuff, binary.LittleEndian, messageID); err != nil {
+		return nil, err
+	}
+
+	// 写入命令码 (1字节)
+	if err := dataBuff.WriteByte(cmdID); err != nil {
+		return nil, err
+	}
+
+	// 写入内部命令数据
+	if len(innerCmdData) > 0 {
+		if _, err := dataBuff.Write(innerCmdData); err != nil {
+			return nil, err
+		}
+	}
+
+	// 获取完整的数据包（不包含校验和）
+	packetData := dataBuff.Bytes()
+
+	// 计算校验和（从包头到数据的累加和）
+	checksum := calculatePacketChecksum(packetData)
+
+	// 写入校验码 (2字节，小端模式)
+	if err := binary.Write(dataBuff, binary.LittleEndian, checksum); err != nil {
+		return nil, err
+	}
+
+	// 获取完整的数据包（包含校验和）
+	packetData = dataBuff.Bytes()
+
+	// 记录十六进制日志
+	logger.Debugf("Pack心跳消息 -> 命令: 0x%02X, 物理ID: 0x%08X, 数据长度: %d, 数据: %s",
+		cmdID, physicalID, len(innerCmdData), hex.EncodeToString(packetData))
+
+	return packetData, nil
+}
+
+// packDNYMessage 处理常规DNY消息的封包
+func (dp *DNYPacket) packDNYMessage(msg ziface.IMessage) ([]byte, error) {
 	// 转换为DNY消息
 	dnyMsg, ok := dny_protocol.IMessageToDnyMessage(msg)
 	if !ok {
@@ -194,10 +202,7 @@ func (dp *DNYPacket) Pack(msg ziface.IMessage) ([]byte, error) {
 	packetData := dataBuff.Bytes()
 
 	// 计算校验和（从包头到数据的累加和）
-	var checksum uint16
-	for _, b := range packetData {
-		checksum += uint16(b)
-	}
+	checksum := calculatePacketChecksum(packetData)
 
 	// 写入校验码 (2字节，小端模式)
 	if err := binary.Write(dataBuff, binary.LittleEndian, checksum); err != nil {
@@ -221,87 +226,93 @@ func (dp *DNYPacket) Pack(msg ziface.IMessage) ([]byte, error) {
 // 将二进制数据解析为IMessage对象，支持十六进制编码和原始数据
 func (dp *DNYPacket) Unpack(binaryData []byte) (ziface.IMessage, error) {
 	// 首先尝试检测数据是否为十六进制编码字符串
-	actualData := binaryData
+	actualData := dp.decodeHexDataIfNeeded(binaryData)
 
+	// 特殊处理：如果数据不符合DNY协议格式，创建特殊消息类型
+	if !isDNYProtocolData(actualData) {
+		return dp.handleNonDNYData(actualData)
+	}
+
+	// 处理DNY协议数据
+	return dp.handleDNYProtocolData(actualData)
+}
+
+// decodeHexDataIfNeeded 如果数据是十六进制编码的，则解码
+func (dp *DNYPacket) decodeHexDataIfNeeded(data []byte) []byte {
 	// 检查是否为十六进制字符串（所有字节都是ASCII十六进制字符）
-	if isHexString(binaryData) {
+	if isHexString(data) {
 		// 解码十六进制字符串为字节数组
-		decoded, err := hex.DecodeString(string(binaryData))
+		decoded, err := hex.DecodeString(string(data))
 		if err != nil {
-			return nil, fmt.Errorf("十六进制解码失败: %v", err)
+			// 解码失败，返回原始数据
+			return data
 		}
-		actualData = decoded
 
 		if dp.logHexDump {
-			logger.Debugf("检测到十六进制编码数据，解码后长度: %d -> %d", len(binaryData), len(actualData))
+			logger.Debugf("检测到十六进制编码数据，解码后长度: %d -> %d", len(data), len(decoded))
 		}
+		return decoded
 	}
 
-	// 特殊处理：如果数据不符合DNY协议格式，我们创建一个特殊的消息类型来处理
-	// 这样可以让非DNY协议数据（ICCID、link心跳等）通过正常的路由机制处理
-	if !isDNYProtocolData(actualData) {
-		// 检查数据长度是否足够包含最小包长度
-		if len(actualData) < dny_protocol.DnyHeaderLen {
-			// 注意：使用自定义的ErrNotEnoughData错误
-			// 这确保了zinx框架可以正确处理不完整数据的情况
-			logger.WithFields(logrus.Fields{
-				"dataLen": len(actualData),
-				"minLen":  dny_protocol.DnyHeaderLen,
-			}).Debug("数据不足以解析头部，等待更多数据")
-			return nil, ErrNotEnoughData
-		}
+	return data
+}
 
-		// 创建一个特殊的消息类型（msgID=0）来处理非DNY协议数据
-		// 这些数据将被路由到一个特殊的处理器
-		logger.WithFields(logrus.Fields{
-			"dataLen": len(actualData),
-			"dataHex": hex.EncodeToString(actualData),
-		}).Info("检测到非DNY协议数据，创建特殊消息进行处理")
-
-		// 创建一个特殊消息，msgID=0表示非DNY协议数据
-		msg := dny_protocol.NewMessage(0, 0, actualData)
-		return msg, nil
-	}
-
-	// 以下是DNY协议的正常解析逻辑
+// handleNonDNYData 处理非DNY协议数据
+func (dp *DNYPacket) handleNonDNYData(data []byte) (ziface.IMessage, error) {
 	// 检查数据长度是否足够包含最小包长度
-	if len(actualData) < dny_protocol.MinPackageLen {
+	if len(data) < dny_protocol.DnyHeaderLen {
+		// 注意：使用自定义的ErrNotEnoughData错误
+		// 这确保了zinx框架可以正确处理不完整数据的情况
 		logger.WithFields(logrus.Fields{
-			"dataLen": len(actualData),
+			"dataLen": len(data),
+			"minLen":  dny_protocol.DnyHeaderLen,
+		}).Debug("数据不足以解析头部，等待更多数据")
+		return nil, ErrNotEnoughData
+	}
+
+	// 创建一个特殊的消息类型（msgID=0）来处理非DNY协议数据
+	// 这些数据将被路由到一个特殊的处理器
+	logger.WithFields(logrus.Fields{
+		"dataLen": len(data),
+		"dataHex": hex.EncodeToString(data),
+	}).Info("检测到非DNY协议数据，创建特殊消息进行处理")
+
+	// 创建一个特殊消息，msgID=0表示非DNY协议数据
+	msg := dny_protocol.NewMessage(0, 0, data)
+	return msg, nil
+}
+
+// handleDNYProtocolData 处理DNY协议数据
+func (dp *DNYPacket) handleDNYProtocolData(data []byte) (ziface.IMessage, error) {
+	// 检查数据长度是否足够包含最小包长度
+	if len(data) < dny_protocol.MinPackageLen {
+		logger.WithFields(logrus.Fields{
+			"dataLen": len(data),
 			"minLen":  dny_protocol.MinPackageLen,
 		}).Debug("数据不足以解析DNY协议包，等待更多数据")
 		return nil, ErrNotEnoughData
 	}
 
 	// 检查包头是否为"DNY"
-	if !bytes.HasPrefix(actualData, []byte(dny_protocol.DnyHeader)) {
-		return nil, fmt.Errorf("无效的DNY协议包头: %s", hex.EncodeToString(actualData[:3]))
+	if !bytes.HasPrefix(data, []byte(dny_protocol.DnyHeader)) {
+		return nil, fmt.Errorf("无效的DNY协议包头: %s", hex.EncodeToString(data[:3]))
 	}
 
 	// 解析数据长度 (第4-5字节，小端序)
-	dataLen := binary.LittleEndian.Uint16(actualData[3:5])
+	dataLen := binary.LittleEndian.Uint16(data[3:5])
 
 	// 检查数据包长度是否完整
 	totalLen := dny_protocol.DnyHeaderLen + int(dataLen)
-	if len(actualData) < totalLen {
+	if len(data) < totalLen {
 		logger.WithFields(logrus.Fields{
-			"dataLen":  len(actualData),
+			"dataLen":  len(data),
 			"totalLen": totalLen,
 		}).Debug("数据不足以解析完整DNY消息，等待更多数据")
 		return nil, ErrNotEnoughData
 	}
 
-	// 解析物理ID (第6-9字节，小端序) - 现在使用完整的4字节物理ID
-	physicalId := binary.LittleEndian.Uint32(actualData[5:9])
-
-	// 解析消息ID (第10-11字节，小端序)
-	messageId := binary.LittleEndian.Uint16(actualData[9:11])
-
-	// 解析命令码 (第12字节)
-	command := uint32(actualData[11])
-
-	// 计算数据部分长度（总数据长度 - 物理ID(4) - 消息ID(2) - 命令(1) - 校验(2)）
-	payloadLen := int(dataLen) - 4 - 2 - 1 - 2
+	// 解析DNY协议字段
+	physicalId, messageId, command, payloadLen := dp.parseDNYFields(data, dataLen)
 
 	// 输出DNY协议解析信息
 	logger.WithFields(logrus.Fields{
@@ -309,7 +320,7 @@ func (dp *DNYPacket) Unpack(binaryData []byte) (ziface.IMessage, error) {
 		"physicalID": physicalId,
 		"messageID":  messageId,
 		"payloadLen": payloadLen,
-		"totalLen":   len(actualData),
+		"totalLen":   len(data),
 	}).Error("解析DNY协议数据，将路由到对应处理器")
 
 	// 创建DNY消息对象
@@ -317,20 +328,46 @@ func (dp *DNYPacket) Unpack(binaryData []byte) (ziface.IMessage, error) {
 
 	// 拷贝数据部分（如果有）
 	if payloadLen > 0 {
-		copy(msg.GetData(), actualData[12:12+payloadLen])
+		copy(msg.GetData(), data[12:12+payloadLen])
 	}
 
 	// 保存原始数据
-	msg.SetRawData(actualData[:totalLen])
+	msg.SetRawData(data[:totalLen])
 
 	// 记录十六进制日志
 	if dp.logHexDump {
 		logger.Debugf("Unpack DNY消息 <- 命令: 0x%02X, 物理ID: 0x%08X, 消息ID: 0x%04X, 数据长度: %d, 数据: %s",
 			command, physicalId, messageId, payloadLen,
-			hex.EncodeToString(actualData[:totalLen]))
+			hex.EncodeToString(data[:totalLen]))
 	}
 
 	return msg, nil
+}
+
+// parseDNYFields 解析DNY协议的字段
+func (dp *DNYPacket) parseDNYFields(data []byte, dataLen uint16) (uint32, uint16, uint32, int) {
+	// 解析物理ID (第6-9字节，小端序) - 现在使用完整的4字节物理ID
+	physicalId := binary.LittleEndian.Uint32(data[5:9])
+
+	// 解析消息ID (第10-11字节，小端序)
+	messageId := binary.LittleEndian.Uint16(data[9:11])
+
+	// 解析命令码 (第12字节)
+	command := uint32(data[11])
+
+	// 计算数据部分长度（总数据长度 - 物理ID(4) - 消息ID(2) - 命令(1) - 校验(2)）
+	payloadLen := int(dataLen) - 4 - 2 - 1 - 2
+
+	return physicalId, messageId, command, payloadLen
+}
+
+// calculatePacketChecksum 计算校验和（从包头到数据的累加和）
+func calculatePacketChecksum(data []byte) uint16 {
+	var checksum uint16
+	for _, b := range data {
+		checksum += uint16(b)
+	}
+	return checksum
 }
 
 // isDNYProtocolData 检查数据是否符合DNY协议格式
