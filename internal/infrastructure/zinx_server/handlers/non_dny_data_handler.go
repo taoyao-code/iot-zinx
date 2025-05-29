@@ -2,19 +2,23 @@ package handlers
 
 import (
 	"encoding/hex"
-	"fmt"
 	"time"
 
 	"github.com/aceld/zinx/ziface"
-	"github.com/bujia-iot/iot-zinx/internal/domain/dny_protocol"
+	"github.com/aceld/zinx/znet"
+	"github.com/bujia-iot/iot-zinx/internal/app"
 	"github.com/bujia-iot/iot-zinx/internal/infrastructure/logger"
 	"github.com/bujia-iot/iot-zinx/internal/infrastructure/zinx_server"
 	"github.com/sirupsen/logrus"
 )
 
-// NonDNYDataHandler 处理非DNY协议数据的处理器
-// 用于处理ICCID、link心跳等非DNY协议格式的数据
-type NonDNYDataHandler struct{}
+// LinkHeartbeat 模块心跳字符串
+const LinkHeartbeat = "link"
+
+// NonDNYDataHandler 处理非DNY协议数据 (ICCID、link心跳等)
+type NonDNYDataHandler struct {
+	znet.BaseRouter
+}
 
 // NewNonDNYDataHandler 创建非DNY数据处理器
 func NewNonDNYDataHandler() ziface.IRouter {
@@ -28,26 +32,10 @@ func (h *NonDNYDataHandler) PreHandle(request ziface.IRequest) {
 
 // Handle 处理非DNY协议数据
 func (h *NonDNYDataHandler) Handle(request ziface.IRequest) {
+	// 获取消息和连接
 	msg := request.GetMessage()
 	conn := request.GetConnection()
-
-	// 强制输出调试信息
-	fmt.Printf("\n🔥🔥🔥 NonDNYDataHandler.Handle被调用! msgID: %d 🔥🔥🔥\n", msg.GetMsgID())
-	fmt.Printf("数据长度: %d\n", msg.GetDataLen())
-	fmt.Printf("数据(HEX): %s\n", hex.EncodeToString(msg.GetData()))
-
-	// 转换为DNY消息以获取原始数据
-	dnyMsg, ok := dny_protocol.IMessageToDnyMessage(msg)
-	if !ok {
-		logger.WithFields(logrus.Fields{
-			"connID": conn.GetConnID(),
-			"msgID":  msg.GetMsgID(),
-		}).Error("消息类型转换失败，无法处理非DNY协议数据")
-		return
-	}
-
-	// 获取原始数据
-	data := dnyMsg.GetData()
+	data := msg.GetData()
 
 	logger.WithFields(logrus.Fields{
 		"connID":     conn.GetConnID(),
@@ -55,19 +43,10 @@ func (h *NonDNYDataHandler) Handle(request ziface.IRequest) {
 		"dataLen":    len(data),
 		"dataHex":    hex.EncodeToString(data),
 		"dataStr":    string(data),
-	}).Info("处理非DNY协议数据")
+	}).Debug("收到非DNY协议数据")
 
-	// 处理不同类型的非DNY协议数据
-	processed := h.processNonDNYData(conn, data)
-
-	if !processed {
-		logger.WithFields(logrus.Fields{
-			"connID":     conn.GetConnID(),
-			"remoteAddr": conn.RemoteAddr().String(),
-			"dataLen":    len(data),
-			"dataHex":    hex.EncodeToString(data),
-		}).Warn("未能识别的非DNY协议数据")
-	}
+	// 处理不同类型的非DNY数据
+	h.processNonDNYData(conn, data)
 }
 
 // PostHandle 后处理
@@ -75,7 +54,7 @@ func (h *NonDNYDataHandler) PostHandle(request ziface.IRequest) {
 	// 可以在这里添加后处理逻辑，比如清理、统计等
 }
 
-// processNonDNYData 处理具体的非DNY协议数据
+// processNonDNYData 处理非DNY协议数据
 func (h *NonDNYDataHandler) processNonDNYData(conn ziface.IConnection, data []byte) bool {
 	// 1. 处理ICCID (20字节数字字符串)
 	if len(data) == 20 && h.isValidICCIDBytes(data) {
@@ -83,7 +62,7 @@ func (h *NonDNYDataHandler) processNonDNYData(conn ziface.IConnection, data []by
 	}
 
 	// 2. 处理link心跳
-	if len(data) == 4 && string(data) == zinx_server.LinkHeartbeat {
+	if len(data) == 4 && string(data) == LinkHeartbeat {
 		return h.processLinkHeartbeat(conn, data)
 	}
 
@@ -110,7 +89,12 @@ func (h *NonDNYDataHandler) processICCID(conn ziface.IConnection, data []byte) b
 		"iccid":      iccidStr,
 	}).Info("收到并处理ICCID数据")
 
-	fmt.Printf("✅ ICCID处理成功: %s\n", iccidStr)
+	// 通知业务层
+	deviceService := app.GetServiceManager().DeviceService
+	if deviceService != nil {
+		go deviceService.HandleDeviceOnline(iccidStr, iccidStr)
+	}
+
 	return true
 }
 
@@ -129,39 +113,36 @@ func (h *NonDNYDataHandler) processLinkHeartbeat(conn ziface.IConnection, data [
 		"remoteAddr": conn.RemoteAddr().String(),
 		"heartbeat":  string(data),
 		"timestamp":  now,
-	}).Info("收到并处理link心跳")
+	}).Debug("收到并处理link心跳")
 
-	fmt.Printf("✅ Link心跳处理成功: %s\n", string(data))
 	return true
 }
 
 // processHexEncodedData 处理十六进制编码数据
 func (h *NonDNYDataHandler) processHexEncodedData(conn ziface.IConnection, data []byte) bool {
-	// 解码十六进制字符串
+	logger.WithFields(logrus.Fields{
+		"connID":     conn.GetConnID(),
+		"remoteAddr": conn.RemoteAddr().String(),
+		"dataLen":    len(data),
+		"dataHex":    hex.EncodeToString(data),
+	}).Debug("收到十六进制编码数据，尝试解码")
+
+	// 解码十六进制字符串为二进制数据
 	decoded, err := hex.DecodeString(string(data))
 	if err != nil {
 		logger.WithFields(logrus.Fields{
 			"connID":     conn.GetConnID(),
 			"remoteAddr": conn.RemoteAddr().String(),
 			"error":      err.Error(),
-			"dataHex":    hex.EncodeToString(data),
-		}).Error("十六进制解码失败")
+		}).Error("十六进制数据解码失败")
 		return false
 	}
-
-	logger.WithFields(logrus.Fields{
-		"connID":      conn.GetConnID(),
-		"remoteAddr":  conn.RemoteAddr().String(),
-		"originalLen": len(data),
-		"decodedLen":  len(decoded),
-		"decodedHex":  hex.EncodeToString(decoded),
-	}).Info("处理十六进制编码数据")
 
 	// 递归处理解码后的数据
 	return h.processNonDNYData(conn, decoded)
 }
 
-// processUnknownData 处理未知数据
+// processUnknownData 处理未知类型的数据
 func (h *NonDNYDataHandler) processUnknownData(conn ziface.IConnection, data []byte) bool {
 	logger.WithFields(logrus.Fields{
 		"connID":     conn.GetConnID(),
@@ -169,13 +150,9 @@ func (h *NonDNYDataHandler) processUnknownData(conn ziface.IConnection, data []b
 		"dataLen":    len(data),
 		"dataHex":    hex.EncodeToString(data),
 		"dataStr":    string(data),
-	}).Debug("收到未知的非DNY协议数据")
+	}).Warn("收到未知类型的非DNY协议数据")
 
-	fmt.Printf("❓ 未知数据: 长度=%d, HEX=%s, ASCII=%s\n",
-		len(data), hex.EncodeToString(data), string(data))
-
-	// 即使是未知数据，也返回true表示已处理，避免错误日志
-	return true
+	return false
 }
 
 // isValidICCIDBytes 验证字节数组是否为有效的ICCID格式
@@ -197,24 +174,19 @@ func (h *NonDNYDataHandler) isValidICCIDBytes(data []byte) bool {
 
 // isHexEncodedData 检查数据是否为十六进制编码的字符串
 func (h *NonDNYDataHandler) isHexEncodedData(data []byte) bool {
-	// 特殊情况处理：很短的数据通常不是十六进制编码
+	// 短数据通常不是十六进制编码字符串
 	if len(data) < 6 {
 		return false
 	}
 
-	// 如果数据以"DNY"开头，不认为是十六进制编码
-	if len(data) >= 3 && string(data[:3]) == "DNY" {
+	// 必须是偶数长度
+	if len(data)%2 != 0 {
 		return false
 	}
 
-	// 必须是偶数长度且长度大于0
-	if len(data) == 0 || len(data)%2 != 0 {
-		return false
-	}
-
-	// 检查是否都是ASCII十六进制字符
+	// 检查每个字节是否为十六进制字符
 	for _, b := range data {
-		if !((b >= '0' && b <= '9') || (b >= 'A' && b <= 'F') || (b >= 'a' && b <= 'f')) {
+		if !((b >= '0' && b <= '9') || (b >= 'a' && b <= 'f') || (b >= 'A' && b <= 'F')) {
 			return false
 		}
 	}

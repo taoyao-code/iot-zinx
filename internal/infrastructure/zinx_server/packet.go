@@ -122,17 +122,22 @@ func (dp *DNYPacket) Pack(msg ziface.IMessage) ([]byte, error) {
 		}
 	}
 
-	// 写入校验码 (2字节，暂时设为0x00 0x00)
-	if err := binary.Write(dataBuff, binary.LittleEndian, uint16(0)); err != nil {
+	// 获取完整的数据包（不包含校验和）
+	packetData := dataBuff.Bytes()
+
+	// 计算校验和（从包头到数据的累加和）
+	var checksum uint16
+	for _, b := range packetData {
+		checksum += uint16(b)
+	}
+
+	// 写入校验码 (2字节，小端模式)
+	if err := binary.Write(dataBuff, binary.LittleEndian, checksum); err != nil {
 		return nil, err
 	}
 
-	// 获取完整的数据包
-	packetData := dataBuff.Bytes()
-
-	// 在发送数据前调用钩子函数
-	// 注意：这里缺少连接对象，因为Pack方法没有连接参数
-	// 实际发送时会在连接层调用OnRawDataSent
+	// 获取完整的数据包（包含校验和）
+	packetData = dataBuff.Bytes()
 
 	// 记录十六进制日志
 	if dp.logHexDump {

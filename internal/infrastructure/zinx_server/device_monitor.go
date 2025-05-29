@@ -47,12 +47,10 @@ func StartDeviceMonitor() error {
 
 	// 启动定时检查
 	go func() {
-		fmt.Println("设备状态监控定时器启动")
 		ticker := time.NewTicker(checkInterval)
 		defer ticker.Stop()
 
 		for range ticker.C {
-			fmt.Printf("执行设备心跳检查，当前时间: %s\n", time.Now().Format("2006-01-02 15:04:05"))
 			checkDeviceHeartbeats(heartbeatTimeout)
 		}
 	}()

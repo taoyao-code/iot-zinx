@@ -88,6 +88,11 @@ func StartTCPServer() error {
 	// 检查注册的路由数量
 	checkRouterCount(server)
 
+	// 初始化命令管理器
+	cmdManager := zinx_server.GetCommandManager()
+	cmdManager.Start()
+	logger.Info("命令管理器已启动")
+
 	// 启动设备状态监控服务
 	zinx_server.StartDeviceMonitor()
 

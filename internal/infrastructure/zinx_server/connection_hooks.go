@@ -10,6 +10,7 @@ import (
 
 	"github.com/aceld/zinx/ziface"
 	"github.com/bujia-iot/iot-zinx/internal/app"
+	"github.com/bujia-iot/iot-zinx/internal/domain/dny_protocol"
 	"github.com/bujia-iot/iot-zinx/internal/infrastructure/logger"
 	"github.com/bujia-iot/iot-zinx/internal/infrastructure/zinx_server/common"
 	"github.com/sirupsen/logrus"
@@ -908,58 +909,66 @@ func sendRegisterResponse(conn ziface.IConnection, physicalID uint32, messageID 
 	return true
 }
 
-// SendDNYResponse 发送DNY协议响应（供handlers使用的公共函数）
-func SendDNYResponse(conn ziface.IConnection, physicalID uint32, messageID uint16, command uint8, responseData []byte) error {
-	// 构建完整的DNY协议包
-	packet := buildDNYResponsePacket(physicalID, messageID, command, responseData)
+// SendDNYResponse 发送DNY协议响应
+func SendDNYResponse(conn ziface.IConnection, physicalId uint32, messageId uint16, command uint8, data []byte) error {
+	// 构建响应数据包
+	packet := buildDNYResponsePacket(physicalId, messageId, command, data)
 
-	// 直接输出到控制台
-	now := time.Now().Format("2006-01-02 15:04:05.000")
-	fmt.Printf("\n[%s] [RESPONSE_DATA] 发送响应 - ConnID: %d, Remote: %s\n",
-		now, conn.GetConnID(), conn.RemoteAddr().String())
-	fmt.Printf("命令: 0x%02X, 物理ID: %d, 消息ID: %d\n", command, physicalID, messageID)
-	fmt.Printf("数据(HEX): %X\n", packet)
-	fmt.Println("---------------------")
-
-	// 直接写入标准输出，确保在控制台可见
-	fmt.Printf("\n[SEND_DATA] ConnID: %d, Command: 0x%02X, PhysicalID: %d, MessageID: %d\n",
-		conn.GetConnID(), command, physicalID, messageID)
-	fmt.Printf("Response Data(HEX): %X\n", packet)
-	fmt.Println("----------------------------------------")
-
-	// 记录要发送的响应数据包
+	// 日志记录发送的数据包
 	logger.WithFields(logrus.Fields{
 		"connID":     conn.GetConnID(),
-		"physicalID": physicalID,
-		"messageID":  messageID,
+		"physicalId": fmt.Sprintf("0x%08X", physicalId),
+		"messageId":  messageId,
 		"command":    fmt.Sprintf("0x%02X", command),
-		"dataHex":    fmt.Sprintf("%X", packet),
+		"dataHex":    hex.EncodeToString(packet),
 		"dataLen":    len(packet),
-	}).Info("发送响应数据包")
+	}).Debug("发送DNY响应数据包")
 
-	// 通知TCP监视器发送数据
-	GetGlobalMonitor().OnRawDataSent(conn, packet)
+	// 将命令注册到命令管理器进行跟踪，除非是不需要回复的命令
+	if needConfirmation(command) {
+		GetCommandManager().RegisterCommand(conn, physicalId, messageId, command, data)
+	}
 
-	// 使用SendBuffMsg发送完整的DNY协议包
-	if err := conn.SendBuffMsg(0, packet); err != nil {
+	// 发送数据包
+	err := conn.SendBuffMsg(0, packet)
+	if err != nil {
 		logger.WithFields(logrus.Fields{
 			"connID":     conn.GetConnID(),
-			"physicalID": physicalID,
-			"messageID":  messageID,
+			"physicalId": fmt.Sprintf("0x%08X", physicalId),
+			"messageId":  messageId,
 			"command":    fmt.Sprintf("0x%02X", command),
 			"error":      err.Error(),
 		}).Error("发送DNY响应失败")
 		return err
 	}
 
-	logger.WithFields(logrus.Fields{
-		"connID":     conn.GetConnID(),
-		"physicalID": physicalID,
-		"messageID":  messageID,
-		"command":    fmt.Sprintf("0x%02X", command),
-	}).Debug("已发送DNY响应")
+	// 通知监视器发送了原始数据
+	GetGlobalMonitor().OnRawDataSent(conn, packet)
 
 	return nil
+}
+
+// needConfirmation 判断命令是否需要确认回复
+func needConfirmation(command uint8) bool {
+	// 心跳类命令不需要确认
+	if command == dny_protocol.CmdHeartbeat ||
+		command == uint8(dny_protocol.CmdSlaveHeartbeat) ||
+		command == dny_protocol.CmdMainHeartbeat {
+		return false
+	}
+
+	// 查询设备状态命令需要确认
+	if command == dny_protocol.CmdNetworkStatus {
+		return true
+	}
+
+	// 充电控制命令需要确认
+	if command == dny_protocol.CmdChargeControl {
+		return true
+	}
+
+	// 其他命令根据实际需求确定是否需要确认
+	return true
 }
 
 // ConnectionInfo 连接信息结构体
