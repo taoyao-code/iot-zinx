@@ -633,7 +633,7 @@ func handleHostHeartbeat(conn ziface.IConnection, data []byte, physicalID uint32
 	}).Info("处理主机状态心跳包")
 
 	// 主机状态心跳包无需应答
-	return true
+	return sendHeartbeatResponse(conn, physicalID, messageID, 0x11)
 }
 
 // handleGetServerTime 处理获取服务器时间请求
@@ -713,7 +713,7 @@ func handleDeviceStatus(conn ziface.IConnection, data []byte, physicalID uint32,
 	}).Info("处理设备状态包")
 
 	// 设备状态包无需应答
-	return true
+	return sendHeartbeatResponse(conn, physicalID, messageID, 0x21)
 }
 
 // buildDNYResponsePacket 构建DNY协议响应数据包
