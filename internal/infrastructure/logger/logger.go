@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/bujia-iot/iot-zinx/internal/infrastructure/config"
 	"github.com/sirupsen/logrus"
@@ -78,28 +79,68 @@ func InitWithConsole(cfg *config.LoggerConfig) error {
 		})
 	}
 
+	// 直接在控制台输出测试信息
+	fmt.Println("\n===== 日志系统初始化开始 =====")
+	fmt.Printf("日志级别: %s\n", cfg.Level)
+	fmt.Printf("日志格式: %s\n", cfg.Format)
+	fmt.Printf("日志文件路径: %s\n", cfg.FilePath)
+
 	// 设置同时输出到控制台和文件
 	writers := []io.Writer{os.Stdout}
 
 	// 如果配置了文件路径，添加文件输出
 	if cfg.FilePath != "" {
-		logDir := filepath.Dir(cfg.FilePath)
+		// 获取绝对路径
+		absPath, err := filepath.Abs(cfg.FilePath)
+		if err != nil {
+			fmt.Printf("获取日志文件绝对路径失败: %v\n", err)
+			absPath = cfg.FilePath
+		}
+		fmt.Printf("日志文件绝对路径: %s\n", absPath)
+
+		logDir := filepath.Dir(absPath)
+		fmt.Printf("创建日志目录: %s\n", logDir)
+
 		if err := os.MkdirAll(logDir, 0o755); err != nil {
+			fmt.Printf("创建日志目录失败: %v\n", err)
 			return fmt.Errorf("failed to create log directory: %w", err)
 		}
 
-		// 创建日志文件
-		file, err := os.OpenFile(cfg.FilePath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o666)
+		// 测试文件权限
+		testFileName := filepath.Join(logDir, "test_permission.tmp")
+		testFile, err := os.OpenFile(testFileName, os.O_CREATE|os.O_WRONLY, 0o666)
 		if err != nil {
+			fmt.Printf("测试文件权限失败: %v\n", err)
+		} else {
+			testFile.WriteString("测试写入权限")
+			testFile.Close()
+			os.Remove(testFileName)
+			fmt.Println("文件权限测试成功")
+		}
+
+		// 创建日志文件
+		fmt.Printf("打开日志文件: %s\n", absPath)
+		file, err := os.OpenFile(absPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o666)
+		if err != nil {
+			fmt.Printf("打开日志文件失败: %v\n", err)
 			return fmt.Errorf("failed to open log file: %w", err)
 		}
 
+		fmt.Printf("日志文件已打开: %v\n", file.Name())
 		writers = append(writers, file)
 	}
 
 	// 创建多路输出
 	multiWriter := io.MultiWriter(writers...)
 	log.SetOutput(multiWriter)
+
+	// 测试直接写入
+	fmt.Println("===== 测试直接写入 =====")
+	testString := fmt.Sprintf("测试日志时间: %s\n", time.Now().Format("2006-01-02 15:04:05.000"))
+	multiWriter.Write([]byte(testString))
+	fmt.Printf("测试写入完成: %s\n", testString)
+
+	fmt.Println("===== 日志系统初始化完成 =====\n")
 
 	// 确保日志立即可见
 	log.Info("日志系统初始化完成，同时输出到控制台和文件")

@@ -1,0 +1,37 @@
+# .air.toml
+# 项目根目录，相对于此配置文件的位置
+root = "."
+# 临时文件目录，用于存放构建产物
+tmp_dir = "tmp"
+
+[build]
+  # 构建应用的主命令
+  # 我们将编译 cmd/gateway/main.go 并将可执行文件输出到 tmp/main
+  cmd = "go build -o ./tmp/main ./cmd/gateway"
+  # air 将运行这个编译后的二进制文件
+  bin = "tmp/main"
+  # 监听这些后缀的文件变化
+  include_ext = ["go", "tpl", "tmpl", "html", "yaml", "toml"]
+  # 忽略这些目录下的文件变化
+  exclude_dir = ["assets", "tmp", "vendor", "bin", "logs", "docs", "examples", "test"]
+  # 每次构建前执行的命令
+  # pre_cmd = ["echo 'building...'"]
+  # 构建后执行的命令
+  # post_cmd = ["echo 'built!'"]
+  # 如果为 true，则在构建失败时停止运行
+  stop_on_error = true
+  # 发送 SIGTERM 信号给旧进程，等待 delay 毫秒后再发送 SIGKILL
+  kill_delay = 500 # ms
+
+[log]
+  # 显示日志时间
+  time = true
+  # 主日志颜色
+  main_only = false
+
+[misc]
+  # 退出时删除 tmp 目录
+  clean_on_exit = true
+
+[screen]
+  clear_on_rebuild = true

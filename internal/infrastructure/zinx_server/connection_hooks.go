@@ -516,6 +516,14 @@ func handleDNYProtocol(conn ziface.IConnection, data []byte) bool {
 	// 解析命令
 	command := data[11]
 
+	// 直接输出到控制台
+	now := time.Now().Format("2006-01-02 15:04:05.000")
+	fmt.Printf("\n[%s] [REQUEST_DATA] 收到请求 - ConnID: %d, Remote: %s\n",
+		now, conn.GetConnID(), conn.RemoteAddr().String())
+	fmt.Printf("命令: 0x%02X, 物理ID: %d, 消息ID: %d\n", command, physicalID, messageID)
+	fmt.Printf("数据(HEX): %X\n", data)
+	fmt.Println("---------------------")
+
 	// 在标准输出直接打印明显的命令信息
 	fmt.Printf("\n[RECEIVED_COMMAND] ConnID: %d, Command: 0x%02X, PhysicalID: %d, MessageID: %d\n",
 		conn.GetConnID(), command, physicalID, messageID)
@@ -873,6 +881,14 @@ func sendRegisterResponse(conn ziface.IConnection, physicalID uint32, messageID 
 func SendDNYResponse(conn ziface.IConnection, physicalID uint32, messageID uint16, command uint8, responseData []byte) error {
 	// 构建完整的DNY协议包
 	packet := buildDNYResponsePacket(physicalID, messageID, command, responseData)
+
+	// 直接输出到控制台
+	now := time.Now().Format("2006-01-02 15:04:05.000")
+	fmt.Printf("\n[%s] [RESPONSE_DATA] 发送响应 - ConnID: %d, Remote: %s\n",
+		now, conn.GetConnID(), conn.RemoteAddr().String())
+	fmt.Printf("命令: 0x%02X, 物理ID: %d, 消息ID: %d\n", command, physicalID, messageID)
+	fmt.Printf("数据(HEX): %X\n", packet)
+	fmt.Println("---------------------")
 
 	// 直接写入标准输出，确保在控制台可见
 	fmt.Printf("\n[SEND_DATA] ConnID: %d, Command: 0x%02X, PhysicalID: %d, MessageID: %d\n",
