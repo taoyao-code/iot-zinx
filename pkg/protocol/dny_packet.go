@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/aceld/zinx/ziface"
+	"github.com/aceld/zinx/zlog"
 	"github.com/bujia-iot/iot-zinx/internal/domain/dny_protocol"
 	"github.com/bujia-iot/iot-zinx/internal/infrastructure/logger"
 	"github.com/sirupsen/logrus"
@@ -29,8 +30,6 @@ type DNYPacket struct {
 
 // NewDNYPacket 创建一个新的DNY协议数据包处理器
 func NewDNYPacket(logHexDump bool) ziface.IDataPack {
-	fmt.Printf("🚀🚀🚀 NewDNYPacket创建新的数据包处理器，logHexDump=%v 🚀🚀🚀\n", logHexDump)
-
 	return &DNYPacket{
 		logHexDump: logHexDump,
 	}
@@ -42,7 +41,7 @@ func (dp *DNYPacket) GetHeadLen() uint32 {
 	// 记录到日志
 	logger.WithFields(logrus.Fields{
 		"headLen": dny_protocol.DnyHeaderLen,
-	}).Error("DNYPacket.GetHeadLen被调用")
+	}).Debug("DNYPacket.GetHeadLen被调用")
 
 	// DNY协议头长度 = 包头"DNY"(3) + 数据长度(2)
 	return dny_protocol.DnyHeaderLen
@@ -141,8 +140,12 @@ func (dp *DNYPacket) packHeartbeatMessage(msg ziface.IMessage) ([]byte, error) {
 	packetData = dataBuff.Bytes()
 
 	// 记录十六进制日志
-	logger.Debugf("Pack心跳消息 -> 命令: 0x%02X, 物理ID: 0x%08X, 数据长度: %d, 数据: %s",
-		cmdID, physicalID, len(innerCmdData), hex.EncodeToString(packetData))
+	logger.WithFields(logrus.Fields{
+		"cmdID":      cmdID,
+		"physicalID": physicalID,
+		"dataLen":    len(innerCmdData),
+		"dataHex":    hex.EncodeToString(packetData),
+	}).Debug("Pack心跳消息")
 
 	return packetData, nil
 }
@@ -211,7 +214,7 @@ func (dp *DNYPacket) packDNYMessage(msg ziface.IMessage) ([]byte, error) {
 
 	// 记录十六进制日志
 	if dp.logHexDump {
-		logger.Debugf("Pack消息 -> 命令: 0x%02X, 物理ID: 0x%08X, 数据长度: %d, 数据: %s",
+		zlog.Debugf("Pack消息 -> 命令: 0x%02X, 物理ID: 0x%08X, 数据长度: %d, 数据: %s",
 			dnyMsg.GetMsgID(), dnyMsg.GetPhysicalId(), dnyMsg.GetDataLen(),
 			hex.EncodeToString(packetData))
 	}
@@ -246,7 +249,7 @@ func (dp *DNYPacket) decodeHexDataIfNeeded(data []byte) []byte {
 		}
 
 		if dp.logHexDump {
-			logger.Debugf("检测到十六进制编码数据，解码后长度: %d -> %d", len(data), len(decoded))
+			zlog.Debugf("检测到十六进制编码数据，解码后长度: %d -> %d", len(data), len(decoded))
 		}
 		return decoded
 	}
@@ -374,7 +377,7 @@ func (dp *DNYPacket) handleDNYProtocolData(data []byte) (ziface.IMessage, error)
 
 	// 记录十六进制日志
 	if dp.logHexDump {
-		logger.Debugf("Unpack DNY消息 <- 命令: 0x%02X, 物理ID: 0x%08X, 消息ID: 0x%04X, 数据长度: %d, 数据: %s",
+		zlog.Debugf("Unpack DNY消息 <- 命令: 0x%02X, 物理ID: 0x%08X, 消息ID: 0x%04X, 数据长度: %d, 数据: %s",
 			command, physicalId, messageId, payloadLen,
 			hex.EncodeToString(data[:totalLen]))
 	}
