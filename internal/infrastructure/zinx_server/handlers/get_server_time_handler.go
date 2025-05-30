@@ -1,10 +1,11 @@
 package handlers
 
 import (
-	"github.com/bujia-iot/iot-zinx/pkg"
 	"encoding/binary"
 	"fmt"
 	"time"
+
+	"github.com/bujia-iot/iot-zinx/pkg"
 
 	"github.com/aceld/zinx/ziface"
 	"github.com/aceld/zinx/znet"
@@ -37,12 +38,14 @@ func (h *GetServerTimeHandler) Handle(request ziface.IRequest) {
 	// 提取关键信息
 	physicalId := dnyMsg.GetPhysicalId()
 	dnyMessageId := dnyMsg.GetMsgID()
+	cmdId := uint8(msg.GetMsgID()) // 获取原始命令ID，用于响应
 
 	// 记录获取服务器时间请求
 	logger.WithFields(logrus.Fields{
 		"connID":       conn.GetConnID(),
 		"physicalId":   fmt.Sprintf("0x%08X", physicalId),
 		"dnyMessageId": dnyMessageId,
+		"cmdId":        fmt.Sprintf("0x%02X", cmdId),
 	}).Info("收到获取服务器时间请求")
 
 	// 获取当前时间戳（Unix时间，秒级）
@@ -52,10 +55,8 @@ func (h *GetServerTimeHandler) Handle(request ziface.IRequest) {
 	timeBytes := make([]byte, 4)
 	binary.LittleEndian.PutUint32(timeBytes, uint32(now))
 
-	// 发送响应
-	// 生成消息ID
-	messageID := uint16(time.Now().Unix() & 0xFFFF)
-	if err := pkg.Protocol.SendDNYResponse(conn, physicalId, messageID, uint8(dny_protocol.CmdGetServerTime), timeBytes); err != nil {
+	// 发送响应 - 使用原始命令ID回复
+	if err := pkg.Protocol.SendDNYResponse(conn, physicalId, uint16(dnyMessageId), cmdId, timeBytes); err != nil {
 		logger.WithFields(logrus.Fields{
 			"connID":     conn.GetConnID(),
 			"physicalId": fmt.Sprintf("0x%08X", physicalId),
@@ -69,11 +70,12 @@ func (h *GetServerTimeHandler) Handle(request ziface.IRequest) {
 		"physicalId": fmt.Sprintf("0x%08X", physicalId),
 		"timestamp":  now,
 		"time":       time.Unix(now, 0).Format("2006-01-02 15:04:05"),
+		"cmdId":      fmt.Sprintf("0x%02X", cmdId),
 	}).Debug("发送服务器时间成功")
 
 	// 如果设备ID还未绑定，设置一个临时ID
 	deviceId, err := conn.GetProperty(PropKeyDeviceId)
-	if err != nil || deviceId.(string)[:7] == "TempID-" {
+	if err != nil || deviceId == nil || (deviceId.(string) != "" && deviceId.(string)[:7] == "TempID-") {
 		deviceIdStr := fmt.Sprintf("%08X", physicalId)
 		pkg.Monitor.GetGlobalMonitor().BindDeviceIdToConnection(deviceIdStr, conn)
 	}

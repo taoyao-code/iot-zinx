@@ -319,7 +319,28 @@ func (dp *DNYPacket) handleDNYProtocolData(data []byte) (ziface.IMessage, error)
 		"messageID":  messageId,
 		"payloadLen": payloadLen,
 		"totalLen":   len(data),
-	}).Error("解析DNY协议数据，将路由到对应处理器")
+	}).Info("解析DNY协议数据，将路由到对应处理器")
+
+	// 计算并验证校验和
+	calculatedChecksum := CalculatePacketChecksum(data[:dny_protocol.DnyHeaderLen+int(dataLen)-2])
+	receivedChecksum := binary.LittleEndian.Uint16(data[dny_protocol.DnyHeaderLen+int(dataLen)-2 : dny_protocol.DnyHeaderLen+int(dataLen)])
+
+	if calculatedChecksum != receivedChecksum {
+		logger.WithFields(logrus.Fields{
+			"command":            fmt.Sprintf("0x%02X", command),
+			"physicalID":         physicalId,
+			"messageID":          messageId,
+			"calculatedChecksum": calculatedChecksum,
+			"receivedChecksum":   receivedChecksum,
+		}).Warn("DNY协议数据校验和不匹配，但仍将继续处理")
+	} else {
+		logger.WithFields(logrus.Fields{
+			"command":    fmt.Sprintf("0x%02X", command),
+			"physicalID": physicalId,
+			"messageID":  messageId,
+			"checksum":   receivedChecksum,
+		}).Debug("DNY协议数据校验和验证通过")
+	}
 
 	// 创建DNY消息对象
 	msg := dny_protocol.NewMessage(command, physicalId, make([]byte, payloadLen))

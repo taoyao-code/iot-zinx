@@ -1,9 +1,10 @@
 package handlers
 
 import (
-	"github.com/bujia-iot/iot-zinx/pkg"
 	"encoding/hex"
 	"time"
+
+	"github.com/bujia-iot/iot-zinx/pkg"
 
 	"github.com/aceld/zinx/ziface"
 	"github.com/aceld/zinx/znet"
@@ -89,15 +90,7 @@ func (h *NonDNYDataHandler) processICCID(conn ziface.IConnection, data []byte) b
 		"remoteAddr": conn.RemoteAddr().String(),
 		"iccid":      iccidStr,
 		"deviceId":   tempDeviceId,
-	}).Info("收到并处理ICCID数据")
-
-	// 按照协议要求，向设备返回确认消息，通知已收到ICCID
-	if err := conn.SendMsg(0, []byte("ICCID_OK")); err != nil {
-		logger.WithFields(logrus.Fields{
-			"connID": conn.GetConnID(),
-			"error":  err.Error(),
-		}).Error("发送ICCID确认消息失败")
-	}
+	}).Info("收到ICCID数据 - 根据协议无需应答")
 
 	// 通知业务层
 	deviceService := app.GetServiceManager().DeviceService
@@ -133,15 +126,7 @@ func (h *NonDNYDataHandler) processLinkHeartbeat(conn ziface.IConnection, data [
 		"heartbeat":  string(data),
 		"deviceID":   deviceID,
 		"timestamp":  now,
-	}).Debug("收到并处理link心跳")
-
-	// 按照协议要求，向设备回复相同的link字符串作为心跳确认
-	if err := conn.SendMsg(0, []byte("link")); err != nil {
-		logger.WithFields(logrus.Fields{
-			"connID": conn.GetConnID(),
-			"error":  err.Error(),
-		}).Error("发送link心跳确认失败")
-	}
+	}).Info("收到link心跳 - 根据协议无需应答")
 
 	return true
 }
