@@ -25,7 +25,7 @@ const (
 	CmdMainHeartbeat   = 0x11 // 主机状态心跳包
 	CmdGetServerTime   = 0x12 // 主机获取服务器时间
 	CmdDeviceRegister  = 0x20 // 设备注册包
-	CmdDeviceHeart     = 0x21 // 设备心跳包
+	CmdDeviceHeart     = 0x21 // 设备心跳包/分机心跳
 	CmdDeviceTime      = 0x22 // 设备获取服务器时间
 	CmdNetworkStatus   = 0x81 // 查询设备联网状态
 	CmdChargeControl   = 0x82 // 服务器开始、停止充电操作
@@ -42,8 +42,7 @@ const (
 // DNY命令ID定义
 const (
 	// 设备上报命令
-	CmdSlaveHeartbeat uint32 = 0x21 // 分机心跳
-	CmdAlarm          uint32 = 0x42 // 报警
+	CmdAlarm uint32 = 0x42 // 报警
 
 	// 服务器下发命令
 	CmdFirmwareUpgrade uint32 = 0xE0 // 固件升级

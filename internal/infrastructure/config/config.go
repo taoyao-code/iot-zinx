@@ -15,6 +15,7 @@ type Config struct {
 	Logger           LoggerConfig           `mapstructure:"logger"`
 	BusinessPlatform BusinessPlatformConfig `mapstructure:"businessPlatform"`
 	Timeouts         TimeoutsConfig         `mapstructure:"timeouts"`
+	DeviceConnection DeviceConnectionConfig `mapstructure:"deviceConnection"`
 }
 
 // TCPServerConfig TCP服务器配置
@@ -87,6 +88,13 @@ type TimeoutsConfig struct {
 	DnyResponseSeconds           int `mapstructure:"dnyResponseSeconds"`
 	HeartbeatIntervalSeconds     int `mapstructure:"heartbeatIntervalSeconds"`
 	LinkHeartbeatIntervalSeconds int `mapstructure:"linkHeartbeatIntervalSeconds"`
+}
+
+// DeviceConnectionConfig 设备连接配置
+type DeviceConnectionConfig struct {
+	HeartbeatTimeoutSeconds   int `mapstructure:"heartbeatTimeoutSeconds"`
+	HeartbeatIntervalSeconds  int `mapstructure:"heartbeatIntervalSeconds"`
+	HeartbeatWarningThreshold int `mapstructure:"heartbeatWarningThreshold"`
 }
 
 // 全局配置实例

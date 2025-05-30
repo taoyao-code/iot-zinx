@@ -7,20 +7,10 @@ import (
 	"time"
 
 	"github.com/aceld/zinx/ziface"
+	"github.com/bujia-iot/iot-zinx/internal/infrastructure/config"
 	"github.com/bujia-iot/iot-zinx/internal/infrastructure/logger"
+	"github.com/bujia-iot/iot-zinx/pkg/constants"
 	"github.com/sirupsen/logrus"
-)
-
-// 监控配置常量
-const (
-	// 心跳超时时间
-	HeartbeatTimeout = 60 * time.Second
-
-	// 心跳检查间隔
-	HeartbeatCheckInterval = 30 * time.Second
-
-	// 心跳警告阈值，在超时前多长时间发出警告
-	HeartbeatWarningThreshold = 30 * time.Second
 )
 
 // 监控服务是否运行中
@@ -30,6 +20,15 @@ var monitorRunning int32
 type DeviceMonitor struct {
 	// 设备连接访问器，用于获取当前所有设备连接
 	deviceConnAccessor func(func(deviceId string, conn ziface.IConnection) bool)
+
+	// 心跳超时时间
+	heartbeatTimeout time.Duration
+
+	// 心跳检查间隔
+	checkInterval time.Duration
+
+	// 心跳警告阈值
+	warningThreshold time.Duration
 }
 
 // 确保DeviceMonitor实现了IDeviceMonitor接口
@@ -37,8 +36,30 @@ var _ IDeviceMonitor = (*DeviceMonitor)(nil)
 
 // NewDeviceMonitor 创建设备监控器
 func NewDeviceMonitor(deviceConnAccessor func(func(deviceId string, conn ziface.IConnection) bool)) *DeviceMonitor {
+	// 从配置中获取心跳参数
+	cfg := config.GetConfig().DeviceConnection
+
+	// 使用配置值，如果配置未设置则使用默认值
+	heartbeatTimeout := time.Duration(cfg.HeartbeatTimeoutSeconds) * time.Second
+	if heartbeatTimeout == 0 {
+		heartbeatTimeout = 60 * time.Second // 默认60秒
+	}
+
+	checkInterval := time.Duration(cfg.HeartbeatIntervalSeconds) * time.Second
+	if checkInterval == 0 {
+		checkInterval = 30 * time.Second // 默认30秒
+	}
+
+	warningThreshold := time.Duration(cfg.HeartbeatWarningThreshold) * time.Second
+	if warningThreshold == 0 {
+		warningThreshold = 30 * time.Second // 默认30秒
+	}
+
 	return &DeviceMonitor{
 		deviceConnAccessor: deviceConnAccessor,
+		heartbeatTimeout:   heartbeatTimeout,
+		checkInterval:      checkInterval,
+		warningThreshold:   warningThreshold,
 	}
 }
 
@@ -52,19 +73,19 @@ func (dm *DeviceMonitor) Start() error {
 	}
 
 	fmt.Printf("\n🔄🔄🔄 设备状态监控服务启动 🔄🔄🔄\n")
-	fmt.Printf("检查间隔: %s\n", HeartbeatCheckInterval)
-	fmt.Printf("心跳超时: %s\n", HeartbeatTimeout)
-	fmt.Printf("警告阈值: %s\n", HeartbeatWarningThreshold)
+	fmt.Printf("检查间隔: %s\n", dm.checkInterval)
+	fmt.Printf("心跳超时: %s\n", dm.heartbeatTimeout)
+	fmt.Printf("警告阈值: %s\n", dm.warningThreshold)
 
 	logger.WithFields(logrus.Fields{
-		"checkInterval":    HeartbeatCheckInterval / time.Second,
-		"heartbeatTimeout": HeartbeatTimeout / time.Second,
-		"warningThreshold": HeartbeatWarningThreshold / time.Second,
+		"checkInterval":    dm.checkInterval / time.Second,
+		"heartbeatTimeout": dm.heartbeatTimeout / time.Second,
+		"warningThreshold": dm.warningThreshold / time.Second,
 	}).Info("设备状态监控服务启动")
 
 	// 启动定时检查
 	go func() {
-		ticker := time.NewTicker(HeartbeatCheckInterval)
+		ticker := time.NewTicker(dm.checkInterval)
 		defer ticker.Stop()
 
 		for range ticker.C {
@@ -89,8 +110,8 @@ func (dm *DeviceMonitor) checkDeviceHeartbeats() {
 	}
 
 	now := time.Now().Unix()
-	timeoutThreshold := now - int64(HeartbeatTimeout/time.Second)
-	warningThreshold := now - int64(HeartbeatWarningThreshold/time.Second)
+	timeoutThreshold := now - int64(dm.heartbeatTimeout/time.Second)
+	warningThreshold := now - int64(dm.warningThreshold/time.Second)
 
 	deviceCount := 0
 	timeoutCount := 0
@@ -106,7 +127,7 @@ func (dm *DeviceMonitor) checkDeviceHeartbeats() {
 		}
 
 		// 获取最后一次心跳时间
-		lastHeartbeatVal, err := conn.GetProperty("LastHeartbeat")
+		lastHeartbeatVal, err := conn.GetProperty(constants.PropKeyLastHeartbeat)
 		if err != nil {
 			// 对于正式注册的设备，如果没有心跳时间属性，说明可能有问题
 			logger.WithFields(logrus.Fields{
@@ -127,7 +148,7 @@ func (dm *DeviceMonitor) checkDeviceHeartbeats() {
 				"deviceId":        deviceId,
 				"lastHeartbeatAt": time.Unix(lastHeartbeat, 0).Format("2006-01-02 15:04:05"),
 				"nowAt":           time.Unix(now, 0).Format("2006-01-02 15:04:05"),
-				"timeoutSeconds":  HeartbeatTimeout / time.Second,
+				"timeoutSeconds":  dm.heartbeatTimeout / time.Second,
 			}).Warn("设备心跳超时，关闭连接")
 			conn.Stop()
 			timeoutCount++
@@ -138,7 +159,7 @@ func (dm *DeviceMonitor) checkDeviceHeartbeats() {
 				"deviceId":         deviceId,
 				"lastHeartbeatAt":  time.Unix(lastHeartbeat, 0).Format("2006-01-02 15:04:05"),
 				"nowAt":            time.Unix(now, 0).Format("2006-01-02 15:04:05"),
-				"timeoutSeconds":   HeartbeatTimeout / time.Second,
+				"timeoutSeconds":   dm.heartbeatTimeout / time.Second,
 				"remainingSeconds": timeoutThreshold - lastHeartbeat,
 			}).Warn("设备心跳接近超时")
 			warningCount++

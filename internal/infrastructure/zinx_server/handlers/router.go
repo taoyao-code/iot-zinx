@@ -15,6 +15,7 @@ func RegisterRouters(server ziface.IServer) {
 	// server.AddRouter(dny_protocol.CmdHeartbeat, &HeartbeatHandler{})
 
 	// 3. 设备心跳包（新版）
+	// 注册0x21命令处理器，同时处理设备心跳和分机心跳
 	server.AddRouter(dny_protocol.CmdDeviceHeart, &HeartbeatHandler{})
 
 	// 4. 设备注册包

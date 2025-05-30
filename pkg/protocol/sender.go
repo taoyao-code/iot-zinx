@@ -91,7 +91,7 @@ func BuildDNYResponsePacket(physicalID uint32, messageID uint16, command uint8, 
 func NeedConfirmation(command uint8) bool {
 	// 心跳类命令不需要确认
 	if command == dny_protocol.CmdHeartbeat ||
-		command == uint8(dny_protocol.CmdSlaveHeartbeat) ||
+		command == uint8(dny_protocol.CmdDeviceHeart) ||
 		command == dny_protocol.CmdMainHeartbeat ||
 		command == dny_protocol.CmdDeviceHeart {
 		return false

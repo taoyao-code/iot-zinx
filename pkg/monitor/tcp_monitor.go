@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/aceld/zinx/ziface"
+	"github.com/bujia-iot/iot-zinx/internal/infrastructure/config"
 	"github.com/bujia-iot/iot-zinx/internal/infrastructure/logger"
 	"github.com/bujia-iot/iot-zinx/pkg/constants"
 	"github.com/bujia-iot/iot-zinx/pkg/protocol"
@@ -54,11 +55,39 @@ func (m *TCPMonitor) OnConnectionEstablished(conn ziface.IConnection) {
 
 // OnConnectionClosed 当连接关闭时通知TCP监视器
 func (m *TCPMonitor) OnConnectionClosed(conn ziface.IConnection) {
-	// 这里调用TCP监视器的连接关闭方法
+	// 获取连接ID和远程地址
+	connID := conn.GetConnID()
+	remoteAddr := conn.RemoteAddr().String()
+
+	// 记录连接关闭
 	fmt.Printf("\n[%s] 连接已关闭 - ConnID: %d, 远程地址: %s\n",
 		time.Now().Format("2006-01-02 15:04:05.000"),
-		conn.GetConnID(),
-		conn.RemoteAddr().String())
+		connID,
+		remoteAddr)
+
+	// 获取关联的设备ID
+	deviceID := "unknown"
+	if val, err := conn.GetProperty(constants.PropKeyDeviceId); err == nil && val != nil {
+		deviceID = val.(string)
+
+		// 更新设备状态为离线
+		if UpdateDeviceStatusFunc != nil {
+			UpdateDeviceStatusFunc(deviceID, constants.DeviceStatusOffline)
+		}
+
+		// 记录设备离线
+		logger.WithFields(logrus.Fields{
+			"deviceId":   deviceID,
+			"connID":     connID,
+			"remoteAddr": remoteAddr,
+		}).Info("设备连接已关闭，状态更新为离线")
+
+		// 清理映射关系
+		m.deviceIdToConnMap.Delete(deviceID)
+	}
+
+	// 清理连接ID映射
+	m.connIdToDeviceIdMap.Delete(connID)
 }
 
 // OnRawDataReceived 当接收到原始数据时调用
@@ -225,13 +254,18 @@ func (m *TCPMonitor) UpdateLastHeartbeatTime(conn ziface.IConnection) {
 
 	// 更新 TCP 读取超时
 	if tcpConn, ok := conn.GetTCPConnection().(*net.TCPConn); ok {
-		// 使用超时常量
-		readDeadLine := 60 * time.Second
-		if err := tcpConn.SetReadDeadline(now.Add(readDeadLine)); err != nil {
+		// 从配置中获取超时值，如果未配置则使用默认值60秒
+		cfg := config.GetConfig().DeviceConnection
+		heartbeatTimeout := time.Duration(cfg.HeartbeatTimeoutSeconds) * time.Second
+		if heartbeatTimeout == 0 {
+			heartbeatTimeout = 60 * time.Second // 默认60秒
+		}
+
+		if err := tcpConn.SetReadDeadline(now.Add(heartbeatTimeout)); err != nil {
 			logger.WithFields(logrus.Fields{
 				"error":    err.Error(),
 				"connID":   conn.GetConnID(),
-				"deadline": now.Add(readDeadLine).Format("2006-01-02 15:04:05"),
+				"deadline": now.Add(heartbeatTimeout).Format("2006-01-02 15:04:05"),
 			}).Error("设置读取超时失败")
 		}
 	}

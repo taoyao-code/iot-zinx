@@ -4,60 +4,59 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/bujia-iot/iot-zinx/pkg"
-
 	"github.com/aceld/zinx/ziface"
-	"github.com/aceld/zinx/znet"
 	"github.com/bujia-iot/iot-zinx/internal/domain/dny_protocol"
 	"github.com/bujia-iot/iot-zinx/internal/infrastructure/logger"
+	"github.com/bujia-iot/iot-zinx/pkg"
 	"github.com/sirupsen/logrus"
 )
 
 // HeartbeatHandler 处理设备心跳包 (命令ID: 0x10 & 0x21)
 type HeartbeatHandler struct {
-	znet.BaseRouter
+	DNYHandlerBase
 }
 
 // Handle 处理设备心跳请求
 func (h *HeartbeatHandler) Handle(request ziface.IRequest) {
-	// 获取请求消息
-	msg := request.GetMessage()
+	// 调用基类预处理
+	h.PreHandle(request)
+
+	// 获取连接和消息
 	conn := request.GetConnection()
 
-	// 转换为DNY消息
-	dnyMsg, ok := dny_protocol.IMessageToDnyMessage(msg)
+	// 获取DNY消息
+	dnyMsg, ok := h.GetDNYMessage(request)
 	if !ok {
 		logger.WithFields(logrus.Fields{
 			"connID": conn.GetConnID(),
-			"msgID":  msg.GetMsgID(),
+			"msgID":  request.GetMessage().GetMsgID(),
 		}).Error("消息类型转换失败，无法处理设备心跳")
 		return
 	}
 
-	// 提取关键信息
+	// 提取设备信息
 	physicalId := dnyMsg.GetPhysicalId()
-	messageID := uint16(dnyMsg.GetMsgID())
-	commandId := msg.GetMsgID()
+	commandId := request.GetMessage().GetMsgID()
+	messageID := uint16(commandId)
 
-	// 设备ID（16进制字符串）
-	deviceIdStr := fmt.Sprintf("%08X", physicalId)
+	// 获取或生成设备ID
+	deviceId := h.FormatPhysicalID(physicalId)
 
 	// 记录心跳日志
 	logger.WithFields(logrus.Fields{
 		"connID":     conn.GetConnID(),
 		"physicalId": fmt.Sprintf("0x%08X", physicalId),
-		"deviceId":   deviceIdStr,
-		"messageID":  messageID,
+		"deviceId":   deviceId,
 		"commandId":  fmt.Sprintf("0x%02X", commandId),
 	}).Debug("收到设备心跳")
 
 	// 如果设备ID未绑定，则进行绑定
 	if _, err := conn.GetProperty(PropKeyDeviceId); err != nil {
-		pkg.Monitor.GetGlobalMonitor().BindDeviceIdToConnection(deviceIdStr, conn)
+		pkg.Monitor.GetGlobalMonitor().BindDeviceIdToConnection(deviceId, conn)
 	}
 
-	// 更新最后一次心跳时间
-	pkg.Monitor.GetGlobalMonitor().UpdateLastHeartbeatTime(conn)
+	// 更新心跳时间和设备状态
+	h.UpdateHeartbeat(conn)
 
 	// 处理心跳数据
 	data := dnyMsg.GetData()
@@ -70,14 +69,10 @@ func (h *HeartbeatHandler) Handle(request ziface.IRequest) {
 		// 记录心跳状态
 		logger.WithFields(logrus.Fields{
 			"connID":          conn.GetConnID(),
-			"deviceId":        deviceIdStr,
+			"deviceId":        deviceId,
 			"heartbeatType":   heartbeatType,
 			"heartbeatStatus": heartbeatStatus,
 		}).Debug("设备心跳状态")
-
-		// 通知业务层设备状态更新
-		// 这里只是简单更新设备状态为在线
-		go UpdateDeviceStatus(deviceIdStr, DeviceStatusOnline)
 	}
 
 	// 构建响应数据
@@ -85,20 +80,15 @@ func (h *HeartbeatHandler) Handle(request ziface.IRequest) {
 	responseData[0] = 0x00 // 成功
 
 	// 发送心跳响应
-	pkg.Protocol.SendDNYResponse(conn, physicalId, messageID, uint8(commandId), responseData)
+	h.SendDNYResponse(conn, physicalId, messageID, uint8(commandId), responseData)
 
-	// 获取设备类型和ICCID
-	deviceType := uint16(0)
-	iccid := ""
+	// 获取设备ICCID
+	iccid := h.GetICCID(conn)
 
-	// TODO: 如果需要，从设备属性中获取设备类型和ICCID
-
-	// 记录详细日志
+	// 记录处理完成日志
 	logger.WithFields(logrus.Fields{
 		"connID":     conn.GetConnID(),
-		"physicalId": fmt.Sprintf("0x%08X", physicalId),
-		"deviceId":   deviceIdStr,
-		"deviceType": deviceType,
+		"deviceId":   deviceId,
 		"iccid":      iccid,
 		"remoteAddr": conn.RemoteAddr().String(),
 	}).Debug("设备心跳处理完成")
@@ -165,8 +155,8 @@ func getCommandName(commandId uint32) string {
 	switch commandId {
 	case dny_protocol.CmdHeartbeat:
 		return "心跳(0x01)"
-	case dny_protocol.CmdSlaveHeartbeat:
-		return "分机心跳(0x21)"
+	case dny_protocol.CmdDeviceHeart:
+		return "设备心跳/分机心跳(0x21)"
 	default:
 		return fmt.Sprintf("未知心跳(0x%02X)", commandId)
 	}
