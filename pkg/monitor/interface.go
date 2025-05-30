@@ -32,6 +32,9 @@ type IConnectionMonitor interface {
 
 	// UpdateDeviceStatus 更新设备状态
 	UpdateDeviceStatus(deviceId string, status string)
+
+	// ForEachConnection 遍历所有设备连接
+	ForEachConnection(callback func(deviceId string, conn ziface.IConnection) bool)
 }
 
 // IDeviceMonitor 定义了设备监控器接口

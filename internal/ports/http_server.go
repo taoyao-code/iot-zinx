@@ -1,8 +1,6 @@
 package ports
 
 import (
-	"fmt"
-
 	"github.com/bujia-iot/iot-zinx/internal/adapter/http"
 	"github.com/bujia-iot/iot-zinx/internal/infrastructure/config"
 	"github.com/bujia-iot/iot-zinx/internal/infrastructure/logger"
@@ -11,8 +9,6 @@ import (
 
 // StartHTTPServer 启动HTTP API服务器
 func StartHTTPServer() error {
-	httpConfig := config.GetConfig().HTTPAPIServer
-
 	// 设置Gin模式
 	gin.SetMode(gin.ReleaseMode)
 
@@ -23,7 +19,7 @@ func StartHTTPServer() error {
 	registerHTTPHandlers(r)
 
 	// 启动HTTP服务器
-	addr := fmt.Sprintf("%s:%d", httpConfig.Host, httpConfig.Port)
+	addr := config.FormatHTTPAddress()
 	logger.Infof("HTTP API服务器启动在 %s", addr)
 	return r.Run(addr)
 }

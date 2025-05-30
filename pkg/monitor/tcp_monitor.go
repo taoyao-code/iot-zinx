@@ -3,6 +3,7 @@ package monitor
 import (
 	"encoding/hex"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
@@ -78,12 +79,17 @@ func (m *TCPMonitor) OnConnectionClosed(conn ziface.IConnection) {
 		// 通知设备监控器设备断开连接
 		deviceMonitor.OnDeviceDisconnect(deviceID, conn, "connection_closed")
 
+		// 更新设备状态为离线或重连中
+		if UpdateDeviceStatusFunc != nil {
+			UpdateDeviceStatusFunc(deviceID, constants.DeviceStatusOffline)
+		}
+
 		// 记录设备离线
 		logger.WithFields(logrus.Fields{
 			"deviceId":   deviceID,
 			"connID":     connID,
 			"remoteAddr": remoteAddr,
-		}).Info("设备连接已关闭，状态更新为重连中")
+		}).Info("设备连接已关闭，状态更新为离线")
 
 		// 清理映射关系
 		m.deviceIdToConnMap.Delete(deviceID)
@@ -369,4 +375,24 @@ func (m *TCPMonitor) UpdateDeviceStatus(deviceId string, status string) {
 	if UpdateDeviceStatusFunc != nil {
 		UpdateDeviceStatusFunc(deviceId, status)
 	}
+}
+
+// ForEachConnection 遍历所有设备连接
+func (m *TCPMonitor) ForEachConnection(callback func(deviceId string, conn ziface.IConnection) bool) {
+	// 遍历设备ID到连接的映射
+	m.deviceIdToConnMap.Range(func(key, value interface{}) bool {
+		deviceId, ok1 := key.(string)
+		conn, ok2 := value.(ziface.IConnection)
+
+		if ok1 && ok2 {
+			// 忽略临时连接
+			if strings.HasPrefix(deviceId, "TempID-") {
+				return true
+			}
+
+			// 执行回调函数
+			return callback(deviceId, conn)
+		}
+		return true
+	})
 }

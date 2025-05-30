@@ -48,20 +48,41 @@ func main() {
 	// 初始化Redis连接
 	if err := redis.InitClient(); err != nil {
 		logger.Errorf("初始化Redis连接失败: %v", err)
+		// 不退出，因为Redis连接失败不应该影响网关基本功能
+	}
+
+	// 启动HTTP API服务器(Gin) - 先启动HTTP服务
+	// 这样可以确保API接口在TCP服务启动前就可用
+	httpServerStarted := make(chan bool, 1)
+	var httpErr error
+
+	go func() {
+		logger.Info("正在启动HTTP API服务器...")
+		httpErr = ports.StartHTTPServer()
+		if httpErr != nil {
+			logger.Errorf("启动HTTP API服务器失败: %v", httpErr)
+			httpServerStarted <- false
+		} else {
+			logger.Info("HTTP API服务器启动成功")
+			httpServerStarted <- true
+		}
+	}()
+
+	// 等待HTTP服务器启动结果
+	select {
+	case success := <-httpServerStarted:
+		if !success && httpErr != nil {
+			logger.Warn("HTTP服务启动失败，网关将仅提供TCP服务")
+		}
 	}
 
 	// 启动Zinx TCP服务器
+	logger.Info("正在启动TCP服务器...")
 	if err := ports.StartTCPServer(); err != nil {
 		logger.Errorf("启动TCP服务器失败: %v", err)
 		os.Exit(1)
 	}
-
-	// 启动HTTP API服务器(Gin)
-	go func() {
-		if err := ports.StartHTTPServer(); err != nil {
-			logger.Errorf("启动HTTP API服务器失败: %v", err)
-		}
-	}()
+	logger.Info("TCP服务器启动成功")
 
 	logger.Info("充电设备网关启动完成，等待设备连接...")
 

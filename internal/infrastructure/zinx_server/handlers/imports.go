@@ -62,6 +62,7 @@ func LegacyGetGlobalMonitor() interface {
 	GetDeviceIdByConnId(connId uint64) (string, bool)
 	UpdateLastHeartbeatTime(conn ziface.IConnection)
 	UpdateDeviceStatus(deviceId string, status string)
+	ForEachConnection(callback func(deviceId string, conn ziface.IConnection) bool)
 } {
 	return monitor.GetGlobalMonitor()
 }

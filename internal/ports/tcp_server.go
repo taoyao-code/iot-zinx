@@ -18,6 +18,7 @@ func StartTCPServer() error {
 	// 获取配置
 	cfg := config.GetConfig()
 	zinxCfg := cfg.TCPServer.Zinx
+	deviceCfg := cfg.DeviceConnection
 
 	// 初始化pkg包之间的依赖关系
 	pkg.InitPackages()
@@ -70,11 +71,16 @@ func StartTCPServer() error {
 	handlers.RegisterRouters(server)
 
 	// 设置连接钩子
+	// 使用配置中的连接参数
+	readTimeout := time.Duration(deviceCfg.HeartbeatTimeoutSeconds) * time.Second
+	writeTimeout := readTimeout
+	keepAliveTimeout := time.Duration(deviceCfg.HeartbeatIntervalSeconds) * time.Second
+
 	// 使用pkg包中的连接钩子
 	connectionHooks := pkg.Network.NewConnectionHooks(
-		60*time.Second,  // 读超时
-		60*time.Second,  // 写超时
-		120*time.Second, // KeepAlive周期
+		readTimeout,      // 读超时
+		writeTimeout,     // 写超时
+		keepAliveTimeout, // KeepAlive周期
 	)
 
 	// 设置连接建立回调
@@ -94,7 +100,7 @@ func StartTCPServer() error {
 	server.SetOnConnStop(connectionHooks.OnConnectionStop)
 
 	// 设置心跳检测
-	heartbeatInterval := 30 * time.Second
+	heartbeatInterval := time.Duration(deviceCfg.HeartbeatIntervalSeconds) * time.Second
 	server.StartHeartBeatWithOption(heartbeatInterval, &ziface.HeartBeatOption{
 		MakeMsg:          pkg.Network.MakeDNYProtocolHeartbeatMsg,
 		OnRemoteNotAlive: pkg.Network.OnDeviceNotAlive,
@@ -106,12 +112,13 @@ func StartTCPServer() error {
 		// 遍历所有设备连接并传递给回调函数
 		tcpMonitor := pkg.Monitor.GetGlobalMonitor()
 		if tcpMonitor == nil {
+			logger.Error("TCP监视器未初始化，无法遍历设备连接")
 			return
 		}
 
-		// 由于没有直接获取所有连接的方法，这里需要服务器实例提供
-		// 临时解决方案：实际项目中应该通过TCPMonitor实现
-		logger.Warn("设备连接遍历功能未完全实现")
+		// 实现设备连接遍历功能
+		// 从TcpMonitor的deviceIdToConnMap获取所有连接
+		tcpMonitor.ForEachConnection(callback)
 	})
 
 	// 启动设备监控器

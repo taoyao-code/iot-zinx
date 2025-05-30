@@ -8,10 +8,11 @@ import (
 	"github.com/bujia-iot/iot-zinx/internal/domain/dny_protocol"
 	"github.com/bujia-iot/iot-zinx/internal/infrastructure/logger"
 	"github.com/bujia-iot/iot-zinx/pkg"
+	"github.com/bujia-iot/iot-zinx/pkg/constants"
 	"github.com/sirupsen/logrus"
 )
 
-// HeartbeatHandler 处理设备心跳包 (命令ID: 0x10 & 0x21)
+// HeartbeatHandler 处理设备心跳包 (命令ID: 0x01 & 0x21)
 type HeartbeatHandler struct {
 	DNYHandlerBase
 }
@@ -37,7 +38,12 @@ func (h *HeartbeatHandler) Handle(request ziface.IRequest) {
 	// 提取设备信息
 	physicalId := dnyMsg.GetPhysicalId()
 	commandId := request.GetMessage().GetMsgID()
-	messageID := uint16(commandId)
+	messageID := uint16(0)
+
+	// 从连接属性中获取消息ID，如果存在的话
+	if val, err := conn.GetProperty("messageID"); err == nil && val != nil {
+		messageID = val.(uint16)
+	}
 
 	// 获取或生成设备ID
 	deviceId := h.FormatPhysicalID(physicalId)
@@ -51,7 +57,7 @@ func (h *HeartbeatHandler) Handle(request ziface.IRequest) {
 	}).Debug("收到设备心跳")
 
 	// 如果设备ID未绑定，则进行绑定
-	if _, err := conn.GetProperty(PropKeyDeviceId); err != nil {
+	if _, err := conn.GetProperty(constants.PropKeyDeviceId); err != nil {
 		pkg.Monitor.GetGlobalMonitor().BindDeviceIdToConnection(deviceId, conn)
 	}
 
@@ -77,10 +83,25 @@ func (h *HeartbeatHandler) Handle(request ziface.IRequest) {
 
 	// 构建响应数据
 	responseData := make([]byte, 1)
-	responseData[0] = 0x00 // 成功
+	responseData[0] = dny_protocol.ResponseSuccess // 成功
 
 	// 发送心跳响应
-	h.SendDNYResponse(conn, physicalId, messageID, uint8(commandId), responseData)
+	if err := h.SendDNYResponse(conn, physicalId, messageID, uint8(commandId), responseData); err != nil {
+		logger.WithFields(logrus.Fields{
+			"connID":     conn.GetConnID(),
+			"deviceId":   deviceId,
+			"physicalId": physicalId,
+			"commandId":  commandId,
+			"error":      err.Error(),
+		}).Error("发送心跳应答失败")
+	} else {
+		logger.WithFields(logrus.Fields{
+			"connID":     conn.GetConnID(),
+			"deviceId":   deviceId,
+			"physicalId": physicalId,
+			"commandId":  commandId,
+		}).Debug("已发送心跳应答")
+	}
 
 	// 获取设备ICCID
 	iccid := h.GetICCID(conn)
