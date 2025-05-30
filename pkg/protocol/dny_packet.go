@@ -57,8 +57,8 @@ func (dp *DNYPacket) Pack(msg ziface.IMessage) ([]byte, error) {
 		"dataLen": msg.GetDataLen(),
 	}).Error("DNYPacket.Pack被调用")
 
-	// 特殊处理心跳消息 (0xF001 = 61441)
-	if msg.GetMsgID() == uint32(0xF001) {
+	// 特殊处理zinx框架的心跳消息 (0xF001 = 61441) 或 (99999)
+	if msg.GetMsgID() == uint32(0xF001) || msg.GetMsgID() == uint32(99999) {
 		return dp.packHeartbeatMessage(msg)
 	}
 

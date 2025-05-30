@@ -55,17 +55,17 @@ func StartTCPServer() error {
 		zconf.GlobalObject.LogIsolationLevel = 0
 	}
 
-	// 1. 先创建服务器实例
+	// 1. 初始化pkg包之间的依赖关系
+	pkg.InitPackages()
+
+	// 2. 创建服务器实例
 	server := znet.NewServer()
 
-	// 2. 创建自定义数据包封包与解包器
+	// 3. 创建自定义数据包封包与解包器
 	dataPack := pkg.Protocol.NewDNYDataPackFactory().NewDataPack(cfg.Logger.LogHexDump)
 
-	// 3. 设置自定义数据包处理器
+	// 4. 设置自定义数据包处理器
 	server.SetPacket(dataPack)
-
-	// 4. 初始化pkg包之间的依赖关系
-	pkg.InitPackages()
 
 	// 5. 注册路由 - 确保在初始化包之后再注册路由
 	handlers.RegisterRouters(server)
@@ -104,7 +104,7 @@ func StartTCPServer() error {
 	server.StartHeartBeatWithOption(heartbeatInterval, &ziface.HeartBeatOption{
 		MakeMsg:          pkg.Network.MakeDNYProtocolHeartbeatMsg,
 		OnRemoteNotAlive: pkg.Network.OnDeviceNotAlive,
-		HeartBeatMsgID:   0x81, // 使用DNY协议的查询状态命令ID 0x81，不再使用特殊ID
+		HeartBeatMsgID:   99999, // 使用特殊ID，和DNYPacket.Pack中的处理对应
 	})
 
 	// 创建设备监控器

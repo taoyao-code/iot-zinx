@@ -15,7 +15,7 @@ import (
 
 // HeartbeatCheckRouter 处理Zinx框架发送的心跳检测消息的响应
 // 实现了Zinx的心跳检测Router接口，处理设备对心跳检测的回复
-// 注意：这个处理器处理的是自定义的心跳消息ID 0xF001
+// 注意：这个处理器处理的是自定义的心跳消息ID 0xF001 和 99999
 type HeartbeatCheckRouter struct {
 	znet.BaseRouter
 }
