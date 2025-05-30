@@ -38,22 +38,21 @@ func MakeDNYProtocolHeartbeatMsg(conn ziface.IConnection) []byte {
 	}
 
 	// 创建DNY协议查询设备状态命令
-	// 使用自定义心跳命令ID 0xF001，实际上会内部封装0x81查询命令
+	// 直接使用标准DNY协议的查询状态命令0x81
 	messageID := uint16(time.Now().Unix() & 0xFFFF)
 
-	// 内部封装的查询命令数据
-	cmdData := []byte{0x81} // 实际发送0x81设备状态查询命令
+	// 不需要额外的数据
+	cmdData := []byte{}
 
 	// 构建DNY协议包
-	packet := BuildDNYResponsePacket(physicalID, messageID, 0xF0, cmdData)
+	packet := BuildDNYResponsePacket(physicalID, messageID, 0x81, cmdData)
 
 	logger.WithFields(logrus.Fields{
 		"connID":     conn.GetConnID(),
 		"deviceID":   deviceID,
 		"physicalID": physicalID,
 		"messageID":  messageID,
-		"commandID":  "0xF0",
-		"innerCmdID": "0x81",
+		"commandID":  "0x81",
 		"packetLen":  len(packet),
 	}).Debug("创建DNY协议心跳检测消息")
 

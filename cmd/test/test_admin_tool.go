@@ -108,7 +108,7 @@ func printMenu() {
 func listDevices() {
 	fmt.Println("\n正在获取设备列表...")
 
-	resp, err := http.Get(HTTPServerAddr + "/api/devices")
+	resp, err := http.Get(HTTPServerAddr + "/api/v1/devices")
 	if err != nil {
 		fmt.Printf("请求失败: %v\n", err)
 		return
@@ -212,7 +212,7 @@ func queryDeviceStatus(scanner *bufio.Scanner) {
 
 	fmt.Printf("正在查询设备 %s 的状态...\n", deviceID)
 
-	resp, err := http.Get(HTTPServerAddr + "/api/device/" + deviceID + "/status")
+	resp, err := http.Get(HTTPServerAddr + "/api/v1/device/" + deviceID + "/status")
 	if err != nil {
 		fmt.Printf("请求失败: %v\n", err)
 		return
@@ -354,7 +354,7 @@ func startCharging(scanner *bufio.Scanner) {
 	fmt.Printf("正在向设备 %s 端口 %d 发送开始充电命令...\n", deviceID, port)
 
 	body, _ := json.Marshal(reqData)
-	resp, err := http.Post(HTTPServerAddr+"/api/charging/start", "application/json", bytes.NewBuffer(body))
+	resp, err := http.Post(HTTPServerAddr+"/api/v1/charging/start", "application/json", bytes.NewBuffer(body))
 	if err != nil {
 		fmt.Printf("请求失败: %v\n", err)
 		return
@@ -423,7 +423,7 @@ func stopCharging(scanner *bufio.Scanner) {
 	}
 
 	body, _ := json.Marshal(reqData)
-	resp, err := http.Post(HTTPServerAddr+"/api/charging/stop", "application/json", bytes.NewBuffer(body))
+	resp, err := http.Post(HTTPServerAddr+"/api/v1/charging/stop", "application/json", bytes.NewBuffer(body))
 	if err != nil {
 		fmt.Printf("请求失败: %v\n", err)
 		return
@@ -553,7 +553,7 @@ func monitorDevices() {
 // sendCommand 发送DNY命令的通用方法
 func sendCommand(reqData map[string]interface{}) bool {
 	body, _ := json.Marshal(reqData)
-	resp, err := http.Post(HTTPServerAddr+"/api/command/dny", "application/json", bytes.NewBuffer(body))
+	resp, err := http.Post(HTTPServerAddr+"/api/v1/command/dny", "application/json", bytes.NewBuffer(body))
 	if err != nil {
 		fmt.Printf("请求失败: %v\n", err)
 		return false

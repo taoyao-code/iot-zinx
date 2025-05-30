@@ -104,7 +104,7 @@ func StartTCPServer() error {
 	server.StartHeartBeatWithOption(heartbeatInterval, &ziface.HeartBeatOption{
 		MakeMsg:          pkg.Network.MakeDNYProtocolHeartbeatMsg,
 		OnRemoteNotAlive: pkg.Network.OnDeviceNotAlive,
-		HeartBeatMsgID:   0xF001, // 特殊心跳消息ID
+		HeartBeatMsgID:   0x81, // 使用DNY协议的查询状态命令ID 0x81，不再使用特殊ID
 	})
 
 	// 创建设备监控器

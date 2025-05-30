@@ -390,6 +390,27 @@ func (m *TCPMonitor) ForEachConnection(callback func(deviceId string, conn zifac
 				return true
 			}
 
+			// 检查连接是否仍然有效
+			if conn == nil || conn.GetTCPConnection() == nil {
+				logger.WithFields(logrus.Fields{
+					"deviceId": deviceId,
+				}).Warn("发现无效连接，将从映射中移除")
+				m.deviceIdToConnMap.Delete(deviceId)
+				return true
+			}
+
+			// 检查连接状态
+			if val, err := conn.GetProperty(constants.PropKeyConnStatus); err == nil && val != nil {
+				status := val.(string)
+				if status == constants.ConnStatusClosed || status == constants.ConnStatusInactive {
+					logger.WithFields(logrus.Fields{
+						"deviceId": deviceId,
+						"status":   status,
+					}).Debug("跳过非活跃连接")
+					return true
+				}
+			}
+
 			// 执行回调函数
 			return callback(deviceId, conn)
 		}

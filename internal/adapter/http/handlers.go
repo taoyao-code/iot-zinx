@@ -176,15 +176,26 @@ func HandleSendCommand(c *gin.Context) {
 
 // HandleDeviceList 获取当前在线设备列表
 func HandleDeviceList(c *gin.Context) {
-	var devices []gin.H
 	// 获取设备服务
 	deviceService := app.GetServiceManager().DeviceService
 
 	// 从设备服务获取所有设备状态
 	allDevices := deviceService.GetAllDevices()
 
-	// 创建设备ID映射，用于后续合并连接信息
-	deviceMap := make(map[string]gin.H)
+	// 创建设备数组
+	var devices []gin.H
+
+	// 获取全局TCP监视器
+	tcpMonitor := pkg.Monitor.GetGlobalMonitor()
+	if tcpMonitor == nil {
+		c.JSON(http.StatusInternalServerError, APIResponse{
+			Code:    500,
+			Message: "系统错误: TCP监视器未初始化",
+		})
+		return
+	}
+
+	// 处理每个设备信息
 	for _, device := range allDevices {
 		deviceInfo := gin.H{
 			"deviceId": device.DeviceID,
@@ -203,22 +214,28 @@ func HandleDeviceList(c *gin.Context) {
 			deviceInfo["lastUpdateTime"] = time.Unix(device.LastSeen, 0).Format("2006-01-02 15:04:05")
 		}
 
-		deviceMap[device.DeviceID] = deviceInfo
+		// 获取设备连接，补充更多信息
+		if conn, exists := tcpMonitor.GetConnectionByDeviceId(device.DeviceID); exists {
+			// 获取连接状态
+			connStatus := ConnStatusInactive
+			if statusVal, err := conn.GetProperty(PropKeyConnStatus); err == nil && statusVal != nil {
+				connStatus = statusVal.(string)
+			}
+			deviceInfo["connectionStatus"] = connStatus
+
+			// 获取远程地址
+			deviceInfo["remoteAddr"] = conn.RemoteAddr().String()
+
+			// 获取最后心跳时间
+			if val, err := conn.GetProperty(PropKeyLastHeartbeatStr); err == nil && val != nil {
+				deviceInfo["heartbeatTime"] = val.(string)
+			}
+		}
+
+		devices = append(devices, deviceInfo)
 	}
 
-	// 获取全局TCP监视器
-	tcpMonitor := pkg.Monitor.GetGlobalMonitor()
-	if tcpMonitor == nil {
-		c.JSON(http.StatusInternalServerError, APIResponse{
-			Code:    500,
-			Message: "系统错误: TCP监视器未初始化",
-		})
-		return
-	}
-
-	// 由于没有直接的RangeDeviceConnections函数，我们需要修改这里的逻辑
-	// 这里可能需要实现一个遍历所有设备连接的函数
-	// 临时方案：简化处理，直接返回现有设备
+	// 返回设备列表
 	c.JSON(http.StatusOK, APIResponse{
 		Code:    0,
 		Message: "成功",
