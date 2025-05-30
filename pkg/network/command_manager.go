@@ -1,4 +1,4 @@
-package zinx_server
+package network
 
 import (
 	"fmt"
@@ -37,6 +37,9 @@ type CommandManager struct {
 	stopChan  chan struct{}
 	isRunning bool
 }
+
+// 确保CommandManager实现了ICommandManager接口
+var _ ICommandManager = (*CommandManager)(nil)
 
 // 创建全局命令管理器实例
 var (
@@ -223,21 +226,36 @@ func (cm *CommandManager) checkTimeoutCommands() {
 			"retryCount": existingCmd.RetryCount,
 		}).Info("重发超时命令")
 
-		// 构建响应数据包并发送
-		err := SendDNYResponse(existingCmd.Connection, existingCmd.PhysicalID, existingCmd.MessageID, existingCmd.Command, existingCmd.Data)
-		if err != nil {
-			logger.WithFields(logrus.Fields{
-				"cmdKey":     cmdKey,
-				"physicalID": fmt.Sprintf("0x%08X", existingCmd.PhysicalID),
-				"messageID":  existingCmd.MessageID,
-				"command":    fmt.Sprintf("0x%02X", existingCmd.Command),
-				"error":      err.Error(),
-			}).Error("重发命令失败")
+		// 构建响应数据包并发送 (这里需要外部提供发送方法)
+		if SendCommandFunc != nil {
+			err := SendCommandFunc(existingCmd.Connection, existingCmd.PhysicalID, existingCmd.MessageID, existingCmd.Command, existingCmd.Data)
+			if err != nil {
+				logger.WithFields(logrus.Fields{
+					"cmdKey":     cmdKey,
+					"physicalID": fmt.Sprintf("0x%08X", existingCmd.PhysicalID),
+					"messageID":  existingCmd.MessageID,
+					"command":    fmt.Sprintf("0x%02X", existingCmd.Command),
+					"error":      err.Error(),
+				}).Error("重发命令失败")
 
-			// 删除失败的命令
-			cm.lock.Lock()
-			delete(cm.commands, cmdKey)
-			cm.lock.Unlock()
+				// 删除失败的命令
+				cm.lock.Lock()
+				delete(cm.commands, cmdKey)
+				cm.lock.Unlock()
+			}
+		} else {
+			logger.Error("未设置命令发送函数，无法重发命令")
 		}
 	}
+}
+
+// 定义命令发送函数类型
+type SendCommandFuncType func(conn ziface.IConnection, physicalID uint32, messageID uint16, command uint8, data []byte) error
+
+// SendCommandFunc 命令发送函数，需要外部设置
+var SendCommandFunc SendCommandFuncType
+
+// SetSendCommandFunc 设置命令发送函数
+func SetSendCommandFunc(fn SendCommandFuncType) {
+	SendCommandFunc = fn
 }

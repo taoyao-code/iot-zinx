@@ -5,7 +5,7 @@ import (
 	"github.com/aceld/zinx/znet"
 	"github.com/bujia-iot/iot-zinx/internal/domain/dny_protocol"
 	"github.com/bujia-iot/iot-zinx/internal/infrastructure/logger"
-	"github.com/bujia-iot/iot-zinx/internal/infrastructure/zinx_server"
+	"github.com/bujia-iot/iot-zinx/pkg"
 	"github.com/sirupsen/logrus"
 )
 
@@ -36,7 +36,7 @@ func (h *DNYHandlerBase) PreHandle(request ziface.IRequest) {
 	messageID := uint16(0) // 从消息中提取消息ID，现在暂时设为0
 
 	// 尝试确认命令
-	if zinx_server.GetCommandManager().ConfirmCommand(physicalID, messageID, commandID) {
+	if pkg.Network.GetCommandManager().ConfirmCommand(physicalID, messageID, commandID) {
 		logger.WithFields(logrus.Fields{
 			"connID":     conn.GetConnID(),
 			"physicalID": physicalID,

@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"github.com/bujia-iot/iot-zinx/pkg"
 	"encoding/binary"
 	"fmt"
 	"time"
@@ -9,7 +10,6 @@ import (
 	"github.com/aceld/zinx/znet"
 	"github.com/bujia-iot/iot-zinx/internal/domain/dny_protocol"
 	"github.com/bujia-iot/iot-zinx/internal/infrastructure/logger"
-	"github.com/bujia-iot/iot-zinx/internal/infrastructure/zinx_server"
 	"github.com/sirupsen/logrus"
 )
 
@@ -55,7 +55,7 @@ func (h *GetServerTimeHandler) Handle(request ziface.IRequest) {
 	// 发送响应
 	// 生成消息ID
 	messageID := uint16(time.Now().Unix() & 0xFFFF)
-	if err := zinx_server.SendDNYResponse(conn, physicalId, messageID, uint8(dny_protocol.CmdGetServerTime), timeBytes); err != nil {
+	if err := pkg.Protocol.SendDNYResponse(conn, physicalId, messageID, uint8(dny_protocol.CmdGetServerTime), timeBytes); err != nil {
 		logger.WithFields(logrus.Fields{
 			"connID":     conn.GetConnID(),
 			"physicalId": fmt.Sprintf("0x%08X", physicalId),
@@ -72,12 +72,12 @@ func (h *GetServerTimeHandler) Handle(request ziface.IRequest) {
 	}).Debug("发送服务器时间成功")
 
 	// 如果设备ID还未绑定，设置一个临时ID
-	deviceId, err := conn.GetProperty(zinx_server.PropKeyDeviceId)
+	deviceId, err := conn.GetProperty(PropKeyDeviceId)
 	if err != nil || deviceId.(string)[:7] == "TempID-" {
 		deviceIdStr := fmt.Sprintf("%08X", physicalId)
-		zinx_server.BindDeviceIdToConnection(deviceIdStr, conn)
+		pkg.Monitor.GetGlobalMonitor().BindDeviceIdToConnection(deviceIdStr, conn)
 	}
 
 	// 更新心跳时间
-	zinx_server.UpdateLastHeartbeatTime(conn)
+	pkg.Monitor.GetGlobalMonitor().UpdateLastHeartbeatTime(conn)
 }

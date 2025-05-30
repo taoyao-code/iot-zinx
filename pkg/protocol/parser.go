@@ -1,4 +1,4 @@
-package zinx_server
+package protocol
 
 import (
 	"encoding/hex"

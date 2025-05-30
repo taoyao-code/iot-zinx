@@ -1,4 +1,4 @@
-package zinx_server
+package network
 
 import (
 	"encoding/hex"
@@ -10,11 +10,16 @@ import (
 
 // RawDataHandler 原始数据处理器
 // 用于处理设备发送的十六进制编码数据、ICCID识别等
-type RawDataHandler struct{}
+type RawDataHandler struct {
+	// 数据包处理函数
+	handlePacketFunc func(conn ziface.IConnection, data []byte) bool
+}
 
 // NewRawDataHandler 创建原始数据处理器
-func NewRawDataHandler() ziface.IRouter {
-	return &RawDataHandler{}
+func NewRawDataHandler(handlePacketFunc func(conn ziface.IConnection, data []byte) bool) ziface.IRouter {
+	return &RawDataHandler{
+		handlePacketFunc: handlePacketFunc,
+	}
 }
 
 // PreHandle 预处理
@@ -35,7 +40,11 @@ func (r *RawDataHandler) Handle(request ziface.IRequest) {
 	}).Debug("收到原始数据")
 
 	// 调用我们的数据包处理逻辑
-	HandlePacket(conn, data)
+	if r.handlePacketFunc != nil {
+		r.handlePacketFunc(conn, data)
+	} else {
+		logger.Error("数据包处理函数未设置，无法处理原始数据")
+	}
 }
 
 // PostHandle 后处理

@@ -1,7 +1,6 @@
 package ports
 
 import (
-	"fmt"
 	"path/filepath"
 	"time"
 
@@ -10,8 +9,8 @@ import (
 	"github.com/aceld/zinx/znet"
 	"github.com/bujia-iot/iot-zinx/internal/infrastructure/config"
 	"github.com/bujia-iot/iot-zinx/internal/infrastructure/logger"
-	"github.com/bujia-iot/iot-zinx/internal/infrastructure/zinx_server"
 	"github.com/bujia-iot/iot-zinx/internal/infrastructure/zinx_server/handlers"
+	"github.com/bujia-iot/iot-zinx/pkg"
 )
 
 // StartTCPServer 配置并启动Zinx TCP服务器
@@ -20,9 +19,8 @@ func StartTCPServer() error {
 	cfg := config.GetConfig()
 	zinxCfg := cfg.TCPServer.Zinx
 
-	// 设置Zinx使用我们的日志系统
-	zinx_server.SetupZinxLogger()
-	logger.Info("已设置Zinx框架使用自定义日志系统")
+	// 初始化pkg包之间的依赖关系
+	pkg.InitPackages()
 
 	// 直接设置Zinx全局对象配置
 	zconf.GlobalObject.Name = zinxCfg.Name
@@ -60,69 +58,68 @@ func StartTCPServer() error {
 	}
 
 	// 创建自定义数据包封包与解包器
-	dataPack := zinx_server.NewDNYPacket(cfg.Logger.LogHexDump)
+	dataPack := pkg.Protocol.NewDNYDataPackFactory().NewDataPack(cfg.Logger.LogHexDump)
 
-	// 添加调试输出确认数据包处理器创建和设置
-	fmt.Printf("\n🔧🔧🔧 创建DNYPacket数据包处理器成功! 对象地址: %p 🔧🔧🔧\n", dataPack)
+	// 创建服务器
+	server := znet.NewServer()
 
-	// 使用选项创建服务器实例 - 使用WithPacket选项设置自定义解析器
-	fmt.Printf("🔧🔧🔧 使用WithPacket选项设置自定义数据包处理器 🔧🔧🔧\n")
-	server := znet.NewServer(znet.WithPacket(dataPack))
-	fmt.Printf("🔧🔧🔧 服务器创建完成，使用了自定义解析器 🔧🔧🔧\n\n")
+	// 设置自定义数据包处理器
+	server.SetPacket(dataPack)
 
-	// 验证数据包处理器是否正确设置
-	packet := server.GetPacket()
-	if packet != nil {
-		fmt.Printf("🔧🔧🔧 成功获取设置的数据包处理器: %T, 对象地址: %p 🔧🔧🔧\n", packet, packet)
-
-		// 测试调用GetHeadLen方法
-		headLen := packet.GetHeadLen()
-		fmt.Printf("🔧🔧🔧 测试调用GetHeadLen()，返回值: %d 🔧🔧🔧\n", headLen)
-	} else {
-		logger.Error("数据包处理器设置失败或无法获取")
-		return fmt.Errorf("数据包处理器设置失败")
-	}
-
-	// 设置连接创建和销毁的钩子函数
-	server.SetOnConnStart(zinx_server.OnConnectionStart)
-	server.SetOnConnStop(zinx_server.OnConnectionStop)
-
-	// 注册路由处理器
+	// 注册路由
 	handlers.RegisterRouters(server)
 
-	// 检查注册的路由数量
-	checkRouterCount(server)
+	// 设置连接钩子
+	// 使用pkg包中的连接钩子
+	connectionHooks := pkg.Network.NewConnectionHooks(
+		60*time.Second,  // 读超时
+		60*time.Second,  // 写超时
+		120*time.Second, // KeepAlive周期
+	)
 
-	// 初始化命令管理器
-	cmdManager := zinx_server.GetCommandManager()
-	cmdManager.Start()
+	// 设置连接建立回调
+	connectionHooks.SetOnConnectionEstablishedFunc(func(conn ziface.IConnection) {
+		// 通知监视器连接建立
+		pkg.Monitor.GetGlobalMonitor().OnConnectionEstablished(conn)
+	})
 
-	// 启动设备状态监控服务
-	zinx_server.StartDeviceMonitor()
+	// 设置连接关闭回调
+	connectionHooks.SetOnConnectionClosedFunc(func(conn ziface.IConnection) {
+		// 通知监视器连接关闭
+		pkg.Monitor.GetGlobalMonitor().OnConnectionClosed(conn)
+	})
 
-	// 使用zinx框架的心跳检测机制，与当前项目的协议结合
-	// 心跳间隔设置为30秒，符合项目的协议要求
+	// 设置连接钩子到服务器
+	server.SetOnConnStart(connectionHooks.OnConnectionStart)
+	server.SetOnConnStop(connectionHooks.OnConnectionStop)
+
+	// 设置心跳检测
 	heartbeatInterval := 30 * time.Second
 	server.StartHeartBeatWithOption(heartbeatInterval, &ziface.HeartBeatOption{
-		// 使用符合当前协议的心跳消息生成函数
-		MakeMsg: zinx_server.MakeDNYProtocolHeartbeatMsg,
-		// 使用符合当前协议的断开连接处理函数
-		OnRemoteNotAlive: zinx_server.OnDeviceNotAlive,
-		// 使用自定义的心跳路由处理器
-		Router: &handlers.HeartbeatCheckRouter{},
-		// 使用自定义的心跳消息ID（0xF001为自定义未使用ID，避免与现有命令冲突）
-		HeartBeatMsgID: uint32(0xF001),
+		MakeMsg:          pkg.Network.MakeDNYProtocolHeartbeatMsg,
+		OnRemoteNotAlive: pkg.Network.OnDeviceNotAlive,
+		HeartBeatMsgID:   0xF001, // 特殊心跳消息ID
 	})
-	logger.Info("已启用Zinx心跳检测机制，间隔30秒，使用DNY协议消息格式")
+
+	// 创建设备监控器
+	deviceMonitor := pkg.Monitor.NewDeviceMonitor(func(callback func(deviceId string, conn ziface.IConnection) bool) {
+		// 遍历所有设备连接并传递给回调函数
+		tcpMonitor := pkg.Monitor.GetGlobalMonitor()
+		if tcpMonitor == nil {
+			return
+		}
+
+		// 由于没有直接获取所有连接的方法，这里需要服务器实例提供
+		// 临时解决方案：实际项目中应该通过TCPMonitor实现
+		logger.Warn("设备连接遍历功能未完全实现")
+	})
+
+	// 启动设备监控器
+	deviceMonitor.Start()
 
 	// 启动服务器
-	go server.Serve()
+	logger.Infof("TCP服务器启动在 %s:%d", cfg.TCPServer.Host, zinxCfg.TCPPort)
+	server.Serve()
 
 	return nil
-}
-
-// 检查注册的路由数量
-func checkRouterCount(server ziface.IServer) {
-	// TODO: 检查路由数量
-	fmt.Println("路由注册验证完成")
 }

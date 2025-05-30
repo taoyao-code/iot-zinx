@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"github.com/bujia-iot/iot-zinx/pkg"
 	"encoding/hex"
 	"time"
 
@@ -8,7 +9,6 @@ import (
 	"github.com/aceld/zinx/znet"
 	"github.com/bujia-iot/iot-zinx/internal/app"
 	"github.com/bujia-iot/iot-zinx/internal/infrastructure/logger"
-	"github.com/bujia-iot/iot-zinx/internal/infrastructure/zinx_server"
 	"github.com/sirupsen/logrus"
 )
 
@@ -78,11 +78,11 @@ func (h *NonDNYDataHandler) processNonDNYData(conn ziface.IConnection, data []by
 // processICCID 处理ICCID数据
 func (h *NonDNYDataHandler) processICCID(conn ziface.IConnection, data []byte) bool {
 	iccidStr := string(data)
-	conn.SetProperty(zinx_server.PropKeyICCID, iccidStr)
+	conn.SetProperty(PropKeyICCID, iccidStr)
 
 	// 将ICCID作为设备ID进行绑定（临时ID，格式为TempID-ICCID）
 	tempDeviceId := "TempID-" + iccidStr
-	conn.SetProperty(zinx_server.PropKeyDeviceId, tempDeviceId)
+	conn.SetProperty(PropKeyDeviceId, tempDeviceId)
 
 	logger.WithFields(logrus.Fields{
 		"connID":     conn.GetConnID(),
@@ -106,7 +106,7 @@ func (h *NonDNYDataHandler) processICCID(conn ziface.IConnection, data []byte) b
 	}
 
 	// 更新心跳时间
-	zinx_server.UpdateLastHeartbeatTime(conn)
+	pkg.Monitor.GetGlobalMonitor().UpdateLastHeartbeatTime(conn)
 
 	return true
 }
@@ -114,16 +114,16 @@ func (h *NonDNYDataHandler) processICCID(conn ziface.IConnection, data []byte) b
 // processLinkHeartbeat 处理link心跳
 func (h *NonDNYDataHandler) processLinkHeartbeat(conn ziface.IConnection, data []byte) bool {
 	// 更新心跳时间
-	zinx_server.UpdateLastHeartbeatTime(conn)
+	pkg.Monitor.GetGlobalMonitor().UpdateLastHeartbeatTime(conn)
 
 	// 手动获取当前时间戳用于设置link属性
 	now := time.Now().Unix()
-	conn.SetProperty(zinx_server.PropKeyLastLink, now)
-	conn.SetProperty(zinx_server.PropKeyConnStatus, zinx_server.ConnStatusActive)
+	conn.SetProperty(PropKeyLastLink, now)
+	conn.SetProperty(PropKeyConnStatus, ConnStatusActive)
 
 	// 获取设备ID信息用于日志记录
 	deviceID := "unknown"
-	if val, err := conn.GetProperty(zinx_server.PropKeyDeviceId); err == nil && val != nil {
+	if val, err := conn.GetProperty(PropKeyDeviceId); err == nil && val != nil {
 		deviceID = val.(string)
 	}
 

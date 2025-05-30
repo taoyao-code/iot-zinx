@@ -1,4 +1,4 @@
-package zinx_server
+package protocol
 
 import (
 	"bytes"
@@ -29,9 +29,6 @@ type DNYPacket struct {
 
 // NewDNYPacket 创建一个新的DNY协议数据包处理器
 func NewDNYPacket(logHexDump bool) ziface.IDataPack {
-	// 初始化TCP监视器
-	InitTCPMonitor()
-
 	fmt.Printf("🚀🚀🚀 NewDNYPacket创建新的数据包处理器，logHexDump=%v 🚀🚀🚀\n", logHexDump)
 
 	return &DNYPacket{
@@ -133,7 +130,7 @@ func (dp *DNYPacket) packHeartbeatMessage(msg ziface.IMessage) ([]byte, error) {
 	packetData := dataBuff.Bytes()
 
 	// 计算校验和（从包头到数据的累加和）
-	checksum := calculatePacketChecksum(packetData)
+	checksum := CalculatePacketChecksum(packetData)
 
 	// 写入校验码 (2字节，小端模式)
 	if err := binary.Write(dataBuff, binary.LittleEndian, checksum); err != nil {
@@ -157,7 +154,7 @@ func (dp *DNYPacket) packDNYMessage(msg ziface.IMessage) ([]byte, error) {
 	if !ok {
 		errMsg := "消息类型转换失败，无法转换为DNY消息"
 		logger.Error(errMsg)
-		return nil, fmt.Errorf(errMsg)
+		return nil, errors.New(errMsg)
 	}
 
 	// 创建缓冲区
@@ -202,7 +199,7 @@ func (dp *DNYPacket) packDNYMessage(msg ziface.IMessage) ([]byte, error) {
 	packetData := dataBuff.Bytes()
 
 	// 计算校验和（从包头到数据的累加和）
-	checksum := calculatePacketChecksum(packetData)
+	checksum := CalculatePacketChecksum(packetData)
 
 	// 写入校验码 (2字节，小端模式)
 	if err := binary.Write(dataBuff, binary.LittleEndian, checksum); err != nil {
@@ -229,7 +226,7 @@ func (dp *DNYPacket) Unpack(binaryData []byte) (ziface.IMessage, error) {
 	actualData := dp.decodeHexDataIfNeeded(binaryData)
 
 	// 特殊处理：如果数据不符合DNY协议格式，创建特殊消息类型
-	if !isDNYProtocolData(actualData) {
+	if !IsDNYProtocolData(actualData) {
 		return dp.handleNonDNYData(actualData)
 	}
 
@@ -240,7 +237,7 @@ func (dp *DNYPacket) Unpack(binaryData []byte) (ziface.IMessage, error) {
 // decodeHexDataIfNeeded 如果数据是十六进制编码的，则解码
 func (dp *DNYPacket) decodeHexDataIfNeeded(data []byte) []byte {
 	// 检查是否为十六进制字符串（所有字节都是ASCII十六进制字符）
-	if isHexString(data) {
+	if IsHexString(data) {
 		// 解码十六进制字符串为字节数组
 		decoded, err := hex.DecodeString(string(data))
 		if err != nil {
@@ -295,7 +292,8 @@ func (dp *DNYPacket) handleDNYProtocolData(data []byte) (ziface.IMessage, error)
 
 	// 检查包头是否为"DNY"
 	if !bytes.HasPrefix(data, []byte(dny_protocol.DnyHeader)) {
-		return nil, fmt.Errorf("无效的DNY协议包头: %s", hex.EncodeToString(data[:3]))
+		headerHex := hex.EncodeToString(data[:3])
+		return nil, fmt.Errorf("无效的DNY协议包头: %s", headerHex)
 	}
 
 	// 解析数据长度 (第4-5字节，小端序)
@@ -361,8 +359,8 @@ func (dp *DNYPacket) parseDNYFields(data []byte, dataLen uint16) (uint32, uint16
 	return physicalId, messageId, command, payloadLen
 }
 
-// calculatePacketChecksum 计算校验和（从包头到数据的累加和）
-func calculatePacketChecksum(data []byte) uint16 {
+// CalculatePacketChecksum 计算校验和（从包头到数据的累加和）
+func CalculatePacketChecksum(data []byte) uint16 {
 	var checksum uint16
 	for _, b := range data {
 		checksum += uint16(b)
@@ -370,8 +368,8 @@ func calculatePacketChecksum(data []byte) uint16 {
 	return checksum
 }
 
-// isDNYProtocolData 检查数据是否符合DNY协议格式
-func isDNYProtocolData(data []byte) bool {
+// IsDNYProtocolData 检查数据是否符合DNY协议格式
+func IsDNYProtocolData(data []byte) bool {
 	// 检查最小长度
 	if len(data) < dny_protocol.MinPackageLen {
 		return false
@@ -394,8 +392,8 @@ func isDNYProtocolData(data []byte) bool {
 	return true
 }
 
-// isHexString 检查字节数组是否为有效的十六进制字符串
-func isHexString(data []byte) bool {
+// IsHexString 检查字节数组是否为有效的十六进制字符串
+func IsHexString(data []byte) bool {
 	// 检查是否为合适的十六进制长度
 	if len(data) == 0 || len(data)%2 != 0 {
 		return false

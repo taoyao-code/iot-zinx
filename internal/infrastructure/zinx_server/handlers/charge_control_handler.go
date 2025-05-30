@@ -9,19 +9,19 @@ import (
 	"github.com/aceld/zinx/znet"
 	"github.com/bujia-iot/iot-zinx/internal/domain/dny_protocol"
 	"github.com/bujia-iot/iot-zinx/internal/infrastructure/logger"
-	"github.com/bujia-iot/iot-zinx/internal/infrastructure/zinx_server"
-	"github.com/bujia-iot/iot-zinx/internal/infrastructure/zinx_server/common"
+	"github.com/bujia-iot/iot-zinx/pkg"
+	"github.com/bujia-iot/iot-zinx/pkg/monitor"
 	"github.com/sirupsen/logrus"
 )
 
 // ChargeControlHandler 处理充电控制命令 (命令ID: 0x82)
 type ChargeControlHandler struct {
 	znet.BaseRouter
-	monitor common.IConnectionMonitor
+	monitor monitor.IConnectionMonitor
 }
 
 // NewChargeControlHandler 创建充电控制处理器
-func NewChargeControlHandler(monitor common.IConnectionMonitor) *ChargeControlHandler {
+func NewChargeControlHandler(monitor monitor.IConnectionMonitor) *ChargeControlHandler {
 	return &ChargeControlHandler{
 		monitor: monitor,
 	}
@@ -93,7 +93,7 @@ func (h *ChargeControlHandler) SendChargeControlCommand(conn ziface.IConnection,
 
 	// 获取设备ID（如有）
 	deviceId := "Unknown"
-	if deviceIdVal, err := conn.GetProperty(common.PropKeyDeviceId); err == nil {
+	if deviceIdVal, err := conn.GetProperty(PropKeyDeviceId); err == nil {
 		deviceId = deviceIdVal.(string)
 	}
 
@@ -254,5 +254,5 @@ func (h *ChargeControlHandler) Handle(request ziface.IRequest) {
 	// 例如：更新订单状态、记录充电开始时间等
 
 	// 更新心跳时间
-	zinx_server.UpdateLastHeartbeatTime(conn)
+	pkg.Monitor.GetGlobalMonitor().UpdateLastHeartbeatTime(conn)
 }

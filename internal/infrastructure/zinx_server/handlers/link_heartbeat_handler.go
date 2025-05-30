@@ -1,12 +1,12 @@
 package handlers
 
 import (
+	"github.com/bujia-iot/iot-zinx/pkg"
 	"time"
 
 	"github.com/aceld/zinx/ziface"
 	"github.com/aceld/zinx/znet"
 	"github.com/bujia-iot/iot-zinx/internal/infrastructure/logger"
-	"github.com/bujia-iot/iot-zinx/internal/infrastructure/zinx_server"
 	"github.com/sirupsen/logrus"
 )
 
@@ -21,10 +21,10 @@ func (h *LinkHeartbeatHandler) Handle(request ziface.IRequest) {
 
 	// 更新最后一次"link"心跳时间
 	now := time.Now().Unix()
-	conn.SetProperty(zinx_server.PropKeyLastLink, now)
+	conn.SetProperty(PropKeyLastLink, now)
 
 	// 同时更新通用心跳时间，确保读取超时正确重置
-	zinx_server.UpdateLastHeartbeatTime(conn)
+	pkg.Monitor.GetGlobalMonitor().UpdateLastHeartbeatTime(conn)
 
 	logger.WithFields(logrus.Fields{
 		"connID":     conn.GetConnID(),

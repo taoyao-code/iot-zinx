@@ -1,12 +1,12 @@
 package handlers
 
 import (
+	"github.com/bujia-iot/iot-zinx/pkg"
 	"fmt"
 
 	"github.com/aceld/zinx/ziface"
 	"github.com/bujia-iot/iot-zinx/internal/domain/dny_protocol"
 	"github.com/bujia-iot/iot-zinx/internal/infrastructure/logger"
-	"github.com/bujia-iot/iot-zinx/internal/infrastructure/zinx_server"
 	"github.com/sirupsen/logrus"
 )
 
@@ -40,7 +40,7 @@ func (h *DeviceStatusHandler) Handle(request ziface.IRequest) {
 
 	// 获取设备ID用于日志记录
 	deviceID := "unknown"
-	if val, err := conn.GetProperty(zinx_server.PropKeyDeviceId); err == nil && val != nil {
+	if val, err := conn.GetProperty(PropKeyDeviceId); err == nil && val != nil {
 		deviceID = val.(string)
 	}
 
@@ -53,13 +53,13 @@ func (h *DeviceStatusHandler) Handle(request ziface.IRequest) {
 	}).Debug("收到设备状态查询请求")
 
 	// 更新心跳时间
-	zinx_server.UpdateLastHeartbeatTime(conn)
+	pkg.Monitor.GetGlobalMonitor().UpdateLastHeartbeatTime(conn)
 
 	// 构建设备状态响应数据
 	responseData := h.buildDeviceStatusResponse(conn)
 
 	// 发送响应
-	if err := zinx_server.SendDNYResponse(conn, physicalId, messageId, dny_protocol.CmdNetworkStatus, responseData); err != nil {
+	if err := pkg.Protocol.SendDNYResponse(conn, physicalId, messageId, dny_protocol.CmdNetworkStatus, responseData); err != nil {
 		logger.WithFields(logrus.Fields{
 			"connID":     conn.GetConnID(),
 			"physicalId": fmt.Sprintf("0x%08X", physicalId),
@@ -93,7 +93,7 @@ func (h *DeviceStatusHandler) buildDeviceStatusResponse(conn ziface.IConnection)
 
 	// 设置ICCID
 	iccid := ""
-	if iccidVal, err := conn.GetProperty(zinx_server.PropKeyICCID); err == nil && iccidVal != nil {
+	if iccidVal, err := conn.GetProperty(PropKeyICCID); err == nil && iccidVal != nil {
 		iccid = iccidVal.(string)
 	}
 

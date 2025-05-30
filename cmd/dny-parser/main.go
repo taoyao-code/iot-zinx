@@ -7,7 +7,8 @@ import (
 	"os"
 	"strings"
 
-	"github.com/bujia-iot/iot-zinx/internal/infrastructure/zinx_server"
+	"github.com/bujia-iot/iot-zinx/pkg"
+	"github.com/bujia-iot/iot-zinx/pkg/protocol"
 )
 
 func main() {
@@ -20,8 +21,8 @@ func main() {
 	// 解析命令行参数
 	flag.Parse()
 
-	// 初始化TCP监视器
-	zinx_server.InitTCPMonitor()
+	// 初始化包依赖关系
+	pkg.InitPackages()
 
 	// 判断运行模式
 	if *interactive {
@@ -29,7 +30,7 @@ func main() {
 		runInteractiveMode()
 	} else if *hexData != "" {
 		// 直接解析指定的十六进制数据
-		zinx_server.ParseManualData(*hexData, "命令行解析")
+		protocol.ParseManualData(*hexData, "命令行解析")
 	} else {
 		// 如果没有指定参数，显示帮助信息
 		fmt.Println("DNY协议解析工具")
@@ -64,7 +65,7 @@ func runInteractiveMode() {
 		}
 
 		// 解析十六进制数据
-		zinx_server.ParseManualData(input, "交互式解析")
+		protocol.ParseManualData(input, "交互式解析")
 	}
 
 	if err := scanner.Err(); err != nil {

@@ -5,7 +5,6 @@ import (
 	"github.com/aceld/zinx/znet"
 	"github.com/bujia-iot/iot-zinx/internal/domain/dny_protocol"
 	"github.com/bujia-iot/iot-zinx/internal/infrastructure/logger"
-	"github.com/bujia-iot/iot-zinx/internal/infrastructure/zinx_server"
 	"github.com/sirupsen/logrus"
 )
 
@@ -41,11 +40,11 @@ func (h *ICCIDHandler) Handle(request ziface.IRequest) {
 	iccid := string(data)
 
 	// 保存ICCID到连接属性
-	conn.SetProperty(zinx_server.PropKeyICCID, iccid)
+	conn.SetProperty(PropKeyICCID, iccid)
 
 	// 更新设备ID，使用ICCID作为临时标识
 	tempDeviceId := "TempID-" + iccid
-	conn.SetProperty(zinx_server.PropKeyDeviceId, tempDeviceId)
+	conn.SetProperty(PropKeyDeviceId, tempDeviceId)
 
 	logger.WithFields(logrus.Fields{
 		"connID":     conn.GetConnID(),

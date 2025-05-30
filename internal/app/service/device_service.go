@@ -6,6 +6,7 @@ import (
 
 	"github.com/bujia-iot/iot-zinx/internal/domain/dny_protocol"
 	"github.com/bujia-iot/iot-zinx/internal/infrastructure/logger"
+	"github.com/bujia-iot/iot-zinx/pkg"
 	"github.com/sirupsen/logrus"
 )
 
@@ -38,7 +39,7 @@ func (s *DeviceService) HandleDeviceOnline(deviceId string, iccid string) {
 	}).Info("设备上线")
 
 	// 更新设备状态为在线
-	s.HandleDeviceStatusUpdate(deviceId, "online")
+	s.HandleDeviceStatusUpdate(deviceId, pkg.DeviceStatusOnline)
 
 	// TODO: 调用业务平台API，通知设备上线
 }
@@ -52,7 +53,7 @@ func (s *DeviceService) HandleDeviceOffline(deviceId string, iccid string) {
 	}).Info("设备离线")
 
 	// 更新设备状态为离线
-	s.HandleDeviceStatusUpdate(deviceId, "offline")
+	s.HandleDeviceStatusUpdate(deviceId, pkg.DeviceStatusOffline)
 
 	// TODO: 调用业务平台API，通知设备离线
 }
@@ -183,7 +184,7 @@ func (s *DeviceService) HandlePowerHeartbeat(deviceId string, power *dny_protoco
 	}).Debug("处理功率心跳数据")
 
 	// 更新设备状态为在线
-	s.HandleDeviceStatusUpdate(deviceId, "online")
+	s.HandleDeviceStatusUpdate(deviceId, pkg.DeviceStatusOnline)
 
 	// TODO: 调用业务平台API更新功率数据
 }

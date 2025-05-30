@@ -1,13 +1,13 @@
 package handlers
 
 import (
+	"github.com/bujia-iot/iot-zinx/pkg"
 	"fmt"
 
 	"github.com/aceld/zinx/ziface"
 	"github.com/aceld/zinx/znet"
 	"github.com/bujia-iot/iot-zinx/internal/domain/dny_protocol"
 	"github.com/bujia-iot/iot-zinx/internal/infrastructure/logger"
-	"github.com/bujia-iot/iot-zinx/internal/infrastructure/zinx_server"
 	"github.com/sirupsen/logrus"
 )
 
@@ -45,10 +45,10 @@ func (h *MainHeartbeatHandler) Handle(request ziface.IRequest) {
 	dnyMessageId := dnyMsg.GetMsgID()
 
 	// 如果设备ID还未绑定，设置物理ID
-	deviceId, err := conn.GetProperty(zinx_server.PropKeyDeviceId)
+	deviceId, err := conn.GetProperty(PropKeyDeviceId)
 	if err != nil || deviceId.(string)[:7] == "TempID-" {
 		deviceIdStr := fmt.Sprintf("%08X", physicalId)
-		zinx_server.BindDeviceIdToConnection(deviceIdStr, conn)
+		pkg.Monitor.GetGlobalMonitor().BindDeviceIdToConnection(deviceIdStr, conn)
 	}
 
 	// 解析主心跳数据
@@ -79,5 +79,5 @@ func (h *MainHeartbeatHandler) Handle(request ziface.IRequest) {
 	// 主机每隔30分钟发送一次，服务器不用应答
 
 	// 更新心跳时间
-	zinx_server.UpdateLastHeartbeatTime(conn)
+	pkg.Monitor.GetGlobalMonitor().UpdateLastHeartbeatTime(conn)
 }

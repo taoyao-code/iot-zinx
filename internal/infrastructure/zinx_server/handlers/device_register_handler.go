@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"github.com/bujia-iot/iot-zinx/pkg"
 	"fmt"
 	"time"
 
@@ -9,7 +10,6 @@ import (
 	"github.com/bujia-iot/iot-zinx/internal/app"
 	"github.com/bujia-iot/iot-zinx/internal/domain/dny_protocol"
 	"github.com/bujia-iot/iot-zinx/internal/infrastructure/logger"
-	"github.com/bujia-iot/iot-zinx/internal/infrastructure/zinx_server"
 	"github.com/sirupsen/logrus"
 )
 
@@ -62,12 +62,12 @@ func (h *DeviceRegisterHandler) Handle(request ziface.IRequest) {
 
 	// 将设备ID绑定到连接
 	deviceIdStr := fmt.Sprintf("%08X", physicalId)
-	zinx_server.BindDeviceIdToConnection(deviceIdStr, conn)
+	pkg.Monitor.GetGlobalMonitor().BindDeviceIdToConnection(deviceIdStr, conn)
 
 	// 使用解析出的ICCID
 	iccid := registerData.ICCID
 	// 将ICCID存储到连接属性中
-	conn.SetProperty(zinx_server.PropKeyICCID, iccid)
+	conn.SetProperty(PropKeyICCID, iccid)
 
 	// 通知业务层设备上线
 	deviceService := app.GetServiceManager().DeviceService
@@ -84,7 +84,7 @@ func (h *DeviceRegisterHandler) Handle(request ziface.IRequest) {
 	// 发送响应
 	// 生成消息ID
 	messageID := uint16(time.Now().Unix() & 0xFFFF)
-	if err := zinx_server.SendDNYResponse(conn, physicalId, messageID, uint8(dny_protocol.CmdDeviceRegister), responseData); err != nil {
+	if err := pkg.Protocol.SendDNYResponse(conn, physicalId, messageID, uint8(dny_protocol.CmdDeviceRegister), responseData); err != nil {
 		logger.WithFields(logrus.Fields{
 			"connID":     conn.GetConnID(),
 			"physicalId": fmt.Sprintf("0x%08X", physicalId),
@@ -100,5 +100,5 @@ func (h *DeviceRegisterHandler) Handle(request ziface.IRequest) {
 	}).Debug("设备注册响应发送成功")
 
 	// 更新心跳时间
-	zinx_server.UpdateLastHeartbeatTime(conn)
+	pkg.Monitor.GetGlobalMonitor().UpdateLastHeartbeatTime(conn)
 }

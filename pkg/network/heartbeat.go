@@ -1,4 +1,4 @@
-package zinx_server
+package network
 
 import (
 	"fmt"
@@ -6,6 +6,7 @@ import (
 
 	"github.com/aceld/zinx/ziface"
 	"github.com/bujia-iot/iot-zinx/internal/infrastructure/logger"
+	"github.com/bujia-iot/iot-zinx/pkg/constants"
 	"github.com/sirupsen/logrus"
 )
 
@@ -19,7 +20,7 @@ func MakeDNYProtocolHeartbeatMsg(conn ziface.IConnection) []byte {
 	deviceID := "unknown"
 	physicalID := uint32(0)
 
-	if val, err := conn.GetProperty(PropKeyDeviceId); err == nil && val != nil {
+	if val, err := conn.GetProperty("DeviceId"); err == nil && val != nil {
 		deviceID = val.(string)
 		// 尝试将设备ID解析为数字（如果是十六进制格式，需要转换）
 		_, err := fmt.Sscanf(deviceID, "%X", &physicalID)
@@ -44,7 +45,7 @@ func MakeDNYProtocolHeartbeatMsg(conn ziface.IConnection) []byte {
 	cmdData := []byte{0x81} // 实际发送0x81设备状态查询命令
 
 	// 构建DNY协议包
-	packet := buildDNYResponsePacket(physicalID, messageID, 0xF0, cmdData)
+	packet := BuildDNYResponsePacket(physicalID, messageID, 0xF0, cmdData)
 
 	logger.WithFields(logrus.Fields{
 		"connID":     conn.GetConnID(),
@@ -67,13 +68,13 @@ func OnDeviceNotAlive(conn ziface.IConnection) {
 
 	// 获取设备ID
 	deviceID := "unknown"
-	if val, err := conn.GetProperty(PropKeyDeviceId); err == nil && val != nil {
+	if val, err := conn.GetProperty(constants.PropKeyDeviceId); err == nil && val != nil {
 		deviceID = val.(string)
 	}
 
 	// 获取最后心跳时间
 	lastHeartbeatStr := "unknown"
-	if val, err := conn.GetProperty(PropKeyLastHeartbeatStr); err == nil && val != nil {
+	if val, err := conn.GetProperty(constants.PropKeyLastHeartbeatStr); err == nil && val != nil {
 		lastHeartbeatStr = val.(string)
 	}
 
@@ -86,10 +87,12 @@ func OnDeviceNotAlive(conn ziface.IConnection) {
 	}).Warn("设备心跳超时，断开连接")
 
 	// 更新设备状态为离线
-	UpdateDeviceStatus(deviceID, "offline")
+	if UpdateDeviceStatusFunc != nil {
+		UpdateDeviceStatusFunc(deviceID, constants.DeviceStatusOffline)
+	}
 
 	// 更新连接状态
-	conn.SetProperty(PropKeyConnStatus, ConnStatusInactive)
+	conn.SetProperty(constants.PropKeyConnStatus, constants.ConnStatusInactive)
 
 	// 关闭连接
 	conn.Stop()
@@ -98,4 +101,57 @@ func OnDeviceNotAlive(conn ziface.IConnection) {
 		"connID":   connID,
 		"deviceID": deviceID,
 	}).Info("已断开心跳超时的设备连接")
+}
+
+// BuildDNYResponsePacket 构建DNY协议响应数据包
+func BuildDNYResponsePacket(physicalID uint32, messageID uint16, command uint8, data []byte) []byte {
+	// 计算数据段长度（物理ID + 消息ID + 命令 + 数据 + 校验）
+	dataLen := 4 + 2 + 1 + len(data) + 2
+
+	// 构建数据包
+	packet := make([]byte, 0, 5+dataLen) // 包头(3) + 长度(2) + 数据段
+
+	// 包头 "DNY"
+	packet = append(packet, 'D', 'N', 'Y')
+
+	// 长度（小端模式）
+	packet = append(packet, byte(dataLen), byte(dataLen>>8))
+
+	// 物理ID（小端模式）
+	packet = append(packet, byte(physicalID), byte(physicalID>>8), byte(physicalID>>16), byte(physicalID>>24))
+
+	// 消息ID（小端模式）
+	packet = append(packet, byte(messageID), byte(messageID>>8))
+
+	// 命令
+	packet = append(packet, command)
+
+	// 数据
+	packet = append(packet, data...)
+
+	// 计算校验和（从包头到数据的累加和）
+	checksum := CalculateResponseChecksum(packet)
+	packet = append(packet, byte(checksum), byte(checksum>>8))
+
+	return packet
+}
+
+// CalculateResponseChecksum 计算响应数据包校验和
+func CalculateResponseChecksum(data []byte) uint16 {
+	var sum uint16
+	for _, b := range data {
+		sum += uint16(b)
+	}
+	return sum
+}
+
+// 更新设备状态的函数类型定义
+type UpdateDeviceStatusFuncType = constants.UpdateDeviceStatusFuncType
+
+// UpdateDeviceStatusFunc 更新设备状态的函数，需要外部设置
+var UpdateDeviceStatusFunc UpdateDeviceStatusFuncType
+
+// SetUpdateDeviceStatusFunc 设置更新设备状态的函数
+func SetUpdateDeviceStatusFunc(fn UpdateDeviceStatusFuncType) {
+	UpdateDeviceStatusFunc = fn
 }

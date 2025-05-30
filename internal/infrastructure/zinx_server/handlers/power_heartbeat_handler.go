@@ -3,12 +3,13 @@ package handlers
 import (
 	"fmt"
 
+	"github.com/bujia-iot/iot-zinx/pkg"
+
 	"github.com/aceld/zinx/ziface"
 	"github.com/aceld/zinx/znet"
 	"github.com/bujia-iot/iot-zinx/internal/app"
 	"github.com/bujia-iot/iot-zinx/internal/domain/dny_protocol"
 	"github.com/bujia-iot/iot-zinx/internal/infrastructure/logger"
-	"github.com/bujia-iot/iot-zinx/internal/infrastructure/zinx_server"
 	"github.com/sirupsen/logrus"
 )
 
@@ -67,8 +68,8 @@ func (h *PowerHeartbeatHandler) Handle(request ziface.IRequest) {
 	go deviceService.HandlePowerHeartbeat(deviceId, powerData)
 
 	// 功率心跳通常不需要响应，但更新心跳时间
-	zinx_server.UpdateLastHeartbeatTime(conn)
+	pkg.Monitor.GetGlobalMonitor().UpdateLastHeartbeatTime(conn)
 
-	// 记录设备在线状态
-	zinx_server.UpdateDeviceStatus(deviceId, "online")
+	// 更新设备在线状态
+	pkg.Monitor.GetGlobalMonitor().UpdateDeviceStatus(deviceId, DeviceStatusOnline)
 }

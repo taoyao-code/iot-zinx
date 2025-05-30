@@ -4,7 +4,6 @@ import (
 	"github.com/aceld/zinx/ziface"
 	"github.com/bujia-iot/iot-zinx/internal/domain/dny_protocol"
 	"github.com/bujia-iot/iot-zinx/internal/infrastructure/logger"
-	"github.com/bujia-iot/iot-zinx/internal/infrastructure/zinx_server"
 )
 
 // RegisterRouters 注册所有路由
@@ -35,7 +34,7 @@ func RegisterRouters(server ziface.IServer) {
 	server.AddRouter(dny_protocol.CmdSwipeCard, &SwipeCardHandler{})
 
 	// 充电控制处理器
-	server.AddRouter(dny_protocol.CmdChargeControl, NewChargeControlHandler(zinx_server.GetGlobalMonitor()))
+	server.AddRouter(dny_protocol.CmdChargeControl, NewChargeControlHandler(LegacyGetGlobalMonitor()))
 
 	// 结算数据处理器
 	server.AddRouter(dny_protocol.CmdSettlement, &SettlementHandler{})
@@ -45,9 +44,6 @@ func RegisterRouters(server ziface.IServer) {
 
 	// 参数设置处理器
 	server.AddRouter(dny_protocol.CmdParamSetting, &ParameterSettingHandler{})
-
-	// 注意：心跳检测路由(0xF001)由Zinx框架的StartHeartBeatWithOption自动注册
-	// 请勿在此处重复注册，否则会导致路由冲突
 
 	// 后续添加其他命令处理器
 	// server.AddRouter(dny_protocol.CmdAlarm, &AlarmHandler{})

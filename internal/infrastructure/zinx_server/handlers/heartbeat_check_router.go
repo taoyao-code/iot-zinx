@@ -2,12 +2,14 @@ package handlers
 
 import (
 	"fmt"
+	"time"
+
+	"github.com/bujia-iot/iot-zinx/pkg"
 
 	"github.com/aceld/zinx/ziface"
 	"github.com/aceld/zinx/znet"
 	"github.com/bujia-iot/iot-zinx/internal/domain/dny_protocol"
 	"github.com/bujia-iot/iot-zinx/internal/infrastructure/logger"
-	"github.com/bujia-iot/iot-zinx/internal/infrastructure/zinx_server"
 	"github.com/sirupsen/logrus"
 )
 
@@ -59,15 +61,15 @@ func (r *HeartbeatCheckRouter) Handle(request ziface.IRequest) {
 				}).Info("处理心跳响应中的设备状态查询")
 
 				// 如果设备ID与连接未关联，进行关联
-				if val, err := conn.GetProperty(zinx_server.PropKeyDeviceId); err != nil || val == nil {
-					zinx_server.BindDeviceIdToConnection(deviceID, conn)
+				if val, err := conn.GetProperty(PropKeyDeviceId); err != nil || val == nil {
+					pkg.Monitor.GetGlobalMonitor().BindDeviceIdToConnection(deviceID, conn)
 				}
 			}
 		}
 	} else {
 		// 非DNY协议消息，尝试获取设备ID用于日志记录
 		deviceID := "unknown"
-		if val, err := conn.GetProperty(zinx_server.PropKeyDeviceId); err == nil && val != nil {
+		if val, err := conn.GetProperty(PropKeyDeviceId); err == nil && val != nil {
 			deviceID = val.(string)
 		}
 
@@ -80,21 +82,30 @@ func (r *HeartbeatCheckRouter) Handle(request ziface.IRequest) {
 	}
 
 	// 无论是什么类型的响应，都更新心跳时间
-	zinx_server.UpdateLastHeartbeatTime(conn)
+	pkg.Monitor.GetGlobalMonitor().UpdateLastHeartbeatTime(conn)
 
 	// 获取设备ID用于日志记录
 	deviceID := "unknown"
-	if val, err := conn.GetProperty(zinx_server.PropKeyDeviceId); err == nil && val != nil {
+	if val, err := conn.GetProperty(PropKeyDeviceId); err == nil && val != nil {
 		deviceID = val.(string)
 	}
 
 	// 更新设备状态为在线
-	zinx_server.UpdateDeviceStatus(deviceID, "online")
+	pkg.Monitor.GetGlobalMonitor().UpdateDeviceStatus(deviceID, DeviceStatusOnline)
 
 	logger.WithFields(logrus.Fields{
 		"connID":     conn.GetConnID(),
 		"deviceID":   deviceID,
 		"remoteAddr": conn.RemoteAddr().String(),
-		"status":     zinx_server.ConnStatusActive,
+		"status":     ConnStatusActive,
 	}).Debug("心跳检测响应处理完成，设备状态已更新")
+
+	// 记录心跳信息
+	logger.WithFields(logrus.Fields{
+		"connID":     conn.GetConnID(),
+		"deviceID":   deviceID,
+		"status":     ConnStatusActive,
+		"remoteAddr": conn.RemoteAddr().String(),
+		"time":       time.Now().Format("2006-01-02 15:04:05"),
+	}).Info("设备心跳成功")
 }

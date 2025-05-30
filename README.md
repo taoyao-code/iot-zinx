@@ -26,105 +26,49 @@
 
 ## 目录结构
 
+- `cmd/gateway`: 网关程序
+- `cmd/dny-parser`: DNY协议解析工具
+- `internal/app`: 应用层代码
+- `internal/domain`: 领域层代码
+- `internal/infrastructure`: 基础设施层代码
+- `internal/ports`: 接口层代码
+- `pkg`: 可重用工具包 (重构后的工具类集合)
+- `examples`: 示例代码
+- `test`: 测试代码
+
+## 工具包使用
+
+项目的可重用工具类已重构到`pkg`目录中，包括：
+
+- `pkg/protocol`: DNY协议处理相关工具
+- `pkg/network`: 网络通信相关工具
+- `pkg/monitor`: 设备和连接监控工具
+- `pkg/utils`: 通用工具类
+
+### 快速开始
+
+```go
+import "github.com/bujia-iot/iot-zinx/pkg"
+
+// 初始化pkg包依赖关系
+pkg.InitPackages()
+
+// 使用协议相关功能
+packet := pkg.Protocol.NewDNYDataPackFactory().NewDataPack(true)
+result := pkg.Protocol.ParseDNYProtocol(data)
+pkg.Protocol.SendDNYResponse(conn, physicalId, messageId, command, data)
+
+// 使用网络相关功能
+hooks := pkg.Network.NewConnectionHooks(60*time.Second, 60*time.Second, 120*time.Second)
+cmdMgr := pkg.Network.GetCommandManager()
+
+// 使用监控相关功能
+monitor := pkg.Monitor.GetGlobalMonitor()
+monitor.BindDeviceIdToConnection(deviceId, conn)
+monitor.UpdateLastHeartbeatTime(conn)
 ```
-iot-zinx/
-├── bin/                  # 编译后的可执行文件
-│   └── gateway           # 网关服务可执行文件
-├── cmd/                  # 命令行入口
-│   ├── dny-parser/       # DNY协议解析工具
-│   │   └── main.go       # 解析工具入口
-│   └── gateway/          # 网关服务入口
-│       └── main.go       # 主程序入口
-├── conf/                 # 默认配置目录
-│   └── zinx.json         # Zinx框架默认配置
-├── configs/              # 应用配置文件目录
-│   └── gateway.yaml      # 网关配置文件
-├── deployments/          # 部署相关文件
-├── docs/                 # 项目文档
-│   ├── 进度/             # 进度文档
-│   │   └── 阶段一完成报告.md # 阶段性报告
-│   ├── 1.设计方案.md      # 设计方案文档
-│   ├── AP3000-设备与服务器通信协议.md
-│   ├── 对接硬件.md
-│   └── 主机-服务器通信协议.md
-├── internal/             # 内部代码，不对外暴露
-│   ├── adapter/          # 适配器层，对接外部系统
-│   │   └── http/         # HTTP适配器
-│   │       └── handlers.go # HTTP请求处理器
-│   ├── app/              # 应用层，核心业务逻辑
-│   │   ├── dto/          # 数据传输对象
-│   │   │   ├── charge_control_dto.go
-│   │   │   └── swipe_card_dto.go
-│   │   ├── service/      # 业务服务
-│   │   │   └── device_service.go
-│   │   └── service_manager.go
-│   ├── domain/           # 领域层，核心业务模型
-│   │   └── dny_protocol/ # DNY协议相关定义
-│   │       ├── constants.go
-│   │       ├── frame.go
-│   │       └── message_types.go
-│   ├── infrastructure/   # 基础设施层
-│   │   ├── config/       # 配置管理
-│   │   │   └── config.go
-│   │   ├── logger/       # 日志服务
-│   │   │   └── logger.go
-│   │   ├── redis/        # Redis客户端
-│   │   │   └── client.go
-│   │   └── zinx_server/  # Zinx服务器实现
-│   │       ├── command_manager.go # 命令管理器
-│   │       ├── common/    # 公共组件
-│   │       │   └── monitor.go
-│   │       ├── connection_hooks.go # 连接生命周期钩子
-│   │       ├── device_monitor.go # 设备状态监控
-│   │       ├── handlers/ # 命令处理器
-│   │       │   ├── charge_control_handler.go
-│   │       │   ├── connection_monitor.go
-│   │       │   ├── device_register_handler.go
-│   │       │   ├── device_status_handler.go
-│   │       │   ├── dny_handler_base.go
-│   │       │   ├── dny_protocol_parser.go
-│   │       │   ├── get_server_time_handler.go
-│   │       │   ├── heartbeat_check_router.go
-│   │       │   ├── heartbeat_handler.go
-│   │       │   ├── iccid_handler.go
-│   │       │   ├── link_heartbeat_handler.go
-│   │       │   ├── main_heartbeat_handler.go
-│   │       │   ├── non_dny_data_handler.go
-│   │       │   ├── parameter_setting_handler.go
-│   │       │   ├── power_heartbeat_handler.go
-│   │       │   ├── router.go
-│   │       │   ├── settlement_handler.go
-│   │       │   ├── swipe_card_handler.go
-│   │       │   └── tcp_data_logger.go
-│   │       ├── heartbeat.go # 心跳处理
-│   │       ├── logger_adapter.go # 日志适配器
-│   │       ├── monitor.go # 监控组件
-│   │       ├── packet.go # 数据包处理器
-│   │       ├── raw_data_handler.go # 原始数据处理
-│   │       └── raw_data_hook.go # 原始数据钩子
-│   └── ports/            # 端口层，定义系统边界
-│       ├── http_server.go
-│       └── tcp_server.go
-├── logs/                 # 日志文件目录
-│   └── gateway.log       # 网关日志文件
-├── pkg/                  # 可共享的代码包
-│   ├── errors/           # 错误处理
-│   │   └── errors.go
-│   ├── utils/            # 工具函数
-│   └── validation/       # 数据验证
-├── script/               # 脚本工具
-│   ├── parse-example.sh  # 示例解析脚本
-│   ├── parse-log.sh      # 日志解析脚本
-│   └── push.sh           # 推送脚本
-├── test/                 # 测试代码
-│   └── test_admin_tool.go # 测试管理工具
-├── web/                  # Web相关文件
-├── go.mod                # Go模块文件
-├── go.sum                # Go依赖校验文件
-├── Makefile              # 构建脚本
-├── CHANGELOG.md          # 变更日志
-└── README.md             # 项目说明文档
-```
+
+详细说明请参考 [pkg/README.md](pkg/README.md)。
 
 ## 开发指南
 

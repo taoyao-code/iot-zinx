@@ -1,4 +1,4 @@
-package zinx_server
+package monitor
 
 import (
 	"encoding/hex"
@@ -8,13 +8,13 @@ import (
 	"time"
 
 	"github.com/aceld/zinx/ziface"
-	"github.com/bujia-iot/iot-zinx/internal/app"
 	"github.com/bujia-iot/iot-zinx/internal/infrastructure/logger"
-	"github.com/bujia-iot/iot-zinx/internal/infrastructure/zinx_server/common"
+	"github.com/bujia-iot/iot-zinx/pkg/constants"
+	"github.com/bujia-iot/iot-zinx/pkg/protocol"
 	"github.com/sirupsen/logrus"
 )
 
-// TCPMonitor TCP监视器，实现IConnectionMonitor接口
+// TCPMonitor TCP监视器
 type TCPMonitor struct {
 	enabled bool
 
@@ -23,6 +23,9 @@ type TCPMonitor struct {
 	connIdToDeviceIdMap sync.Map // map[uint64]string
 }
 
+// 确保TCPMonitor实现了IConnectionMonitor接口
+var _ IConnectionMonitor = (*TCPMonitor)(nil)
+
 // 全局TCP数据监视器
 var (
 	globalMonitorOnce sync.Once
@@ -30,7 +33,7 @@ var (
 )
 
 // GetGlobalMonitor 获取全局监视器实例
-func GetGlobalMonitor() common.IConnectionMonitor {
+func GetGlobalMonitor() *TCPMonitor {
 	globalMonitorOnce.Do(func() {
 		globalMonitor = &TCPMonitor{
 			enabled: true,
@@ -38,11 +41,6 @@ func GetGlobalMonitor() common.IConnectionMonitor {
 		fmt.Println("TCP数据监视器已初始化")
 	})
 	return globalMonitor
-}
-
-// InitTCPMonitor 初始化TCP监视器（向后兼容）
-func InitTCPMonitor() common.IConnectionMonitor {
-	return GetGlobalMonitor()
 }
 
 // OnConnectionEstablished 当连接建立时通知TCP监视器
@@ -86,7 +84,7 @@ func (m *TCPMonitor) OnRawDataReceived(conn ziface.IConnection, data []byte) {
 		if len(data) >= 3 && data[0] == 0x44 && data[1] == 0x4E && data[2] == 0x59 {
 			fmt.Printf("【DNY协议】检测到DNY协议数据包\n")
 			// 如果是DNY协议数据，解析并显示详细信息
-			if result := ParseDNYProtocol(data); result != "" {
+			if result := protocol.ParseDNYProtocol(data); result != "" {
 				fmt.Println(result)
 
 				// 解析命令字段进行更详细的记录
@@ -142,7 +140,7 @@ func (m *TCPMonitor) OnRawDataSent(conn ziface.IConnection, data []byte) {
 		// 解析DNY协议数据
 		if len(data) >= 3 && data[0] == 0x44 && data[1] == 0x4E && data[2] == 0x59 {
 			// 如果是DNY协议数据，解析并显示详细信息
-			if result := ParseDNYProtocol(data); result != "" {
+			if result := protocol.ParseDNYProtocol(data); result != "" {
 				fmt.Println(result)
 
 				// 解析命令字段进行更详细的记录
@@ -178,8 +176,12 @@ func (m *TCPMonitor) OnRawDataSent(conn ziface.IConnection, data []byte) {
 func (m *TCPMonitor) BindDeviceIdToConnection(deviceId string, conn ziface.IConnection) {
 	m.deviceIdToConnMap.Store(deviceId, conn)
 	m.connIdToDeviceIdMap.Store(conn.GetConnID(), deviceId)
-	conn.SetProperty(common.PropKeyDeviceId, deviceId)
-	m.UpdateDeviceStatus(deviceId, "online")
+	conn.SetProperty(constants.PropKeyDeviceId, deviceId)
+
+	// 更新设备状态
+	if UpdateDeviceStatusFunc != nil {
+		UpdateDeviceStatusFunc(deviceId, constants.DeviceStatusOnline)
+	}
 
 	logger.WithFields(logrus.Fields{
 		"deviceId":   deviceId,
@@ -213,31 +215,34 @@ func (m *TCPMonitor) UpdateLastHeartbeatTime(conn ziface.IConnection) {
 	now := time.Now()
 
 	// 更新心跳时间（时间戳）
-	conn.SetProperty(common.PropKeyLastHeartbeat, now.Unix())
+	conn.SetProperty(constants.PropKeyLastHeartbeat, now.Unix())
 
 	// 更新心跳时间（格式化字符串）
-	conn.SetProperty(common.PropKeyLastHeartbeatStr, now.Format("2006-01-02 15:04:05"))
+	conn.SetProperty(constants.PropKeyLastHeartbeatStr, now.Format("2006-01-02 15:04:05"))
 
 	// 更新连接状态
-	conn.SetProperty(common.PropKeyConnStatus, common.ConnStatusActive)
+	conn.SetProperty(constants.PropKeyConnStatus, constants.ConnStatusActive)
 
 	// 更新 TCP 读取超时
 	if tcpConn, ok := conn.GetTCPConnection().(*net.TCPConn); ok {
-		// 使用common包中定义的超时常量
-		if err := tcpConn.SetReadDeadline(now.Add(common.TCPReadDeadLine)); err != nil {
+		// 使用超时常量
+		readDeadLine := 60 * time.Second
+		if err := tcpConn.SetReadDeadline(now.Add(readDeadLine)); err != nil {
 			logger.WithFields(logrus.Fields{
 				"error":    err.Error(),
 				"connID":   conn.GetConnID(),
-				"deadline": now.Add(common.TCPReadDeadLine).Format("2006-01-02 15:04:05"),
+				"deadline": now.Add(readDeadLine).Format("2006-01-02 15:04:05"),
 			}).Error("设置读取超时失败")
 		}
 	}
 
 	// 获取设备ID并更新在线状态
 	deviceID := "unknown"
-	if val, err := conn.GetProperty(common.PropKeyDeviceId); err == nil && val != nil {
+	if val, err := conn.GetProperty(constants.PropKeyDeviceId); err == nil && val != nil {
 		deviceID = val.(string)
-		m.UpdateDeviceStatus(deviceID, "online")
+		if UpdateDeviceStatusFunc != nil {
+			UpdateDeviceStatusFunc(deviceID, constants.DeviceStatusOnline)
+		}
 	}
 
 	logger.WithFields(logrus.Fields{
@@ -245,18 +250,52 @@ func (m *TCPMonitor) UpdateLastHeartbeatTime(conn ziface.IConnection) {
 		"deviceId":      deviceID,
 		"remoteAddr":    conn.RemoteAddr().String(),
 		"heartbeatTime": now.Format("2006-01-02 15:04:05"),
-		"nextDeadline":  now.Add(common.TCPReadDeadLine).Format("2006-01-02 15:04:05"),
-		"connStatus":    common.ConnStatusActive,
+		"nextDeadline":  now.Add(60 * time.Second).Format("2006-01-02 15:04:05"),
+		"connStatus":    constants.ConnStatusActive,
 	}).Debug("已更新心跳时间")
 }
 
-// UpdateDeviceStatus 更新设备在线状态
-func (m *TCPMonitor) UpdateDeviceStatus(deviceId string, status string) {
-	deviceService := app.GetServiceManager().DeviceService
-	go deviceService.HandleDeviceStatusUpdate(deviceId, status)
+// 更新设备状态的函数类型定义
+type UpdateDeviceStatusFuncType = constants.UpdateDeviceStatusFuncType
 
-	logger.WithFields(logrus.Fields{
-		"deviceId": deviceId,
-		"status":   status,
-	}).Debug("设备状态已更新")
+// UpdateDeviceStatusFunc 更新设备状态的函数，需要外部设置
+var UpdateDeviceStatusFunc UpdateDeviceStatusFuncType
+
+// SetUpdateDeviceStatusFunc 设置更新设备状态的函数
+func SetUpdateDeviceStatusFunc(fn UpdateDeviceStatusFuncType) {
+	UpdateDeviceStatusFunc = fn
+}
+
+// UpdateDeviceStatus 更新设备状态
+func (m *TCPMonitor) UpdateDeviceStatus(deviceId string, status string) {
+	// 根据设备ID查找连接
+	if conn, exists := m.GetConnectionByDeviceId(deviceId); exists {
+		// 记录设备状态变更
+		logger.WithFields(logrus.Fields{
+			"deviceId":   deviceId,
+			"connID":     conn.GetConnID(),
+			"remoteAddr": conn.RemoteAddr().String(),
+			"status":     status,
+		}).Info("设备状态更新")
+
+		// 如果设备离线，更新连接状态
+		if status == constants.DeviceStatusOffline {
+			conn.SetProperty(constants.PropKeyConnStatus, constants.ConnStatusInactive)
+		} else if status == constants.DeviceStatusOnline {
+			conn.SetProperty(constants.PropKeyConnStatus, constants.ConnStatusActive)
+			// 更新最后心跳时间
+			m.UpdateLastHeartbeatTime(conn)
+		}
+	} else {
+		// 设备不在线，只记录状态变更
+		logger.WithFields(logrus.Fields{
+			"deviceId": deviceId,
+			"status":   status,
+		}).Info("设备状态更新(设备不在线)")
+	}
+
+	// 调用外部提供的设备状态更新函数
+	if UpdateDeviceStatusFunc != nil {
+		UpdateDeviceStatusFunc(deviceId, status)
+	}
 }

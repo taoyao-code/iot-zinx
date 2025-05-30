@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"github.com/bujia-iot/iot-zinx/pkg"
 	"encoding/binary"
 	"fmt"
 	"time"
@@ -10,7 +11,6 @@ import (
 	"github.com/bujia-iot/iot-zinx/internal/app"
 	"github.com/bujia-iot/iot-zinx/internal/domain/dny_protocol"
 	"github.com/bujia-iot/iot-zinx/internal/infrastructure/logger"
-	"github.com/bujia-iot/iot-zinx/internal/infrastructure/zinx_server"
 	"github.com/sirupsen/logrus"
 )
 
@@ -88,7 +88,7 @@ func (h *ParameterSettingHandler) Handle(request ziface.IRequest) {
 	// 发送响应
 	// 生成消息ID
 	messageID := uint16(time.Now().Unix() & 0xFFFF)
-	if err := zinx_server.SendDNYResponse(conn, physicalId, messageID, uint8(dny_protocol.CmdParamSetting), responseData); err != nil {
+	if err := pkg.Protocol.SendDNYResponse(conn, physicalId, messageID, uint8(dny_protocol.CmdParamSetting), responseData); err != nil {
 		logger.WithFields(logrus.Fields{
 			"connID":      conn.GetConnID(),
 			"deviceId":    deviceId,
@@ -106,5 +106,5 @@ func (h *ParameterSettingHandler) Handle(request ziface.IRequest) {
 	}).Debug("参数设置响应发送成功")
 
 	// 更新心跳时间
-	zinx_server.UpdateLastHeartbeatTime(conn)
+	pkg.Monitor.GetGlobalMonitor().UpdateLastHeartbeatTime(conn)
 }
