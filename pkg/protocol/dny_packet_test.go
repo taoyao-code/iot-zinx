@@ -109,12 +109,3 @@ func createDNYMessage(physicalId uint32, messageId uint16, command uint8, data [
 		PhysicalId: physicalId,
 	}
 }
-
-// calculateChecksum 计算校验和
-func calculateChecksum(data []byte) byte {
-	var sum byte = 0
-	for _, b := range data {
-		sum += b
-	}
-	return sum
-}

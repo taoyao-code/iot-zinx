@@ -20,9 +20,6 @@ func StartTCPServer() error {
 	zinxCfg := cfg.TCPServer.Zinx
 	deviceCfg := cfg.DeviceConnection
 
-	// 初始化pkg包之间的依赖关系
-	pkg.InitPackages()
-
 	// 直接设置Zinx全局对象配置
 	zconf.GlobalObject.Name = zinxCfg.Name
 	zconf.GlobalObject.Host = cfg.TCPServer.Host
@@ -58,16 +55,19 @@ func StartTCPServer() error {
 		zconf.GlobalObject.LogIsolationLevel = 0
 	}
 
-	// 创建自定义数据包封包与解包器
-	dataPack := pkg.Protocol.NewDNYDataPackFactory().NewDataPack(cfg.Logger.LogHexDump)
-
-	// 创建服务器
+	// 1. 先创建服务器实例
 	server := znet.NewServer()
 
-	// 设置自定义数据包处理器
+	// 2. 创建自定义数据包封包与解包器
+	dataPack := pkg.Protocol.NewDNYDataPackFactory().NewDataPack(cfg.Logger.LogHexDump)
+
+	// 3. 设置自定义数据包处理器
 	server.SetPacket(dataPack)
 
-	// 注册路由
+	// 4. 初始化pkg包之间的依赖关系
+	pkg.InitPackages()
+
+	// 5. 注册路由 - 确保在初始化包之后再注册路由
 	handlers.RegisterRouters(server)
 
 	// 设置连接钩子
