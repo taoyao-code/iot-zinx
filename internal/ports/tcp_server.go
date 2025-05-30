@@ -20,6 +20,9 @@ func StartTCPServer() error {
 	zinxCfg := cfg.TCPServer.Zinx
 	deviceCfg := cfg.DeviceConnection
 
+	// 1. 初始化pkg包之间的依赖关系
+	pkg.InitPackages()
+
 	// 直接设置Zinx全局对象配置
 	zconf.GlobalObject.Name = zinxCfg.Name
 	zconf.GlobalObject.Host = cfg.TCPServer.Host
@@ -54,9 +57,6 @@ func StartTCPServer() error {
 	default:
 		zconf.GlobalObject.LogIsolationLevel = 0
 	}
-
-	// 1. 初始化pkg包之间的依赖关系
-	pkg.InitPackages()
 
 	// 2. 创建服务器实例
 	server := znet.NewServer()
