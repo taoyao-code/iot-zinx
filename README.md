@@ -8,11 +8,14 @@
 
 ### 主要功能
 
-- 设备连接管理：处理设备上线、注册和离线
-- 心跳管理：主机心跳、分机心跳等各类心跳包处理
-- 刷卡消费：处理设备刷卡请求
-- 充电控制：向设备发送充电启停命令
-- 设备状态监控：监控设备心跳状态，自动清理超时连接
+- **设备连接管理**：处理设备上线、注册和离线，支持ICCID和设备ID双重识别
+- **多种心跳管理**：支持标准心跳、主机心跳、Link心跳等多种保活机制
+- **刷卡消费**：处理设备刷卡请求，验证卡片有效性并授权消费
+- **充电控制**：向设备发送充电启停命令，控制充电过程
+- **设备状态监控**：实时监控设备心跳状态，自动清理超时连接
+- **服务器时间同步**：提供精准时间服务，确保设备与服务器时间同步
+- **命令重发机制**：关键业务命令支持超时重发，确保命令可靠送达
+- **原始数据记录**：完整记录设备与服务器之间的通信数据，便于问题排查
 
 ### 技术栈
 
@@ -28,6 +31,8 @@ iot-zinx/
 ├── bin/                  # 编译后的可执行文件
 │   └── gateway           # 网关服务可执行文件
 ├── cmd/                  # 命令行入口
+│   ├── dny-parser/       # DNY协议解析工具
+│   │   └── main.go       # 解析工具入口
 │   └── gateway/          # 网关服务入口
 │       └── main.go       # 主程序入口
 ├── conf/                 # 默认配置目录
@@ -35,8 +40,9 @@ iot-zinx/
 ├── configs/              # 应用配置文件目录
 │   └── gateway.yaml      # 网关配置文件
 ├── deployments/          # 部署相关文件
-├── dosc/                 # 项目文档
+├── docs/                 # 项目文档
 │   ├── 进度/             # 进度文档
+│   │   └── 阶段一完成报告.md # 阶段性报告
 │   ├── 1.设计方案.md      # 设计方案文档
 │   ├── AP3000-设备与服务器通信协议.md
 │   ├── 对接硬件.md
@@ -55,7 +61,8 @@ iot-zinx/
 │   ├── domain/           # 领域层，核心业务模型
 │   │   └── dny_protocol/ # DNY协议相关定义
 │   │       ├── constants.go
-│   │       └── frame.go
+│   │       ├── frame.go
+│   │       └── message_types.go
 │   ├── infrastructure/   # 基础设施层
 │   │   ├── config/       # 配置管理
 │   │   │   └── config.go
@@ -64,17 +71,37 @@ iot-zinx/
 │   │   ├── redis/        # Redis客户端
 │   │   │   └── client.go
 │   │   └── zinx_server/  # Zinx服务器实现
-│   │       ├── connection_hooks.go
-│   │       ├── datapacker.go
-│   │       ├── device_monitor.go
-│   │       └── handlers/ # 命令处理器
-│   │           ├── charge_control_handler.go
-│   │           ├── device_register_handler.go
-│   │           ├── get_server_time_handler.go
-│   │           ├── heartbeat_handler.go
-│   │           ├── main_heartbeat_handler.go
-│   │           ├── router.go
-│   │           └── swipe_card_handler.go
+│   │       ├── command_manager.go # 命令管理器
+│   │       ├── common/    # 公共组件
+│   │       │   └── monitor.go
+│   │       ├── connection_hooks.go # 连接生命周期钩子
+│   │       ├── device_monitor.go # 设备状态监控
+│   │       ├── handlers/ # 命令处理器
+│   │       │   ├── charge_control_handler.go
+│   │       │   ├── connection_monitor.go
+│   │       │   ├── device_register_handler.go
+│   │       │   ├── device_status_handler.go
+│   │       │   ├── dny_handler_base.go
+│   │       │   ├── dny_protocol_parser.go
+│   │       │   ├── get_server_time_handler.go
+│   │       │   ├── heartbeat_check_router.go
+│   │       │   ├── heartbeat_handler.go
+│   │       │   ├── iccid_handler.go
+│   │       │   ├── link_heartbeat_handler.go
+│   │       │   ├── main_heartbeat_handler.go
+│   │       │   ├── non_dny_data_handler.go
+│   │       │   ├── parameter_setting_handler.go
+│   │       │   ├── power_heartbeat_handler.go
+│   │       │   ├── router.go
+│   │       │   ├── settlement_handler.go
+│   │       │   ├── swipe_card_handler.go
+│   │       │   └── tcp_data_logger.go
+│   │       ├── heartbeat.go # 心跳处理
+│   │       ├── logger_adapter.go # 日志适配器
+│   │       ├── monitor.go # 监控组件
+│   │       ├── packet.go # 数据包处理器
+│   │       ├── raw_data_handler.go # 原始数据处理
+│   │       └── raw_data_hook.go # 原始数据钩子
 │   └── ports/            # 端口层，定义系统边界
 │       ├── http_server.go
 │       └── tcp_server.go
@@ -85,11 +112,13 @@ iot-zinx/
 │   │   └── errors.go
 │   ├── utils/            # 工具函数
 │   └── validation/       # 数据验证
+├── script/               # 脚本工具
+│   ├── parse-example.sh  # 示例解析脚本
+│   ├── parse-log.sh      # 日志解析脚本
+│   └── push.sh           # 推送脚本
 ├── test/                 # 测试代码
-│   ├── mock/             # 测试模拟
-│   │   └── mock.go
-│   └── unit/             # 单元测试
-│       └── device_service_test.go
+│   └── test_admin_tool.go # 测试管理工具
+├── web/                  # Web相关文件
 ├── go.mod                # Go模块文件
 ├── go.sum                # Go依赖校验文件
 ├── Makefile              # 构建脚本
@@ -147,10 +176,25 @@ make build
 - `DeviceRegisterHandler`：设备注册请求处理器 (0x20)
 - `HeartbeatHandler`：标准心跳包处理器 (0x01)
 - `MainHeartbeatHandler`：主机心跳包处理器 (0x11)
-- `SlaveHeartbeatHandler`：分机心跳包处理器 (0x21)
-- `GetServerTimeHandler`：获取服务器时间处理器 (0x12)
+- `DeviceStatusHandler`：设备状态处理器 (0x21)
+- `GetServerTimeHandler`：获取服务器时间处理器 (0x12/0x22)
 - `SwipeCardHandler`：刷卡请求处理器 (0x02)
 - `ChargeControlHandler`：充电控制处理器 (0x82)
+- `ICCIDHandler`：ICCID识别处理器
+- `LinkHeartbeatHandler`：Link心跳处理器
+- `NonDNYDataHandler`：非DNY协议数据处理器
+- `ParameterSettingHandler`：参数设置处理器
+- `PowerHeartbeatHandler`：电源心跳处理器
+- `SettlementHandler`：结算处理器
+
+### 核心组件
+
+- `connection_hooks.go`：连接生命周期钩子函数，处理设备连接建立和断开
+- `packet.go`：数据包处理器，负责DNY协议数据的封包和解包
+- `device_monitor.go`：设备状态监控器，监控设备心跳状态
+- `command_manager.go`：命令管理器，管理发送命令的确认和超时重发
+- `monitor.go`：TCP数据监视器，记录设备数据传输过程
+- `raw_data_handler.go`：原始数据处理器，处理非结构化数据
 
 ### 端口和适配器架构
 
@@ -176,21 +220,25 @@ make build
 
 ### 设备连接生命周期
 
-1. 设备发送ICCID (SIM卡号)：网关保存ICCID并等待后续消息
-2. 设备发送设备注册请求 (0x20)：网关解析设备信息并完成注册
-3. 设备发送心跳包 (0x01/0x11/0x21)：网关更新设备状态
-4. 设备发送刷卡请求 (0x02)：网关验证卡片并响应
-5. 网关发送充电控制命令 (0x82)：设备执行充电操作并响应结果
+1. **连接建立**：设备与网关建立TCP连接，网关创建连接对象并分配连接ID
+2. **初始化识别**：设备可能发送ICCID(SIM卡号)或Link心跳等初始化数据
+3. **设备注册**：设备发送注册请求(0x20)，网关解析设备信息并完成注册
+4. **心跳保活**：设备定期发送心跳包(0x01/0x11/0x21)，网关更新设备状态
+5. **业务交互**：设备发送业务请求(如刷卡0x02)或网关下发控制命令(如充电控制0x82)
+6. **连接监控**：网关监控设备心跳状态，自动清理超时连接
+7. **连接断开**：设备主动断开连接或网关检测到连接超时，释放连接资源
 
 ## 协议支持
 
 本系统实现了DNY协议（设备通信协议），支持以下功能：
 
 1. 设备注册与认证
-2. 心跳保活
+2. 心跳保活（设备心跳、主机心跳、Link心跳等）
 3. 刷卡消费
 4. 充电控制
-5. 设备状态查询
+5. 设备状态监控
+6. 服务器时间同步
+7. 参数设置
 
 ## 版权与许可
 
