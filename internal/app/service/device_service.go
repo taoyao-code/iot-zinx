@@ -7,6 +7,7 @@ import (
 	"github.com/bujia-iot/iot-zinx/internal/domain/dny_protocol"
 	"github.com/bujia-iot/iot-zinx/internal/infrastructure/logger"
 	"github.com/bujia-iot/iot-zinx/pkg"
+	"github.com/bujia-iot/iot-zinx/pkg/monitor"
 	"github.com/sirupsen/logrus"
 )
 
@@ -27,7 +28,18 @@ type DeviceInfo struct {
 
 // NewDeviceService 创建设备服务实例
 func NewDeviceService() *DeviceService {
-	return &DeviceService{}
+	service := &DeviceService{}
+
+	// 订阅设备状态变更事件
+	eventBus := pkg.Monitor.GetEventBus()
+	eventBus.Subscribe(pkg.Monitor.EventType.StatusChange, service.handleDeviceStatusChangeEvent, nil)
+	eventBus.Subscribe(pkg.Monitor.EventType.Connect, service.handleDeviceConnectEvent, nil)
+	eventBus.Subscribe(pkg.Monitor.EventType.Disconnect, service.handleDeviceDisconnectEvent, nil)
+	eventBus.Subscribe(pkg.Monitor.EventType.Reconnect, service.handleDeviceReconnectEvent, nil)
+
+	logger.Info("设备服务已初始化并订阅设备事件")
+
+	return service
 }
 
 // HandleDeviceOnline 处理设备上线
@@ -206,4 +218,78 @@ func (s *DeviceService) HandleParameterSetting(deviceId string, param *dny_proto
 // NowUnix 获取当前时间戳
 func NowUnix() int64 {
 	return time.Now().Unix()
+}
+
+// 处理设备状态变更事件
+func (s *DeviceService) handleDeviceStatusChangeEvent(event *monitor.DeviceEvent) {
+	deviceId := event.DeviceID
+	oldStatus := event.Data["old_status"].(string)
+	newStatus := event.Data["new_status"].(string)
+
+	logger.WithFields(logrus.Fields{
+		"deviceId":  deviceId,
+		"oldStatus": oldStatus,
+		"newStatus": newStatus,
+	}).Info("设备状态变更")
+
+	// 更新设备状态
+	s.HandleDeviceStatusUpdate(deviceId, newStatus)
+
+	// TODO: 调用业务平台API通知设备状态变更
+}
+
+// 处理设备连接事件
+func (s *DeviceService) handleDeviceConnectEvent(event *monitor.DeviceEvent) {
+	deviceId := event.DeviceID
+	connID := event.Data["conn_id"].(uint64)
+
+	logger.WithFields(logrus.Fields{
+		"deviceId": deviceId,
+		"connID":   connID,
+	}).Info("设备连接")
+
+	// 获取ICCID
+	sessionManager := pkg.Monitor.GetSessionManager()
+	if session, exists := sessionManager.GetSession(deviceId); exists {
+		// 处理设备上线
+		s.HandleDeviceOnline(deviceId, session.ICCID)
+	}
+}
+
+// 处理设备断开连接事件
+func (s *DeviceService) handleDeviceDisconnectEvent(event *monitor.DeviceEvent) {
+	deviceId := event.DeviceID
+	connID := event.Data["conn_id"].(uint64)
+	reason := event.Data["reason"].(string)
+
+	logger.WithFields(logrus.Fields{
+		"deviceId": deviceId,
+		"connID":   connID,
+		"reason":   reason,
+	}).Info("设备断开连接")
+
+	// 不立即将设备标记为离线，而是标记为重连中
+	s.HandleDeviceStatusUpdate(deviceId, pkg.DeviceStatusReconnecting)
+
+	// TODO: 通知业务平台设备暂时离线
+}
+
+// 处理设备重连事件
+func (s *DeviceService) handleDeviceReconnectEvent(event *monitor.DeviceEvent) {
+	deviceId := event.DeviceID
+	oldConnID := event.Data["old_conn_id"].(uint64)
+	newConnID := event.Data["new_conn_id"].(uint64)
+
+	logger.WithFields(logrus.Fields{
+		"deviceId":  deviceId,
+		"oldConnID": oldConnID,
+		"newConnID": newConnID,
+	}).Info("设备重连")
+
+	// 获取ICCID
+	sessionManager := pkg.Monitor.GetSessionManager()
+	if session, exists := sessionManager.GetSession(deviceId); exists {
+		// 处理设备恢复上线
+		s.HandleDeviceOnline(deviceId, session.ICCID)
+	}
 }

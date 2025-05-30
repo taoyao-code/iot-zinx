@@ -13,25 +13,30 @@ import (
 
 // 设备状态常量
 const (
-	DeviceStatusOnline  = constants.DeviceStatusOnline
-	DeviceStatusOffline = constants.DeviceStatusOffline
+	DeviceStatusOnline       = constants.DeviceStatusOnline
+	DeviceStatusOffline      = constants.DeviceStatusOffline
+	DeviceStatusReconnecting = constants.DeviceStatusReconnecting
 )
 
 // 连接状态常量
 const (
-	ConnStatusActive   = constants.ConnStatusActive
-	ConnStatusInactive = constants.ConnStatusInactive
-	ConnStatusClosed   = constants.ConnStatusClosed
+	ConnStatusActive    = constants.ConnStatusActive
+	ConnStatusInactive  = constants.ConnStatusInactive
+	ConnStatusClosed    = constants.ConnStatusClosed
+	ConnStatusSuspended = constants.ConnStatusSuspended
 )
 
 // 连接属性键常量
 const (
-	PropKeyDeviceId         = constants.PropKeyDeviceId
-	PropKeyICCID            = constants.PropKeyICCID
-	PropKeyLastHeartbeat    = constants.PropKeyLastHeartbeat
-	PropKeyLastHeartbeatStr = constants.PropKeyLastHeartbeatStr
-	PropKeyConnStatus       = constants.PropKeyConnStatus
-	PropKeyLastLink         = constants.PropKeyLastLink
+	PropKeyDeviceId           = constants.PropKeyDeviceId
+	PropKeyICCID              = constants.PropKeyICCID
+	PropKeyLastHeartbeat      = constants.PropKeyLastHeartbeat
+	PropKeyLastHeartbeatStr   = constants.PropKeyLastHeartbeatStr
+	PropKeyConnStatus         = constants.PropKeyConnStatus
+	PropKeyLastLink           = constants.PropKeyLastLink
+	PropKeySessionID          = constants.PropKeySessionID
+	PropKeyReconnectCount     = constants.PropKeyReconnectCount
+	PropKeyLastDisconnectTime = constants.PropKeyLastDisconnectTime
 )
 
 // Protocol 协议相关工具导出
@@ -113,6 +118,19 @@ var Monitor = struct {
 	NewDeviceMonitor func(deviceConnAccessor func(func(deviceId string, conn ziface.IConnection) bool)) monitor.IDeviceMonitor
 	// 设置更新设备状态函数
 	SetUpdateDeviceStatusFunc func(fn monitor.UpdateDeviceStatusFuncType)
+	// 获取会话管理器
+	GetSessionManager func() *monitor.SessionManager
+	// 获取事件总线
+	GetEventBus func() *monitor.EventBus
+	// 设备事件类型常量
+	EventType struct {
+		StatusChange string
+		Connect      string
+		Disconnect   string
+		Reconnect    string
+		Heartbeat    string
+		Data         string
+	}
 }{
 	GetGlobalMonitor: func() monitor.IConnectionMonitor {
 		return monitor.GetGlobalMonitor()
@@ -121,6 +139,27 @@ var Monitor = struct {
 		return monitor.NewDeviceMonitor(deviceConnAccessor)
 	},
 	SetUpdateDeviceStatusFunc: monitor.SetUpdateDeviceStatusFunc,
+	GetSessionManager: func() *monitor.SessionManager {
+		return monitor.GetSessionManager()
+	},
+	GetEventBus: func() *monitor.EventBus {
+		return monitor.GetEventBus()
+	},
+	EventType: struct {
+		StatusChange string
+		Connect      string
+		Disconnect   string
+		Reconnect    string
+		Heartbeat    string
+		Data         string
+	}{
+		StatusChange: monitor.EventTypeStatusChange,
+		Connect:      monitor.EventTypeConnect,
+		Disconnect:   monitor.EventTypeDisconnect,
+		Reconnect:    monitor.EventTypeReconnect,
+		Heartbeat:    monitor.EventTypeHeartbeat,
+		Data:         monitor.EventTypeData,
+	},
 }
 
 // Utils 工具类导出

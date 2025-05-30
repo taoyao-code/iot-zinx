@@ -95,6 +95,7 @@ type DeviceConnectionConfig struct {
 	HeartbeatTimeoutSeconds   int `mapstructure:"heartbeatTimeoutSeconds"`
 	HeartbeatIntervalSeconds  int `mapstructure:"heartbeatIntervalSeconds"`
 	HeartbeatWarningThreshold int `mapstructure:"heartbeatWarningThreshold"`
+	SessionTimeoutMinutes     int `mapstructure:"sessionTimeoutMinutes"`
 }
 
 // 全局配置实例

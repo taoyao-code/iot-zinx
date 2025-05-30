@@ -29,6 +29,12 @@ type DeviceMonitor struct {
 
 	// 心跳警告阈值
 	warningThreshold time.Duration
+
+	// 会话管理器
+	sessionManager *SessionManager
+
+	// 事件总线
+	eventBus *EventBus
 }
 
 // 确保DeviceMonitor实现了IDeviceMonitor接口
@@ -60,6 +66,8 @@ func NewDeviceMonitor(deviceConnAccessor func(func(deviceId string, conn ziface.
 		heartbeatTimeout:   heartbeatTimeout,
 		checkInterval:      checkInterval,
 		warningThreshold:   warningThreshold,
+		sessionManager:     GetSessionManager(),
+		eventBus:           GetEventBus(),
 	}
 }
 
@@ -83,13 +91,28 @@ func (dm *DeviceMonitor) Start() error {
 		"warningThreshold": dm.warningThreshold / time.Second,
 	}).Info("设备状态监控服务启动")
 
-	// 启动定时检查
+	// 启动定时检查心跳
 	go func() {
 		ticker := time.NewTicker(dm.checkInterval)
 		defer ticker.Stop()
 
 		for range ticker.C {
 			dm.checkDeviceHeartbeats()
+		}
+	}()
+
+	// 启动定时清理过期会话
+	go func() {
+		ticker := time.NewTicker(10 * time.Minute) // 每10分钟清理一次
+		defer ticker.Stop()
+
+		for range ticker.C {
+			expiredCount := dm.sessionManager.CleanupExpiredSessions()
+			if expiredCount > 0 {
+				logger.WithFields(logrus.Fields{
+					"expiredCount": expiredCount,
+				}).Info("清理过期会话完成")
+			}
 		}
 	}()
 
@@ -150,6 +173,19 @@ func (dm *DeviceMonitor) checkDeviceHeartbeats() {
 				"nowAt":           time.Unix(now, 0).Format("2006-01-02 15:04:05"),
 				"timeoutSeconds":  dm.heartbeatTimeout / time.Second,
 			}).Warn("设备心跳超时，关闭连接")
+
+			// 发布心跳超时事件
+			dm.eventBus.PublishDeviceHeartbeat(deviceId, conn.GetConnID(), "timeout")
+
+			// 挂起会话（允许设备在会话超时内重连）
+			dm.sessionManager.SuspendSession(deviceId)
+
+			// 更新设备状态为重连中
+			if UpdateDeviceStatusFunc != nil {
+				UpdateDeviceStatusFunc(deviceId, constants.DeviceStatusReconnecting)
+			}
+
+			// 关闭连接
 			conn.Stop()
 			timeoutCount++
 		} else if lastHeartbeat < warningThreshold {
@@ -162,6 +198,10 @@ func (dm *DeviceMonitor) checkDeviceHeartbeats() {
 				"timeoutSeconds":   dm.heartbeatTimeout / time.Second,
 				"remainingSeconds": timeoutThreshold - lastHeartbeat,
 			}).Warn("设备心跳接近超时")
+
+			// 发布心跳警告事件
+			dm.eventBus.PublishDeviceHeartbeat(deviceId, conn.GetConnID(), "warning")
+
 			warningCount++
 		}
 
@@ -170,7 +210,92 @@ func (dm *DeviceMonitor) checkDeviceHeartbeats() {
 
 	// 输出检查结果统计
 	if deviceCount > 0 {
-		fmt.Printf("设备心跳检查完成: 总设备数=%d, 超时设备=%d, 警告设备=%d\n",
-			deviceCount, timeoutCount, warningCount)
+		logger.WithFields(logrus.Fields{
+			"deviceCount":  deviceCount,
+			"timeoutCount": timeoutCount,
+			"warningCount": warningCount,
+		}).Debug("设备心跳检查完成")
+	}
+}
+
+// OnDeviceRegistered 设备注册处理
+func (dm *DeviceMonitor) OnDeviceRegistered(deviceID string, conn ziface.IConnection) {
+	// 检查是否存在会话
+	if session, exists := dm.sessionManager.GetSession(deviceID); exists {
+		// 存在会话，恢复会话
+		dm.sessionManager.ResumeSession(deviceID, conn)
+
+		// 发布设备重连事件
+		dm.eventBus.PublishDeviceReconnect(deviceID, session.LastConnID, conn.GetConnID())
+
+		logger.WithFields(logrus.Fields{
+			"deviceID":  deviceID,
+			"sessionID": session.SessionID,
+			"connID":    conn.GetConnID(),
+			"oldConnID": session.LastConnID,
+		}).Info("设备重连，恢复会话")
+	} else {
+		// 不存在会话，创建新会话
+		session := dm.sessionManager.CreateSession(deviceID, conn)
+
+		// 发布设备连接事件
+		dm.eventBus.PublishDeviceConnect(deviceID, conn.GetConnID())
+
+		logger.WithFields(logrus.Fields{
+			"deviceID":  deviceID,
+			"sessionID": session.SessionID,
+			"connID":    conn.GetConnID(),
+		}).Info("设备首次连接，创建会话")
+	}
+
+	// 更新设备状态为在线
+	if UpdateDeviceStatusFunc != nil {
+		UpdateDeviceStatusFunc(deviceID, constants.DeviceStatusOnline)
+	}
+
+	// 发布状态变更事件
+	dm.eventBus.PublishDeviceStatusChange(deviceID, constants.DeviceStatusReconnecting, constants.DeviceStatusOnline)
+}
+
+// OnDeviceHeartbeat 设备心跳处理
+func (dm *DeviceMonitor) OnDeviceHeartbeat(deviceID string, conn ziface.IConnection) {
+	// 更新会话心跳时间
+	if session, exists := dm.sessionManager.GetSession(deviceID); exists {
+		dm.sessionManager.UpdateSession(deviceID, func(s *DeviceSession) {
+			s.LastHeartbeatTime = time.Now()
+		})
+
+		// 发布心跳事件
+		dm.eventBus.PublishDeviceHeartbeat(deviceID, conn.GetConnID(), "normal")
+
+		logger.WithFields(logrus.Fields{
+			"deviceID":  deviceID,
+			"sessionID": session.SessionID,
+			"connID":    conn.GetConnID(),
+		}).Debug("更新设备心跳时间")
+	}
+}
+
+// OnDeviceDisconnect 设备断开连接处理
+func (dm *DeviceMonitor) OnDeviceDisconnect(deviceID string, conn ziface.IConnection, reason string) {
+	// 挂起会话
+	if dm.sessionManager.SuspendSession(deviceID) {
+		// 发布断开连接事件
+		dm.eventBus.PublishDeviceDisconnect(deviceID, conn.GetConnID(), reason)
+
+		// 更新设备状态为重连中
+		if UpdateDeviceStatusFunc != nil {
+			oldStatus := constants.DeviceStatusOnline
+			UpdateDeviceStatusFunc(deviceID, constants.DeviceStatusReconnecting)
+
+			// 发布状态变更事件
+			dm.eventBus.PublishDeviceStatusChange(deviceID, oldStatus, constants.DeviceStatusReconnecting)
+		}
+
+		logger.WithFields(logrus.Fields{
+			"deviceID": deviceID,
+			"connID":   conn.GetConnID(),
+			"reason":   reason,
+		}).Info("设备断开连接，会话已挂起")
 	}
 }

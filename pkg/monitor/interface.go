@@ -41,4 +41,13 @@ type IDeviceMonitor interface {
 
 	// Stop 停止设备监控
 	Stop()
+
+	// OnDeviceRegistered 设备注册处理
+	OnDeviceRegistered(deviceID string, conn ziface.IConnection)
+
+	// OnDeviceHeartbeat 设备心跳处理
+	OnDeviceHeartbeat(deviceID string, conn ziface.IConnection)
+
+	// OnDeviceDisconnect 设备断开连接处理
+	OnDeviceDisconnect(deviceID string, conn ziface.IConnection, reason string)
 }

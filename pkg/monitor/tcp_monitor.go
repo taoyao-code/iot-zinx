@@ -3,12 +3,10 @@ package monitor
 import (
 	"encoding/hex"
 	"fmt"
-	"net"
 	"sync"
 	"time"
 
 	"github.com/aceld/zinx/ziface"
-	"github.com/bujia-iot/iot-zinx/internal/infrastructure/config"
 	"github.com/bujia-iot/iot-zinx/internal/infrastructure/logger"
 	"github.com/bujia-iot/iot-zinx/pkg/constants"
 	"github.com/bujia-iot/iot-zinx/pkg/protocol"
@@ -70,17 +68,22 @@ func (m *TCPMonitor) OnConnectionClosed(conn ziface.IConnection) {
 	if val, err := conn.GetProperty(constants.PropKeyDeviceId); err == nil && val != nil {
 		deviceID = val.(string)
 
-		// 更新设备状态为离线
-		if UpdateDeviceStatusFunc != nil {
-			UpdateDeviceStatusFunc(deviceID, constants.DeviceStatusOffline)
-		}
+		// 获取设备监控器
+		deviceMonitor := NewDeviceMonitor(func(fn func(deviceId string, conn ziface.IConnection) bool) {
+			m.deviceIdToConnMap.Range(func(key, value interface{}) bool {
+				return fn(key.(string), value.(ziface.IConnection))
+			})
+		})
+
+		// 通知设备监控器设备断开连接
+		deviceMonitor.OnDeviceDisconnect(deviceID, conn, "connection_closed")
 
 		// 记录设备离线
 		logger.WithFields(logrus.Fields{
 			"deviceId":   deviceID,
 			"connID":     connID,
 			"remoteAddr": remoteAddr,
-		}).Info("设备连接已关闭，状态更新为离线")
+		}).Info("设备连接已关闭，状态更新为重连中")
 
 		// 清理映射关系
 		m.deviceIdToConnMap.Delete(deviceID)
@@ -203,20 +206,62 @@ func (m *TCPMonitor) OnRawDataSent(conn ziface.IConnection, data []byte) {
 
 // BindDeviceIdToConnection 绑定设备ID到连接并更新在线状态
 func (m *TCPMonitor) BindDeviceIdToConnection(deviceId string, conn ziface.IConnection) {
+	// 获取连接ID
+	connID := conn.GetConnID()
+
+	// 检查之前的映射关系
+	oldConn, exists := m.deviceIdToConnMap.Load(deviceId)
+
+	// 如果该设备已有连接，先处理原连接（可能是重连）
+	if exists && oldConn != nil {
+		oldConnObj := oldConn.(ziface.IConnection)
+		oldConnID := oldConnObj.GetConnID()
+
+		if oldConnID != connID {
+			// 不同的连接，说明设备可能重连
+			logger.WithFields(logrus.Fields{
+				"deviceId":  deviceId,
+				"oldConnID": oldConnID,
+				"newConnID": connID,
+			}).Info("设备更换连接，可能是重连")
+
+			// 移除旧连接的映射（避免资源泄漏）
+			m.connIdToDeviceIdMap.Delete(oldConnID)
+
+			// 尝试关闭旧连接（如果还没关闭）
+			oldConnObj.Stop()
+		}
+	}
+
+	// 更新双向映射
 	m.deviceIdToConnMap.Store(deviceId, conn)
-	m.connIdToDeviceIdMap.Store(conn.GetConnID(), deviceId)
+	m.connIdToDeviceIdMap.Store(connID, deviceId)
+
+	// 设置设备ID属性到连接
 	conn.SetProperty(constants.PropKeyDeviceId, deviceId)
 
-	// 更新设备状态
+	// 设置连接状态为活跃
+	conn.SetProperty(constants.PropKeyConnStatus, constants.ConnStatusActive)
+
+	// 记录设备上线日志
+	logger.WithFields(logrus.Fields{
+		"deviceId": deviceId,
+		"connID":   connID,
+	}).Info("设备连接绑定成功")
+
+	// 更新设备状态为在线
 	if UpdateDeviceStatusFunc != nil {
 		UpdateDeviceStatusFunc(deviceId, constants.DeviceStatusOnline)
 	}
 
-	logger.WithFields(logrus.Fields{
-		"deviceId":   deviceId,
-		"connID":     conn.GetConnID(),
-		"remoteAddr": conn.RemoteAddr().String(),
-	}).Info("设备ID已绑定到连接")
+	// 通知设备监控器设备已注册
+	deviceMonitor := NewDeviceMonitor(func(fn func(deviceId string, conn ziface.IConnection) bool) {
+		m.deviceIdToConnMap.Range(func(key, value interface{}) bool {
+			return fn(key.(string), value.(ziface.IConnection))
+		})
+	})
+
+	deviceMonitor.OnDeviceRegistered(deviceId, conn)
 }
 
 // GetConnectionByDeviceId 根据设备ID获取连接
@@ -239,54 +284,46 @@ func (m *TCPMonitor) GetDeviceIdByConnId(connId uint64) (string, bool) {
 	return deviceId, ok
 }
 
-// UpdateLastHeartbeatTime 更新最后一次DNY心跳时间、连接状态并更新设备状态
+// UpdateLastHeartbeatTime 更新最后一次心跳时间、连接状态并更新设备状态
 func (m *TCPMonitor) UpdateLastHeartbeatTime(conn ziface.IConnection) {
+	// 获取当前时间
 	now := time.Now()
+	timestamp := now.Unix()
+	timeStr := now.Format("2006-01-02 15:04:05.000")
 
-	// 更新心跳时间（时间戳）
-	conn.SetProperty(constants.PropKeyLastHeartbeat, now.Unix())
-
-	// 更新心跳时间（格式化字符串）
-	conn.SetProperty(constants.PropKeyLastHeartbeatStr, now.Format("2006-01-02 15:04:05"))
-
-	// 更新连接状态
+	// 更新心跳时间属性
+	conn.SetProperty(constants.PropKeyLastHeartbeat, timestamp)
+	conn.SetProperty(constants.PropKeyLastHeartbeatStr, timeStr)
 	conn.SetProperty(constants.PropKeyConnStatus, constants.ConnStatusActive)
 
-	// 更新 TCP 读取超时
-	if tcpConn, ok := conn.GetTCPConnection().(*net.TCPConn); ok {
-		// 从配置中获取超时值，如果未配置则使用默认值60秒
-		cfg := config.GetConfig().DeviceConnection
-		heartbeatTimeout := time.Duration(cfg.HeartbeatTimeoutSeconds) * time.Second
-		if heartbeatTimeout == 0 {
-			heartbeatTimeout = 60 * time.Second // 默认60秒
-		}
-
-		if err := tcpConn.SetReadDeadline(now.Add(heartbeatTimeout)); err != nil {
-			logger.WithFields(logrus.Fields{
-				"error":    err.Error(),
-				"connID":   conn.GetConnID(),
-				"deadline": now.Add(heartbeatTimeout).Format("2006-01-02 15:04:05"),
-			}).Error("设置读取超时失败")
-		}
-	}
-
-	// 获取设备ID并更新在线状态
-	deviceID := "unknown"
+	// 获取设备ID
+	deviceId := "unknown"
 	if val, err := conn.GetProperty(constants.PropKeyDeviceId); err == nil && val != nil {
-		deviceID = val.(string)
-		if UpdateDeviceStatusFunc != nil {
-			UpdateDeviceStatusFunc(deviceID, constants.DeviceStatusOnline)
-		}
+		deviceId = val.(string)
 	}
 
+	// 记录心跳日志
 	logger.WithFields(logrus.Fields{
+		"deviceId":      deviceId,
 		"connID":        conn.GetConnID(),
-		"deviceId":      deviceID,
-		"remoteAddr":    conn.RemoteAddr().String(),
-		"heartbeatTime": now.Format("2006-01-02 15:04:05"),
-		"nextDeadline":  now.Add(60 * time.Second).Format("2006-01-02 15:04:05"),
-		"connStatus":    constants.ConnStatusActive,
-	}).Debug("已更新心跳时间")
+		"heartbeatTime": timeStr,
+	}).Debug("更新设备心跳时间")
+
+	// 更新设备状态为在线
+	if UpdateDeviceStatusFunc != nil && deviceId != "unknown" {
+		UpdateDeviceStatusFunc(deviceId, constants.DeviceStatusOnline)
+	}
+
+	// 通知设备监控器设备心跳
+	if deviceId != "unknown" {
+		deviceMonitor := NewDeviceMonitor(func(fn func(deviceId string, conn ziface.IConnection) bool) {
+			m.deviceIdToConnMap.Range(func(key, value interface{}) bool {
+				return fn(key.(string), value.(ziface.IConnection))
+			})
+		})
+
+		deviceMonitor.OnDeviceHeartbeat(deviceId, conn)
+	}
 }
 
 // 更新设备状态的函数类型定义

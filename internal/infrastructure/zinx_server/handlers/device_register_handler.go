@@ -1,15 +1,17 @@
 package handlers
 
 import (
-	"github.com/bujia-iot/iot-zinx/pkg"
 	"fmt"
 	"time"
+
+	"github.com/bujia-iot/iot-zinx/pkg"
 
 	"github.com/aceld/zinx/ziface"
 	"github.com/aceld/zinx/znet"
 	"github.com/bujia-iot/iot-zinx/internal/app"
 	"github.com/bujia-iot/iot-zinx/internal/domain/dny_protocol"
 	"github.com/bujia-iot/iot-zinx/internal/infrastructure/logger"
+	"github.com/bujia-iot/iot-zinx/pkg/monitor"
 	"github.com/sirupsen/logrus"
 )
 
@@ -62,12 +64,49 @@ func (h *DeviceRegisterHandler) Handle(request ziface.IRequest) {
 
 	// 将设备ID绑定到连接
 	deviceIdStr := fmt.Sprintf("%08X", physicalId)
-	pkg.Monitor.GetGlobalMonitor().BindDeviceIdToConnection(deviceIdStr, conn)
 
-	// 使用解析出的ICCID
+	// 存储ICCID
 	iccid := registerData.ICCID
-	// 将ICCID存储到连接属性中
 	conn.SetProperty(PropKeyICCID, iccid)
+
+	// 检查是否存在会话
+	sessionManager := monitor.GetSessionManager()
+	var session *monitor.DeviceSession
+	var isReconnect bool
+
+	// 先尝试使用ICCID查找会话
+	if iccid != "" && len(iccid) > 0 {
+		if existSession, exists := sessionManager.GetSessionByICCID(iccid); exists {
+			oldDeviceID := existSession.DeviceID
+
+			// 设备ID变更，记录日志
+			if oldDeviceID != deviceIdStr {
+				logger.WithFields(logrus.Fields{
+					"oldDeviceID": oldDeviceID,
+					"newDeviceID": deviceIdStr,
+					"iccid":       iccid,
+					"sessionID":   existSession.SessionID,
+				}).Info("设备ID已变更，但ICCID相同，可能是设备重启或更换了物理ID")
+
+				// 添加临时ID映射，便于后续查找
+				sessionManager.AddTempDeviceID(oldDeviceID, deviceIdStr)
+			}
+
+			session = existSession
+			isReconnect = true
+		}
+	}
+
+	// 再尝试使用设备ID查找会话
+	if session == nil {
+		if existSession, exists := sessionManager.GetSession(deviceIdStr); exists {
+			session = existSession
+			isReconnect = true
+		}
+	}
+
+	// 绑定设备ID到连接
+	pkg.Monitor.GetGlobalMonitor().BindDeviceIdToConnection(deviceIdStr, conn)
 
 	// 通知业务层设备上线
 	deviceService := app.GetServiceManager().DeviceService
@@ -94,9 +133,10 @@ func (h *DeviceRegisterHandler) Handle(request ziface.IRequest) {
 	}
 
 	logger.WithFields(logrus.Fields{
-		"connID":     conn.GetConnID(),
-		"physicalId": fmt.Sprintf("0x%08X", physicalId),
-		"deviceId":   deviceIdStr,
+		"connID":      conn.GetConnID(),
+		"physicalId":  fmt.Sprintf("0x%08X", physicalId),
+		"deviceId":    deviceIdStr,
+		"isReconnect": isReconnect,
 	}).Debug("设备注册响应发送成功")
 
 	// 更新心跳时间
