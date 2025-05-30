@@ -286,6 +286,7 @@ func (dp *DNYPacket) handleDNYProtocolData(data []byte) (ziface.IMessage, error)
 		logger.WithFields(logrus.Fields{
 			"dataLen": len(data),
 			"minLen":  dny_protocol.MinPackageLen,
+			"dataHex": hex.EncodeToString(data),
 		}).Debug("数据不足以解析DNY协议包，等待更多数据")
 		return nil, ErrNotEnoughData
 	}
@@ -293,6 +294,10 @@ func (dp *DNYPacket) handleDNYProtocolData(data []byte) (ziface.IMessage, error)
 	// 检查包头是否为"DNY"
 	if !bytes.HasPrefix(data, []byte(dny_protocol.DnyHeader)) {
 		headerHex := hex.EncodeToString(data[:3])
+		logger.WithFields(logrus.Fields{
+			"header":  headerHex,
+			"dataHex": hex.EncodeToString(data),
+		}).Error("无效的DNY协议包头")
 		return nil, fmt.Errorf("无效的DNY协议包头: %s", headerHex)
 	}
 
@@ -305,6 +310,7 @@ func (dp *DNYPacket) handleDNYProtocolData(data []byte) (ziface.IMessage, error)
 		logger.WithFields(logrus.Fields{
 			"dataLen":  len(data),
 			"totalLen": totalLen,
+			"dataHex":  hex.EncodeToString(data),
 		}).Debug("数据不足以解析完整DNY消息，等待更多数据")
 		return nil, ErrNotEnoughData
 	}
@@ -312,14 +318,26 @@ func (dp *DNYPacket) handleDNYProtocolData(data []byte) (ziface.IMessage, error)
 	// 解析DNY协议字段
 	physicalId, messageId, command, payloadLen := dp.parseDNYFields(data, dataLen)
 
-	// 输出DNY协议解析信息
-	logger.WithFields(logrus.Fields{
-		"command":    fmt.Sprintf("0x%02X", command),
-		"physicalID": physicalId,
-		"messageID":  messageId,
-		"payloadLen": payloadLen,
-		"totalLen":   len(data),
-	}).Info("解析DNY协议数据，将路由到对应处理器")
+	// 强化日志输出 - 关键命令使用ERROR级别确保记录
+	if command == 0x22 || command == 0x12 { // 获取服务器时间命令
+		logger.WithFields(logrus.Fields{
+			"command":    fmt.Sprintf("0x%02X", command),
+			"physicalID": fmt.Sprintf("0x%08X", physicalId),
+			"messageID":  fmt.Sprintf("0x%04X", messageId),
+			"payloadLen": payloadLen,
+			"totalLen":   len(data),
+			"dataHex":    hex.EncodeToString(data[:totalLen]),
+		}).Error("收到获取服务器时间命令，将路由到处理器")
+	} else {
+		// 输出DNY协议解析信息
+		logger.WithFields(logrus.Fields{
+			"command":    fmt.Sprintf("0x%02X", command),
+			"physicalID": fmt.Sprintf("0x%08X", physicalId),
+			"messageID":  fmt.Sprintf("0x%04X", messageId),
+			"payloadLen": payloadLen,
+			"totalLen":   len(data),
+		}).Info("解析DNY协议数据，将路由到对应处理器")
+	}
 
 	// 计算并验证校验和
 	calculatedChecksum := CalculatePacketChecksum(data[:dny_protocol.DnyHeaderLen+int(dataLen)-2])
@@ -328,16 +346,17 @@ func (dp *DNYPacket) handleDNYProtocolData(data []byte) (ziface.IMessage, error)
 	if calculatedChecksum != receivedChecksum {
 		logger.WithFields(logrus.Fields{
 			"command":            fmt.Sprintf("0x%02X", command),
-			"physicalID":         physicalId,
-			"messageID":          messageId,
+			"physicalID":         fmt.Sprintf("0x%08X", physicalId),
+			"messageID":          fmt.Sprintf("0x%04X", messageId),
 			"calculatedChecksum": calculatedChecksum,
 			"receivedChecksum":   receivedChecksum,
+			"dataHex":            hex.EncodeToString(data[:totalLen]),
 		}).Warn("DNY协议数据校验和不匹配，但仍将继续处理")
 	} else {
 		logger.WithFields(logrus.Fields{
 			"command":    fmt.Sprintf("0x%02X", command),
-			"physicalID": physicalId,
-			"messageID":  messageId,
+			"physicalID": fmt.Sprintf("0x%08X", physicalId),
+			"messageID":  fmt.Sprintf("0x%04X", messageId),
 			"checksum":   receivedChecksum,
 		}).Debug("DNY协议数据校验和验证通过")
 	}

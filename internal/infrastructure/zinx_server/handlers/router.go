@@ -4,6 +4,7 @@ import (
 	"github.com/aceld/zinx/ziface"
 	"github.com/bujia-iot/iot-zinx/internal/domain/dny_protocol"
 	"github.com/bujia-iot/iot-zinx/internal/infrastructure/logger"
+	"github.com/sirupsen/logrus"
 )
 
 // RegisterRouters 注册所有路由
@@ -24,9 +25,9 @@ func RegisterRouters(server ziface.IServer) {
 	// 5. 设备状态查询 (0x81)
 	server.AddRouter(dny_protocol.CmdNetworkStatus, &DeviceStatusHandler{})
 
-	// 6. 设备获取服务器时间
-	server.AddRouter(dny_protocol.CmdDeviceTime, &GetServerTimeHandler{})
-	server.AddRouter(dny_protocol.CmdGetServerTime, &GetServerTimeHandler{})
+	// 6. 设备获取服务器时间 (确保路由优先级更高)
+	server.AddRouter(dny_protocol.CmdDeviceTime, &GetServerTimeHandler{})    // 设备获取服务器时间 0x22
+	server.AddRouter(dny_protocol.CmdGetServerTime, &GetServerTimeHandler{}) // 主机获取服务器时间 0x12
 
 	// 主机心跳处理器（需要特殊处理，包含更多信息）
 	server.AddRouter(dny_protocol.CmdMainHeartbeat, &MainHeartbeatHandler{}) // 主机心跳 0x11
@@ -50,5 +51,19 @@ func RegisterRouters(server ziface.IServer) {
 	// server.AddRouter(dny_protocol.CmdAlarm, &AlarmHandler{})
 
 	// 日志输出已注册的路由
-	logger.Info("已注册所有路由处理器")
+	logger.WithFields(logrus.Fields{
+		"0x00": "轮询完整指令",
+		"0x01": "设备心跳包(旧版)",
+		"0x02": "刷卡操作",
+		"0x03": "结算消费信息上传",
+		"0x06": "端口充电时功率心跳包",
+		"0x11": "主机状态心跳包",
+		"0x12": "主机获取服务器时间",
+		"0x20": "设备注册包",
+		"0x21": "设备心跳包/分机心跳",
+		"0x22": "设备获取服务器时间",
+		"0x81": "查询设备联网状态",
+		"0x82": "服务器开始、停止充电操作",
+		"0x83": "设置运行参数",
+	}).Info("已注册所有路由处理器")
 }

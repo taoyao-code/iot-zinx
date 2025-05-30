@@ -483,17 +483,8 @@ func buildDNYPacket(physicalID uint32, messageID uint16, command byte, data []by
 	packet = append(packet, data...)
 
 	// 计算校验和
-	checksum := calculatePacketChecksum(packet)
+	checksum := pkg.Protocol.CalculatePacketChecksum(packet)
 	packet = append(packet, byte(checksum), byte(checksum>>8))
 
 	return packet
-}
-
-// calculatePacketChecksum 计算数据包校验和
-func calculatePacketChecksum(data []byte) uint16 {
-	var sum uint16
-	for _, b := range data {
-		sum += uint16(b)
-	}
-	return sum
 }

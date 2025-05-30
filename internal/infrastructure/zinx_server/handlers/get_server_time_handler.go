@@ -6,17 +6,16 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/bujia-iot/iot-zinx/pkg"
-
 	"github.com/aceld/zinx/ziface"
 	"github.com/aceld/zinx/znet"
 	"github.com/bujia-iot/iot-zinx/internal/domain/dny_protocol"
 	"github.com/bujia-iot/iot-zinx/internal/infrastructure/logger"
+	"github.com/bujia-iot/iot-zinx/pkg"
 	"github.com/sirupsen/logrus"
 )
 
 // GetServerTimeHandler 处理设备获取服务器时间请求 (命令ID: 0x22 或 0x12)
-// 注：0x22是设备获取服务器时间指令，0x12是主机获取服务器时间指令
+// 0x22是设备获取服务器时间指令，0x12是主机获取服务器时间指令
 type GetServerTimeHandler struct {
 	znet.BaseRouter
 }
@@ -26,81 +25,135 @@ func (h *GetServerTimeHandler) Handle(request ziface.IRequest) {
 	// 获取请求消息
 	msg := request.GetMessage()
 	conn := request.GetConnection()
+	rawData := msg.GetData()
 
-	// 转换为DNY消息
-	dnyMsg, ok := dny_protocol.IMessageToDnyMessage(msg)
-	if !ok {
-		logger.WithFields(logrus.Fields{
-			"connID": conn.GetConnID(),
-			"msgID":  msg.GetMsgID(),
-		}).Error("消息类型转换失败，无法处理获取服务器时间请求")
-		return
-	}
-
-	// 提取关键信息
-	physicalId := dnyMsg.GetPhysicalId()
-	dnyMessageId := dnyMsg.GetMsgID()
-	cmdId := uint8(msg.GetMsgID()) // 获取原始命令ID，用于响应
-
-	// 获取完整请求数据进行记录
-	data := msg.GetData()
-	requestHex := ""
-	if len(data) > 0 {
-		requestHex = hex.EncodeToString(data)
-	}
-
-	// 记录获取服务器时间请求
+	// 打印请求详情 - 原始数据用于调试
 	logger.WithFields(logrus.Fields{
-		"connID":       conn.GetConnID(),
-		"physicalId":   fmt.Sprintf("0x%08X", physicalId),
-		"dnyMessageId": fmt.Sprintf("0x%04X", dnyMessageId),
-		"cmdId":        fmt.Sprintf("0x%02X", cmdId),
-		"requestData":  requestHex,
-	}).Info("收到获取服务器时间请求")
+		"msgID":      msg.GetMsgID(),
+		"dataLen":    len(rawData),
+		"rawDataHex": hex.EncodeToString(rawData),
+	}).Debug("收到获取服务器时间请求原始数据")
 
-	// 获取当前时间戳（Unix时间，秒级）
-	now := time.Now().Unix()
+	// 尝试进行DNY消息转换
+	dnyMsg, ok := dny_protocol.IMessageToDnyMessage(msg)
 
-	// 将时间戳转换为字节数组（小端序）
-	timeBytes := make([]byte, 4)
-	binary.LittleEndian.PutUint32(timeBytes, uint32(now))
+	// 解析物理ID和消息ID
+	var physicalId uint32
+	var messageID uint16
+	var commandID byte
 
-	// 发送响应 - 必须使用原始命令ID回复
-	// 根据协议规范，响应必须使用与请求相同的命令ID和消息ID
-	if err := pkg.Protocol.SendDNYResponse(conn, physicalId, uint16(dnyMessageId), cmdId, timeBytes); err != nil {
+	// 如果转换成功，使用DNY消息中的物理ID和命令ID
+	if ok {
+		physicalId = dnyMsg.GetPhysicalId()
+		commandID = byte(dnyMsg.GetMsgID())
+
+		// 从原始数据中提取消息ID (2字节，位于物理ID之后)
+		if len(rawData) >= 11 { // 包头(3) + 长度(2) + 物理ID(4) + 消息ID(2)
+			messageID = binary.LittleEndian.Uint16(rawData[9:11])
+		}
+
 		logger.WithFields(logrus.Fields{
-			"connID":     conn.GetConnID(),
-			"physicalId": fmt.Sprintf("0x%08X", physicalId),
-			"cmdId":      fmt.Sprintf("0x%02X", cmdId),
-			"messageId":  fmt.Sprintf("0x%04X", dnyMessageId),
-			"error":      err.Error(),
+			"command":    fmt.Sprintf("0x%02X", commandID),
+			"physicalID": fmt.Sprintf("0x%08X", physicalId),
+			"messageID":  fmt.Sprintf("0x%04X", messageID),
+			"rawData":    hex.EncodeToString(rawData),
+		}).Info("收到获取服务器时间请求 - 转换为DNY消息成功")
+	} else {
+		// DNY消息转换失败，尝试直接从原始数据解析
+		if len(rawData) >= 11 {
+			// 验证DNY包头
+			if string(rawData[0:3]) != "DNY" {
+				logger.WithFields(logrus.Fields{
+					"header":  string(rawData[0:3]),
+					"rawData": hex.EncodeToString(rawData),
+				}).Error("解析DNY消息失败：无效的包头")
+				return
+			}
+
+			// 从原始数据提取物理ID (4字节，小端序)
+			physicalId = binary.LittleEndian.Uint32(rawData[5:9])
+
+			// 从原始数据提取消息ID (2字节，小端序)
+			messageID = binary.LittleEndian.Uint16(rawData[9:11])
+
+			// 从原始数据提取命令ID (1字节)
+			commandID = rawData[11]
+
+			logger.WithFields(logrus.Fields{
+				"command":    fmt.Sprintf("0x%02X", commandID),
+				"physicalID": fmt.Sprintf("0x%08X", physicalId),
+				"messageID":  fmt.Sprintf("0x%04X", messageID),
+				"rawData":    hex.EncodeToString(rawData),
+			}).Info("收到获取服务器时间请求 - 直接从原始数据解析")
+		} else {
+			logger.WithFields(logrus.Fields{
+				"error":   "数据长度不足",
+				"dataLen": len(rawData),
+				"rawData": hex.EncodeToString(rawData),
+			}).Error("解析DNY消息失败：数据长度不足")
+			return
+		}
+	}
+
+	// 构建响应消息
+	// 1. 获取当前时间戳
+	timestamp := uint32(time.Now().Unix())
+
+	// 2. 构建响应数据
+	// 数据长度 = 物理ID(4) + 消息ID(2) + 命令(1) + 时间戳(4) + 校验(2)
+	dataLen := uint16(4 + 2 + 1 + 4 + 2)
+
+	// 创建响应数据包
+	respData := make([]byte, 0, 3+2+int(dataLen)) // 包头(3) + 长度(2) + 数据
+
+	// 添加包头 "DNY"
+	respData = append(respData, 'D', 'N', 'Y')
+
+	// 添加长度字段 (小端序)
+	lenBytes := make([]byte, 2)
+	binary.LittleEndian.PutUint16(lenBytes, dataLen)
+	respData = append(respData, lenBytes...)
+
+	// 添加物理ID (使用与请求相同的物理ID)
+	idBytes := make([]byte, 4)
+	binary.LittleEndian.PutUint32(idBytes, physicalId)
+	respData = append(respData, idBytes...)
+
+	// 添加消息ID (使用与请求相同的消息ID)
+	msgIdBytes := make([]byte, 2)
+	binary.LittleEndian.PutUint16(msgIdBytes, messageID)
+	respData = append(respData, msgIdBytes...)
+
+	// 添加命令字节 (使用与请求相同的命令)
+	respData = append(respData, commandID)
+
+	// 添加时间戳 (小端序)
+	timestampBytes := make([]byte, 4)
+	binary.LittleEndian.PutUint32(timestampBytes, timestamp)
+	respData = append(respData, timestampBytes...)
+
+	// 计算校验和
+	checksum := pkg.Protocol.CalculatePacketChecksum(respData)
+	checksumBytes := make([]byte, 2)
+	binary.LittleEndian.PutUint16(checksumBytes, checksum)
+	respData = append(respData, checksumBytes...)
+
+	// 发送响应
+	err := conn.SendMsg(0, respData)
+	if err != nil {
+		logger.WithFields(logrus.Fields{
+			"error": err,
 		}).Error("发送服务器时间响应失败")
 		return
 	}
 
+	// 打印响应详情
 	logger.WithFields(logrus.Fields{
-		"connID":     conn.GetConnID(),
-		"physicalId": fmt.Sprintf("0x%08X", physicalId),
-		"timestamp":  now,
-		"time":       time.Unix(now, 0).Format("2006-01-02 15:04:05"),
-		"cmdId":      fmt.Sprintf("0x%02X", cmdId),
-		"messageId":  fmt.Sprintf("0x%04X", dnyMessageId),
-		"response":   hex.EncodeToString(timeBytes),
-	}).Info("发送服务器时间响应成功")
-
-	// 如果设备ID还未绑定，设置一个临时ID
-	deviceId, err := conn.GetProperty(PropKeyDeviceId)
-	if err != nil || deviceId == nil || (deviceId.(string) != "" && deviceId.(string)[:7] == "TempID-") {
-		deviceIdStr := fmt.Sprintf("%08X", physicalId)
-		pkg.Monitor.GetGlobalMonitor().BindDeviceIdToConnection(deviceIdStr, conn)
-
-		logger.WithFields(logrus.Fields{
-			"connID":     conn.GetConnID(),
-			"physicalId": fmt.Sprintf("0x%08X", physicalId),
-			"deviceId":   deviceIdStr,
-		}).Debug("设备ID绑定成功")
-	}
-
-	// 更新心跳时间
-	pkg.Monitor.GetGlobalMonitor().UpdateLastHeartbeatTime(conn)
+		"command":    fmt.Sprintf("0x%02X", commandID),
+		"physicalID": fmt.Sprintf("0x%08X", physicalId),
+		"messageID":  fmt.Sprintf("0x%04X", messageID),
+		"timestamp":  timestamp,
+		"dateTime":   time.Unix(int64(timestamp), 0).Format("2006-01-02 15:04:05"),
+		"rawData":    hex.EncodeToString(respData),
+	}).Info("已发送服务器时间响应")
 }

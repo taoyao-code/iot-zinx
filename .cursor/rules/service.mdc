@@ -3,4 +3,6 @@ description:
 globs: 
 alwaysApply: true
 ---
-禁止运行服务端
+禁止运行服务端：cmd/gateway/main.go
+
+1.在写工具函数时，优先排查是否已经在 pkg 包中存在了
