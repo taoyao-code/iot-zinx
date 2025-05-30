@@ -5,7 +5,9 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"sync"
 	"syscall"
+	"time"
 
 	"github.com/bujia-iot/iot-zinx/internal/app"
 	"github.com/bujia-iot/iot-zinx/internal/infrastructure/config"
@@ -51,38 +53,33 @@ func main() {
 		// 不退出，因为Redis连接失败不应该影响网关基本功能
 	}
 
-	// 启动HTTP API服务器(Gin) - 先启动HTTP服务
-	// 这样可以确保API接口在TCP服务启动前就可用
-	httpServerStarted := make(chan bool, 1)
-	var httpErr error
+	// 使用WaitGroup来等待服务启动完成
+	var wg sync.WaitGroup
 
+	// 启动HTTP API服务器(Gin)
+	wg.Add(1)
 	go func() {
+		defer wg.Done()
 		logger.Info("正在启动HTTP API服务器...")
-		httpErr = ports.StartHTTPServer()
-		if httpErr != nil {
-			logger.Errorf("启动HTTP API服务器失败: %v", httpErr)
-			httpServerStarted <- false
-		} else {
-			logger.Info("HTTP API服务器启动成功")
-			httpServerStarted <- true
+		if err := ports.StartHTTPServer(); err != nil {
+			logger.Errorf("启动HTTP API服务器失败: %v", err)
 		}
 	}()
 
-	// 等待HTTP服务器启动结果
-	select {
-	case success := <-httpServerStarted:
-		if !success && httpErr != nil {
-			logger.Warn("HTTP服务启动失败，网关将仅提供TCP服务")
-		}
-	}
-
 	// 启动Zinx TCP服务器
-	logger.Info("正在启动TCP服务器...")
-	if err := ports.StartTCPServer(); err != nil {
-		logger.Errorf("启动TCP服务器失败: %v", err)
-		os.Exit(1)
-	}
-	logger.Info("TCP服务器启动成功")
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		logger.Info("正在启动TCP服务器...")
+		if err := ports.StartTCPServer(); err != nil {
+			logger.Errorf("启动TCP服务器失败: %v", err)
+			os.Exit(1) // TCP服务器失败属于致命错误
+		}
+		logger.Info("TCP服务器启动成功")
+	}()
+
+	// 等待一小段时间，确保日志输出有序
+	time.Sleep(500 * time.Millisecond)
 
 	logger.Info("充电设备网关启动完成，等待设备连接...")
 
