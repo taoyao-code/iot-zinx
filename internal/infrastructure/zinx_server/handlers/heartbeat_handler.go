@@ -17,33 +17,47 @@ type HeartbeatHandler struct {
 	DNYHandlerBase
 }
 
-// Handle 处理设备心跳请求
-func (h *HeartbeatHandler) Handle(request ziface.IRequest) {
-	// 调用基类预处理
-	h.PreHandle(request)
-
-	// 获取连接和消息
+// PreHandle 预处理心跳请求
+func (h *HeartbeatHandler) PreHandle(request ziface.IRequest) {
 	conn := request.GetConnection()
+	msg := request.GetMessage()
 
 	// 获取DNY消息
 	dnyMsg, ok := h.GetDNYMessage(request)
 	if !ok {
 		logger.WithFields(logrus.Fields{
 			"connID": conn.GetConnID(),
-			"msgID":  request.GetMessage().GetMsgID(),
+			"msgID":  msg.GetMsgID(),
 		}).Error("消息类型转换失败，无法处理设备心跳")
 		return
+	}
+
+	// 更新心跳时间
+	h.UpdateHeartbeat(conn)
+
+	// 提取设备信息并绑定设备ID
+	physicalId := dnyMsg.GetPhysicalId()
+	deviceId := h.FormatPhysicalID(physicalId)
+
+	// 如果设备ID未绑定，则进行绑定
+	if _, err := conn.GetProperty(constants.PropKeyDeviceId); err != nil {
+		pkg.Monitor.GetGlobalMonitor().BindDeviceIdToConnection(deviceId, conn)
+	}
+}
+
+// Handle 处理设备心跳请求
+func (h *HeartbeatHandler) Handle(request ziface.IRequest) {
+	conn := request.GetConnection()
+
+	// 获取DNY消息
+	dnyMsg, ok := h.GetDNYMessage(request)
+	if !ok {
+		return // 预处理已经记录了错误
 	}
 
 	// 提取设备信息
 	physicalId := dnyMsg.GetPhysicalId()
 	commandId := request.GetMessage().GetMsgID()
-	messageID := uint16(0)
-
-	// 从连接属性中获取消息ID，如果存在的话
-	if val, err := conn.GetProperty("messageID"); err == nil && val != nil {
-		messageID = val.(uint16)
-	}
 
 	// 获取或生成设备ID
 	deviceId := h.FormatPhysicalID(physicalId)
@@ -85,25 +99,19 @@ func (h *HeartbeatHandler) Handle(request ziface.IRequest) {
 	responseData := make([]byte, 1)
 	responseData[0] = dny_protocol.ResponseSuccess // 成功
 
-	// 发送心跳响应
-	if err := h.SendDNYResponse(conn, physicalId, messageID, uint8(commandId), responseData); err != nil {
+	// 发送心跳响应，使用消息ID作为响应ID
+	if err := h.SendDNYResponse(conn, dnyMsg.GetPhysicalId(), uint16(request.GetMessage().GetMsgID()), uint8(request.GetMessage().GetMsgID()), responseData); err != nil {
 		logger.WithFields(logrus.Fields{
-			"connID":     conn.GetConnID(),
-			"deviceId":   deviceId,
-			"physicalId": physicalId,
-			"commandId":  commandId,
-			"error":      err.Error(),
+			"error": err.Error(),
 		}).Error("发送心跳应答失败")
-	} else {
-		logger.WithFields(logrus.Fields{
-			"connID":     conn.GetConnID(),
-			"deviceId":   deviceId,
-			"physicalId": physicalId,
-			"commandId":  commandId,
-		}).Debug("已发送心跳应答")
+		return
 	}
+}
 
-	// 获取设备ICCID
+// PostHandle 后处理心跳请求
+func (h *HeartbeatHandler) PostHandle(request ziface.IRequest) {
+	conn := request.GetConnection()
+	deviceId := h.GetDeviceID(conn)
 	iccid := h.GetICCID(conn)
 
 	// 记录处理完成日志
