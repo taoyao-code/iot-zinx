@@ -1,8 +1,9 @@
 package handlers
 
 import (
-	"github.com/bujia-iot/iot-zinx/pkg"
 	"fmt"
+
+	"github.com/bujia-iot/iot-zinx/pkg"
 
 	"github.com/aceld/zinx/ziface"
 	"github.com/bujia-iot/iot-zinx/internal/domain/dny_protocol"
@@ -13,6 +14,13 @@ import (
 // DeviceStatusHandler 处理设备状态查询 (命令ID: 0x81)
 type DeviceStatusHandler struct {
 	DNYHandlerBase
+}
+
+func (h *DeviceStatusHandler) PreHandle(request ziface.IRequest) {
+	logger.WithFields(logrus.Fields{
+		"connID":     request.GetConnection().GetConnID(),
+		"remoteAddr": request.GetConnection().RemoteAddr().String(),
+	}).Debug("收到设备状态查询请求")
 }
 
 // Handle 处理设备状态查询请求
@@ -74,6 +82,14 @@ func (h *DeviceStatusHandler) Handle(request ziface.IRequest) {
 		"physicalId": fmt.Sprintf("0x%08X", physicalId),
 		"deviceID":   deviceID,
 	}).Debug("设备状态查询响应发送成功")
+}
+
+// PostHandle 后处理设备状态查询请求
+func (h *DeviceStatusHandler) PostHandle(request ziface.IRequest) {
+	logger.WithFields(logrus.Fields{
+		"connID":     request.GetConnection().GetConnID(),
+		"remoteAddr": request.GetConnection().RemoteAddr().String(),
+	}).Debug("设备状态查询请求处理完成")
 }
 
 // buildDeviceStatusResponse 构建设备状态响应数据

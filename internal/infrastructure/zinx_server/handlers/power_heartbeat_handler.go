@@ -18,6 +18,14 @@ type PowerHeartbeatHandler struct {
 	znet.BaseRouter
 }
 
+// PreHandle 预处理功率心跳数据
+func (h *PowerHeartbeatHandler) PreHandle(request ziface.IRequest) {
+	logger.WithFields(logrus.Fields{
+		"connID":     request.GetConnection().GetConnID(),
+		"remoteAddr": request.GetConnection().RemoteAddr().String(),
+	}).Debug("收到功率心跳数据")
+}
+
 // Handle 处理功率心跳数据
 func (h *PowerHeartbeatHandler) Handle(request ziface.IRequest) {
 	// 获取请求消息
@@ -72,4 +80,12 @@ func (h *PowerHeartbeatHandler) Handle(request ziface.IRequest) {
 
 	// 更新设备在线状态
 	pkg.Monitor.GetGlobalMonitor().UpdateDeviceStatus(deviceId, DeviceStatusOnline)
+}
+
+// PostHandle 后处理功率心跳数据
+func (h *PowerHeartbeatHandler) PostHandle(request ziface.IRequest) {
+	logger.WithFields(logrus.Fields{
+		"connID":     request.GetConnection().GetConnID(),
+		"remoteAddr": request.GetConnection().RemoteAddr().String(),
+	}).Debug("功率心跳数据处理完成")
 }

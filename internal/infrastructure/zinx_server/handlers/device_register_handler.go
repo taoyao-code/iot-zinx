@@ -20,6 +20,14 @@ type DeviceRegisterHandler struct {
 	znet.BaseRouter
 }
 
+// 预处理
+func (h *DeviceRegisterHandler) PreHandle(request ziface.IRequest) {
+	logger.WithFields(logrus.Fields{
+		"connID":     request.GetConnection().GetConnID(),
+		"remoteAddr": request.GetConnection().RemoteAddr().String(),
+	}).Debug("收到设备注册请求")
+}
+
 // Handle 处理设备注册请求
 func (h *DeviceRegisterHandler) Handle(request ziface.IRequest) {
 	// 获取请求消息
@@ -141,4 +149,12 @@ func (h *DeviceRegisterHandler) Handle(request ziface.IRequest) {
 
 	// 更新心跳时间
 	pkg.Monitor.GetGlobalMonitor().UpdateLastHeartbeatTime(conn)
+}
+
+// PostHandle 后处理设备注册请求
+func (h *DeviceRegisterHandler) PostHandle(request ziface.IRequest) {
+	logger.WithFields(logrus.Fields{
+		"connID":     request.GetConnection().GetConnID(),
+		"remoteAddr": request.GetConnection().RemoteAddr().String(),
+	}).Debug("设备注册请求处理完成")
 }

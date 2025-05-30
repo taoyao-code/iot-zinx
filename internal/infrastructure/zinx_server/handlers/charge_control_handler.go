@@ -152,6 +152,14 @@ func (h *ChargeControlHandler) SendChargeControlCommand(conn ziface.IConnection,
 	return nil
 }
 
+// 预处理充电控制命令
+func (h *ChargeControlHandler) PreHandle(request ziface.IRequest) {
+	logger.WithFields(logrus.Fields{
+		"connID":     request.GetConnection().GetConnID(),
+		"remoteAddr": request.GetConnection().RemoteAddr().String(),
+	}).Debug("收到充电控制命令")
+}
+
 // Handle 处理充电控制命令的响应
 func (h *ChargeControlHandler) Handle(request ziface.IRequest) {
 	// 获取请求消息
@@ -255,4 +263,12 @@ func (h *ChargeControlHandler) Handle(request ziface.IRequest) {
 
 	// 更新心跳时间
 	pkg.Monitor.GetGlobalMonitor().UpdateLastHeartbeatTime(conn)
+}
+
+// PostHandle 后处理充电控制命令
+func (h *ChargeControlHandler) PostHandle(request ziface.IRequest) {
+	logger.WithFields(logrus.Fields{
+		"connID":     request.GetConnection().GetConnID(),
+		"remoteAddr": request.GetConnection().RemoteAddr().String(),
+	}).Debug("充电控制命令处理完成")
 }

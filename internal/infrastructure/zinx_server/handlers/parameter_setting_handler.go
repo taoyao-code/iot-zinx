@@ -1,10 +1,11 @@
 package handlers
 
 import (
-	"github.com/bujia-iot/iot-zinx/pkg"
 	"encoding/binary"
 	"fmt"
 	"time"
+
+	"github.com/bujia-iot/iot-zinx/pkg"
 
 	"github.com/aceld/zinx/ziface"
 	"github.com/aceld/zinx/znet"
@@ -17,6 +18,14 @@ import (
 // ParameterSettingHandler 处理参数设置 (命令ID: 0x83, 0x84)
 type ParameterSettingHandler struct {
 	znet.BaseRouter
+}
+
+// PreHandle 预处理参数设置
+func (h *ParameterSettingHandler) PreHandle(request ziface.IRequest) {
+	logger.WithFields(logrus.Fields{
+		"connID":     request.GetConnection().GetConnID(),
+		"remoteAddr": request.GetConnection().RemoteAddr().String(),
+	}).Debug("收到参数设置")
 }
 
 // Handle 处理参数设置
@@ -107,4 +116,12 @@ func (h *ParameterSettingHandler) Handle(request ziface.IRequest) {
 
 	// 更新心跳时间
 	pkg.Monitor.GetGlobalMonitor().UpdateLastHeartbeatTime(conn)
+}
+
+// PostHandle 后处理参数设置
+func (h *ParameterSettingHandler) PostHandle(request ziface.IRequest) {
+	logger.WithFields(logrus.Fields{
+		"connID":     request.GetConnection().GetConnID(),
+		"remoteAddr": request.GetConnection().RemoteAddr().String(),
+	}).Debug("参数设置处理完成")
 }

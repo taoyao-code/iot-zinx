@@ -1,10 +1,11 @@
 package handlers
 
 import (
-	"github.com/bujia-iot/iot-zinx/pkg"
 	"encoding/binary"
 	"fmt"
 	"time"
+
+	"github.com/bujia-iot/iot-zinx/pkg"
 
 	"github.com/aceld/zinx/ziface"
 	"github.com/aceld/zinx/znet"
@@ -58,6 +59,14 @@ const (
 	RateModeEnergy = 2 // 计量模式
 	RateModeCount  = 3 // 计次模式
 )
+
+// 预处理刷卡请求
+func (h *SwipeCardHandler) PreHandle(request ziface.IRequest) {
+	logger.WithFields(logrus.Fields{
+		"connID":     request.GetConnection().GetConnID(),
+		"remoteAddr": request.GetConnection().RemoteAddr().String(),
+	}).Debug("收到刷卡请求")
+}
 
 // Handle 处理刷卡请求
 func (h *SwipeCardHandler) Handle(request ziface.IRequest) {
@@ -155,4 +164,12 @@ func (h *SwipeCardHandler) Handle(request ziface.IRequest) {
 
 	// 更新心跳时间
 	pkg.Monitor.GetGlobalMonitor().UpdateLastHeartbeatTime(conn)
+}
+
+// PostHandle 后处理刷卡请求
+func (h *SwipeCardHandler) PostHandle(request ziface.IRequest) {
+	logger.WithFields(logrus.Fields{
+		"connID":     request.GetConnection().GetConnID(),
+		"remoteAddr": request.GetConnection().RemoteAddr().String(),
+	}).Debug("刷卡请求处理完成")
 }

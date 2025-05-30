@@ -26,6 +26,14 @@ func NewNonDNYDataHandler() ziface.IRouter {
 	return &NonDNYDataHandler{}
 }
 
+// 生命周期函数，预处理
+func (h *NonDNYDataHandler) PreHandle(request ziface.IRequest) {
+	logger.WithFields(logrus.Fields{
+		"connID":     request.GetConnection().GetConnID(),
+		"remoteAddr": request.GetConnection().RemoteAddr().String(),
+	}).Debug("收到非DNY协议数据")
+}
+
 // Handle 处理非DNY协议数据
 func (h *NonDNYDataHandler) Handle(request ziface.IRequest) {
 	// 获取消息和连接
@@ -43,6 +51,14 @@ func (h *NonDNYDataHandler) Handle(request ziface.IRequest) {
 
 	// 处理不同类型的非DNY数据
 	h.processNonDNYData(conn, data)
+}
+
+// 后处理函数
+func (h *NonDNYDataHandler) PostHandle(request ziface.IRequest) {
+	logger.WithFields(logrus.Fields{
+		"connID":     request.GetConnection().GetConnID(),
+		"remoteAddr": request.GetConnection().RemoteAddr().String(),
+	}).Debug("收到非DNY协议数据")
 }
 
 // processNonDNYData 处理非DNY协议数据

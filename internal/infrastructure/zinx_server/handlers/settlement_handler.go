@@ -1,9 +1,10 @@
 package handlers
 
 import (
-	"github.com/bujia-iot/iot-zinx/pkg"
 	"fmt"
 	"time"
+
+	"github.com/bujia-iot/iot-zinx/pkg"
 
 	"github.com/aceld/zinx/ziface"
 	"github.com/aceld/zinx/znet"
@@ -16,6 +17,14 @@ import (
 // SettlementHandler 处理结算数据上报 (命令ID: 0x03)
 type SettlementHandler struct {
 	znet.BaseRouter
+}
+
+// PreHandle 预处理结算数据上报
+func (h *SettlementHandler) PreHandle(request ziface.IRequest) {
+	logger.WithFields(logrus.Fields{
+		"connID":     request.GetConnection().GetConnID(),
+		"remoteAddr": request.GetConnection().RemoteAddr().String(),
+	}).Debug("收到结算数据上报")
 }
 
 // Handle 处理结算数据上报
@@ -104,4 +113,12 @@ func (h *SettlementHandler) Handle(request ziface.IRequest) {
 
 	// 更新心跳时间
 	pkg.Monitor.GetGlobalMonitor().UpdateLastHeartbeatTime(conn)
+}
+
+// PostHandle 后处理结算数据上报
+func (h *SettlementHandler) PostHandle(request ziface.IRequest) {
+	logger.WithFields(logrus.Fields{
+		"connID":     request.GetConnection().GetConnID(),
+		"remoteAddr": request.GetConnection().RemoteAddr().String(),
+	}).Debug("结算数据上报处理完成")
 }

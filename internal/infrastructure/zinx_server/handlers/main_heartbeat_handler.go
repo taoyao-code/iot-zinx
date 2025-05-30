@@ -1,8 +1,9 @@
 package handlers
 
 import (
-	"github.com/bujia-iot/iot-zinx/pkg"
 	"fmt"
+
+	"github.com/bujia-iot/iot-zinx/pkg"
 
 	"github.com/aceld/zinx/ziface"
 	"github.com/aceld/zinx/znet"
@@ -14,6 +15,14 @@ import (
 // MainHeartbeatHandler 处理主机心跳请求 (命令ID: 0x11)
 type MainHeartbeatHandler struct {
 	znet.BaseRouter
+}
+
+// PreHandle 预处理主机心跳请求
+func (h *MainHeartbeatHandler) PreHandle(request ziface.IRequest) {
+	logger.WithFields(logrus.Fields{
+		"connID":     request.GetConnection().GetConnID(),
+		"remoteAddr": request.GetConnection().RemoteAddr().String(),
+	}).Debug("收到主机心跳请求")
 }
 
 // Handle 处理主机心跳请求
@@ -80,4 +89,12 @@ func (h *MainHeartbeatHandler) Handle(request ziface.IRequest) {
 
 	// 更新心跳时间
 	pkg.Monitor.GetGlobalMonitor().UpdateLastHeartbeatTime(conn)
+}
+
+// PostHandle 后处理主机心跳请求
+func (h *MainHeartbeatHandler) PostHandle(request ziface.IRequest) {
+	logger.WithFields(logrus.Fields{
+		"connID":     request.GetConnection().GetConnID(),
+		"remoteAddr": request.GetConnection().RemoteAddr().String(),
+	}).Debug("主机心跳请求处理完成")
 }

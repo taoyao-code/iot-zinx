@@ -20,6 +20,14 @@ type GetServerTimeHandler struct {
 	znet.BaseRouter
 }
 
+// PreHandle 预处理设备获取服务器时间请求
+func (h *GetServerTimeHandler) PreHandle(request ziface.IRequest) {
+	logger.WithFields(logrus.Fields{
+		"connID":     request.GetConnection().GetConnID(),
+		"remoteAddr": request.GetConnection().RemoteAddr().String(),
+	}).Debug("收到设备获取服务器时间请求")
+}
+
 // Handle 处理设备获取服务器时间请求
 func (h *GetServerTimeHandler) Handle(request ziface.IRequest) {
 	// 获取请求消息
@@ -165,4 +173,12 @@ func (h *GetServerTimeHandler) Handle(request ziface.IRequest) {
 		"dateTime":   time.Unix(int64(timestamp), 0).Format("2006-01-02 15:04:05"),
 		"rawData":    hex.EncodeToString(respData),
 	}).Error("已发送服务器时间响应") // 使用ERROR级别确保记录
+}
+
+// PostHandle 后处理设备获取服务器时间请求
+func (h *GetServerTimeHandler) PostHandle(request ziface.IRequest) {
+	logger.WithFields(logrus.Fields{
+		"connID":     request.GetConnection().GetConnID(),
+		"remoteAddr": request.GetConnection().RemoteAddr().String(),
+	}).Debug("设备获取服务器时间请求处理完成")
 }
