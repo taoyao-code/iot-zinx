@@ -59,7 +59,12 @@ func StartTCPServer() error {
 	}
 
 	// 2. 创建服务器实例
-	server := znet.NewServer()
+	// server := znet.NewServer()
+
+	server := znet.NewUserConfServer(zconf.GlobalObject)
+
+	// 拦截器
+	server.AddInterceptor(&MyInterceptor{})
 
 	// 3. 创建自定义数据包封包与解包器
 	dataPack := pkg.Protocol.NewDNYDataPackFactory().NewDataPack(cfg.Logger.LogHexDump)

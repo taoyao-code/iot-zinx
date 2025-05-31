@@ -6,7 +6,6 @@ import (
 	"time"
 
 	"github.com/aceld/zinx/ziface"
-	"github.com/aceld/zinx/znet"
 	"github.com/bujia-iot/iot-zinx/internal/domain/dny_protocol"
 	"github.com/bujia-iot/iot-zinx/internal/infrastructure/logger"
 	"github.com/bujia-iot/iot-zinx/pkg"
@@ -16,7 +15,7 @@ import (
 
 // ChargeControlHandler 处理充电控制命令 (命令ID: 0x82)
 type ChargeControlHandler struct {
-	znet.BaseRouter
+	DNYHandlerBase
 	monitor monitor.IConnectionMonitor
 }
 
@@ -154,6 +153,9 @@ func (h *ChargeControlHandler) SendChargeControlCommand(conn ziface.IConnection,
 
 // 预处理充电控制命令
 func (h *ChargeControlHandler) PreHandle(request ziface.IRequest) {
+	// 先调用基类的 PreHandle 方法
+	h.DNYHandlerBase.PreHandle(request)
+
 	logger.WithFields(logrus.Fields{
 		"connID":     request.GetConnection().GetConnID(),
 		"remoteAddr": request.GetConnection().RemoteAddr().String(),

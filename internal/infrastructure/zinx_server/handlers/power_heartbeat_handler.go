@@ -6,7 +6,6 @@ import (
 	"github.com/bujia-iot/iot-zinx/pkg"
 
 	"github.com/aceld/zinx/ziface"
-	"github.com/aceld/zinx/znet"
 	"github.com/bujia-iot/iot-zinx/internal/app"
 	"github.com/bujia-iot/iot-zinx/internal/domain/dny_protocol"
 	"github.com/bujia-iot/iot-zinx/internal/infrastructure/logger"
@@ -15,7 +14,7 @@ import (
 
 // PowerHeartbeatHandler 处理功率心跳数据 (命令ID: 0x06)
 type PowerHeartbeatHandler struct {
-	znet.BaseRouter
+	DNYHandlerBase
 }
 
 // PreHandle 预处理功率心跳数据

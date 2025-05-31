@@ -7,7 +7,6 @@ import (
 	"time"
 
 	"github.com/aceld/zinx/ziface"
-	"github.com/aceld/zinx/znet"
 	"github.com/bujia-iot/iot-zinx/internal/domain/dny_protocol"
 	"github.com/bujia-iot/iot-zinx/internal/infrastructure/logger"
 	"github.com/bujia-iot/iot-zinx/pkg/protocol"
@@ -17,7 +16,7 @@ import (
 // GetServerTimeHandler 处理设备获取服务器时间请求 (命令ID: 0x22 或 0x12)
 // 0x22是设备获取服务器时间指令，0x12是主机获取服务器时间指令
 type GetServerTimeHandler struct {
-	znet.BaseRouter
+	DNYHandlerBase
 }
 
 // PreHandle 预处理设备获取服务器时间请求

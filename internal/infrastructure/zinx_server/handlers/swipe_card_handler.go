@@ -8,7 +8,6 @@ import (
 	"github.com/bujia-iot/iot-zinx/pkg"
 
 	"github.com/aceld/zinx/ziface"
-	"github.com/aceld/zinx/znet"
 	"github.com/bujia-iot/iot-zinx/internal/app"
 	"github.com/bujia-iot/iot-zinx/internal/domain/dny_protocol"
 	"github.com/bujia-iot/iot-zinx/internal/infrastructure/logger"
@@ -17,7 +16,7 @@ import (
 
 // SwipeCardHandler 处理刷卡请求 (命令ID: 0x02)
 type SwipeCardHandler struct {
-	znet.BaseRouter
+	DNYHandlerBase
 }
 
 // 刷卡类型定义

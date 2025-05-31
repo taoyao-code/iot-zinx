@@ -6,7 +6,6 @@ import (
 	"github.com/bujia-iot/iot-zinx/pkg"
 
 	"github.com/aceld/zinx/ziface"
-	"github.com/aceld/zinx/znet"
 	"github.com/bujia-iot/iot-zinx/internal/domain/dny_protocol"
 	"github.com/bujia-iot/iot-zinx/internal/infrastructure/logger"
 	"github.com/sirupsen/logrus"
@@ -14,7 +13,7 @@ import (
 
 // MainHeartbeatHandler 处理主机心跳请求 (命令ID: 0x11)
 type MainHeartbeatHandler struct {
-	znet.BaseRouter
+	DNYHandlerBase
 }
 
 // PreHandle 预处理主机心跳请求

@@ -7,7 +7,6 @@ import (
 	"github.com/bujia-iot/iot-zinx/pkg"
 
 	"github.com/aceld/zinx/ziface"
-	"github.com/aceld/zinx/znet"
 	"github.com/bujia-iot/iot-zinx/internal/app"
 	"github.com/bujia-iot/iot-zinx/internal/domain/dny_protocol"
 	"github.com/bujia-iot/iot-zinx/internal/infrastructure/logger"
@@ -17,7 +16,7 @@ import (
 
 // DeviceRegisterHandler 处理设备注册请求 (命令ID: 0x20)
 type DeviceRegisterHandler struct {
-	znet.BaseRouter
+	DNYHandlerBase
 }
 
 // 预处理
