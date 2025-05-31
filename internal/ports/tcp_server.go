@@ -6,11 +6,13 @@ import (
 
 	"github.com/aceld/zinx/zconf"
 	"github.com/aceld/zinx/ziface"
+	"github.com/aceld/zinx/zlog"
 	"github.com/aceld/zinx/znet"
 	"github.com/bujia-iot/iot-zinx/internal/infrastructure/config"
 	"github.com/bujia-iot/iot-zinx/internal/infrastructure/logger"
 	"github.com/bujia-iot/iot-zinx/internal/infrastructure/zinx_server/handlers"
 	"github.com/bujia-iot/iot-zinx/pkg"
+	"github.com/bujia-iot/iot-zinx/pkg/utils"
 )
 
 // StartTCPServer 配置并启动Zinx TCP服务器
@@ -62,6 +64,8 @@ func StartTCPServer() error {
 	// server := znet.NewServer()
 
 	server := znet.NewUserConfServer(zconf.GlobalObject)
+
+	zlog.SetLogger(utils.NewZinxLoggerAdapter())
 
 	// 拦截器
 	server.AddInterceptor(&MyInterceptor{})
