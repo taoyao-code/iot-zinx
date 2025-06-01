@@ -69,15 +69,11 @@ func (m *TCPMonitor) OnConnectionClosed(conn ziface.IConnection) {
 	if val, err := conn.GetProperty(constants.PropKeyDeviceId); err == nil && val != nil {
 		deviceID = val.(string)
 
-		// 获取设备监控器
-		deviceMonitor := NewDeviceMonitor(func(fn func(deviceId string, conn ziface.IConnection) bool) {
-			m.deviceIdToConnMap.Range(func(key, value interface{}) bool {
-				return fn(key.(string), value.(ziface.IConnection))
-			})
-		})
-
-		// 通知设备监控器设备断开连接
-		deviceMonitor.OnDeviceDisconnect(deviceID, conn, "connection_closed")
+		// 通知全局设备监控器设备断开连接
+		deviceMonitor := GetGlobalDeviceMonitor()
+		if deviceMonitor != nil {
+			deviceMonitor.OnDeviceDisconnect(deviceID, conn, "connection_closed")
+		}
 
 		// 更新设备状态为离线或重连中
 		if UpdateDeviceStatusFunc != nil {
@@ -260,14 +256,11 @@ func (m *TCPMonitor) BindDeviceIdToConnection(deviceId string, conn ziface.IConn
 		UpdateDeviceStatusFunc(deviceId, constants.DeviceStatusOnline)
 	}
 
-	// 通知设备监控器设备已注册
-	deviceMonitor := NewDeviceMonitor(func(fn func(deviceId string, conn ziface.IConnection) bool) {
-		m.deviceIdToConnMap.Range(func(key, value interface{}) bool {
-			return fn(key.(string), value.(ziface.IConnection))
-		})
-	})
-
-	deviceMonitor.OnDeviceRegistered(deviceId, conn)
+	// 通知全局设备监控器设备已注册
+	deviceMonitor := GetGlobalDeviceMonitor()
+	if deviceMonitor != nil {
+		deviceMonitor.OnDeviceRegistered(deviceId, conn)
+	}
 }
 
 // GetConnectionByDeviceId 根据设备ID获取连接
@@ -320,15 +313,12 @@ func (m *TCPMonitor) UpdateLastHeartbeatTime(conn ziface.IConnection) {
 		UpdateDeviceStatusFunc(deviceId, constants.DeviceStatusOnline)
 	}
 
-	// 通知设备监控器设备心跳
+	// 通知全局设备监控器设备心跳
 	if deviceId != "unknown" {
-		deviceMonitor := NewDeviceMonitor(func(fn func(deviceId string, conn ziface.IConnection) bool) {
-			m.deviceIdToConnMap.Range(func(key, value interface{}) bool {
-				return fn(key.(string), value.(ziface.IConnection))
-			})
-		})
-
-		deviceMonitor.OnDeviceHeartbeat(deviceId, conn)
+		deviceMonitor := GetGlobalDeviceMonitor()
+		if deviceMonitor != nil {
+			deviceMonitor.OnDeviceHeartbeat(deviceId, conn)
+		}
 	}
 }
 

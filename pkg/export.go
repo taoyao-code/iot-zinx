@@ -125,7 +125,9 @@ var Network = struct {
 var Monitor = struct {
 	// 获取TCP监视器
 	GetGlobalMonitor func() monitor.IConnectionMonitor
-	// 创建设备监控器
+	// 获取全局设备监控器
+	GetGlobalDeviceMonitor func() monitor.IDeviceMonitor
+	// 创建设备监控器（已弃用，推荐使用GetGlobalDeviceMonitor）
 	NewDeviceMonitor func(deviceConnAccessor func(func(deviceId string, conn ziface.IConnection) bool)) monitor.IDeviceMonitor
 	// 设置更新设备状态函数
 	SetUpdateDeviceStatusFunc func(fn monitor.UpdateDeviceStatusFuncType)
@@ -145,6 +147,9 @@ var Monitor = struct {
 }{
 	GetGlobalMonitor: func() monitor.IConnectionMonitor {
 		return monitor.GetGlobalMonitor()
+	},
+	GetGlobalDeviceMonitor: func() monitor.IDeviceMonitor {
+		return monitor.GetGlobalDeviceMonitor()
 	},
 	NewDeviceMonitor: func(deviceConnAccessor func(func(deviceId string, conn ziface.IConnection) bool)) monitor.IDeviceMonitor {
 		return monitor.NewDeviceMonitor(deviceConnAccessor)

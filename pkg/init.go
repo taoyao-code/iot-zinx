@@ -47,12 +47,29 @@ func InitPackages() {
 		return protocol.SendDNYResponse(conn, physicalID, messageID, command, data)
 	})
 
+	// 启动全局设备监控器
+	deviceMonitor := monitor.GetGlobalDeviceMonitor()
+	if deviceMonitor != nil {
+		if err := deviceMonitor.Start(); err != nil {
+			logger.Errorf("启动设备监控器失败: %v", err)
+		} else {
+			logger.Info("全局设备监控器已启动")
+		}
+	}
+
 	logger.Info("pkg包依赖关系初始化完成")
 }
 
 // CleanupPackages 清理包资源
 // 该函数应该在应用关闭时调用，用于清理各个包的资源
 func CleanupPackages() {
+	// 停止设备监控器
+	deviceMonitor := monitor.GetGlobalDeviceMonitor()
+	if deviceMonitor != nil {
+		deviceMonitor.Stop()
+		logger.Info("全局设备监控器已停止")
+	}
+
 	// 停止命令管理器
 	cmdMgr := network.GetCommandManager()
 	cmdMgr.Stop()

@@ -3,6 +3,7 @@ package monitor
 import (
 	"fmt"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -39,6 +40,29 @@ type DeviceMonitor struct {
 
 // 确保DeviceMonitor实现了IDeviceMonitor接口
 var _ IDeviceMonitor = (*DeviceMonitor)(nil)
+
+// 全局设备监控器
+var (
+	globalDeviceMonitorOnce sync.Once
+	globalDeviceMonitor     *DeviceMonitor
+)
+
+// GetGlobalDeviceMonitor 获取全局设备监控器实例
+func GetGlobalDeviceMonitor() *DeviceMonitor {
+	globalDeviceMonitorOnce.Do(func() {
+		// 创建设备连接访问器，通过全局TCP监控器获取连接
+		deviceConnAccessor := func(fn func(deviceId string, conn ziface.IConnection) bool) {
+			tcpMonitor := GetGlobalMonitor()
+			if tcpMonitor != nil {
+				tcpMonitor.ForEachConnection(fn)
+			}
+		}
+
+		globalDeviceMonitor = NewDeviceMonitor(deviceConnAccessor)
+		logger.Info("全局设备监控器已初始化")
+	})
+	return globalDeviceMonitor
+}
 
 // NewDeviceMonitor 创建设备监控器
 func NewDeviceMonitor(deviceConnAccessor func(func(deviceId string, conn ziface.IConnection) bool)) *DeviceMonitor {
