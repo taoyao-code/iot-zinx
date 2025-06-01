@@ -4,6 +4,7 @@ import (
 	"encoding/binary"
 
 	"github.com/aceld/zinx/ziface"
+	"github.com/bujia-iot/iot-zinx/internal/infrastructure/logger"
 )
 
 // IDecoderFactory 定义了解码器工厂接口
@@ -51,10 +52,26 @@ func (d *DNYDecoder) GetLengthField() *ziface.LengthField {
 }
 
 // Intercept 拦截器方法，用于实现自定义的拦截处理
+// 这是Zinx框架路由消息的关键环节：必须设置消息ID才能正确路由到处理器
 func (d *DNYDecoder) Intercept(chain ziface.IChain) ziface.IcResp {
 	// 获取请求数据
 	request := chain.Request()
 
-	// 直接继续处理
+	iRequest := request.(ziface.IRequest)
+
+	// 获取消息对象
+	iMessage := iRequest.GetMessage()
+
+	// 关键步骤：设置消息ID以便Zinx框架正确路由
+	// DNYPacket.Unpack() 已经将DNY协议的命令字段解析并存储在消息的MsgID中
+	// 这里需要调用SetMsgID()来告知Zinx框架应该路由到哪个处理器
+	iMessage.SetMsgID(iMessage.GetMsgID())
+
+	// 打印调试信息，确认消息ID已正确设置
+	logger.Debugf("DNYDecoder Intercept: 设置消息ID为 %d", iMessage.GetMsgID())
+	// 这里可以添加更多的调试信息，例如打印消息内容等
+	logger.Debugf("DNYDecoder Intercept: 消息内容 %s", string(iMessage.GetData()))
+
+	// 继续处理链，现在消息将被正确路由到对应的处理器
 	return chain.Proceed(request)
 }

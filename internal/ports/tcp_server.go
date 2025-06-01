@@ -1,7 +1,6 @@
 package ports
 
 import (
-	"path/filepath"
 	"time"
 
 	"github.com/aceld/zinx/zconf"
@@ -23,7 +22,7 @@ func StartTCPServer() error {
 	// 1. 初始化pkg包之间的依赖关系
 	pkg.InitPackages()
 
-	// 直接设置Zinx全局对象配置
+	// 设置Zinx服务器配置（不包含日志配置，因为我们使用自定义日志系统）
 	zconf.GlobalObject.Name = zinxCfg.Name
 	zconf.GlobalObject.Host = cfg.TCPServer.Host
 	zconf.GlobalObject.TCPPort = zinxCfg.TCPPort
@@ -33,35 +32,13 @@ func StartTCPServer() error {
 	zconf.GlobalObject.WorkerPoolSize = uint32(zinxCfg.WorkerPoolSize)
 	zconf.GlobalObject.MaxWorkerTaskLen = uint32(zinxCfg.MaxWorkerTaskLen)
 
-	// 设置日志配置 - 简化路径处理
-	if len(cfg.Logger.FilePath) > 0 {
-		// 使用filepath包处理路径分割
-		dir := filepath.Dir(cfg.Logger.FilePath)
-		file := filepath.Base(cfg.Logger.FilePath)
-
-		// 设置Zinx日志配置
-		zconf.GlobalObject.LogDir = dir
-		zconf.GlobalObject.LogFile = file
-	}
-
-	// 根据日志级别设置隔离级别
-	switch cfg.Logger.Level {
-	case "debug":
-		zconf.GlobalObject.LogIsolationLevel = 0
-	case "info":
-		zconf.GlobalObject.LogIsolationLevel = 1
-	case "warn":
-		zconf.GlobalObject.LogIsolationLevel = 2
-	case "error":
-		zconf.GlobalObject.LogIsolationLevel = 3
-	default:
-		zconf.GlobalObject.LogIsolationLevel = 0
-	}
+	// 注意：不再设置Zinx原生日志配置，因为我们已经在main.go中通过utils.SetupZinxLogger()
+	// 设置了自定义日志系统，两者会发生冲突
 	// 2. 创建服务器实例
-	// server := znet.NewServer()
 	server := znet.NewUserConfServer(zconf.GlobalObject)
 
-	// 注意：自定义日志已在main.go中通过utils.SetupZinxLogger()设置，此处不再重复设置
+	// 注意：自定义日志已在main.go中通过utils.SetupZinxLogger()设置
+	// 不再使用Zinx原生日志配置，避免冲突
 
 	// 3. 创建自定义数据包封包与解包器
 	dataPack := pkg.Protocol.NewDNYDataPackFactory().NewDataPack(cfg.Logger.LogHexDump)
