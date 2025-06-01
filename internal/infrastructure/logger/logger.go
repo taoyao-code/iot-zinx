@@ -59,10 +59,12 @@ func Init(cfg *config.LoggerConfig) error {
 
 // InitWithConsole 初始化日志系统，同时输出到控制台和文件
 func InitWithConsole(cfg *config.LoggerConfig) error {
-	// 设置日志级别
-	level, err := logrus.ParseLevel(cfg.Level)
+	// 强制设置为debug级别，确保输出所有日志
+	forcedLevel := "debug"
+	level, err := logrus.ParseLevel(forcedLevel)
 	if err != nil {
-		return fmt.Errorf("invalid log level: %s, %w", cfg.Level, err)
+		// 如果解析失败，强制使用debug级别
+		level = logrus.DebugLevel
 	}
 	log.SetLevel(level)
 
@@ -75,12 +77,15 @@ func InitWithConsole(cfg *config.LoggerConfig) error {
 		log.SetFormatter(&logrus.TextFormatter{
 			TimestampFormat: "2006-01-02 15:04:05",
 			FullTimestamp:   true,
+			ForceColors:     true, // 强制启用颜色
 		})
 	}
 
 	// 直接在控制台输出测试信息
 	fmt.Println("\n===== 日志系统初始化开始 =====")
-	fmt.Printf("日志级别: %s\n", cfg.Level)
+	fmt.Printf("原始日志级别: %s\n", cfg.Level)
+	fmt.Printf("强制设置级别: %s\n", forcedLevel)
+	fmt.Printf("实际使用级别: %s\n", level.String())
 	fmt.Printf("日志格式: %s\n", cfg.Format)
 	fmt.Printf("日志文件路径: %s\n", cfg.FilePath)
 

@@ -3,6 +3,7 @@ package protocol
 import (
 	"encoding/binary"
 	"fmt"
+	"time"
 
 	"github.com/aceld/zinx/ziface"
 	"github.com/bujia-iot/iot-zinx/internal/infrastructure/logger"
@@ -55,25 +56,49 @@ func (d *DNYDecoder) GetLengthField() *ziface.LengthField {
 // Intercept 拦截器方法，用于实现自定义的拦截处理
 // 这是Zinx框架路由消息的关键环节：必须设置消息ID才能正确路由到处理器
 func (d *DNYDecoder) Intercept(chain ziface.IChain) ziface.IcResp {
-	// 先添加基础调试日志确认方法被调用
-	fmt.Printf("🔄 DNYDecoder.Intercept() 被调用!\n")
+	// 强制控制台输出，确保一定能看到
+	fmt.Printf("\n🔥🔥🔥 DNYDecoder.Intercept() 被调用! 🔥🔥🔥\n")
+	fmt.Printf("⏰ 时间: %s\n", time.Now().Format("2006-01-02 15:04:05"))
+	
+	// 同时使用我们的日志系统
 	logger.Debugf("DNYDecoder.Intercept() 被调用")
+	logger.Infof("DNYDecoder.Intercept() 被调用 - Info级别")
+	logger.Warnf("DNYDecoder.Intercept() 被调用 - Warn级别")
+	logger.Errorf("DNYDecoder.Intercept() 被调用 - Error级别")
 
 	// 获取请求数据
 	request := chain.Request()
+	if request == nil {
+		fmt.Printf("❌ request为nil\n")
+		return chain.Proceed(request)
+	}
 
 	// 获取请求对象
-	iRequest := request.(ziface.IRequest)
+	iRequest, ok := request.(ziface.IRequest)
+	if !ok {
+		fmt.Printf("❌ request无法转换为IRequest\n")
+		return chain.Proceed(request)
+	}
 
 	// 获取消息对象
 	iMessage := iRequest.GetMessage()
+	if iMessage == nil {
+		fmt.Printf("❌ iMessage为nil\n")
+		return chain.Proceed(request)
+	}
 
 	// 获取消息的原始数据，尝试从中提取命令字段作为路由ID
 	msgData := iMessage.GetData()
+	if msgData == nil {
+		fmt.Printf("❌ msgData为nil\n")
+		return chain.Proceed(request)
+	}
 
 	// 增强调试信息 - 显示原始数据
-	fmt.Printf("📦 DNYDecoder: 消息ID=%d, 数据长度=%d, 数据前12字节=[% 02X]\n",
-		iMessage.GetMsgID(), len(msgData), msgData[:min(len(msgData), 12)])
+	fmt.Printf("📦 DNYDecoder: 消息ID=%d, 数据长度=%d\n", iMessage.GetMsgID(), len(msgData))
+	if len(msgData) > 0 {
+		fmt.Printf("📦 数据前%d字节: [% 02X]\n", min(len(msgData), 20), msgData[:min(len(msgData), 20)])
+	}
 
 	logger.Debugf("DNYDecoder Intercept: 原始消息ID=%d, 数据长度=%d",
 		iMessage.GetMsgID(), len(msgData))
