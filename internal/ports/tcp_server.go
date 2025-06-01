@@ -43,12 +43,19 @@ func StartTCPServer() error {
 	// 3. 创建自定义数据包封包与解包器
 	dataPack := pkg.Protocol.NewDNYDataPackFactory().NewDataPack(cfg.Logger.LogHexDump)
 
-	// 3.1 创建自定义解码器 - 修复：使用AddInterceptor而不是SetDecoder
-	decoder := pkg.Protocol.NewDNYDecoderFactory().NewDecoder()
+	// 3.1 创建FrameDecoder拦截器
+	// 根据Zinx设计，需要先添加FrameDecoder进行数据包分割，然后添加自定义decoder处理业务逻辑
+	// decoder := pkg.Protocol.NewDNYDecoderFactory().NewDecoder()
+	// lengthField := decoder.GetLengthField()
+	// frameDecoder := zinterceptor.NewFrameDecoder(*lengthField)
 
-	// 4. 设置解码器和数据包处理器
-	// 在Zinx v1.2.6中，应该使用AddInterceptor来添加解码器拦截器
-	server.AddInterceptor(decoder)
+	// 4. 设置拦截器和数据包处理器
+	// 重要：拦截器添加顺序很关键！
+	// 1. 先添加FrameDecoder处理数据包分割
+	// server.AddInterceptor(frameDecoder)
+	// 2. 再添加自定义DNYDecoder处理路由设置
+	// server.AddInterceptor(decoder)
+	server.AddInterceptor(&MyInterceptor{}) // 添加自定义拦截器
 	server.SetPacket(dataPack)
 
 	// 5. 注册路由 - 确保在初始化包之后再注册路由
