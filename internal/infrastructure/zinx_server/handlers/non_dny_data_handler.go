@@ -6,7 +6,6 @@ import (
 
 	"github.com/aceld/zinx/ziface"
 	"github.com/aceld/zinx/znet"
-	"github.com/bujia-iot/iot-zinx/internal/app"
 	"github.com/bujia-iot/iot-zinx/internal/infrastructure/logger"
 	"github.com/bujia-iot/iot-zinx/pkg/constants"
 	"github.com/bujia-iot/iot-zinx/pkg/monitor"
@@ -83,22 +82,11 @@ func (h *NonDNYDataHandler) processICCID(conn ziface.IConnection, data []byte) b
 	iccidStr := string(data)
 	conn.SetProperty(constants.PropKeyICCID, iccidStr)
 
-	// 将ICCID作为设备ID进行绑定（临时ID，格式为TempID-ICCID）
-	tempDeviceId := "TempID-" + iccidStr
-	conn.SetProperty(constants.PropKeyDeviceId, tempDeviceId)
-
 	logger.WithFields(logrus.Fields{
 		"connID":     conn.GetConnID(),
 		"remoteAddr": conn.RemoteAddr().String(),
 		"iccid":      iccidStr,
-		"deviceId":   tempDeviceId,
-	}).Info("收到ICCID数据 - 根据协议无需应答")
-
-	// 通知业务层
-	deviceService := app.GetServiceManager().DeviceService
-	if deviceService != nil {
-		go deviceService.HandleDeviceOnline(tempDeviceId, iccidStr)
-	}
+	}).Debug("收到ICCID数据")
 
 	// 更新心跳时间
 	monitor.GetGlobalMonitor().UpdateLastHeartbeatTime(conn)
@@ -118,7 +106,7 @@ func (h *NonDNYDataHandler) processLinkHeartbeat(conn ziface.IConnection, data [
 	conn.SetProperty(constants.PropKeyConnStatus, constants.ConnStatusActive)
 
 	// 获取设备ID信息用于日志记录
-	deviceID := "unknown"
+	var deviceID string
 	if val, err := conn.GetProperty(constants.PropKeyDeviceId); err == nil && val != nil {
 		deviceID = val.(string)
 	}

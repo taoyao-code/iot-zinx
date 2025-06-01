@@ -9,6 +9,7 @@ import (
 	"github.com/bujia-iot/iot-zinx/internal/domain/dny_protocol"
 	"github.com/bujia-iot/iot-zinx/internal/infrastructure/logger"
 	"github.com/bujia-iot/iot-zinx/pkg"
+	"github.com/bujia-iot/iot-zinx/pkg/constants"
 	"github.com/bujia-iot/iot-zinx/pkg/monitor"
 	"github.com/sirupsen/logrus"
 )
@@ -91,8 +92,8 @@ func (h *ChargeControlHandler) SendChargeControlCommand(conn ziface.IConnection,
 	data := GenerateChargeControlData(rateMode, balance, portNumber, chargeCommand, chargeDuration, orderNumber, maxChargeDuration, maxPower, qrCodeLight)
 
 	// 获取设备ID（如有）
-	deviceId := "Unknown"
-	if deviceIdVal, err := conn.GetProperty(PropKeyDeviceId); err == nil {
+	var deviceId string
+	if deviceIdVal, err := conn.GetProperty(constants.PropKeyDeviceId); err == nil {
 		deviceId = deviceIdVal.(string)
 	}
 

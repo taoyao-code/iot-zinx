@@ -132,27 +132,27 @@ func (ch *ConnectionHooks) OnConnectionStop(conn ziface.IConnection) {
 	// 获取心跳信息
 	lastHeartbeatStr, timeSinceHeart := ch.getHeartbeatInfo(conn)
 
-	// 尝试获取设备信息
-	if deviceId, err := conn.GetProperty(constants.PropKeyDeviceId); err == nil && deviceId != nil {
-		deviceIdStr := deviceId.(string)
+	// 尝试获取设备信息，优化连接断开日志记录
+	deviceId, hasDeviceId := conn.GetProperty(constants.PropKeyDeviceId)
+	var deviceIdStr string
 
-		logger.WithFields(logrus.Fields{
-			"deviceId":       deviceIdStr,
-			"remoteAddr":     remoteAddr,
-			"connID":         connID,
-			"lastHeartbeat":  lastHeartbeatStr,
-			"timeSinceHeart": timeSinceHeart,
-			"connStatus":     constants.ConnStatusClosed,
-		}).Info("设备连接断开")
+	if hasDeviceId == nil && deviceId != nil {
+		deviceIdStr = deviceId.(string)
 	} else {
-		logger.WithFields(logrus.Fields{
-			"remoteAddr":     remoteAddr,
-			"connID":         connID,
-			"lastHeartbeat":  lastHeartbeatStr,
-			"timeSinceHeart": timeSinceHeart,
-			"connStatus":     constants.ConnStatusClosed,
-		}).Info("未知设备连接断开")
+		deviceIdStr = "unregistered"
 	}
+
+	// 记录连接断开日志
+	logFields := logrus.Fields{
+		"deviceId":       deviceIdStr,
+		"remoteAddr":     remoteAddr,
+		"connID":         connID,
+		"lastHeartbeat":  lastHeartbeatStr,
+		"timeSinceHeart": timeSinceHeart,
+		"connStatus":     constants.ConnStatusClosed,
+	}
+
+	logger.WithFields(logFields).Info("设备连接断开")
 
 	// 调用自定义连接关闭回调
 	if ch.onConnectionClosedFunc != nil {
@@ -174,7 +174,7 @@ func (ch *ConnectionHooks) getHeartbeatInfo(conn ziface.IConnection) (string, fl
 				lastHeartbeatStr = time.Unix(ts, 0).Format("2006-01-02 15:04:05")
 				timeSinceHeart = time.Since(time.Unix(ts, 0)).Seconds()
 			} else {
-				lastHeartbeatStr = "unknown"
+				lastHeartbeatStr = "invalid"
 			}
 		} else {
 			lastHeartbeatStr = "never"

@@ -14,15 +14,25 @@ func OnDeviceNotAlive(conn ziface.IConnection) {
 	remoteAddr := conn.RemoteAddr().String()
 
 	// 获取设备ID
-	deviceID := "unknown"
+	var deviceID string
 	if val, err := conn.GetProperty(constants.PropKeyDeviceId); err == nil && val != nil {
 		deviceID = val.(string)
 	}
 
 	// 获取最后心跳时间
-	lastHeartbeatStr := "unknown"
+	var lastHeartbeatStr string
 	if val, err := conn.GetProperty(constants.PropKeyLastHeartbeatStr); err == nil && val != nil {
 		lastHeartbeatStr = val.(string)
+	}
+
+	// 只处理已注册的设备心跳超时
+	if deviceID == "" {
+		logger.WithFields(logrus.Fields{
+			"connID":     connID,
+			"remoteAddr": remoteAddr,
+			"reason":     "unregistered_device_timeout",
+		}).Debug("未注册设备连接心跳超时")
+		return
 	}
 
 	logger.WithFields(logrus.Fields{

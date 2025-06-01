@@ -3,7 +3,6 @@ package monitor
 import (
 	"encoding/hex"
 	"fmt"
-	"strings"
 	"sync"
 	"time"
 
@@ -28,8 +27,9 @@ var _ IConnectionMonitor = (*TCPMonitor)(nil)
 
 // 全局TCP数据监视器
 var (
-	globalMonitorOnce sync.Once
-	globalMonitor     *TCPMonitor
+	globalMonitorOnce     sync.Once
+	globalMonitor         *TCPMonitor
+	statusUpdateOptimizer *StatusUpdateOptimizer
 )
 
 // GetGlobalMonitor 获取全局监视器实例
@@ -65,9 +65,8 @@ func (m *TCPMonitor) OnConnectionClosed(conn ziface.IConnection) {
 		remoteAddr)
 
 	// 获取关联的设备ID
-	deviceID := "unknown"
 	if val, err := conn.GetProperty(constants.PropKeyDeviceId); err == nil && val != nil {
-		deviceID = val.(string)
+		deviceID := val.(string)
 
 		// 通知全局设备监控器设备断开连接
 		deviceMonitor := GetGlobalDeviceMonitor()
@@ -251,8 +250,10 @@ func (m *TCPMonitor) BindDeviceIdToConnection(deviceId string, conn ziface.IConn
 		"connID":   connID,
 	}).Info("设备连接绑定成功")
 
-	// 更新设备状态为在线
-	if UpdateDeviceStatusFunc != nil {
+	// 更新设备状态为在线（使用优化器）
+	if statusUpdateOptimizer != nil {
+		statusUpdateOptimizer.UpdateDeviceStatus(deviceId, constants.DeviceStatusOnline, "register")
+	} else if UpdateDeviceStatusFunc != nil {
 		UpdateDeviceStatusFunc(deviceId, constants.DeviceStatusOnline)
 	}
 
@@ -296,9 +297,18 @@ func (m *TCPMonitor) UpdateLastHeartbeatTime(conn ziface.IConnection) {
 	conn.SetProperty(constants.PropKeyConnStatus, constants.ConnStatusActive)
 
 	// 获取设备ID
-	deviceId := "unknown"
+	var deviceId string
 	if val, err := conn.GetProperty(constants.PropKeyDeviceId); err == nil && val != nil {
 		deviceId = val.(string)
+	}
+
+	// 只处理已注册的设备心跳
+	if deviceId == "" {
+		logger.WithFields(logrus.Fields{
+			"connID":        conn.GetConnID(),
+			"heartbeatTime": timeStr,
+		}).Debug("未注册设备心跳，跳过状态更新")
+		return
 	}
 
 	// 记录心跳日志
@@ -308,17 +318,19 @@ func (m *TCPMonitor) UpdateLastHeartbeatTime(conn ziface.IConnection) {
 		"heartbeatTime": timeStr,
 	}).Debug("更新设备心跳时间")
 
-	// 更新设备状态为在线
-	if UpdateDeviceStatusFunc != nil && deviceId != "unknown" {
+	// 更新设备状态为在线（使用优化器）
+	if statusUpdateOptimizer != nil {
+		// 使用优化器进行状态更新，避免冗余调用
+		statusUpdateOptimizer.UpdateDeviceStatus(deviceId, constants.DeviceStatusOnline, "heartbeat")
+	} else if UpdateDeviceStatusFunc != nil {
+		// 后备方案：直接调用原始函数
 		UpdateDeviceStatusFunc(deviceId, constants.DeviceStatusOnline)
 	}
 
 	// 通知全局设备监控器设备心跳
-	if deviceId != "unknown" {
-		deviceMonitor := GetGlobalDeviceMonitor()
-		if deviceMonitor != nil {
-			deviceMonitor.OnDeviceHeartbeat(deviceId, conn)
-		}
+	deviceMonitor := GetGlobalDeviceMonitor()
+	if deviceMonitor != nil {
+		deviceMonitor.OnDeviceHeartbeat(deviceId, conn)
 	}
 }
 
@@ -331,6 +343,12 @@ var UpdateDeviceStatusFunc UpdateDeviceStatusFuncType
 // SetUpdateDeviceStatusFunc 设置更新设备状态的函数
 func SetUpdateDeviceStatusFunc(fn UpdateDeviceStatusFuncType) {
 	UpdateDeviceStatusFunc = fn
+
+	// 同时初始化状态更新优化器
+	if statusUpdateOptimizer == nil {
+		statusUpdateOptimizer = NewStatusUpdateOptimizer(fn)
+		logger.Info("设备状态更新优化器已初始化并集成到TCP监控器")
+	}
 }
 
 // UpdateDeviceStatus 更新设备状态
@@ -350,8 +368,10 @@ func (m *TCPMonitor) UpdateDeviceStatus(deviceId string, status string) {
 			conn.SetProperty(constants.PropKeyConnStatus, constants.ConnStatusInactive)
 		} else if status == constants.DeviceStatusOnline {
 			conn.SetProperty(constants.PropKeyConnStatus, constants.ConnStatusActive)
-			// 更新最后心跳时间
-			m.UpdateLastHeartbeatTime(conn)
+			// 优化：避免循环调用，直接更新心跳时间属性而不触发递归状态更新
+			now := time.Now()
+			conn.SetProperty(constants.PropKeyLastHeartbeat, now.Unix())
+			conn.SetProperty(constants.PropKeyLastHeartbeatStr, now.Format("2006-01-02 15:04:05.000"))
 		}
 	} else {
 		// 设备不在线，只记录状态变更
@@ -361,49 +381,67 @@ func (m *TCPMonitor) UpdateDeviceStatus(deviceId string, status string) {
 		}).Info("设备状态更新(设备不在线)")
 	}
 
-	// 调用外部提供的设备状态更新函数
-	if UpdateDeviceStatusFunc != nil {
+	// 调用外部提供的设备状态更新函数（使用优化器）
+	if statusUpdateOptimizer != nil {
+		statusUpdateOptimizer.UpdateDeviceStatus(deviceId, status, "manual")
+	} else if UpdateDeviceStatusFunc != nil {
 		UpdateDeviceStatusFunc(deviceId, status)
 	}
 }
 
 // ForEachConnection 遍历所有设备连接
 func (m *TCPMonitor) ForEachConnection(callback func(deviceId string, conn ziface.IConnection) bool) {
+	// 用于跟踪需要清理的无效连接
+	invalidConnections := make([]string, 0)
+
 	// 遍历设备ID到连接的映射
 	m.deviceIdToConnMap.Range(func(key, value interface{}) bool {
 		deviceId, ok1 := key.(string)
 		conn, ok2 := value.(ziface.IConnection)
 
-		if ok1 && ok2 {
-			// 忽略临时连接
-			if strings.HasPrefix(deviceId, "TempID-") {
-				return true
-			}
+		if !ok1 || !ok2 {
+			logger.WithFields(logrus.Fields{
+				"key": key,
+			}).Warn("发现无效的映射关系，将清理")
+			invalidConnections = append(invalidConnections, deviceId)
+			return true
+		}
 
-			// 检查连接是否仍然有效
-			if conn == nil || conn.GetTCPConnection() == nil {
+		// 检查连接是否仍然有效
+		if conn == nil || conn.GetTCPConnection() == nil {
+			logger.WithFields(logrus.Fields{
+				"deviceId": deviceId,
+			}).Warn("发现无效连接，将从映射中移除")
+			invalidConnections = append(invalidConnections, deviceId)
+			return true
+		}
+
+		// 检查连接状态
+		if val, err := conn.GetProperty(constants.PropKeyConnStatus); err == nil && val != nil {
+			status := val.(string)
+			if status == constants.ConnStatusClosed || status == constants.ConnStatusInactive {
 				logger.WithFields(logrus.Fields{
 					"deviceId": deviceId,
-				}).Warn("发现无效连接，将从映射中移除")
-				m.deviceIdToConnMap.Delete(deviceId)
+					"status":   status,
+				}).Debug("跳过非活跃连接")
 				return true
 			}
-
-			// 检查连接状态
-			if val, err := conn.GetProperty(constants.PropKeyConnStatus); err == nil && val != nil {
-				status := val.(string)
-				if status == constants.ConnStatusClosed || status == constants.ConnStatusInactive {
-					logger.WithFields(logrus.Fields{
-						"deviceId": deviceId,
-						"status":   status,
-					}).Debug("跳过非活跃连接")
-					return true
-				}
-			}
-
-			// 执行回调函数
-			return callback(deviceId, conn)
 		}
-		return true
+
+		// 执行回调函数
+		return callback(deviceId, conn)
 	})
+
+	// 清理无效连接
+	for _, deviceId := range invalidConnections {
+		m.deviceIdToConnMap.Delete(deviceId)
+		// 也需要清理反向映射
+		m.connIdToDeviceIdMap.Range(func(connKey, deviceKey interface{}) bool {
+			if deviceKey == deviceId {
+				m.connIdToDeviceIdMap.Delete(connKey)
+				return false
+			}
+			return true
+		})
+	}
 }

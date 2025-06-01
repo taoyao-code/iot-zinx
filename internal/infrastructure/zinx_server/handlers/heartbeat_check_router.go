@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/bujia-iot/iot-zinx/pkg"
+	"github.com/bujia-iot/iot-zinx/pkg/constants"
 
 	"github.com/aceld/zinx/ziface"
 	"github.com/aceld/zinx/znet"
@@ -61,15 +62,15 @@ func (r *HeartbeatCheckRouter) Handle(request ziface.IRequest) {
 				}).Info("处理心跳响应中的设备状态查询")
 
 				// 如果设备ID与连接未关联，进行关联
-				if val, err := conn.GetProperty(PropKeyDeviceId); err != nil || val == nil {
+				if val, err := conn.GetProperty(constants.PropKeyDeviceId); err != nil || val == nil {
 					pkg.Monitor.GetGlobalMonitor().BindDeviceIdToConnection(deviceID, conn)
 				}
 			}
 		}
 	} else {
 		// 非DNY协议消息，尝试获取设备ID用于日志记录
-		deviceID := "unknown"
-		if val, err := conn.GetProperty(PropKeyDeviceId); err == nil && val != nil {
+		var deviceID string
+		if val, err := conn.GetProperty(constants.PropKeyDeviceId); err == nil && val != nil {
 			deviceID = val.(string)
 		}
 
@@ -82,29 +83,30 @@ func (r *HeartbeatCheckRouter) Handle(request ziface.IRequest) {
 	}
 
 	// 无论是什么类型的响应，都更新心跳时间
+	// 注意：UpdateLastHeartbeatTime内部已经会更新设备状态，无需重复调用
 	pkg.Monitor.GetGlobalMonitor().UpdateLastHeartbeatTime(conn)
 
 	// 获取设备ID用于日志记录
-	deviceID := "unknown"
-	if val, err := conn.GetProperty(PropKeyDeviceId); err == nil && val != nil {
+	var deviceID string
+	if val, err := conn.GetProperty(constants.PropKeyDeviceId); err == nil && val != nil {
 		deviceID = val.(string)
 	}
 
-	// 更新设备状态为在线
-	pkg.Monitor.GetGlobalMonitor().UpdateDeviceStatus(deviceID, DeviceStatusOnline)
+	// 移除冗余的状态更新调用 - UpdateLastHeartbeatTime内部已处理
+	// pkg.Monitor.GetGlobalMonitor().UpdateDeviceStatus(deviceID, DeviceStatusOnline)
 
 	logger.WithFields(logrus.Fields{
 		"connID":     conn.GetConnID(),
 		"deviceID":   deviceID,
 		"remoteAddr": conn.RemoteAddr().String(),
-		"status":     ConnStatusActive,
+		"status":     constants.ConnStatusActive,
 	}).Debug("心跳检测响应处理完成，设备状态已更新")
 
 	// 记录心跳信息
 	logger.WithFields(logrus.Fields{
 		"connID":     conn.GetConnID(),
 		"deviceID":   deviceID,
-		"status":     ConnStatusActive,
+		"status":     constants.ConnStatusActive,
 		"remoteAddr": conn.RemoteAddr().String(),
 		"time":       time.Now().Format("2006-01-02 15:04:05"),
 	}).Info("设备心跳成功")

@@ -3,6 +3,7 @@ package handlers
 import (
 	"github.com/aceld/zinx/ziface"
 	"github.com/bujia-iot/iot-zinx/internal/domain/dny_protocol"
+	"github.com/bujia-iot/iot-zinx/pkg/monitor"
 )
 
 // RegisterRouters 注册所有路由
@@ -38,7 +39,7 @@ func RegisterRouters(server ziface.IServer) {
 	server.AddRouter(dny_protocol.CmdSwipeCard, &SwipeCardHandler{})
 
 	// 充电控制处理器
-	server.AddRouter(dny_protocol.CmdChargeControl, NewChargeControlHandler(LegacyGetGlobalMonitor()))
+	server.AddRouter(dny_protocol.CmdChargeControl, NewChargeControlHandler(monitor.GetGlobalMonitor()))
 
 	// 结算数据处理器
 	server.AddRouter(dny_protocol.CmdSettlement, &SettlementHandler{})

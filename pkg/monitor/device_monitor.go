@@ -2,7 +2,6 @@ package monitor
 
 import (
 	"fmt"
-	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -168,11 +167,6 @@ func (dm *DeviceMonitor) checkDeviceHeartbeats() {
 	dm.deviceConnAccessor(func(deviceId string, conn ziface.IConnection) bool {
 		deviceCount++
 
-		// 跳过临时连接
-		if strings.HasPrefix(deviceId, "TempID-") {
-			return true
-		}
-
 		// 获取最后一次心跳时间
 		lastHeartbeatVal, err := conn.GetProperty(constants.PropKeyLastHeartbeat)
 		if err != nil {
@@ -272,8 +266,9 @@ func (dm *DeviceMonitor) OnDeviceRegistered(deviceID string, conn ziface.IConnec
 		}).Info("设备首次连接，创建会话")
 	}
 
-	// 更新设备状态为在线
+	// 更新设备状态为在线（通过优化器）
 	if UpdateDeviceStatusFunc != nil {
+		// 直接调用原始函数，因为这是设备注册事件，需要确保执行
 		UpdateDeviceStatusFunc(deviceID, constants.DeviceStatusOnline)
 	}
 

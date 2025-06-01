@@ -4,6 +4,7 @@ import (
 	"fmt"
 
 	"github.com/bujia-iot/iot-zinx/pkg"
+	"github.com/bujia-iot/iot-zinx/pkg/constants"
 
 	"github.com/aceld/zinx/ziface"
 	"github.com/bujia-iot/iot-zinx/internal/domain/dny_protocol"
@@ -53,8 +54,8 @@ func (h *MainHeartbeatHandler) Handle(request ziface.IRequest) {
 	dnyMessageId := dnyMsg.GetMsgID()
 
 	// 如果设备ID还未绑定，设置物理ID
-	deviceId, err := conn.GetProperty(PropKeyDeviceId)
-	if err != nil || deviceId.(string)[:7] == "TempID-" {
+	deviceId, err := conn.GetProperty(constants.PropKeyDeviceId)
+	if err != nil || deviceId == nil {
 		deviceIdStr := fmt.Sprintf("%08X", physicalId)
 		pkg.Monitor.GetGlobalMonitor().BindDeviceIdToConnection(deviceIdStr, conn)
 	}

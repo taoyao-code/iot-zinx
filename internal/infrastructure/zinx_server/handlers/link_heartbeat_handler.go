@@ -33,7 +33,7 @@ func (h *LinkHeartbeatHandler) Handle(request ziface.IRequest) {
 		conn.SetProperty(constants.PropKeyConnStatus, constants.ConnStatusActive)
 
 		// 获取设备ID信息用于日志记录
-		deviceID := "unknown"
+		var deviceID string
 		if val, err := conn.GetProperty(constants.PropKeyDeviceId); err == nil && val != nil {
 			deviceID = val.(string)
 		}

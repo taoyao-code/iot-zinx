@@ -62,12 +62,9 @@ func (h *DNYHandlerBase) GetDNYMessage(request ziface.IRequest) (*dny_protocol.M
 
 // GetDeviceID 从连接中获取设备ID
 func (h *DNYHandlerBase) GetDeviceID(conn ziface.IConnection) string {
-	deviceID := "unknown"
+	var deviceID string
 	if val, err := conn.GetProperty(constants.PropKeyDeviceId); err == nil && val != nil {
 		deviceID = val.(string)
-	} else {
-		// 如果还没有绑定设备ID，尝试从连接ID生成临时ID
-		deviceID = fmt.Sprintf("TempID-%d", conn.GetConnID())
 	}
 	return deviceID
 }
@@ -87,24 +84,16 @@ func (h *DNYHandlerBase) UpdateDeviceStatus(deviceID string, status string) {
 }
 
 // UpdateHeartbeat 更新设备心跳时间
+// 优化：移除冗余的状态更新调用，UpdateLastHeartbeatTime内部已处理状态更新
 func (h *DNYHandlerBase) UpdateHeartbeat(conn ziface.IConnection) {
+	// 只调用更新心跳时间，内部会自动处理设备状态更新
+	// 这样避免了重复调用UpdateDeviceStatus导致的性能问题
 	pkg.Monitor.GetGlobalMonitor().UpdateLastHeartbeatTime(conn)
-
-	// 获取设备ID并更新状态为在线
-	deviceID := h.GetDeviceID(conn)
-	if deviceID != "unknown" && !h.IsTemporaryID(deviceID) {
-		h.UpdateDeviceStatus(deviceID, constants.DeviceStatusOnline)
-	}
 }
 
 // SendDNYResponse 发送DNY协议响应
 func (h *DNYHandlerBase) SendDNYResponse(conn ziface.IConnection, physicalID uint32, messageID uint16, commandID uint8, data []byte) error {
 	return pkg.Protocol.SendDNYResponse(conn, physicalID, messageID, commandID, data)
-}
-
-// IsTemporaryID 判断是否为临时ID
-func (h *DNYHandlerBase) IsTemporaryID(deviceID string) bool {
-	return len(deviceID) > 7 && deviceID[0:7] == "TempID-"
 }
 
 // GetCurrentTimestamp 获取当前Unix时间戳

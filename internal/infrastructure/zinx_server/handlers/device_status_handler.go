@@ -4,6 +4,7 @@ import (
 	"fmt"
 
 	"github.com/bujia-iot/iot-zinx/pkg"
+	"github.com/bujia-iot/iot-zinx/pkg/constants"
 
 	"github.com/aceld/zinx/ziface"
 	"github.com/bujia-iot/iot-zinx/internal/domain/dny_protocol"
@@ -47,8 +48,8 @@ func (h *DeviceStatusHandler) Handle(request ziface.IRequest) {
 	messageId := uint16(dnyMsg.GetMsgID()) // 转换为uint16类型
 
 	// 获取设备ID用于日志记录
-	deviceID := "unknown"
-	if val, err := conn.GetProperty(PropKeyDeviceId); err == nil && val != nil {
+	var deviceID string
+	if val, err := conn.GetProperty(constants.PropKeyDeviceId); err == nil && val != nil {
 		deviceID = val.(string)
 	}
 
@@ -109,7 +110,7 @@ func (h *DeviceStatusHandler) buildDeviceStatusResponse(conn ziface.IConnection)
 
 	// 设置ICCID
 	iccid := ""
-	if iccidVal, err := conn.GetProperty(PropKeyICCID); err == nil && iccidVal != nil {
+	if iccidVal, err := conn.GetProperty(constants.PropKeyICCID); err == nil && iccidVal != nil {
 		iccid = iccidVal.(string)
 	}
 

@@ -75,10 +75,11 @@ func (h *PowerHeartbeatHandler) Handle(request ziface.IRequest) {
 	go deviceService.HandlePowerHeartbeat(deviceId, powerData)
 
 	// 功率心跳通常不需要响应，但更新心跳时间
+	// 注意：UpdateLastHeartbeatTime内部已经会更新设备状态为在线，无需重复调用
 	pkg.Monitor.GetGlobalMonitor().UpdateLastHeartbeatTime(conn)
 
-	// 更新设备在线状态
-	pkg.Monitor.GetGlobalMonitor().UpdateDeviceStatus(deviceId, DeviceStatusOnline)
+	// 移除冗余的状态更新调用 - UpdateLastHeartbeatTime内部已处理
+	// pkg.Monitor.GetGlobalMonitor().UpdateDeviceStatus(deviceId, DeviceStatusOnline)
 }
 
 // PostHandle 后处理功率心跳数据

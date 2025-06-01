@@ -51,9 +51,6 @@ type SessionManager struct {
 	// 会话超时时间
 	sessionTimeout time.Duration
 
-	// 临时设备映射，用于匹配物理设备ID到会话
-	tempDeviceMap sync.Map // map[string]string - tempDeviceID -> sessionID
-
 	// 物理ID到会话ID的映射
 	physicalIDMap sync.Map // map[uint32]string - physicalID -> sessionID
 
@@ -249,24 +246,6 @@ func (m *SessionManager) CleanupExpiredSessions() int {
 	})
 
 	return expiredCount
-}
-
-// AddTempDeviceID 添加临时设备ID映射
-func (m *SessionManager) AddTempDeviceID(tempDeviceID, deviceID string) {
-	m.tempDeviceMap.Store(tempDeviceID, deviceID)
-}
-
-// GetDeviceIDByTempID 通过临时ID获取设备ID
-func (m *SessionManager) GetDeviceIDByTempID(tempDeviceID string) (string, bool) {
-	if value, ok := m.tempDeviceMap.Load(tempDeviceID); ok {
-		return value.(string), true
-	}
-	return "", false
-}
-
-// RemoveTempDeviceID 删除临时设备ID映射
-func (m *SessionManager) RemoveTempDeviceID(tempDeviceID string) {
-	m.tempDeviceMap.Delete(tempDeviceID)
 }
 
 // GetSessionStatistics 获取会话统计信息

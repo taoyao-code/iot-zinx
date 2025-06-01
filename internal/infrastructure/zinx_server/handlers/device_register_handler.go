@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/bujia-iot/iot-zinx/pkg"
+	"github.com/bujia-iot/iot-zinx/pkg/constants"
 
 	"github.com/aceld/zinx/ziface"
 	"github.com/bujia-iot/iot-zinx/internal/app"
@@ -74,19 +75,19 @@ func (h *DeviceRegisterHandler) Handle(request ziface.IRequest) {
 
 	// 存储ICCID
 	iccid := registerData.ICCID
-	conn.SetProperty(PropKeyICCID, iccid)
+	conn.SetProperty(constants.PropKeyICCID, iccid)
 
 	// 检查是否存在会话
 	sessionManager := monitor.GetSessionManager()
 	var session *monitor.DeviceSession
 	var isReconnect bool
 
-	// 先尝试使用ICCID查找会话
+	// 1. 先尝试使用ICCID查找会话
 	if iccid != "" && len(iccid) > 0 {
 		if existSession, exists := sessionManager.GetSessionByICCID(iccid); exists {
 			oldDeviceID := existSession.DeviceID
 
-			// 设备ID变更，记录日志
+			// 设备ID变更，记录日志并更新会话
 			if oldDeviceID != deviceIdStr {
 				logger.WithFields(logrus.Fields{
 					"oldDeviceID": oldDeviceID,
@@ -95,8 +96,11 @@ func (h *DeviceRegisterHandler) Handle(request ziface.IRequest) {
 					"sessionID":   existSession.SessionID,
 				}).Info("设备ID已变更，但ICCID相同，可能是设备重启或更换了物理ID")
 
-				// 添加临时ID映射，便于后续查找
-				sessionManager.AddTempDeviceID(oldDeviceID, deviceIdStr)
+				// 更新会话中的设备ID
+				existSession.DeviceID = deviceIdStr
+				sessionManager.UpdateSession(deviceIdStr, func(s *monitor.DeviceSession) {
+					*s = *existSession
+				})
 			}
 
 			session = existSession
@@ -104,7 +108,7 @@ func (h *DeviceRegisterHandler) Handle(request ziface.IRequest) {
 		}
 	}
 
-	// 再尝试使用设备ID查找会话
+	// 2. 再尝试使用设备ID查找会话
 	if session == nil {
 		if existSession, exists := sessionManager.GetSession(deviceIdStr); exists {
 			session = existSession

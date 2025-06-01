@@ -5,7 +5,6 @@ import (
 
 	"github.com/aceld/zinx/ziface"
 	"github.com/aceld/zinx/znet"
-	"github.com/bujia-iot/iot-zinx/internal/app"
 	"github.com/bujia-iot/iot-zinx/internal/infrastructure/logger"
 	"github.com/bujia-iot/iot-zinx/pkg/constants"
 	"github.com/bujia-iot/iot-zinx/pkg/monitor"
@@ -29,27 +28,16 @@ func (h *SimCardHandler) Handle(request ziface.IRequest) {
 		iccidStr := string(data)
 		conn.SetProperty(constants.PropKeyICCID, iccidStr)
 
-		// 将ICCID作为设备ID进行临时绑定（格式为TempID-ICCID）
-		tempDeviceId := "TempID-" + iccidStr
-		conn.SetProperty(constants.PropKeyDeviceId, tempDeviceId)
-
 		logger.WithFields(logrus.Fields{
 			"connID":     conn.GetConnID(),
 			"remoteAddr": conn.RemoteAddr().String(),
 			"iccid":      iccidStr,
-			"deviceId":   tempDeviceId,
-		}).Info("收到SIM卡号数据")
+		}).Debug("收到SIM卡号数据")
 
 		// 更新心跳时间
 		now := time.Now()
 		conn.SetProperty(constants.PropKeyLastHeartbeat, now.Unix())
 		conn.SetProperty(constants.PropKeyLastHeartbeatStr, now.Format("2006-01-02 15:04:05"))
-
-		// 通知业务层
-		deviceService := app.GetServiceManager().DeviceService
-		if deviceService != nil {
-			go deviceService.HandleDeviceOnline(tempDeviceId, iccidStr)
-		}
 
 		// 更新设备监控
 		monitor.GetGlobalMonitor().UpdateLastHeartbeatTime(conn)
