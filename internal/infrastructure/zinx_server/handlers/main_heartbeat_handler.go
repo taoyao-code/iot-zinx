@@ -31,13 +31,13 @@ func (h *MainHeartbeatHandler) Handle(request ziface.IRequest) {
 	msg := request.GetMessage()
 	conn := request.GetConnection()
 
-	// 强制输出处理器被调用的信息
+	// 记录主机心跳处理器调用信息
 	logger.WithFields(logrus.Fields{
 		"connID":     conn.GetConnID(),
 		"remoteAddr": conn.RemoteAddr().String(),
 		"msgID":      msg.GetMsgID(),
 		"dataLen":    msg.GetDataLen(),
-	}).Error("MainHeartbeatHandler被调用") // 使用ERROR级别确保输出
+	}).Debug("主机心跳处理器被调用")
 
 	// 转换为DNY消息
 	dnyMsg, ok := dny_protocol.IMessageToDnyMessage(msg)
