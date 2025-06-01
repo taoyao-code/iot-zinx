@@ -44,9 +44,10 @@ func (d *DNYDecoder) GetLengthField() *ziface.LengthField {
 		LengthFieldOffset: 3,
 		// 长度字段长度为2字节
 		LengthFieldLength: 2,
-		// 长度调整值为0，表示长度字段后直接是消息数据
-		LengthAdjustment: 0,
-		// 初始跳过的字节数，包含包头(3)和长度字段(2)共5字节
+		// 🔧 修复：DNY协议的长度字段仅包含数据部分，需要加上包头(3字节)+长度字段(2字节)=5字节
+		// 这样Zinx才能正确计算完整消息的长度，从而正确调用拦截器
+		LengthAdjustment: 5,
+		// 不跳过任何字节，让拦截器能够接收到完整的DNY消息包
 		InitialBytesToStrip: 0,
 		// 小端字节序
 		Order: binary.LittleEndian,
@@ -59,7 +60,7 @@ func (d *DNYDecoder) Intercept(chain ziface.IChain) ziface.IcResp {
 	// 强制控制台输出，确保一定能看到
 	fmt.Printf("\n🔥🔥🔥 DNYDecoder.Intercept() 被调用! 🔥🔥🔥\n")
 	fmt.Printf("⏰ 时间: %s\n", time.Now().Format("2006-01-02 15:04:05"))
-	
+
 	// 同时使用我们的日志系统
 	logger.Debugf("DNYDecoder.Intercept() 被调用")
 	logger.Infof("DNYDecoder.Intercept() 被调用 - Info级别")
