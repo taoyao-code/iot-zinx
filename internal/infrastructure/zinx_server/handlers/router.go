@@ -51,6 +51,4 @@ func RegisterRouters(server ziface.IServer) {
 
 	// 后续添加其他命令处理器
 	// server.AddRouter(dny_protocol.CmdAlarm, &AlarmHandler{})
-
-	// 日志输出已注册的路由
 }
