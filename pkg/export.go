@@ -43,6 +43,8 @@ const (
 var Protocol = struct {
 	// 创建DNY协议数据包工厂
 	NewDNYDataPackFactory func() protocol.IDataPackFactory
+	// 创建DNY协议解码器工厂
+	NewDNYDecoderFactory func() protocol.IDecoderFactory
 	// 解析DNY协议数据
 	ParseDNYProtocol func(data []byte) string
 	// 手动解析十六进制数据
@@ -53,6 +55,13 @@ var Protocol = struct {
 	IsDNYProtocolData func(data []byte) bool
 	// 检查是否为十六进制字符串
 	IsHexString func(data []byte) bool
+	// 检查是否为全数字字符串
+	IsAllDigits func(data []byte) bool
+	// 处理特殊消息(SIM卡号和link心跳)
+	HandleSpecialMessage func(data []byte) bool
+	// 特殊消息常量
+	IOT_SIM_CARD_LENGTH int
+	IOT_LINK_HEARTBEAT  string
 	// 创建原始数据处理钩子
 	NewRawDataHook func(handleRawDataFunc func(conn ziface.IConnection, data []byte) bool) *protocol.RawDataHook
 	// 默认原始数据处理器
@@ -67,11 +76,16 @@ var Protocol = struct {
 	NeedConfirmation func(command uint8) bool
 }{
 	NewDNYDataPackFactory:   protocol.NewDNYDataPackFactory,
+	NewDNYDecoderFactory:    protocol.NewDNYDecoderFactory,
 	ParseDNYProtocol:        protocol.ParseDNYProtocol,
 	ParseManualData:         protocol.ParseManualData,
 	CalculatePacketChecksum: protocol.CalculatePacketChecksum,
 	IsDNYProtocolData:       protocol.IsDNYProtocolData,
 	IsHexString:             protocol.IsHexString,
+	IsAllDigits:             protocol.IsAllDigits,
+	HandleSpecialMessage:    protocol.HandleSpecialMessage,
+	IOT_SIM_CARD_LENGTH:     protocol.IOT_SIM_CARD_LENGTH,
+	IOT_LINK_HEARTBEAT:      protocol.IOT_LINK_HEARTBEAT,
 	NewRawDataHook:          protocol.NewRawDataHook,
 	DefaultRawDataHandler:   protocol.DefaultRawDataHandler,
 	PrintRawData:            protocol.PrintRawData,

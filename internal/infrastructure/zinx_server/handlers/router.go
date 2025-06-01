@@ -10,6 +10,10 @@ func RegisterRouters(server ziface.IServer) {
 	// 1. 处理原始数据（非DNY协议）
 	server.AddRouter(0, &NonDNYDataHandler{})
 
+	// 1.1 处理特殊消息类型
+	server.AddRouter(0xFF01, &SimCardHandler{})       // SIM卡号处理
+	server.AddRouter(0xFF02, &LinkHeartbeatHandler{}) // link心跳处理
+
 	// 2. 设备心跳包（旧版）
 	server.AddRouter(dny_protocol.CmdHeartbeat, &HeartbeatHandler{})
 

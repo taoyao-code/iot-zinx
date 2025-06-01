@@ -228,6 +228,16 @@ func (dp *DNYPacket) Unpack(binaryData []byte) (ziface.IMessage, error) {
 	// 首先尝试检测数据是否为十六进制编码字符串
 	actualData := dp.decodeHexDataIfNeeded(binaryData)
 
+	// 首先检查是否为特殊消息 (SIM卡号和link心跳)
+	// 这里添加对特殊消息的处理
+	specialMsg, err := dp.checkSpecialMessages(actualData)
+	if err != nil {
+		return nil, err
+	}
+	if specialMsg != nil {
+		return specialMsg, nil
+	}
+
 	// 特殊处理：如果数据不符合DNY协议格式，创建特殊消息类型
 	if !IsDNYProtocolData(actualData) {
 		return dp.handleNonDNYData(actualData)
@@ -235,6 +245,31 @@ func (dp *DNYPacket) Unpack(binaryData []byte) (ziface.IMessage, error) {
 
 	// 处理DNY协议数据
 	return dp.handleDNYProtocolData(actualData)
+}
+
+// checkSpecialMessages 检查是否为特殊消息 (SIM卡号和link心跳)
+func (dp *DNYPacket) checkSpecialMessages(data []byte) (ziface.IMessage, error) {
+	// 使用更新后的HandleSpecialMessage函数检测是否为特殊消息
+	if HandleSpecialMessage(data) {
+		// 如果是特殊消息，创建对应的消息类型
+		var msgID uint32 = 0xFE // 默认特殊消息ID
+
+		// 根据不同的特殊消息类型设置不同的消息ID
+		if len(data) == 4 && string(data) == IOT_LINK_HEARTBEAT {
+			// 如果是link心跳，使用特定的消息ID
+			msgID = 0xFF02 // 使用特定的消息ID表示link心跳
+		} else if len(data) == IOT_SIM_CARD_LENGTH && IsAllDigits(data) {
+			// 如果是SIM卡号，使用特定的消息ID
+			msgID = 0xFF01 // 使用特定的消息ID表示SIM卡号
+		}
+
+		// 创建特殊消息对象
+		specialMsg := dny_protocol.NewMessage(msgID, 0, data)
+		return specialMsg, nil
+	}
+
+	// 不是特殊消息，返回nil继续正常处理
+	return nil, nil
 }
 
 // decodeHexDataIfNeeded 如果数据是十六进制编码的，则解码

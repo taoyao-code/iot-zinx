@@ -70,7 +70,11 @@ func StartTCPServer() error {
 	// 3. 创建自定义数据包封包与解包器
 	dataPack := pkg.Protocol.NewDNYDataPackFactory().NewDataPack(cfg.Logger.LogHexDump)
 
-	// 4. 设置自定义数据包处理器
+	// 3.1 创建自定义解码器
+	decoder := pkg.Protocol.NewDNYDecoderFactory().NewDecoder()
+
+	// 4. 设置解码器和数据包处理器
+	server.SetDecoder(decoder)
 	server.SetPacket(dataPack)
 
 	// 5. 注册路由 - 确保在初始化包之后再注册路由
