@@ -73,9 +73,10 @@ func (d *DNYDecoder) Intercept(chain ziface.IChain) ziface.IcResp {
 		iMessage.GetMsgID(), len(msgData))
 
 	// 检查是否为 DNY 协议数据并提取命令字段
-	if len(msgData) >= 12 && string(msgData[:3]) == "DNY" {
+	// 修复：检查十六进制字节而不是ASCII字符串
+	if len(msgData) >= 12 && msgData[0] == 0x44 && msgData[1] == 0x4E && msgData[2] == 0x59 {
 		// DNY协议结构：
-		// 0-2: 包头"DNY"
+		// 0-2: 包头"DNY" (0x44 0x4E 0x59)
 		// 3-4: 数据长度(小端序)
 		// 5-8: 物理ID(小端序)
 		// 9-10: 消息ID(小端序)
@@ -87,14 +88,14 @@ func (d *DNYDecoder) Intercept(chain ziface.IChain) ziface.IcResp {
 
 		logger.Debugf("DNYDecoder Intercept: 检测到DNY协议，设置路由ID为命令字段 0x%02X (%d)",
 			commandID, commandID)
-		fmt.Println("DNYDecoder Intercept: 检测到DNY协议，设置路由ID为命令字段 0x%02X (%d)",
+		fmt.Printf("✅ DNYDecoder Intercept: 检测到DNY协议，设置路由ID为命令字段 0x%02X (%d)\n",
 			commandID, commandID)
 
 	} else {
 		// 对于非DNY协议数据，保持原有的消息ID（通常为0，路由到特殊处理器）
 		logger.Debugf("DNYDecoder Intercept: 非DNY协议数据，保持原消息ID=%d",
 			iMessage.GetMsgID())
-		fmt.Println("DNYDecoder Intercept: 非DNY协议数据，保持原消息ID=%d",
+		fmt.Printf("⚠️ DNYDecoder Intercept: 非DNY协议数据，保持原消息ID=%d\n",
 			iMessage.GetMsgID())
 	}
 
