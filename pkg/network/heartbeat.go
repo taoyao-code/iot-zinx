@@ -25,13 +25,17 @@ func OnDeviceNotAlive(conn ziface.IConnection) {
 		lastHeartbeatStr = val.(string)
 	}
 
-	// 只处理已注册的设备心跳超时
+	// 区分已注册和未注册设备的超时处理
 	if deviceID == "" {
 		logger.WithFields(logrus.Fields{
 			"connID":     connID,
 			"remoteAddr": remoteAddr,
 			"reason":     "unregistered_device_timeout",
-		}).Debug("未注册设备连接心跳超时")
+		}).Debug("未注册设备连接心跳超时，关闭连接")
+
+		// 未注册设备超时，直接关闭连接
+		conn.SetProperty(constants.PropKeyConnStatus, constants.ConnStatusInactive)
+		conn.Stop()
 		return
 	}
 

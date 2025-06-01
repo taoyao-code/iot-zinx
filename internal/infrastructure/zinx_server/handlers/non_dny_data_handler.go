@@ -2,11 +2,14 @@ package handlers
 
 import (
 	"encoding/hex"
+	"fmt"
 	"time"
 
 	"github.com/aceld/zinx/ziface"
 	"github.com/aceld/zinx/znet"
+	"github.com/bujia-iot/iot-zinx/internal/app"
 	"github.com/bujia-iot/iot-zinx/internal/infrastructure/logger"
+	"github.com/bujia-iot/iot-zinx/pkg"
 	"github.com/bujia-iot/iot-zinx/pkg/constants"
 	"github.com/bujia-iot/iot-zinx/pkg/monitor"
 	"github.com/sirupsen/logrus"
@@ -78,6 +81,7 @@ func (h *NonDNYDataHandler) processNonDNYData(conn ziface.IConnection, data []by
 
 // processICCID 处理ICCID数据
 // 注：协议规定，服务器无需应答ICCID数据
+// 但需要基于ICCID进行设备注册和绑定
 func (h *NonDNYDataHandler) processICCID(conn ziface.IConnection, data []byte) bool {
 	iccidStr := string(data)
 	conn.SetProperty(constants.PropKeyICCID, iccidStr)
@@ -88,6 +92,40 @@ func (h *NonDNYDataHandler) processICCID(conn ziface.IConnection, data []byte) b
 		"iccid":      iccidStr,
 	}).Debug("收到ICCID数据")
 
+	// 检查是否已经注册过设备ID
+	var existingDeviceID string
+	if val, err := conn.GetProperty(constants.PropKeyDeviceId); err == nil && val != nil {
+		existingDeviceID = val.(string)
+	}
+
+	// 如果已经有设备ID，只更新心跳时间
+	if existingDeviceID != "" {
+		logger.WithFields(logrus.Fields{
+			"connID":   conn.GetConnID(),
+			"deviceID": existingDeviceID,
+			"iccid":    iccidStr,
+		}).Debug("连接已绑定设备ID，仅更新心跳时间")
+
+		monitor.GetGlobalMonitor().UpdateLastHeartbeatTime(conn)
+		return true
+	}
+
+	// 基于ICCID自动生成或查找设备ID进行注册
+	deviceID := h.resolveDeviceIDFromICCID(iccidStr, conn)
+	if deviceID == "" {
+		logger.WithFields(logrus.Fields{
+			"connID": conn.GetConnID(),
+			"iccid":  iccidStr,
+		}).Warn("无法基于ICCID解析设备ID")
+
+		// 更新心跳时间，避免连接被快速断开
+		monitor.GetGlobalMonitor().UpdateLastHeartbeatTime(conn)
+		return true
+	}
+
+	// 执行设备绑定
+	h.performDeviceBinding(deviceID, iccidStr, conn)
+
 	// 更新心跳时间
 	monitor.GetGlobalMonitor().UpdateLastHeartbeatTime(conn)
 
@@ -96,6 +134,7 @@ func (h *NonDNYDataHandler) processICCID(conn ziface.IConnection, data []byte) b
 
 // processLinkHeartbeat 处理link心跳
 // 注：协议规定，服务器无需应答link心跳
+// 但需要更新设备的心跳时间，确保连接保持活跃
 func (h *NonDNYDataHandler) processLinkHeartbeat(conn ziface.IConnection, data []byte) bool {
 	// 更新心跳时间
 	monitor.GetGlobalMonitor().UpdateLastHeartbeatTime(conn)
@@ -109,6 +148,15 @@ func (h *NonDNYDataHandler) processLinkHeartbeat(conn ziface.IConnection, data [
 	var deviceID string
 	if val, err := conn.GetProperty(constants.PropKeyDeviceId); err == nil && val != nil {
 		deviceID = val.(string)
+	}
+
+	// 如果设备已注册，更新会话心跳时间
+	if deviceID != "" {
+		sessionManager := monitor.GetSessionManager()
+		sessionManager.UpdateSession(deviceID, func(session *monitor.DeviceSession) {
+			session.LastHeartbeatTime = time.Now()
+			session.Status = constants.DeviceStatusOnline
+		})
 	}
 
 	logger.WithFields(logrus.Fields{
@@ -150,4 +198,81 @@ func (h *NonDNYDataHandler) isValidICCIDBytes(data []byte) bool {
 	}
 
 	return true
+}
+
+// resolveDeviceIDFromICCID 基于ICCID解析或生成设备ID
+func (h *NonDNYDataHandler) resolveDeviceIDFromICCID(iccid string, conn ziface.IConnection) string {
+	sessionManager := monitor.GetSessionManager()
+
+	// 1. 尝试从现有会话中查找设备ID
+	if session, exists := sessionManager.GetSessionByICCID(iccid); exists {
+		logger.WithFields(logrus.Fields{
+			"connID":   conn.GetConnID(),
+			"iccid":    iccid,
+			"deviceID": session.DeviceID,
+		}).Debug("从现有会话中找到设备ID")
+		return session.DeviceID
+	}
+
+	// 2. 基于ICCID生成临时设备ID（使用ICCID后8位转换为十六进制）
+	// 这是一个临时方案，实际项目中可能需要查询数据库或使用其他映射规则
+	if len(iccid) >= 8 {
+		lastEightDigits := iccid[len(iccid)-8:]
+		// 将后8位数字转换为整数，再转换为十六进制格式的设备ID
+		deviceIDHex := fmt.Sprintf("%08s", lastEightDigits)
+
+		logger.WithFields(logrus.Fields{
+			"connID":      conn.GetConnID(),
+			"iccid":       iccid,
+			"generatedID": deviceIDHex,
+			"source":      "iccid_derived",
+		}).Info("基于ICCID生成临时设备ID")
+
+		return deviceIDHex
+	}
+
+	// 3. 如果ICCID格式不符合预期，返回空字符串
+	logger.WithFields(logrus.Fields{
+		"connID": conn.GetConnID(),
+		"iccid":  iccid,
+	}).Warn("ICCID格式不符合预期，无法生成设备ID")
+
+	return ""
+}
+
+// performDeviceBinding 执行设备绑定操作
+func (h *NonDNYDataHandler) performDeviceBinding(deviceID, iccid string, conn ziface.IConnection) {
+	logger.WithFields(logrus.Fields{
+		"connID":   conn.GetConnID(),
+		"deviceID": deviceID,
+		"iccid":    iccid,
+	}).Info("执行基于ICCID的设备自动绑定")
+
+	// 1. 绑定设备ID到连接
+	pkg.Monitor.GetGlobalMonitor().BindDeviceIdToConnection(deviceID, conn)
+
+	// 2. 设置连接属性
+	conn.SetProperty(constants.PropKeyDeviceId, deviceID)
+	conn.SetProperty(constants.PropKeyICCID, iccid)
+	conn.SetProperty(constants.PropKeyConnStatus, constants.ConnStatusActive)
+
+	// 3. 通知业务层设备上线
+	deviceService := app.GetServiceManager().DeviceService
+	go deviceService.HandleDeviceOnline(deviceID, iccid)
+
+	// 4. 创建或更新设备会话
+	sessionManager := monitor.GetSessionManager()
+	sessionManager.UpdateSession(deviceID, func(session *monitor.DeviceSession) {
+		session.DeviceID = deviceID
+		session.ICCID = iccid
+		session.LastConnID = conn.GetConnID()
+		session.LastHeartbeatTime = time.Now()
+		session.Status = constants.DeviceStatusOnline
+	})
+
+	logger.WithFields(logrus.Fields{
+		"connID":   conn.GetConnID(),
+		"deviceID": deviceID,
+		"iccid":    iccid,
+	}).Info("设备自动绑定完成")
 }
