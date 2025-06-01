@@ -109,13 +109,10 @@ func StartTCPServer() error {
 	server.SetOnConnStart(connectionHooks.OnConnectionStart)
 	server.SetOnConnStop(connectionHooks.OnConnectionStop)
 
-	// 设置心跳检测
-	heartbeatInterval := time.Duration(deviceCfg.HeartbeatIntervalSeconds) * time.Second
-	server.StartHeartBeatWithOption(heartbeatInterval, &ziface.HeartBeatOption{
-		MakeMsg:          pkg.Network.MakeDNYProtocolHeartbeatMsg,
-		OnRemoteNotAlive: pkg.Network.OnDeviceNotAlive,
-		HeartBeatMsgID:   99999, // 使用特殊ID，和DNYPacket.Pack中的处理对应
-	})
+	// 根据AP3000协议，设备主动发送心跳，服务器被动接收
+	// 不再使用Zinx的主动心跳机制，改为被动监听设备心跳超时
+	// 心跳超时检测将通过设备发送的"link"消息来维护
+	logger.Info("TCP服务器配置完成，等待设备连接和心跳消息")
 
 	// 创建设备监控器
 	deviceMonitor := pkg.Monitor.NewDeviceMonitor(func(callback func(deviceId string, conn ziface.IConnection) bool) {

@@ -104,8 +104,6 @@ var Network = struct {
 	NewConnectionHooks func(readDeadLine, writeDeadLine, keepAlivePeriod time.Duration) network.IConnectionHooks
 	// 创建原始数据处理器
 	NewRawDataHandler func(handlePacketFunc func(conn ziface.IConnection, data []byte) bool) ziface.IRouter
-	// 创建DNY协议心跳消息
-	MakeDNYProtocolHeartbeatMsg func(conn ziface.IConnection) []byte
 	// 设备心跳超时处理
 	OnDeviceNotAlive func(conn ziface.IConnection)
 	// 设置更新设备状态函数
@@ -118,10 +116,9 @@ var Network = struct {
 	NewConnectionHooks: func(readDeadLine, writeDeadLine, keepAlivePeriod time.Duration) network.IConnectionHooks {
 		return network.NewConnectionHooks(readDeadLine, writeDeadLine, keepAlivePeriod)
 	},
-	NewRawDataHandler:           network.NewRawDataHandler,
-	MakeDNYProtocolHeartbeatMsg: network.MakeDNYProtocolHeartbeatMsg,
-	OnDeviceNotAlive:            network.OnDeviceNotAlive,
-	SetUpdateDeviceStatusFunc:   network.SetUpdateDeviceStatusFunc,
+	NewRawDataHandler:         network.NewRawDataHandler,
+	OnDeviceNotAlive:          network.OnDeviceNotAlive,
+	SetUpdateDeviceStatusFunc: network.SetUpdateDeviceStatusFunc,
 }
 
 // Monitor 监控相关工具导出
