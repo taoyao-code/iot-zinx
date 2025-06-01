@@ -22,7 +22,7 @@ func (z *ZinxLoggerAdapter) InfoF(format string, v ...interface{}) {
 
 // DebugF 实现zinx的DebugF日志方法
 func (z *ZinxLoggerAdapter) DebugF(format string, v ...interface{}) {
-	zlog.Debugf(format, v...)
+	logger.Debugf(format, v...)
 }
 
 // ErrorF 实现zinx的ErrorF日志方法
@@ -37,7 +37,7 @@ func (z *ZinxLoggerAdapter) InfoFX(ctx context.Context, format string, v ...inte
 
 // DebugFX 实现zinx的DebugFX日志方法
 func (z *ZinxLoggerAdapter) DebugFX(ctx context.Context, format string, v ...interface{}) {
-	zlog.Debugf(format, v...)
+	logger.Debugf(format, v...)
 }
 
 // ErrorFX 实现zinx的ErrorFX日志方法

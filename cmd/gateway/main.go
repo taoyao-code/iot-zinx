@@ -14,6 +14,7 @@ import (
 	"github.com/bujia-iot/iot-zinx/internal/infrastructure/logger"
 	"github.com/bujia-iot/iot-zinx/internal/infrastructure/redis"
 	"github.com/bujia-iot/iot-zinx/internal/ports"
+	"github.com/bujia-iot/iot-zinx/pkg/utils"
 )
 
 var configFile = flag.String("config", "configs/gateway.yaml", "配置文件路径")
@@ -39,6 +40,9 @@ func main() {
 
 	// 记录网关启动日志
 	logger.Info("充电设备网关 (Charging Gateway) 启动中...")
+
+	// 设置Zinx框架使用自定义日志系统
+	utils.SetupZinxLogger()
 
 	// 初始化服务管理器
 	serviceManager := app.GetServiceManager()

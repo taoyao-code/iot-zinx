@@ -6,13 +6,11 @@ import (
 
 	"github.com/aceld/zinx/zconf"
 	"github.com/aceld/zinx/ziface"
-	"github.com/aceld/zinx/zlog"
 	"github.com/aceld/zinx/znet"
 	"github.com/bujia-iot/iot-zinx/internal/infrastructure/config"
 	"github.com/bujia-iot/iot-zinx/internal/infrastructure/logger"
 	"github.com/bujia-iot/iot-zinx/internal/infrastructure/zinx_server/handlers"
 	"github.com/bujia-iot/iot-zinx/pkg"
-	"github.com/bujia-iot/iot-zinx/pkg/utils"
 )
 
 // StartTCPServer 配置并启动Zinx TCP服务器
@@ -59,13 +57,11 @@ func StartTCPServer() error {
 	default:
 		zconf.GlobalObject.LogIsolationLevel = 0
 	}
-
 	// 2. 创建服务器实例
 	// server := znet.NewServer()
-
 	server := znet.NewUserConfServer(zconf.GlobalObject)
 
-	zlog.SetLogger(utils.NewZinxLoggerAdapter())
+	// 注意：自定义日志已在main.go中通过utils.SetupZinxLogger()设置，此处不再重复设置
 
 	// 3. 创建自定义数据包封包与解包器
 	dataPack := pkg.Protocol.NewDNYDataPackFactory().NewDataPack(cfg.Logger.LogHexDump)
