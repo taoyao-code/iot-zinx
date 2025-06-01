@@ -67,9 +67,6 @@ func StartTCPServer() error {
 
 	zlog.SetLogger(utils.NewZinxLoggerAdapter())
 
-	// 拦截器
-	server.AddInterceptor(&MyInterceptor{})
-
 	// 3. 创建自定义数据包封包与解包器
 	dataPack := pkg.Protocol.NewDNYDataPackFactory().NewDataPack(cfg.Logger.LogHexDump)
 
