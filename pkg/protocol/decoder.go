@@ -2,6 +2,7 @@ package protocol
 
 import (
 	"encoding/binary"
+	"fmt"
 
 	"github.com/aceld/zinx/ziface"
 	"github.com/bujia-iot/iot-zinx/internal/infrastructure/logger"
@@ -86,9 +87,14 @@ func (d *DNYDecoder) Intercept(chain ziface.IChain) ziface.IcResp {
 
 		logger.Debugf("DNYDecoder Intercept: 检测到DNY协议，设置路由ID为命令字段 0x%02X (%d)",
 			commandID, commandID)
+		fmt.Println("DNYDecoder Intercept: 检测到DNY协议，设置路由ID为命令字段 0x%02X (%d)",
+			commandID, commandID)
+
 	} else {
 		// 对于非DNY协议数据，保持原有的消息ID（通常为0，路由到特殊处理器）
 		logger.Debugf("DNYDecoder Intercept: 非DNY协议数据，保持原消息ID=%d",
+			iMessage.GetMsgID())
+		fmt.Println("DNYDecoder Intercept: 非DNY协议数据，保持原消息ID=%d",
 			iMessage.GetMsgID())
 	}
 
