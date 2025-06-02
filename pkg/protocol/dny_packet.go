@@ -132,40 +132,37 @@ func (dp *DNYPacket) packDNYMessage(msg ziface.IMessage) ([]byte, error) {
 }
 
 // Unpack 拆包方法
-// 🔧 修复：简化DataPack职责，只负责基本消息框架，协议解析交给拦截器
-// 将二进制数据解析为IMessage对象，支持十六进制编码和原始数据
+// 🔧 修复：支持原始DNY协议数据格式，将其转换为Zinx可处理的消息格式
+// 将二进制数据解析为IMessage对象，支持原始DNY协议数据
 func (dp *DNYPacket) Unpack(binaryData []byte) (ziface.IMessage, error) {
-	// 首先尝试检测数据是否为十六进制编码字符串
-	actualData := dp.decodeHexDataIfNeeded(binaryData)
-
-	// 🔧 关键修复：创建简单消息对象，保存完整原始数据，让拦截器负责协议解析
-	// 不再在DataPack中进行复杂的协议解析，这样确保拦截器链能够正常执行
-
 	// 检查数据长度是否足够
-	if len(actualData) == 0 {
+	if len(binaryData) == 0 {
 		return nil, ErrNotEnoughData
 	}
 
-	// 记录接收到的数据
+	// 记录接收到的原始数据
 	if dp.logHexDump {
 		logger.WithFields(logrus.Fields{
-			"dataLen": len(actualData),
-			"dataHex": hex.EncodeToString(actualData),
-		}).Debug("DNYPacket.Unpack 接收数据")
+			"dataLen": len(binaryData),
+			"dataHex": hex.EncodeToString(binaryData),
+		}).Debug("DNYPacket.Unpack 接收原始数据")
 	}
 
-	// 创建消息对象，msgID=0（默认值），让拦截器后续设置正确的路由ID
-	// 拦截器将从原始数据中解析DNY协议并设置正确的MsgID用于路由
-	msg := dny_protocol.NewMessage(0, 0, actualData)
+	// 🔧 关键修复：检查是否为DNY协议格式数据
+	if len(binaryData) >= 3 && bytes.HasPrefix(binaryData, []byte("DNY")) {
+		// 处理DNY协议格式的数据
+		return dp.handleDNYProtocolData(binaryData)
+	}
 
-	// 💡 关键：保存完整的原始数据，供拦截器使用
-	// 拦截器将从这个原始数据中提取命令ID并设置正确的MsgID用于路由
-	msg.SetRawData(actualData)
+	// 处理非DNY协议数据（如测试客户端发送的Zinx标准格式数据）
+	// 这种情况下直接创建消息对象，保存完整原始数据
+	msg := dny_protocol.NewMessage(0, 0, binaryData)
+	msg.SetRawData(binaryData)
 
 	logger.WithFields(logrus.Fields{
 		"msgID":   msg.GetMsgID(),
-		"dataLen": len(actualData),
-	}).Debug("DNYPacket.Unpack 创建消息对象，等待拦截器处理")
+		"dataLen": len(binaryData),
+	}).Debug("DNYPacket.Unpack 创建非DNY协议消息对象，等待拦截器处理")
 
 	return msg, nil
 }
@@ -322,9 +319,9 @@ func (dp *DNYPacket) handleDNYProtocolData(data []byte) (ziface.IMessage, error)
 		}).Debug("DNY协议数据校验和验证通过")
 	}
 
-	// 🔧 修复拦截器问题：先创建带有默认MsgID的消息对象，让拦截器后续设置正确的路由ID
-	// 这样确保拦截器链能够正常执行，从原始数据中提取命令ID并设置正确的MsgID
-	msg := dny_protocol.NewMessage(0, physicalId, make([]byte, payloadLen))
+	// 🔧 修复拦截器问题：创建消息对象时直接使用命令ID作为MsgID进行路由
+	// 这样Zinx框架可以根据MsgID正确路由到对应的处理器
+	msg := dny_protocol.NewMessage(command, physicalId, make([]byte, payloadLen))
 
 	// 拷贝数据部分（如果有）
 	if payloadLen > 0 {
@@ -332,7 +329,7 @@ func (dp *DNYPacket) handleDNYProtocolData(data []byte) (ziface.IMessage, error)
 	}
 
 	// 💡 关键：保存完整的原始DNY协议数据，供拦截器使用
-	// 拦截器将从这个原始数据中提取命令ID(位置11)并设置正确的MsgID用于路由
+	// 拦截器可以从这个原始数据中进行额外的协议处理
 	msg.SetRawData(data[:totalLen])
 
 	// 记录十六进制日志
