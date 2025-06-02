@@ -10,6 +10,7 @@ import (
 	"github.com/bujia-iot/iot-zinx/internal/infrastructure/logger"
 	"github.com/bujia-iot/iot-zinx/internal/infrastructure/zinx_server/handlers"
 	"github.com/bujia-iot/iot-zinx/pkg"
+	"github.com/bujia-iot/iot-zinx/pkg/protocol"
 )
 
 // StartTCPServer 配置并启动Zinx TCP服务器
@@ -44,12 +45,13 @@ func StartTCPServer() error {
 	dataPack := pkg.Protocol.NewDNYDataPackFactory().NewDataPack(cfg.Logger.LogHexDump)
 
 	// 3.1 创建DNY协议拦截器（修复：使用正确的IInterceptor而不是IDecoder）
-	dnyInterceptor := pkg.Protocol.NewDNYProtocolInterceptorFactory().NewInterceptor()
+	// dnyInterceptor := pkg.Protocol.NewDNYProtocolInterceptorFactory().NewInterceptor()
 
 	// 4. 设置拦截器和数据包处理器
 	// 🔧 修复：使用正确的拦截器架构
-	server.AddInterceptor(dnyInterceptor) // 使用DNYProtocolInterceptor进行协议解析和路由
-	server.SetPacket(dataPack)            // 使用DNYDataPack进行基本消息框架处理
+	// server.AddInterceptor(dnyInterceptor)                     // 使用DNYProtocolInterceptor进行协议解析和路由
+	server.AddInterceptor(&protocol.DNYProtocolInterceptor{}) // 使用DNYProtocolInterceptor进行协议解析和路由
+	server.SetPacket(dataPack)                                // 使用DNYDataPack进行基本消息框架处理
 
 	// 5. 注册路由 - 确保在初始化包之后再注册路由
 	handlers.RegisterRouters(server)
