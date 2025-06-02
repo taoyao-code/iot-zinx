@@ -8,5 +8,5 @@
   "LogDir": "./logs",
   "LogFile": "zinx.log",
   "LogIsolationLevel": 0,
-  "Mode": "kcp"
+  "Mode": "tcp"
 }
