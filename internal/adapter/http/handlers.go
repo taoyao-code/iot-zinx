@@ -1,7 +1,6 @@
 package http
 
 import (
-	"encoding/binary"
 	"encoding/hex"
 	"fmt"
 	"net/http"
@@ -9,6 +8,9 @@ import (
 	"time"
 
 	"github.com/bujia-iot/iot-zinx/internal/app"
+	"github.com/bujia-iot/iot-zinx/internal/app/dto"
+	"github.com/bujia-iot/iot-zinx/internal/app/service"
+	"github.com/bujia-iot/iot-zinx/internal/domain/dny_protocol"
 	"github.com/bujia-iot/iot-zinx/internal/infrastructure/logger"
 	"github.com/bujia-iot/iot-zinx/pkg"
 	"github.com/gin-gonic/gin"
@@ -361,7 +363,7 @@ func HandleQueryDeviceStatus(c *gin.Context) {
 	HandleSendDNYCommand(c)
 }
 
-// HandleStartCharging 开始充电（0x82命令）
+// HandleStartCharging 开始充电（使用统一的充电控制服务）
 func HandleStartCharging(c *gin.Context) {
 	var req struct {
 		DeviceID string `json:"deviceId" binding:"required"`
@@ -369,6 +371,7 @@ func HandleStartCharging(c *gin.Context) {
 		Mode     byte   `json:"mode" binding:"required"`    // 充电模式 0=按时间 1=按电量
 		Value    uint16 `json:"value" binding:"required"`   // 充电时间(分钟)或电量(0.1度)
 		OrderNo  string `json:"orderNo" binding:"required"` // 订单号
+		Balance  uint32 `json:"balance"`                    // 余额（可选）
 	}
 
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -379,31 +382,41 @@ func HandleStartCharging(c *gin.Context) {
 		return
 	}
 
-	// 构建充电控制数据
-	data := make([]byte, 12)
-	data[0] = req.Port                                  // 端口号
-	data[1] = req.Mode                                  // 充电模式
-	binary.LittleEndian.PutUint16(data[2:4], req.Value) // 充电时间/电量
-	copy(data[4:12], []byte(req.OrderNo)[:8])           // 订单号(取前8字节)
+	// 使用统一的充电控制服务
+	chargeService := service.NewChargeControlService(pkg.Monitor.GetGlobalMonitor())
 
-	// 发送充电控制命令
-	dnyReq := struct {
-		DeviceID  string `json:"deviceId"`
-		Command   byte   `json:"command"`
-		Data      string `json:"data"`
-		MessageID uint16 `json:"messageId"`
-	}{
-		DeviceID:  req.DeviceID,
-		Command:   0x82, // 开始/停止充电操作
-		Data:      hex.EncodeToString(data),
-		MessageID: uint16(time.Now().Unix() & 0xFFFF),
+	// 构建统一的充电控制请求
+	chargeReq := &dto.ChargeControlRequest{
+		DeviceID:       req.DeviceID,
+		RateMode:       req.Mode,
+		Balance:        req.Balance,
+		PortNumber:     req.Port,
+		ChargeCommand:  dny_protocol.ChargeCommandStart,
+		ChargeDuration: req.Value,
+		OrderNumber:    req.OrderNo,
 	}
 
-	c.Set("json_body", dnyReq)
-	HandleSendDNYCommand(c)
+	// 发送充电控制命令
+	if err := chargeService.SendChargeControlCommand(chargeReq); err != nil {
+		c.JSON(http.StatusInternalServerError, APIResponse{
+			Code:    500,
+			Message: "发送充电控制命令失败: " + err.Error(),
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, APIResponse{
+		Code:    0,
+		Message: "开始充电命令发送成功",
+		Data: gin.H{
+			"deviceId":    req.DeviceID,
+			"port":        req.Port,
+			"orderNumber": req.OrderNo,
+		},
+	})
 }
 
-// HandleStopCharging 停止充电（0x82命令，端口号设为0xFF）
+// HandleStopCharging 停止充电（使用统一的充电控制服务）
 func HandleStopCharging(c *gin.Context) {
 	var req struct {
 		DeviceID string `json:"deviceId" binding:"required"`
@@ -424,29 +437,35 @@ func HandleStopCharging(c *gin.Context) {
 		req.Port = 0xFF
 	}
 
-	// 构建停止充电数据
-	data := make([]byte, 12)
-	data[0] = req.Port // 端口号
-	data[1] = 0xFF     // 停止充电标志
-	if req.OrderNo != "" {
-		copy(data[4:12], []byte(req.OrderNo)[:8]) // 订单号
+	// 使用统一的充电控制服务
+	chargeService := service.NewChargeControlService(pkg.Monitor.GetGlobalMonitor())
+
+	// 构建统一的充电控制请求
+	chargeReq := &dto.ChargeControlRequest{
+		DeviceID:      req.DeviceID,
+		PortNumber:    req.Port,
+		ChargeCommand: dny_protocol.ChargeCommandStop,
+		OrderNumber:   req.OrderNo,
 	}
 
 	// 发送停止充电命令
-	dnyReq := struct {
-		DeviceID  string `json:"deviceId"`
-		Command   byte   `json:"command"`
-		Data      string `json:"data"`
-		MessageID uint16 `json:"messageId"`
-	}{
-		DeviceID:  req.DeviceID,
-		Command:   0x82,
-		Data:      hex.EncodeToString(data),
-		MessageID: uint16(time.Now().Unix() & 0xFFFF),
+	if err := chargeService.SendChargeControlCommand(chargeReq); err != nil {
+		c.JSON(http.StatusInternalServerError, APIResponse{
+			Code:    500,
+			Message: "发送停止充电命令失败: " + err.Error(),
+		})
+		return
 	}
 
-	c.Set("json_body", dnyReq)
-	HandleSendDNYCommand(c)
+	c.JSON(http.StatusOK, APIResponse{
+		Code:    0,
+		Message: "停止充电命令发送成功",
+		Data: gin.H{
+			"deviceId":    req.DeviceID,
+			"port":        req.Port,
+			"orderNumber": req.OrderNo,
+		},
+	})
 }
 
 // HandleTestTool 测试工具主页面
@@ -456,35 +475,8 @@ func HandleTestTool(c *gin.Context) {
 	})
 }
 
-// buildDNYPacket 构建DNY协议数据包
+// buildDNYPacket 构建DNY协议数据包 - 已弃用，使用dny_protocol.BuildDNYPacket
+// 保留此函数以兼容现有代码
 func buildDNYPacket(physicalID uint32, messageID uint16, command byte, data []byte) []byte {
-	// 计算数据段长度（物理ID + 消息ID + 命令 + 数据）
-	dataLen := 4 + 2 + 1 + len(data)
-
-	// 构建数据包
-	packet := make([]byte, 0, 5+dataLen+2) // 包头(3) + 长度(2) + 数据 + 校验(2)
-
-	// 包头
-	packet = append(packet, 'D', 'N', 'Y')
-
-	// 长度（小端模式）
-	packet = append(packet, byte(dataLen), byte(dataLen>>8))
-
-	// 物理ID（小端模式）
-	packet = append(packet, byte(physicalID), byte(physicalID>>8), byte(physicalID>>16), byte(physicalID>>24))
-
-	// 消息ID（小端模式）
-	packet = append(packet, byte(messageID), byte(messageID>>8))
-
-	// 命令
-	packet = append(packet, command)
-
-	// 数据
-	packet = append(packet, data...)
-
-	// 计算校验和
-	checksum := pkg.Protocol.CalculatePacketChecksum(packet)
-	packet = append(packet, byte(checksum), byte(checksum>>8))
-
-	return packet
+	return dny_protocol.BuildDNYPacket(physicalID, messageID, command, data)
 }

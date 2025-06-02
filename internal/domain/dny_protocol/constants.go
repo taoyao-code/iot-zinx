@@ -58,9 +58,34 @@ const (
 
 // 充电命令定义
 const (
-	ChargeCommandStart = 0x01 // 启动充电
-	ChargeCommandStop  = 0x02 // 停止充电
+	ChargeCommandStop  = 0x00 // 停止充电
+	ChargeCommandStart = 0x01 // 开始充电
 	ChargeCommandQuery = 0x03 // 查询状态
+)
+
+// 充电响应状态定义
+const (
+	ChargeResponseSuccess           = 0x00 // 执行成功
+	ChargeResponseNoCharger         = 0x01 // 端口未插充电器
+	ChargeResponseSameState         = 0x02 // 端口状态和充电命令相同
+	ChargeResponsePortError         = 0x03 // 端口故障
+	ChargeResponseNoSuchPort        = 0x04 // 无此端口号
+	ChargeResponseMultipleWaitPorts = 0x05 // 有多个待充端口
+	ChargeResponseOverPower         = 0x06 // 多路设备功率超标
+	ChargeResponseStorageError      = 0x07 // 存储器损坏
+	ChargeResponseRelayFault        = 0x08 // 继电器坏或保险丝断
+	ChargeResponseRelayStuck        = 0x09 // 继电器粘连
+	ChargeResponseShortCircuit      = 0x0A // 负载短路
+	ChargeResponseSmokeAlarm        = 0x0B // 烟感报警
+	ChargeResponseOverVoltage       = 0x0C // 过压
+	ChargeResponseUnderVoltage      = 0x0D // 欠压
+	ChargeResponseNoResponse        = 0x0E // 未响应
+)
+
+// 费率模式定义
+const (
+	RateModeTime   = 0x00 // 按时间计费
+	RateModeEnergy = 0x01 // 按电量计费
 )
 
 // 应答结果码定义
