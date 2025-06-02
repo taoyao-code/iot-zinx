@@ -113,35 +113,23 @@ func (m *TCPMonitor) OnRawDataReceived(conn ziface.IConnection, data []byte) {
 			"timestamp":  timestamp,
 		}).Info("TCP数据接收 - 原始数据包")
 
-		// 解析DNY协议数据
-		if len(data) >= 3 && data[0] == 0x44 && data[1] == 0x4E && data[2] == 0x59 {
+		// 🔧 使用统一的DNY协议检查和解析接口
+		if protocol.IsDNYProtocolData(data) {
 			fmt.Printf("【DNY协议】检测到DNY协议数据包\n")
-			// 如果是DNY协议数据，解析并显示详细信息
-			if result := protocol.ParseDNYProtocol(data); result != "" {
-				fmt.Println(result)
+			// 使用新的统一解析接口
+			if result, err := protocol.ParseDNYData(data); err == nil {
+				fmt.Println(result.String())
 
-				// 解析命令字段进行更详细的记录
-				if len(data) >= 12 {
-					command := data[11]
-					// 解析物理ID（小端模式）
-					physicalID := uint32(0)
-					if len(data) >= 9 {
-						physicalID = uint32(data[5]) | uint32(data[6])<<8 | uint32(data[7])<<16 | uint32(data[8])<<24
-					}
-					// 解析消息ID（小端模式）
-					messageID := uint16(0)
-					if len(data) >= 11 {
-						messageID = uint16(data[9]) | uint16(data[10])<<8
-					}
-
-					logger.WithFields(logrus.Fields{
-						"connID":     connID,
-						"command":    fmt.Sprintf("0x%02X", command),
-						"physicalID": physicalID,
-						"messageID":  messageID,
-						"dataHex":    hex.EncodeToString(data),
-					}).Info("接收DNY协议数据")
-				}
+				// 记录详细的解析信息
+				logger.WithFields(logrus.Fields{
+					"connID":     connID,
+					"command":    fmt.Sprintf("0x%02X", result.Command),
+					"physicalID": result.PhysicalID,
+					"messageID":  result.MessageID,
+					"dataHex":    hex.EncodeToString(data),
+				}).Info("接收DNY协议数据")
+			} else {
+				fmt.Printf("解析失败: %v\n", err)
 			}
 		}
 
@@ -170,34 +158,22 @@ func (m *TCPMonitor) OnRawDataSent(conn ziface.IConnection, data []byte) {
 			"timestamp":  timestamp,
 		}).Info("发送数据 - write buffer")
 
-		// 解析DNY协议数据
-		if len(data) >= 3 && data[0] == 0x44 && data[1] == 0x4E && data[2] == 0x59 {
-			// 如果是DNY协议数据，解析并显示详细信息
-			if result := protocol.ParseDNYProtocol(data); result != "" {
-				fmt.Println(result)
+		// 🔧 使用统一的DNY协议检查和解析接口
+		if protocol.IsDNYProtocolData(data) {
+			// 使用新的统一解析接口
+			if result, err := protocol.ParseDNYData(data); err == nil {
+				fmt.Println(result.String())
 
-				// 解析命令字段进行更详细的记录
-				if len(data) >= 12 {
-					command := data[11]
-					// 解析物理ID（小端模式）
-					physicalID := uint32(0)
-					if len(data) >= 9 {
-						physicalID = uint32(data[5]) | uint32(data[6])<<8 | uint32(data[7])<<16 | uint32(data[8])<<24
-					}
-					// 解析消息ID（小端模式）
-					messageID := uint16(0)
-					if len(data) >= 11 {
-						messageID = uint16(data[9]) | uint16(data[10])<<8
-					}
-
-					logger.WithFields(logrus.Fields{
-						"connID":     connID,
-						"command":    fmt.Sprintf("0x%02X", command),
-						"physicalID": physicalID,
-						"messageID":  messageID,
-						"dataHex":    hex.EncodeToString(data),
-					}).Info("发送DNY协议数据")
-				}
+				// 记录详细的解析信息
+				logger.WithFields(logrus.Fields{
+					"connID":     connID,
+					"command":    fmt.Sprintf("0x%02X", result.Command),
+					"physicalID": result.PhysicalID,
+					"messageID":  result.MessageID,
+					"dataHex":    hex.EncodeToString(data),
+				}).Info("发送DNY协议数据")
+			} else {
+				fmt.Printf("解析失败: %v\n", err)
 			}
 		}
 

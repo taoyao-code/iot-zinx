@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"sync"
 	"time"
+
+	"github.com/bujia-iot/iot-zinx/pkg"
 )
 
 // TCPDataLogger 用于记录和分析TCP数据
@@ -15,9 +17,6 @@ type TCPDataLogger struct {
 	// 日志文件
 	logFile     *os.File
 	logFilePath string
-
-	// 解析器
-	parser *DNYProtocolParser
 
 	// 互斥锁，保证线程安全
 	mu sync.Mutex
@@ -44,7 +43,6 @@ func NewTCPDataLogger(logDir string, enableParsing bool) (*TCPDataLogger, error)
 	logger := &TCPDataLogger{
 		logFile:       logFile,
 		logFilePath:   logFilePath,
-		parser:        &DNYProtocolParser{},
 		enableParsing: enableParsing,
 	}
 
@@ -75,11 +73,12 @@ func (l *TCPDataLogger) LogTCPData(data []byte, direction string, remoteAddr str
 	logEntry += fmt.Sprintf("数据(HEX): %s\n", hex.EncodeToString(data))
 
 	// 如果启用解析，尝试解析DNY协议
-	if l.enableParsing && len(data) >= 3 && data[0] == 0x44 && data[1] == 0x4E && data[2] == 0x59 {
-		err := l.parser.Parse(data)
+	// 🔧 使用统一的DNY协议检查接口
+	if l.enableParsing && pkg.Protocol.IsDNYProtocolData(data) {
+		result, err := pkg.Protocol.ParseDNYData(data)
 		if err == nil {
 			logEntry += "解析结果:\n"
-			logEntry += l.parser.String()
+			logEntry += result.String() + "\n"
 		} else {
 			logEntry += fmt.Sprintf("解析失败: %v\n", err)
 		}
@@ -171,11 +170,10 @@ func (l *TCPDataLogger) ParseHexString(hexStr string, description string) {
 	logEntry += fmt.Sprintf("数据(HEX): %s\n", hexStr)
 
 	// 尝试解析DNY协议
-	parser := &DNYProtocolParser{}
-	err := parser.ParseHexString(hexStr)
+	result, err := pkg.Protocol.ParseDNYHexString(hexStr)
 	if err == nil {
 		logEntry += "解析结果:\n"
-		logEntry += parser.String()
+		logEntry += result.String() + "\n"
 	} else {
 		logEntry += fmt.Sprintf("解析失败: %v\n", err)
 	}

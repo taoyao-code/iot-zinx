@@ -21,7 +21,7 @@ func NewDNYProtocolInterceptor() ziface.IInterceptor {
 	return &DNYProtocolInterceptor{}
 }
 
-// Intercept 拦截器主方法 - 处理所有DNY协议逻辑
+// Intercept 拦截器主方法 - 处理所有消息
 func (interceptor *DNYProtocolInterceptor) Intercept(chain ziface.IChain) ziface.IcResp {
 	// 强制控制台输出，确保拦截器被调用
 	fmt.Printf("\n🔥 DNYProtocolInterceptor.Intercept() 被调用! 时间: %s\n",
@@ -45,23 +45,31 @@ func (interceptor *DNYProtocolInterceptor) Intercept(chain ziface.IChain) ziface
 		return chain.Proceed(request)
 	}
 
+	// 🔧 关键改变：检查MsgID，如果是0则表示需要拦截器处理
+	msgID := message.GetMsgID()
+	fmt.Printf("📨 收到消息 MsgID: %d\n", msgID)
+
+	// 如果MsgID不是0，说明已经被正确解析，直接放行
+	if msgID != 0 {
+		fmt.Printf("✅ 消息已解析完成，MsgID=%d，直接路由到处理器\n", msgID)
+		return chain.Proceed(request)
+	}
+
+	// MsgID=0表示需要拦截器进行协议解析
 	rawData := message.GetData()
 	if rawData == nil || len(rawData) == 0 {
 		fmt.Printf("❌ rawData为空\n")
 		return chain.Proceed(request)
 	}
 
-	fmt.Printf("📦 收到数据，长度: %d, 前20字节: [% 02X]\n",
+	fmt.Printf("📦 开始协议解析，数据长度: %d, 前20字节: [% 02X]\n",
 		len(rawData), rawData[:min(len(rawData), 20)])
 
-	// 解码十六进制数据（如果需要）
-	actualData := interceptor.decodeHexIfNeeded(rawData)
-
-	// 处理不同类型的消息
-	if interceptor.isDNYProtocol(actualData) {
-		return interceptor.handleDNYProtocol(chain, iRequest, message, actualData)
+	// 🔧 新逻辑：根据数据类型进行不同处理
+	if interceptor.isDNYProtocol(rawData) {
+		return interceptor.handleDNYProtocol(chain, iRequest, message, rawData)
 	} else {
-		return interceptor.handleSpecialMessage(chain, iRequest, message, actualData)
+		return interceptor.handleSpecialMessage(chain, iRequest, message, rawData)
 	}
 }
 

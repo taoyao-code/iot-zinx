@@ -46,10 +46,13 @@ var Protocol = struct {
 	NewDNYDataPackFactory func() protocol.IDataPackFactory
 	// 创建DNY协议拦截器工厂
 	NewDNYProtocolInterceptorFactory func() protocol.IInterceptorFactory
-	// 解析DNY协议数据
-	ParseDNYProtocol func(data []byte) string
+	// 🚫 ParseDNYProtocol 已删除，请使用 ParseDNYData 替代
 	// 手动解析十六进制数据
 	ParseManualData func(hexData, description string)
+	// 🔧 统一的协议解析接口，用于日志和监控
+	ParseDNYData func(data []byte) (*protocol.DNYParseResult, error)
+	// 🔧 解析十六进制字符串
+	ParseDNYHexString func(hexStr string) (*protocol.DNYParseResult, error)
 	// 计算包校验和
 	CalculatePacketChecksum func(data []byte) uint16
 	// 检查是否为DNY协议数据
@@ -78,8 +81,9 @@ var Protocol = struct {
 }{
 	NewDNYDataPackFactory:            protocol.NewDNYDataPackFactory,
 	NewDNYProtocolInterceptorFactory: protocol.NewDNYProtocolInterceptorFactory,
-	ParseDNYProtocol:                 protocol.ParseDNYProtocol,
 	ParseManualData:                  protocol.ParseManualData,
+	ParseDNYData:                     protocol.ParseDNYData,
+	ParseDNYHexString:                protocol.ParseDNYHexString,
 	CalculatePacketChecksum:          protocol.CalculatePacketChecksum,
 	IsDNYProtocolData:                protocol.IsDNYProtocolData,
 	IsHexString:                      protocol.IsHexString,

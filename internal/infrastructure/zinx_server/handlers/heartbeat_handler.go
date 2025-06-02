@@ -179,14 +179,10 @@ func getPortStatusDesc(status uint8) string {
 	}
 }
 
-// getCommandName 获取命令名称
-func getCommandName(commandId uint32) string {
-	switch commandId {
-	case dny_protocol.CmdHeartbeat:
-		return "心跳(0x01)"
-	case dny_protocol.CmdDeviceHeart:
-		return "设备心跳/分机心跳(0x21)"
-	default:
-		return fmt.Sprintf("未知心跳(0x%02X)", commandId)
-	}
-}
+// 🔧 架构重构说明：
+// 已删除重复的命令名称获取函数：
+// - getCommandName() - 请使用 pkg/protocol.GetCommandName() 统一接口
+//
+// 统一使用：
+// import "github.com/bujia-iot/iot-zinx/pkg/protocol"
+// commandName := protocol.GetCommandName(uint8(commandId))

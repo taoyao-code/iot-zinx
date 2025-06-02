@@ -6,7 +6,12 @@ import (
 	"time"
 
 	"github.com/aceld/zinx/ziface"
+	"github.com/bujia-iot/iot-zinx/pkg"
 )
+
+// 🔧 架构重构说明：
+// 本文件已更新使用统一的协议解析接口 pkg.Protocol.ParseDNYData()
+// 删除了重复的 DNYProtocolParser，避免重复解析和代码重复
 
 // ConnectionMonitor 用于监视和记录TCP连接的数据
 type ConnectionMonitor struct {
@@ -124,18 +129,18 @@ func (m *ConnectionMonitor) OnDataSent(conn ziface.IConnection, data []byte) {
 // parseAndPrintData 解析并打印数据
 func (m *ConnectionMonitor) parseAndPrintData(data []byte, direction, remoteAddr string) {
 	// 检查是否为DNY协议数据
-	if len(data) >= 3 && data[0] == 0x44 && data[1] == 0x4E && data[2] == 0x59 {
-		parser := &DNYProtocolParser{}
-		err := parser.Parse(data)
+	// 🔧 使用统一的DNY协议检查接口
+	if pkg.Protocol.IsDNYProtocolData(data) {
+		result, err := pkg.Protocol.ParseDNYData(data)
 		if err == nil {
 			// 打印解析结果
 			timestamp := time.Now().Format("2006-01-02 15:04:05.000")
 			fmt.Printf("\n[%s] %s 数据 - %s\n", timestamp, direction, remoteAddr)
-			fmt.Printf("命令: 0x%02X (%s)\n", parser.Command, parser.GetCommandName())
-			fmt.Printf("物理ID: 0x%08X\n", parser.PhysicalID)
-			fmt.Printf("消息ID: 0x%04X\n", parser.MessageID)
-			fmt.Printf("数据长度: %d\n", len(parser.Data))
-			fmt.Printf("校验结果: %v\n", parser.VerifyChecksum())
+			fmt.Printf("命令: 0x%02X (%s)\n", result.Command, result.CommandName)
+			fmt.Printf("物理ID: 0x%08X\n", result.PhysicalID)
+			fmt.Printf("消息ID: 0x%04X\n", result.MessageID)
+			fmt.Printf("数据长度: %d\n", len(result.Data))
+			fmt.Printf("校验结果: %v\n", result.ChecksumValid)
 			fmt.Println("----------------------------------------")
 		}
 	}
@@ -159,17 +164,16 @@ func (m *ConnectionMonitor) ParseManualHexData(hexData, description string) {
 	m.logger.ParseHexString(hexData, description)
 
 	// 尝试解析DNY协议
-	parser := &DNYProtocolParser{}
-	err := parser.ParseHexString(hexData)
+	result, err := pkg.Protocol.ParseDNYHexString(hexData)
 	if err == nil {
 		// 打印解析结果
 		timestamp := time.Now().Format("2006-01-02 15:04:05.000")
 		fmt.Printf("\n[%s] 手动解析: %s\n", timestamp, description)
-		fmt.Printf("命令: 0x%02X (%s)\n", parser.Command, parser.GetCommandName())
-		fmt.Printf("物理ID: 0x%08X\n", parser.PhysicalID)
-		fmt.Printf("消息ID: 0x%04X\n", parser.MessageID)
-		fmt.Printf("数据长度: %d\n", len(parser.Data))
-		fmt.Printf("校验结果: %v\n", parser.VerifyChecksum())
+		fmt.Printf("命令: 0x%02X (%s)\n", result.Command, result.CommandName)
+		fmt.Printf("物理ID: 0x%08X\n", result.PhysicalID)
+		fmt.Printf("消息ID: 0x%04X\n", result.MessageID)
+		fmt.Printf("数据长度: %d\n", len(result.Data))
+		fmt.Printf("校验结果: %v\n", result.ChecksumValid)
 		fmt.Println("----------------------------------------")
 	} else {
 		fmt.Printf("\n[手动解析失败] %s: %v\n", description, err)

@@ -113,7 +113,7 @@ func handleICCIDResponse(conn ziface.IConnection, data string) bool {
 
 		// 响应设备
 		response := "ICCID识别成功\r\n"
-		if err := conn.SendMsg(0, []byte(response)); err != nil {
+		if err := conn.SendBuffMsg(0, []byte(response)); err != nil {
 			logger.WithFields(logrus.Fields{
 				"error":      err.Error(),
 				"connID":     conn.GetConnID(),
@@ -145,7 +145,7 @@ func handleATCommandResponse(conn ziface.IConnection, data string) bool {
 	if strings.HasPrefix(strings.TrimSpace(data), "AT") {
 		// 发送OK响应
 		response := "OK\r\n"
-		if err := conn.SendMsg(0, []byte(response)); err != nil {
+		if err := conn.SendBuffMsg(0, []byte(response)); err != nil {
 			logger.WithFields(logrus.Fields{
 				"error":      err.Error(),
 				"connID":     conn.GetConnID(),

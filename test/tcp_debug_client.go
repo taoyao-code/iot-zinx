@@ -13,13 +13,13 @@ func main() {
 	fmt.Println("将发送测试数据: 444e590900cd28a2046702221a03")
 
 	// 连接到服务器
-	conn, err := net.Dial("tcp", "localhost:8999")
+	conn, err := net.Dial("tcp", "localhost:7054")
 	if err != nil {
 		log.Fatal("连接服务器失败:", err)
 	}
 	defer conn.Close()
 
-	fmt.Println("✅ 已连接到服务器 localhost:8999")
+	fmt.Println("✅ 已连接到服务器 localhost:7054")
 
 	// 测试数据 - DNY协议格式的获取服务器时间命令
 	testHexData := "444e590900cd28a2046702221a03"

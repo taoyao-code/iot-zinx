@@ -299,7 +299,7 @@ func HandleSendDNYCommand(c *gin.Context) {
 	}
 
 	// 构建DNY协议帧
-	packetData := buildDNYPacket(uint32(physicalID), req.MessageID, req.Command, data)
+	packetData := dny_protocol.BuildDNYPacket(uint32(physicalID), req.MessageID, req.Command, data)
 
 	// 发送到设备
 	err = conn.SendBuffMsg(0, packetData)
@@ -475,8 +475,4 @@ func HandleTestTool(c *gin.Context) {
 	})
 }
 
-// buildDNYPacket 构建DNY协议数据包 - 已弃用，使用dny_protocol.BuildDNYPacket
-// 保留此函数以兼容现有代码
-func buildDNYPacket(physicalID uint32, messageID uint16, command byte, data []byte) []byte {
-	return dny_protocol.BuildDNYPacket(physicalID, messageID, command, data)
-}
+// 🔧 buildDNYPacket 已删除 - 使用 dny_protocol.BuildDNYPacket() 或更好的 pkg.Protocol.BuildDNYResponsePacket()
