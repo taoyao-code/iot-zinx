@@ -49,15 +49,20 @@ func NewDNYPacket(logHexDump bool) ziface.IDataPack {
 }
 
 // GetHeadLen 获取消息头长度
-// DNY协议头长度为5字节：包头(3) + 长度(2)
+// 🔧 关键修复：由于我们需要处理不同格式的数据（DNY协议、ICCID等），返回0表示一次性读取所有可用数据
 func (dp *DNYPacket) GetHeadLen() uint32 {
+	// 🔧 强制控制台输出
+	fmt.Printf("🔧 DNYPacket.GetHeadLen() 被调用，返回0以接收所有数据\n")
+
 	// 记录到日志
 	logger.WithFields(logrus.Fields{
-		"headLen": dny_protocol.DnyHeaderLen,
+		"headLen": 0,
+		"reason":  "支持多种数据格式(DNY协议/ICCID/link)",
 	}).Debug("DNYPacket.GetHeadLen被调用")
 
-	// DNY协议头长度 = 包头"DNY"(3) + 数据长度(2)
-	return dny_protocol.DnyHeaderLen
+	// 🔧 关键修复：返回0表示我们要处理可变长度的数据包
+	// 这样Zinx会将所有接收到的数据传递给Unpack方法
+	return 0
 }
 
 // Pack 封包方法
@@ -167,13 +172,45 @@ func (dp *DNYPacket) Unpack(binaryData []byte) (ziface.IMessage, error) {
 		}).Debug("DNYPacket.Unpack 接收原始数据")
 	}
 
-	// 🔧 关键重构：检查是否为DNY协议格式数据
+	// 🔧 关键重构：优先检查是否为十六进制编码的数据
+	if IsHexString(binaryData) {
+		fmt.Printf("🔍 检测到十六进制数据，尝试解码\n")
+
+		// 解码十六进制数据
+		decoded, err := hex.DecodeString(string(binaryData))
+		if err != nil {
+			fmt.Printf("❌ 十六进制解码失败: %v\n", err)
+			// 如果解码失败，继续使用原始数据
+		} else {
+			fmt.Printf("✅ 十六进制解码成功: %d -> %d 字节\n", len(binaryData), len(decoded))
+			fmt.Printf("📦 解码后数据(HEX): %s\n", hex.EncodeToString(decoded))
+
+			// 检查解码后的数据是否为DNY协议
+			if len(decoded) >= 3 && bytes.HasPrefix(decoded, []byte("DNY")) {
+				fmt.Printf("🎯 解码后发现DNY协议数据\n")
+				return dp.handleDNYProtocolBasic(decoded)
+			}
+
+			// 检查是否为ICCID（解码后为纯数字字符串）
+			if dp.isAllDigits(decoded) {
+				fmt.Printf("📱 解码后发现ICCID: %s\n", string(decoded))
+				msg := dny_protocol.NewMessage(0, 0, decoded)
+				msg.SetRawData(binaryData) // 保存原始十六进制数据
+				return msg, nil
+			}
+
+			// 使用解码后的数据
+			binaryData = decoded
+		}
+	}
+
+	// 🔧 检查是否为DNY协议格式数据
 	if len(binaryData) >= 3 && bytes.HasPrefix(binaryData, []byte("DNY")) {
 		// 对于DNY协议数据，只做基础的完整性检查，不进行完整解析
 		return dp.handleDNYProtocolBasic(binaryData)
 	}
 
-	// 处理非DNY协议数据（如ICCID、link心跳等）
+	// 处理其他非DNY协议数据（如纯ICCID、link心跳等）
 	// 创建消息对象，保存完整原始数据，交给拦截器处理
 	msg := dny_protocol.NewMessage(0, 0, binaryData)
 	msg.SetRawData(binaryData)
@@ -288,5 +325,15 @@ func IsHexString(data []byte) bool {
 		}
 	}
 
+	return true
+}
+
+// isAllDigits 检查字节数组是否全为数字字符
+func (dp *DNYPacket) isAllDigits(data []byte) bool {
+	for _, b := range data {
+		if b < '0' || b > '9' {
+			return false
+		}
+	}
 	return true
 }
