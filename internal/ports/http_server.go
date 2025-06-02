@@ -44,8 +44,22 @@ func registerHTTPHandlers(r *gin.Engine) {
 	// Swagger文档
 	r.GET("/swagger/*any", ginSwagger.WrapHandler(swaggerFiles.Handler))
 
+	// API路由组 v1版本
+	api := r.Group("/api/v1")
+	{
+		// 设备相关API
+		api.GET("/devices", http.HandleDeviceList)
+		api.GET("/device/:deviceId/status", http.HandleDeviceStatus)
+		api.POST("/device/command", http.HandleSendCommand)
+		// DNY协议命令API
+		api.POST("/command/dny", http.HandleSendDNYCommand)
+		api.GET("/device/:deviceId/query", http.HandleQueryDeviceStatus)
+		// 充电控制API
+		api.POST("/charging/start", http.HandleStartCharging)
+		api.POST("/charging/stop", http.HandleStopCharging)
+	}
 	// 健康检查（根路径）
-	r.GET("/health", http.HandleHealthCheck)
+	api.GET("/health", http.HandleHealthCheck)
 
 	// 调试API - 显示所有路由
 	// @Summary 获取所有路由
@@ -55,7 +69,7 @@ func registerHTTPHandlers(r *gin.Engine) {
 	// @Produce json
 	// @Success 200 {object} APIResponse{data=RoutesResponse} "路由列表"
 	// @Router /routes [get]
-	r.GET("/routes", func(c *gin.Context) {
+	api.GET("/routes", func(c *gin.Context) {
 		var routes []http.RouteInfo
 		for _, routeInfo := range r.Routes() {
 			routes = append(routes, http.RouteInfo{
@@ -72,19 +86,4 @@ func registerHTTPHandlers(r *gin.Engine) {
 			},
 		})
 	})
-
-	// API路由组 v1版本
-	api := r.Group("/api/v1")
-	{
-		// 设备相关API
-		api.GET("/devices", http.HandleDeviceList)
-		api.GET("/device/:deviceId/status", http.HandleDeviceStatus)
-		api.POST("/device/command", http.HandleSendCommand)
-		// DNY协议命令API
-		api.POST("/command/dny", http.HandleSendDNYCommand)
-		api.GET("/device/:deviceId/query", http.HandleQueryDeviceStatus)
-		// 充电控制API
-		api.POST("/charging/start", http.HandleStartCharging)
-		api.POST("/charging/stop", http.HandleStopCharging)
-	}
 }

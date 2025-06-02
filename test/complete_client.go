@@ -5,7 +5,10 @@ import (
 	"encoding/hex"
 	"fmt"
 	"net"
+	"os"
+	"os/signal"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/bujia-iot/iot-zinx/internal/domain/dny_protocol"
@@ -623,9 +626,18 @@ func main() {
 		}
 	}()
 
-	// 主程序运行30秒
-	client.logger.GetLogger().Info("🎯 客户端将运行30秒，然后自动退出...")
-	time.Sleep(30 * time.Second)
+	// 设置信号处理，支持优雅退出
+	sigChan := make(chan os.Signal, 1)
+	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
 
-	client.logger.GetLogger().Info("🏁 测试完成，程序退出")
+	client.logger.GetLogger().Info("🎯 客户端开始持续运行，按 Ctrl+C 退出...")
+	client.logger.GetLogger().Info("💡 支持的退出信号: SIGINT (Ctrl+C), SIGTERM")
+
+	// 等待退出信号
+	sig := <-sigChan
+	client.logger.GetLogger().WithFields(logrus.Fields{
+		"signal": sig.String(),
+	}).Info("🔔 收到退出信号，开始优雅关闭...")
+
+	client.logger.GetLogger().Info("🏁 程序退出")
 }
