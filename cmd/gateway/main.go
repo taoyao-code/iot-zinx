@@ -29,31 +29,37 @@ func main() {
 		os.Exit(1)
 	}
 
-	// 初始化日志
+	// 初始化改进的日志系统
 	loggerConfig := config.GetConfig().Logger
-
-	// 确保同时输出到控制台和文件
-	if err := logger.InitWithConsole(&loggerConfig); err != nil {
-		fmt.Printf("初始化日志系统失败: %v\n", err)
+	improvedLogger := logger.NewImprovedLogger()
+	if err := improvedLogger.InitImproved(&loggerConfig); err != nil {
+		fmt.Printf("初始化改进日志系统失败: %v\n", err)
 		os.Exit(1)
 	}
 
 	// 记录网关启动日志
-	logger.Info("充电设备网关 (Charging Gateway) 启动中...")
+	improvedLogger.Info("充电设备网关 (Charging Gateway) 启动中...", map[string]interface{}{
+		"component": "gateway",
+		"action":    "startup",
+	})
 
-	// 设置Zinx框架使用自定义日志系统
-	utils.SetupZinxLogger()
+	// 设置Zinx框架使用改进的日志系统
+	utils.SetupImprovedZinxLogger(improvedLogger)
 
 	// 初始化服务管理器
 	serviceManager := app.GetServiceManager()
 	if err := serviceManager.Init(); err != nil {
-		logger.Errorf("初始化服务管理器失败: %v", err)
+		improvedLogger.Error("初始化服务管理器失败", map[string]interface{}{
+			"error": err.Error(),
+		})
 		os.Exit(1)
 	}
 
 	// 初始化Redis连接
 	if err := redis.InitClient(); err != nil {
-		logger.Errorf("初始化Redis连接失败: %v", err)
+		improvedLogger.Error("初始化Redis连接失败", map[string]interface{}{
+			"error": err.Error(),
+		})
 		// 不退出，因为Redis连接失败不应该影响网关基本功能
 	}
 
@@ -64,9 +70,15 @@ func main() {
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		logger.Info("正在启动HTTP API服务器...")
+		improvedLogger.Info("正在启动HTTP API服务器...", map[string]interface{}{
+			"component": "http_server",
+			"action":    "starting",
+		})
 		if err := ports.StartHTTPServer(); err != nil {
-			logger.Errorf("启动HTTP API服务器失败: %v", err)
+			improvedLogger.Error("启动HTTP API服务器失败", map[string]interface{}{
+				"component": "http_server",
+				"error":     err.Error(),
+			})
 		}
 	}()
 
@@ -74,18 +86,31 @@ func main() {
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		logger.Info("正在启动TCP服务器...")
+		improvedLogger.Info("正在启动TCP服务器...", map[string]interface{}{
+			"component": "tcp_server",
+			"action":    "starting",
+		})
 		if err := ports.StartTCPServer(); err != nil {
-			logger.Errorf("启动TCP服务器失败: %v", err)
+			improvedLogger.Error("启动TCP服务器失败", map[string]interface{}{
+				"component": "tcp_server",
+				"error":     err.Error(),
+			})
 			os.Exit(1) // TCP服务器失败属于致命错误
 		}
-		logger.Info("TCP服务器启动成功")
+		improvedLogger.Info("TCP服务器启动成功", map[string]interface{}{
+			"component": "tcp_server",
+			"action":    "started",
+		})
 	}()
 
 	// 等待一小段时间，确保日志输出有序
 	time.Sleep(500 * time.Millisecond)
 
-	logger.Info("充电设备网关启动完成，等待设备连接...")
+	improvedLogger.Info("充电设备网关启动完成，等待设备连接...", map[string]interface{}{
+		"component": "gateway",
+		"action":    "ready",
+		"status":    "waiting_for_connections",
+	})
 
 	// 等待中断信号
 	c := make(chan os.Signal, 1)
@@ -94,13 +119,23 @@ func main() {
 
 	// 关闭Redis连接
 	if err := redis.Close(); err != nil {
-		logger.Errorf("关闭Redis连接失败: %v", err)
+		improvedLogger.Error("关闭Redis连接失败", map[string]interface{}{
+			"component": "redis",
+			"error":     err.Error(),
+		})
 	}
 
 	// 关闭服务
 	if err := serviceManager.Shutdown(); err != nil {
-		logger.Errorf("关闭服务管理器失败: %v", err)
+		improvedLogger.Error("关闭服务管理器失败", map[string]interface{}{
+			"component": "service_manager",
+			"error":     err.Error(),
+		})
 	}
 
-	logger.Info("充电设备网关已安全关闭")
+	improvedLogger.Info("充电设备网关已安全关闭", map[string]interface{}{
+		"component": "gateway",
+		"action":    "shutdown",
+		"status":    "completed",
+	})
 }

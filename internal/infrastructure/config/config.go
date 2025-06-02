@@ -64,13 +64,15 @@ type RedisConfig struct {
 
 // LoggerConfig 日志配置
 type LoggerConfig struct {
-	Level      string `mapstructure:"level"`
-	Format     string `mapstructure:"format"`
-	FilePath   string `mapstructure:"filePath"`
-	MaxSizeMB  int    `mapstructure:"maxSizeMB"`
-	MaxBackups int    `mapstructure:"maxBackups"`
-	MaxAgeDays int    `mapstructure:"maxAgeDays"`
-	LogHexDump bool   `mapstructure:"logHexDump"`
+	Level            string `mapstructure:"level"`
+	Format           string `mapstructure:"format"`
+	FilePath         string `mapstructure:"filePath"`
+	MaxSizeMB        int    `mapstructure:"maxSizeMB"`
+	MaxBackups       int    `mapstructure:"maxBackups"`
+	MaxAgeDays       int    `mapstructure:"maxAgeDays"`
+	LogHexDump       bool   `mapstructure:"logHexDump"`
+	EnableConsole    bool   `mapstructure:"enableConsole"`
+	EnableStructured bool   `mapstructure:"enableStructured"`
 }
 
 // BusinessPlatformConfig 业务平台API配置

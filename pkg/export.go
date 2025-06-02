@@ -4,6 +4,7 @@ import (
 	"time"
 
 	"github.com/aceld/zinx/ziface"
+	"github.com/bujia-iot/iot-zinx/internal/infrastructure/logger"
 	"github.com/bujia-iot/iot-zinx/pkg/constants"
 	"github.com/bujia-iot/iot-zinx/pkg/monitor"
 	"github.com/bujia-iot/iot-zinx/pkg/network"
@@ -181,7 +182,11 @@ var Monitor = struct {
 // Utils 工具类导出
 var Utils = struct {
 	// 设置Zinx日志适配器
-	SetupZinxLogger func()
+	SetupZinxLogger         func()
+	SetupImprovedZinxLogger func(*logger.ImprovedLogger)
+	GetGlobalImprovedLogger func() *logger.ImprovedLogger
 }{
-	SetupZinxLogger: utils.SetupZinxLogger,
+	SetupZinxLogger:         utils.SetupZinxLogger,
+	SetupImprovedZinxLogger: utils.SetupImprovedZinxLogger,
+	GetGlobalImprovedLogger: utils.GetGlobalImprovedLogger,
 }
