@@ -29,10 +29,17 @@ func (h *GetServerTimeHandler) PreHandle(request ziface.IRequest) {
 
 // Handle 处理设备获取服务器时间请求
 func (h *GetServerTimeHandler) Handle(request ziface.IRequest) {
+	// 🔥 强制控制台输出确保Handler被调用
+	fmt.Printf("\n🎯 GetServerTimeHandler.Handle() 被调用! 时间: %s\n", time.Now().Format("2006-01-02 15:04:05"))
+
 	// 获取请求消息
 	msg := request.GetMessage()
 	conn := request.GetConnection()
 	rawData := msg.GetData()
+
+	// 🔥 强制控制台输出消息详情
+	fmt.Printf("📨 消息详情: MsgID=%d(0x%X), DataLen=%d, RawDataHex=%s\n",
+		msg.GetMsgID(), msg.GetMsgID(), len(rawData), hex.EncodeToString(rawData))
 
 	// 打印请求详情 - 原始数据用于调试
 	logger.WithFields(logrus.Fields{

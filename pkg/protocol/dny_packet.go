@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/aceld/zinx/ziface"
 	"github.com/aceld/zinx/zlog"
@@ -135,8 +136,14 @@ func (dp *DNYPacket) packDNYMessage(msg ziface.IMessage) ([]byte, error) {
 // 🔧 修复：支持原始DNY协议数据格式，将其转换为Zinx可处理的消息格式
 // 将二进制数据解析为IMessage对象，支持原始DNY协议数据
 func (dp *DNYPacket) Unpack(binaryData []byte) (ziface.IMessage, error) {
+	// 🔧 强制控制台输出确保Unpack被调用
+	fmt.Printf("\n🔧 DNYPacket.Unpack() 被调用! 时间: %s, 数据长度: %d\n",
+		time.Now().Format("2006-01-02 15:04:05"), len(binaryData))
+	fmt.Printf("📦 原始数据(HEX): %s\n", hex.EncodeToString(binaryData))
+
 	// 检查数据长度是否足够
 	if len(binaryData) == 0 {
+		fmt.Printf("❌ 数据长度为0\n")
 		return nil, ErrNotEnoughData
 	}
 
@@ -331,6 +338,10 @@ func (dp *DNYPacket) handleDNYProtocolData(data []byte) (ziface.IMessage, error)
 	// 💡 关键：保存完整的原始DNY协议数据，供拦截器使用
 	// 拦截器可以从这个原始数据中进行额外的协议处理
 	msg.SetRawData(data[:totalLen])
+
+	// 📦 强制控制台输出解析结果
+	fmt.Printf("📦 DNY协议解析完成 - MsgID: 0x%02x, PhysicalID: 0x%08x, DataLen: %d\n",
+		command, physicalId, payloadLen)
 
 	// 记录十六进制日志
 	if dp.logHexDump {

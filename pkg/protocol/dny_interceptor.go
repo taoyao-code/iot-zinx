@@ -131,6 +131,9 @@ func (interceptor *DNYProtocolInterceptor) handleDNYProtocol(
 	fmt.Printf("✅ DNY协议解析: 命令=0x%02X, 物理ID=0x%08X, 消息ID=0x%04X, 载荷长度=%d\n",
 		commandID, physicalID, messageID, payloadLen)
 
+	// 🎯 强制控制台输出路由信息
+	fmt.Printf("🎯 准备路由到 MsgID: 0x%02x (命令ID)\n", commandID)
+
 	// 创建DNY消息对象，设置正确的MsgID用于路由
 	dnyMsg := dny_protocol.NewMessage(commandID, physicalID, payload)
 	dnyMsg.SetRawData(data[:totalLen])
