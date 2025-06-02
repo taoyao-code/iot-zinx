@@ -6,15 +6,13 @@ import (
 	"github.com/bujia-iot/iot-zinx/pkg/monitor"
 	"github.com/bujia-iot/iot-zinx/pkg/network"
 	"github.com/bujia-iot/iot-zinx/pkg/protocol"
-	"github.com/bujia-iot/iot-zinx/pkg/utils"
 )
 
 // InitPackages 初始化包之间的依赖关系
 // 该函数应该在应用启动时调用，用于设置各个包之间的依赖关系
+// 注意：不再设置日志系统，因为日志系统应该在main.go中统一设置
 func InitPackages() {
-	// 设置Zinx使用我们的日志系统
-	utils.SetupZinxLogger()
-	logger.Info("已设置Zinx框架使用自定义日志系统")
+	// 注意：移除了utils.SetupZinxLogger()调用，避免覆盖改进的日志系统
 
 	// 设置protocol包访问monitor包的函数
 	protocol.GetTCPMonitor = func() interface {
