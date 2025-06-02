@@ -7,7 +7,6 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/bujia-iot/iot-zinx/internal/app"
 	"github.com/bujia-iot/iot-zinx/internal/app/dto"
 	"github.com/bujia-iot/iot-zinx/internal/app/service"
 	"github.com/bujia-iot/iot-zinx/internal/domain/dny_protocol"
@@ -77,11 +76,19 @@ func HandleDeviceStatus(c *gin.Context) {
 		return
 	}
 
-	// 查询设备连接状态
-	tcpMonitor := pkg.Monitor.GetGlobalMonitor()
-	conn, exists := tcpMonitor.GetConnectionByDeviceId(deviceID)
+	// 获取设备服务
+	ctx := GetGlobalHandlerContext()
+	if ctx == nil || ctx.DeviceService == nil {
+		c.JSON(http.StatusInternalServerError, APIResponse{
+			Code:    500,
+			Message: "系统错误: 设备服务未初始化",
+		})
+		return
+	}
 
-	if !exists {
+	// 通过设备服务获取设备连接信息
+	deviceInfo, err := ctx.DeviceService.GetDeviceConnectionInfo(deviceID)
+	if err != nil {
 		c.JSON(http.StatusNotFound, APIResponse{
 			Code:    404,
 			Message: "设备不在线",
@@ -89,44 +96,19 @@ func HandleDeviceStatus(c *gin.Context) {
 		return
 	}
 
-	// 获取ICCID
-	iccid := ""
-	if iccidVal, err := conn.GetProperty(PropKeyICCID); err == nil {
-		iccid = iccidVal.(string)
-	}
-
-	// 获取最后心跳时间（优先使用格式化的字符串）
-	lastHeartbeatStr := "never"
-	var lastHeartbeat int64
-	var timeSinceHeart float64
-
-	if val, err := conn.GetProperty(PropKeyLastHeartbeatStr); err == nil && val != nil {
-		lastHeartbeatStr = val.(string)
-	} else if val, err := conn.GetProperty(PropKeyLastHeartbeat); err == nil && val != nil {
-		lastHeartbeat = val.(int64)
-		lastHeartbeatStr = time.Unix(lastHeartbeat, 0).Format("2006-01-02 15:04:05")
-		timeSinceHeart = time.Since(time.Unix(lastHeartbeat, 0)).Seconds()
-	}
-
-	// 获取连接状态
-	connStatus := ConnStatusInactive
-	if statusVal, err := conn.GetProperty(PropKeyConnStatus); err == nil && statusVal != nil {
-		connStatus = statusVal.(string)
-	}
-
 	// 返回设备状态信息
 	c.JSON(http.StatusOK, APIResponse{
 		Code:    0,
 		Message: "成功",
 		Data: gin.H{
-			"deviceId":       deviceID,
-			"iccid":          iccid,
-			"isOnline":       connStatus == ConnStatusActive,
-			"status":         connStatus,
-			"lastHeartbeat":  lastHeartbeat,
-			"heartbeatTime":  lastHeartbeatStr,
-			"timeSinceHeart": timeSinceHeart,
-			"remoteAddr":     conn.RemoteAddr().String(),
+			"deviceId":       deviceInfo.DeviceID,
+			"iccid":          deviceInfo.ICCID,
+			"isOnline":       deviceInfo.IsOnline,
+			"status":         deviceInfo.Status,
+			"lastHeartbeat":  deviceInfo.LastHeartbeat,
+			"heartbeatTime":  deviceInfo.HeartbeatTime,
+			"timeSinceHeart": deviceInfo.TimeSinceHeart,
+			"remoteAddr":     deviceInfo.RemoteAddr,
 		},
 	})
 }
@@ -159,42 +141,30 @@ func HandleSendCommand(c *gin.Context) {
 		return
 	}
 
-	// 查询设备连接
-	tcpMonitor := pkg.Monitor.GetGlobalMonitor()
-	conn, exists := tcpMonitor.GetConnectionByDeviceId(req.DeviceID)
-	if !exists {
-		c.JSON(http.StatusNotFound, APIResponse{
-			Code:    404,
-			Message: "设备不在线",
-		})
-		return
-	}
-
-	// 解析设备ID为物理ID
-	physicalID, err := strconv.ParseUint(req.DeviceID, 16, 32)
-	if err != nil {
-		c.JSON(http.StatusBadRequest, APIResponse{
-			Code:    400,
-			Message: "设备ID格式错误",
-		})
-		return
-	}
-
-	// 发送命令到设备（使用正确的DNY协议）
-	// 生成消息ID
-	messageID := uint16(time.Now().Unix() & 0xFFFF)
-	err = pkg.Protocol.SendDNYResponse(conn, uint32(physicalID), messageID, req.Command, req.Data)
-	if err != nil {
-		logger.WithFields(logrus.Fields{
-			"deviceId": req.DeviceID,
-			"command":  req.Command,
-			"error":    err.Error(),
-		}).Error("发送命令到设备失败")
-
+	// 获取设备服务
+	ctx := GetGlobalHandlerContext()
+	if ctx == nil || ctx.DeviceService == nil {
 		c.JSON(http.StatusInternalServerError, APIResponse{
 			Code:    500,
-			Message: "发送命令失败: " + err.Error(),
+			Message: "系统错误: 设备服务未初始化",
 		})
+		return
+	}
+
+	// 通过设备服务发送命令
+	err := ctx.DeviceService.SendCommandToDevice(req.DeviceID, req.Command, req.Data)
+	if err != nil {
+		if err.Error() == "设备不在线" {
+			c.JSON(http.StatusNotFound, APIResponse{
+				Code:    404,
+				Message: "设备不在线",
+			})
+		} else {
+			c.JSON(http.StatusInternalServerError, APIResponse{
+				Code:    500,
+				Message: "发送命令失败: " + err.Error(),
+			})
+		}
 		return
 	}
 
@@ -216,63 +186,17 @@ func HandleSendCommand(c *gin.Context) {
 // @Router /api/v1/devices [get]
 func HandleDeviceList(c *gin.Context) {
 	// 获取设备服务
-	deviceService := app.GetServiceManager().DeviceService
-
-	// 从设备服务获取所有设备状态
-	allDevices := deviceService.GetAllDevices()
-
-	// 创建设备数组
-	var devices []gin.H
-
-	// 获取全局TCP监视器
-	tcpMonitor := pkg.Monitor.GetGlobalMonitor()
-	if tcpMonitor == nil {
+	ctx := GetGlobalHandlerContext()
+	if ctx == nil || ctx.DeviceService == nil {
 		c.JSON(http.StatusInternalServerError, APIResponse{
 			Code:    500,
-			Message: "系统错误: TCP监视器未初始化",
+			Message: "系统错误: 设备服务未初始化",
 		})
 		return
 	}
 
-	// 处理每个设备信息
-	for _, device := range allDevices {
-		deviceInfo := gin.H{
-			"deviceId": device.DeviceID,
-			"isOnline": device.Status == pkg.DeviceStatusOnline,
-			"status":   device.Status,
-		}
-
-		// 添加ICCID（如果有）
-		if device.ICCID != "" {
-			deviceInfo["iccid"] = device.ICCID
-		}
-
-		// 添加最后更新时间
-		if device.LastSeen > 0 {
-			deviceInfo["lastUpdate"] = device.LastSeen
-			deviceInfo["lastUpdateTime"] = time.Unix(device.LastSeen, 0).Format("2006-01-02 15:04:05")
-		}
-
-		// 获取设备连接，补充更多信息
-		if conn, exists := tcpMonitor.GetConnectionByDeviceId(device.DeviceID); exists {
-			// 获取连接状态
-			connStatus := ConnStatusInactive
-			if statusVal, err := conn.GetProperty(PropKeyConnStatus); err == nil && statusVal != nil {
-				connStatus = statusVal.(string)
-			}
-			deviceInfo["connectionStatus"] = connStatus
-
-			// 获取远程地址
-			deviceInfo["remoteAddr"] = conn.RemoteAddr().String()
-
-			// 获取最后心跳时间
-			if val, err := conn.GetProperty(PropKeyLastHeartbeatStr); err == nil && val != nil {
-				deviceInfo["heartbeatTime"] = val.(string)
-			}
-		}
-
-		devices = append(devices, deviceInfo)
-	}
+	// 通过设备服务获取增强的设备列表
+	devices := ctx.DeviceService.GetEnhancedDeviceList()
 
 	// 返回设备列表
 	c.JSON(http.StatusOK, APIResponse{
@@ -513,6 +437,25 @@ func HandleStopCharging(c *gin.Context) {
 	// 如果没有指定端口，默认停止所有端口
 	if req.Port == 0 {
 		req.Port = 0xFF
+	}
+
+	// 获取设备服务
+	ctx := GetGlobalHandlerContext()
+	if ctx == nil || ctx.DeviceService == nil {
+		c.JSON(http.StatusInternalServerError, APIResponse{
+			Code:    500,
+			Message: "系统错误: 设备服务未初始化",
+		})
+		return
+	}
+
+	// 检查设备是否在线
+	if !ctx.DeviceService.IsDeviceOnline(req.DeviceID) {
+		c.JSON(http.StatusNotFound, APIResponse{
+			Code:    404,
+			Message: "设备不在线",
+		})
+		return
 	}
 
 	// 使用统一的充电控制服务

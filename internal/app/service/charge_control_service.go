@@ -16,13 +16,15 @@ import (
 
 // ChargeControlService 充电控制业务服务
 type ChargeControlService struct {
-	monitor monitor.IConnectionMonitor
+	monitor         monitor.IConnectionMonitor
+	responseTracker *CommandResponseTracker
 }
 
 // NewChargeControlService 创建充电控制服务
 func NewChargeControlService(monitor monitor.IConnectionMonitor) *ChargeControlService {
 	return &ChargeControlService{
-		monitor: monitor,
+		monitor:         monitor,
+		responseTracker: GetGlobalCommandTracker(),
 	}
 }
 
@@ -227,6 +229,14 @@ func (s *ChargeControlService) handleOtherErrors(response *dto.ChargeControlResp
 
 // GetChargeStatus 获取充电状态
 func (s *ChargeControlService) GetChargeStatus(deviceID string, portNumber byte) (*dto.ChargeControlResponse, error) {
+	return s.GetChargeStatusWithTimeout(deviceID, portNumber, 10*time.Second)
+}
+
+// GetChargeStatusWithTimeout 获取充电状态（带超时）
+func (s *ChargeControlService) GetChargeStatusWithTimeout(deviceID string, portNumber byte, timeout time.Duration) (*dto.ChargeControlResponse, error) {
+	// 生成消息ID
+	messageID := uint16(time.Now().Unix() & 0xFFFF)
+
 	// 构建查询请求
 	req := &dto.ChargeControlRequest{
 		DeviceID:      deviceID,
@@ -235,13 +245,129 @@ func (s *ChargeControlService) GetChargeStatus(deviceID string, portNumber byte)
 		OrderNumber:   "QUERY_" + fmt.Sprintf("%d", time.Now().Unix()),
 	}
 
+	// 创建命令跟踪
+	pendingCmd := s.responseTracker.TrackCommand(
+		deviceID,
+		byte(dny_protocol.ChargeCommandQuery),
+		messageID,
+		timeout,
+		nil, // 同步等待，不需要回调
+	)
+
 	// 发送查询命令
-	if err := s.SendChargeControlCommand(req); err != nil {
+	if err := s.sendChargeControlCommandWithMessageID(req, messageID); err != nil {
+		// 发送失败，清理跟踪
+		s.responseTracker.pendingCommands.Delete(pendingCmd.ID)
+		pendingCmd.Cancel()
 		return nil, fmt.Errorf("发送查询命令失败: %w", err)
 	}
 
-	// TODO: 实现异步响应处理机制
-	// 这里需要实现等待响应的机制，或者通过回调处理
+	// 等待响应
+	response, err := s.responseTracker.WaitForResponse(pendingCmd)
+	if err != nil {
+		return nil, fmt.Errorf("等待充电状态响应失败: %w", err)
+	}
 
-	return nil, fmt.Errorf("查询功能暂未实现异步响应处理")
+	return response, nil
+}
+
+// GetChargeStatusAsync 异步获取充电状态
+func (s *ChargeControlService) GetChargeStatusAsync(
+	deviceID string,
+	portNumber byte,
+	timeout time.Duration,
+	callback func(*dto.ChargeControlResponse, error),
+) error {
+	// 生成消息ID
+	messageID := uint16(time.Now().Unix() & 0xFFFF)
+
+	// 构建查询请求
+	req := &dto.ChargeControlRequest{
+		DeviceID:      deviceID,
+		PortNumber:    portNumber,
+		ChargeCommand: dny_protocol.ChargeCommandQuery,
+		OrderNumber:   "QUERY_" + fmt.Sprintf("%d", time.Now().Unix()),
+	}
+
+	// 创建命令跟踪
+	pendingCmd := s.responseTracker.TrackCommand(
+		deviceID,
+		byte(dny_protocol.ChargeCommandQuery),
+		messageID,
+		timeout,
+		callback,
+	)
+
+	// 发送查询命令
+	if err := s.sendChargeControlCommandWithMessageID(req, messageID); err != nil {
+		// 发送失败，清理跟踪
+		s.responseTracker.pendingCommands.Delete(pendingCmd.ID)
+		pendingCmd.Cancel()
+		return fmt.Errorf("发送查询命令失败: %w", err)
+	}
+
+	return nil
+}
+
+// sendChargeControlCommandWithMessageID 发送充电控制命令（指定消息ID）
+func (s *ChargeControlService) sendChargeControlCommandWithMessageID(req *dto.ChargeControlRequest, messageID uint16) error {
+	// 验证请求参数
+	if err := req.Validate(); err != nil {
+		return fmt.Errorf("请求参数验证失败: %w", err)
+	}
+
+	// 获取设备连接
+	conn, exists := s.monitor.GetConnectionByDeviceId(req.DeviceID)
+	if !exists {
+		return fmt.Errorf("设备 %s 不在线", req.DeviceID)
+	}
+
+	// 解析设备ID为物理ID
+	physicalID, err := strconv.ParseUint(req.DeviceID, 16, 32)
+	if err != nil {
+		return fmt.Errorf("设备ID格式错误: %w", err)
+	}
+
+	// 构建充电控制协议包
+	packet := dny_protocol.BuildChargeControlPacket(
+		uint32(physicalID),
+		messageID, // 使用指定的消息ID
+		req.RateMode,
+		req.Balance,
+		req.PortNumber,
+		req.ChargeCommand,
+		req.ChargeDuration,
+		req.OrderNumber,
+		req.MaxChargeDuration,
+		req.MaxPower,
+		req.QRCodeLight,
+	)
+
+	// 记录发送日志
+	logger.WithFields(logrus.Fields{
+		"connID":            conn.GetConnID(),
+		"deviceId":          req.DeviceID,
+		"physicalId":        fmt.Sprintf("0x%08X", physicalID),
+		"messageId":         fmt.Sprintf("0x%04X", messageID),
+		"rateMode":          req.RateMode,
+		"balance":           req.Balance,
+		"portNumber":        req.PortNumber,
+		"chargeCommand":     req.ChargeCommand,
+		"chargeDuration":    req.ChargeDuration,
+		"orderNumber":       req.OrderNumber,
+		"maxChargeDuration": req.MaxChargeDuration,
+		"maxPower":          req.MaxPower,
+		"qrCodeLight":       req.QRCodeLight,
+	}).Info("发送充电控制命令（指定消息ID）")
+
+	// 通知监视器发送数据
+	s.monitor.OnRawDataSent(conn, packet)
+
+	// 发送数据到设备
+	err = conn.SendBuffMsg(0, packet)
+	if err != nil {
+		return fmt.Errorf("发送充电控制命令失败: %w", err)
+	}
+
+	return nil
 }

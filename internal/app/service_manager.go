@@ -15,8 +15,8 @@ var (
 
 // ServiceManager 服务管理器，负责创建和管理各种服务
 type ServiceManager struct {
-	// 设备服务
-	DeviceService *service.DeviceService
+	// 设备服务 - 使用接口类型，便于测试和扩展
+	DeviceService service.DeviceServiceInterface
 
 	// Redis客户端
 	redisClient *redis.Client

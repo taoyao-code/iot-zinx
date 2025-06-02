@@ -20,6 +20,9 @@ type TCPMonitor struct {
 	// 存储所有设备ID到连接的映射，用于消息转发
 	deviceIdToConnMap   sync.Map // map[string]ziface.IConnection
 	connIdToDeviceIdMap sync.Map // map[uint64]string
+
+	// 并发安全保护锁 - 保护复合操作的原子性
+	bindMutex sync.RWMutex
 }
 
 // 确保TCPMonitor实现了IConnectionMonitor接口
@@ -64,9 +67,44 @@ func (m *TCPMonitor) OnConnectionClosed(conn ziface.IConnection) {
 		connID,
 		remoteAddr)
 
+	// 使用锁保护清理操作的原子性
+	m.bindMutex.Lock()
+	defer m.bindMutex.Unlock()
+
 	// 获取关联的设备ID
+	var deviceID string
 	if val, err := conn.GetProperty(constants.PropKeyDeviceId); err == nil && val != nil {
-		deviceID := val.(string)
+		deviceID = val.(string)
+	}
+
+	// 安全清理连接ID映射
+	m.connIdToDeviceIdMap.Delete(connID)
+
+	// 如果有关联的设备ID，进行设备相关清理
+	if deviceID != "" {
+		// 验证这确实是该设备的当前连接
+		if currentConn, exists := m.deviceIdToConnMap.Load(deviceID); exists {
+			if currentConnObj, ok := currentConn.(ziface.IConnection); ok && currentConnObj.GetConnID() == connID {
+				// 确认是当前连接，才清理设备映射
+				m.deviceIdToConnMap.Delete(deviceID)
+
+				// 记录设备离线
+				logger.WithFields(logrus.Fields{
+					"deviceId":   deviceID,
+					"connID":     connID,
+					"remoteAddr": remoteAddr,
+				}).Info("设备连接已关闭，清理映射关系")
+			} else {
+				// 这不是当前连接，可能是旧连接，只记录日志
+				logger.WithFields(logrus.Fields{
+					"deviceId":      deviceID,
+					"closedConnID":  connID,
+					"currentConnID": currentConnObj.GetConnID(),
+					"remoteAddr":    remoteAddr,
+				}).Info("关闭的连接不是设备当前连接，跳过设备映射清理")
+				return // 不进行设备状态更新
+			}
+		}
 
 		// 通知全局设备监控器设备断开连接
 		deviceMonitor := GetGlobalDeviceMonitor()
@@ -78,20 +116,7 @@ func (m *TCPMonitor) OnConnectionClosed(conn ziface.IConnection) {
 		if UpdateDeviceStatusFunc != nil {
 			UpdateDeviceStatusFunc(deviceID, constants.DeviceStatusOffline)
 		}
-
-		// 记录设备离线
-		logger.WithFields(logrus.Fields{
-			"deviceId":   deviceID,
-			"connID":     connID,
-			"remoteAddr": remoteAddr,
-		}).Info("设备连接已关闭，状态更新为离线")
-
-		// 清理映射关系
-		m.deviceIdToConnMap.Delete(deviceID)
 	}
-
-	// 清理连接ID映射
-	m.connIdToDeviceIdMap.Delete(connID)
 }
 
 // OnRawDataReceived 当接收到原始数据时调用
@@ -183,6 +208,10 @@ func (m *TCPMonitor) OnRawDataSent(conn ziface.IConnection, data []byte) {
 
 // BindDeviceIdToConnection 绑定设备ID到连接并更新在线状态
 func (m *TCPMonitor) BindDeviceIdToConnection(deviceId string, conn ziface.IConnection) {
+	// 使用锁保护整个绑定操作的原子性
+	m.bindMutex.Lock()
+	defer m.bindMutex.Unlock()
+
 	// 获取连接ID
 	connID := conn.GetConnID()
 
@@ -191,22 +220,46 @@ func (m *TCPMonitor) BindDeviceIdToConnection(deviceId string, conn ziface.IConn
 
 	// 如果该设备已有连接，先处理原连接（可能是重连）
 	if exists && oldConn != nil {
-		oldConnObj := oldConn.(ziface.IConnection)
-		oldConnID := oldConnObj.GetConnID()
-
-		if oldConnID != connID {
-			// 不同的连接，说明设备可能重连
+		oldConnObj, ok := oldConn.(ziface.IConnection)
+		if !ok {
 			logger.WithFields(logrus.Fields{
-				"deviceId":  deviceId,
-				"oldConnID": oldConnID,
-				"newConnID": connID,
-			}).Info("设备更换连接，可能是重连")
+				"deviceId": deviceId,
+			}).Warn("发现无效的连接对象类型，清理映射")
+			m.deviceIdToConnMap.Delete(deviceId)
+		} else {
+			oldConnID := oldConnObj.GetConnID()
 
-			// 移除旧连接的映射（避免资源泄漏）
-			m.connIdToDeviceIdMap.Delete(oldConnID)
+			if oldConnID != connID {
+				// 不同的连接，说明设备可能重连
+				logger.WithFields(logrus.Fields{
+					"deviceId":  deviceId,
+					"oldConnID": oldConnID,
+					"newConnID": connID,
+				}).Info("设备更换连接，可能是重连")
 
-			// 尝试关闭旧连接（如果还没关闭）
-			oldConnObj.Stop()
+				// 安全地移除旧连接的映射（避免资源泄漏）
+				m.connIdToDeviceIdMap.Delete(oldConnID)
+
+				// 尝试优雅关闭旧连接（如果还没关闭）
+				go func() {
+					defer func() {
+						if r := recover(); r != nil {
+							logger.WithFields(logrus.Fields{
+								"deviceId":  deviceId,
+								"oldConnID": oldConnID,
+								"error":     r,
+							}).Warn("关闭旧连接时发生panic")
+						}
+					}()
+					oldConnObj.Stop()
+				}()
+			} else {
+				// 相同连接，可能是重复绑定，直接更新属性
+				logger.WithFields(logrus.Fields{
+					"deviceId": deviceId,
+					"connID":   connID,
+				}).Debug("设备重复绑定到相同连接")
+			}
 		}
 	}
 
@@ -220,10 +273,16 @@ func (m *TCPMonitor) BindDeviceIdToConnection(deviceId string, conn ziface.IConn
 	// 设置连接状态为活跃
 	conn.SetProperty(constants.PropKeyConnStatus, constants.ConnStatusActive)
 
+	// 设置绑定时间
+	now := time.Now()
+	conn.SetProperty(constants.PropKeyLastHeartbeat, now.Unix())
+	conn.SetProperty(constants.PropKeyLastHeartbeatStr, now.Format("2006-01-02 15:04:05.000"))
+
 	// 记录设备上线日志
 	logger.WithFields(logrus.Fields{
-		"deviceId": deviceId,
-		"connID":   connID,
+		"deviceId":   deviceId,
+		"connID":     connID,
+		"remoteAddr": conn.RemoteAddr().String(),
 	}).Info("设备连接绑定成功")
 
 	// 更新设备状态为在线（使用优化器）
@@ -252,12 +311,25 @@ func (m *TCPMonitor) GetConnectionByDeviceId(deviceId string) (ziface.IConnectio
 
 // GetDeviceIdByConnId 根据连接ID获取设备ID
 func (m *TCPMonitor) GetDeviceIdByConnId(connId uint64) (string, bool) {
+	m.bindMutex.RLock()
+	defer m.bindMutex.RUnlock()
+
 	deviceIdVal, ok := m.connIdToDeviceIdMap.Load(connId)
 	if !ok {
 		return "", false
 	}
+
 	deviceId, ok := deviceIdVal.(string)
-	return deviceId, ok
+	if !ok {
+		// 类型断言失败，清理无效映射
+		logger.WithFields(logrus.Fields{
+			"connId": connId,
+		}).Warn("发现无效设备ID类型，清理映射")
+		m.connIdToDeviceIdMap.Delete(connId)
+		return "", false
+	}
+
+	return deviceId, true
 }
 
 // UpdateLastHeartbeatTime 更新最后一次心跳时间、连接状态并更新设备状态
@@ -272,10 +344,17 @@ func (m *TCPMonitor) UpdateLastHeartbeatTime(conn ziface.IConnection) {
 	conn.SetProperty(constants.PropKeyLastHeartbeatStr, timeStr)
 	conn.SetProperty(constants.PropKeyConnStatus, constants.ConnStatusActive)
 
-	// 获取设备ID
+	// 安全获取设备ID
 	var deviceId string
 	if val, err := conn.GetProperty(constants.PropKeyDeviceId); err == nil && val != nil {
-		deviceId = val.(string)
+		if id, ok := val.(string); ok {
+			deviceId = id
+		} else {
+			logger.WithFields(logrus.Fields{
+				"connID": conn.GetConnID(),
+				"type":   fmt.Sprintf("%T", val),
+			}).Warn("设备ID类型不正确")
+		}
 	}
 
 	// 只处理已注册的设备心跳

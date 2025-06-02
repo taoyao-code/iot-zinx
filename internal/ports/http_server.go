@@ -3,6 +3,7 @@ package ports
 import (
 	_ "github.com/bujia-iot/iot-zinx/docs" // Swagger文档
 	"github.com/bujia-iot/iot-zinx/internal/adapter/http"
+	"github.com/bujia-iot/iot-zinx/internal/app"
 	"github.com/bujia-iot/iot-zinx/internal/infrastructure/config"
 	"github.com/bujia-iot/iot-zinx/internal/infrastructure/logger"
 	"github.com/gin-gonic/gin"
@@ -12,6 +13,17 @@ import (
 
 // StartHTTPServer 启动HTTP API服务器
 func StartHTTPServer() error {
+	// 初始化服务依赖
+	serviceManager := app.GetServiceManager()
+
+	// 创建HTTP处理器上下文，注入设备服务
+	handlerContext := http.NewHandlerContext(serviceManager.DeviceService)
+
+	// 设置全局处理器上下文
+	http.SetGlobalHandlerContext(handlerContext)
+
+	logger.Info("HTTP处理器上下文已初始化，设备服务已注入")
+
 	// 设置Gin模式
 	gin.SetMode(gin.ReleaseMode)
 

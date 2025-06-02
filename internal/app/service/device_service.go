@@ -1,9 +1,13 @@
 package service
 
 import (
+	"errors"
+	"fmt"
+	"strconv"
 	"sync"
 	"time"
 
+	"github.com/aceld/zinx/ziface"
 	"github.com/bujia-iot/iot-zinx/internal/domain/dny_protocol"
 	"github.com/bujia-iot/iot-zinx/internal/infrastructure/logger"
 	"github.com/bujia-iot/iot-zinx/pkg"
@@ -16,6 +20,8 @@ type DeviceService struct {
 	// 设备状态存储
 	deviceStatus     sync.Map // map[string]string - deviceId -> status
 	deviceLastUpdate sync.Map // map[string]int64 - deviceId -> timestamp
+	// TCP监控器引用 - 用于底层连接操作
+	tcpMonitor monitor.IConnectionMonitor
 }
 
 // DeviceInfo 设备信息结构体
@@ -28,7 +34,9 @@ type DeviceInfo struct {
 
 // NewDeviceService 创建设备服务实例
 func NewDeviceService() *DeviceService {
-	service := &DeviceService{}
+	service := &DeviceService{
+		tcpMonitor: pkg.Monitor.GetGlobalMonitor(), // 注入TCP监控器依赖
+	}
 
 	// 订阅设备状态变更事件
 	eventBus := pkg.Monitor.GetEventBus()
@@ -116,6 +124,203 @@ func (s *DeviceService) GetAllDevices() []DeviceInfo {
 		devices = append(devices, device)
 		return true
 	})
+
+	return devices
+}
+
+// =================================================================================
+// HTTP层设备操作接口 - 封装TCP监控器的底层实现
+// =================================================================================
+
+// DeviceConnectionInfo 设备连接信息
+type DeviceConnectionInfo struct {
+	DeviceID       string  `json:"deviceId"`
+	ICCID          string  `json:"iccid,omitempty"`
+	IsOnline       bool    `json:"isOnline"`
+	Status         string  `json:"status"`
+	LastHeartbeat  int64   `json:"lastHeartbeat"`
+	HeartbeatTime  string  `json:"heartbeatTime"`
+	TimeSinceHeart float64 `json:"timeSinceHeart"`
+	RemoteAddr     string  `json:"remoteAddr"`
+}
+
+// GetDeviceConnectionInfo 获取设备连接详细信息
+func (s *DeviceService) GetDeviceConnectionInfo(deviceID string) (*DeviceConnectionInfo, error) {
+	if s.tcpMonitor == nil {
+		return nil, errors.New("TCP监控器未初始化")
+	}
+
+	// 查询设备连接状态
+	conn, exists := s.tcpMonitor.GetConnectionByDeviceId(deviceID)
+	if !exists {
+		return nil, errors.New("设备不在线")
+	}
+
+	// 构建设备连接信息
+	info := &DeviceConnectionInfo{
+		DeviceID: deviceID,
+	}
+
+	// 获取ICCID
+	if iccidVal, err := conn.GetProperty(pkg.PropKeyICCID); err == nil && iccidVal != nil {
+		info.ICCID = iccidVal.(string)
+	}
+
+	// 获取最后心跳时间（优先使用格式化的字符串）
+	info.HeartbeatTime = "never"
+	if val, err := conn.GetProperty(pkg.PropKeyLastHeartbeatStr); err == nil && val != nil {
+		info.HeartbeatTime = val.(string)
+	} else if val, err := conn.GetProperty(pkg.PropKeyLastHeartbeat); err == nil && val != nil {
+		info.LastHeartbeat = val.(int64)
+		info.HeartbeatTime = time.Unix(info.LastHeartbeat, 0).Format("2006-01-02 15:04:05")
+		info.TimeSinceHeart = time.Since(time.Unix(info.LastHeartbeat, 0)).Seconds()
+	}
+
+	// 获取连接状态
+	info.Status = pkg.ConnStatusInactive
+	if statusVal, err := conn.GetProperty(pkg.PropKeyConnStatus); err == nil && statusVal != nil {
+		info.Status = statusVal.(string)
+	}
+	info.IsOnline = info.Status == pkg.ConnStatusActive
+
+	// 获取远程地址
+	info.RemoteAddr = conn.RemoteAddr().String()
+
+	return info, nil
+}
+
+// GetDeviceConnection 获取设备连接对象（内部使用）
+func (s *DeviceService) GetDeviceConnection(deviceID string) (ziface.IConnection, bool) {
+	if s.tcpMonitor == nil {
+		return nil, false
+	}
+	return s.tcpMonitor.GetConnectionByDeviceId(deviceID)
+}
+
+// IsDeviceOnline 检查设备是否在线
+func (s *DeviceService) IsDeviceOnline(deviceID string) bool {
+	_, exists := s.GetDeviceConnection(deviceID)
+	return exists
+}
+
+// SendCommandToDevice 发送命令到设备
+func (s *DeviceService) SendCommandToDevice(deviceID string, command byte, data []byte) error {
+	conn, exists := s.GetDeviceConnection(deviceID)
+	if !exists {
+		return errors.New("设备不在线")
+	}
+
+	// 解析设备ID为物理ID
+	physicalID, err := strconv.ParseUint(deviceID, 16, 32)
+	if err != nil {
+		return fmt.Errorf("设备ID格式错误: %v", err)
+	}
+
+	// 生成消息ID
+	messageID := uint16(time.Now().Unix() & 0xFFFF)
+
+	// 发送命令到设备（使用正确的DNY协议）
+	err = pkg.Protocol.SendDNYResponse(conn, uint32(physicalID), messageID, command, data)
+	if err != nil {
+		logger.WithFields(logrus.Fields{
+			"deviceId": deviceID,
+			"command":  command,
+			"error":    err.Error(),
+		}).Error("发送命令到设备失败")
+		return fmt.Errorf("发送命令失败: %v", err)
+	}
+
+	logger.WithFields(logrus.Fields{
+		"deviceId":  deviceID,
+		"command":   fmt.Sprintf("0x%02X", command),
+		"messageId": messageID,
+	}).Info("发送命令到设备成功")
+
+	return nil
+}
+
+// SendDNYCommandToDevice 发送DNY协议命令到设备
+func (s *DeviceService) SendDNYCommandToDevice(deviceID string, command byte, data []byte, messageID uint16) ([]byte, error) {
+	conn, exists := s.GetDeviceConnection(deviceID)
+	if !exists {
+		return nil, errors.New("设备不在线")
+	}
+
+	// 解析物理ID
+	physicalID, err := strconv.ParseUint(deviceID, 10, 32)
+	if err != nil {
+		return nil, fmt.Errorf("设备ID格式错误: %v", err)
+	}
+
+	// 构建DNY协议帧
+	packetData := dny_protocol.BuildDNYPacket(uint32(physicalID), messageID, command, data)
+
+	// 发送到设备
+	err = conn.SendBuffMsg(0, packetData)
+	if err != nil {
+		logger.WithFields(logrus.Fields{
+			"deviceId": deviceID,
+			"command":  command,
+			"error":    err.Error(),
+		}).Error("发送DNY命令到设备失败")
+		return nil, fmt.Errorf("发送DNY命令失败: %v", err)
+	}
+
+	logger.WithFields(logrus.Fields{
+		"deviceId":  deviceID,
+		"command":   fmt.Sprintf("0x%02X", command),
+		"messageId": messageID,
+	}).Info("发送DNY命令到设备成功")
+
+	return packetData, nil
+}
+
+// GetEnhancedDeviceList 获取增强的设备列表（包含连接信息）
+func (s *DeviceService) GetEnhancedDeviceList() []map[string]interface{} {
+	var devices []map[string]interface{}
+
+	// 从设备服务获取所有设备状态
+	allDevices := s.GetAllDevices()
+
+	// 处理每个设备信息
+	for _, device := range allDevices {
+		deviceInfo := map[string]interface{}{
+			"deviceId": device.DeviceID,
+			"isOnline": device.Status == pkg.DeviceStatusOnline,
+			"status":   device.Status,
+		}
+
+		// 添加ICCID（如果有）
+		if device.ICCID != "" {
+			deviceInfo["iccid"] = device.ICCID
+		}
+
+		// 添加最后更新时间
+		if device.LastSeen > 0 {
+			deviceInfo["lastUpdate"] = device.LastSeen
+			deviceInfo["lastUpdateTime"] = time.Unix(device.LastSeen, 0).Format("2006-01-02 15:04:05")
+		}
+
+		// 获取设备连接，补充更多信息
+		if conn, exists := s.GetDeviceConnection(device.DeviceID); exists {
+			// 获取连接状态
+			connStatus := pkg.ConnStatusInactive
+			if statusVal, err := conn.GetProperty(pkg.PropKeyConnStatus); err == nil && statusVal != nil {
+				connStatus = statusVal.(string)
+			}
+			deviceInfo["connectionStatus"] = connStatus
+
+			// 获取远程地址
+			deviceInfo["remoteAddr"] = conn.RemoteAddr().String()
+
+			// 获取最后心跳时间
+			if val, err := conn.GetProperty(pkg.PropKeyLastHeartbeatStr); err == nil && val != nil {
+				deviceInfo["heartbeatTime"] = val.(string)
+			}
+		}
+
+		devices = append(devices, deviceInfo)
+	}
 
 	return devices
 }

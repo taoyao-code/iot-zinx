@@ -99,6 +99,22 @@ func (h *ChargeControlHandler) Handle(request ziface.IRequest) {
 		return
 	}
 
+	// 获取设备ID和消息ID
+	var deviceID string
+	if deviceIDVal, err := conn.GetProperty(constants.PropKeyDeviceId); err == nil {
+		deviceID = deviceIDVal.(string)
+	}
+	messageID := dnyMsg.GetMsgID()
+
+	// 通知命令响应跟踪器
+	commandTracker := service.GetGlobalCommandTracker()
+	if commandTracker.NotifyResponse(deviceID, uint16(messageID), response) {
+		logger.WithFields(logrus.Fields{
+			"deviceId":  deviceID,
+			"messageId": fmt.Sprintf("0x%04X", messageID),
+		}).Debug("已通知命令响应跟踪器")
+	}
+
 	// 记录处理结果
 	logger.WithFields(logrus.Fields{
 		"connID":         conn.GetConnID(),
@@ -109,6 +125,7 @@ func (h *ChargeControlHandler) Handle(request ziface.IRequest) {
 		"portNumber":     response.PortNumber,
 		"waitPorts":      fmt.Sprintf("0x%04X", response.WaitPorts),
 		"timestamp":      response.Timestamp,
+		"messageId":      fmt.Sprintf("0x%04X", messageID),
 	}).Info("充电控制响应处理完成")
 
 	// 更新心跳时间

@@ -54,7 +54,7 @@ func StartTCPServer() error {
 		errMsg := "创建Zinx服务器实例失败"
 		fmt.Printf("❌ %s\n", errMsg)
 		logger.Error(errMsg)
-		return fmt.Errorf(errMsg)
+		return fmt.Errorf("%s", errMsg)
 	}
 	fmt.Printf("✅ Zinx服务器实例创建成功\n")
 
@@ -66,7 +66,7 @@ func StartTCPServer() error {
 		errMsg := "创建DNY数据包处理器失败"
 		fmt.Printf("❌ %s\n", errMsg)
 		logger.Error(errMsg)
-		return fmt.Errorf(errMsg)
+		return fmt.Errorf("%s", errMsg)
 	}
 	server.SetPacket(dnyPacket)
 	fmt.Printf("✅ DNY数据包处理器设置成功\n")
@@ -78,7 +78,7 @@ func StartTCPServer() error {
 		errMsg := "创建DNY协议拦截器失败"
 		fmt.Printf("❌ %s\n", errMsg)
 		logger.Error(errMsg)
-		return fmt.Errorf(errMsg)
+		return fmt.Errorf("%s", errMsg)
 	}
 
 	// 5. 设置拦截器（必须在SetPacket之后调用）
