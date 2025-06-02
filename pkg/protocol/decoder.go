@@ -89,24 +89,29 @@ func (d *DNYDecoder) Intercept(chain ziface.IChain) ziface.IcResp {
 	}
 
 	// 获取消息的原始数据，尝试从中提取命令字段作为路由ID
-	msgData := iMessage.GetData()
-	if msgData == nil {
-		fmt.Printf("❌ msgData为nil\n")
-		return chain.Proceed(request)
+	// 🔧 修复：使用 GetRawData() 而不是 GetData()，因为我们需要完整的DNY协议包
+	rawData := iMessage.GetRawData()
+	if rawData == nil || len(rawData) == 0 {
+		// 如果没有原始数据，尝试使用消息数据
+		rawData = iMessage.GetData()
+		if rawData == nil {
+			fmt.Printf("❌ rawData和msgData都为nil\n")
+			return chain.Proceed(request)
+		}
 	}
 
 	// 增强调试信息 - 显示原始数据
-	fmt.Printf("📦 DNYDecoder: 消息ID=%d, 数据长度=%d\n", iMessage.GetMsgID(), len(msgData))
-	if len(msgData) > 0 {
-		fmt.Printf("📦 数据前%d字节: [% 02X]\n", min(len(msgData), 20), msgData[:min(len(msgData), 20)])
+	fmt.Printf("📦 DNYDecoder: 消息ID=%d, 原始数据长度=%d\n", iMessage.GetMsgID(), len(rawData))
+	if len(rawData) > 0 {
+		fmt.Printf("📦 原始数据前%d字节: [% 02X]\n", min(len(rawData), 20), rawData[:min(len(rawData), 20)])
 	}
 
-	logger.Debugf("DNYDecoder Intercept: 原始消息ID=%d, 数据长度=%d",
-		iMessage.GetMsgID(), len(msgData))
+	logger.Debugf("DNYDecoder Intercept: 原始消息ID=%d, 原始数据长度=%d",
+		iMessage.GetMsgID(), len(rawData))
 
 	// 修复：降低最小长度要求，因为最短的DNY包可能只有9字节数据部分
 	// DNY协议最小结构：物理ID(4) + 消息ID(2) + 命令(1) + 校验(2) = 9字节
-	if len(msgData) >= 7 && msgData[0] == 0x44 && msgData[1] == 0x4E && msgData[2] == 0x59 {
+	if len(rawData) >= 7 && rawData[0] == 0x44 && rawData[1] == 0x4E && rawData[2] == 0x59 {
 		// 修复：正确计算命令字段偏移
 		// DNY协议完整结构：
 		// 0-2: 包头"DNY" (0x44 0x4E 0x59)
@@ -115,8 +120,8 @@ func (d *DNYDecoder) Intercept(chain ziface.IChain) ziface.IcResp {
 		// 9-10: 消息ID(小端序)
 		// 11: 命令字段 <- 这是我们需要的路由ID
 
-		if len(msgData) >= 12 { // 确保有足够字节访问命令字段
-			commandID := uint32(msgData[11])
+		if len(rawData) >= 12 { // 确保有足够字节访问命令字段
+			commandID := uint32(rawData[11])
 
 			// 关键步骤：设置消息ID为DNY协议的命令字段，以便Zinx框架正确路由
 			iMessage.SetMsgID(commandID)
@@ -126,13 +131,13 @@ func (d *DNYDecoder) Intercept(chain ziface.IChain) ziface.IcResp {
 			logger.Debugf("DNYDecoder Intercept: 检测到DNY协议，设置路由ID为命令字段 0x%02X (%d)",
 				commandID, commandID)
 		} else {
-			fmt.Printf("⚠️ DNYDecoder: DNY协议数据长度不足，无法提取命令字段 (长度=%d)\n", len(msgData))
+			fmt.Printf("⚠️ DNYDecoder: DNY协议数据长度不足，无法提取命令字段 (长度=%d)\n", len(rawData))
 			logger.Debugf("DNYDecoder Intercept: DNY协议数据长度不足，无法提取命令字段")
 		}
 	} else {
 		// 对于非DNY协议数据，保持原有的消息ID（通常为0，路由到特殊处理器）
 		fmt.Printf("⚠️ DNYDecoder: 非DNY协议数据，保持原消息ID=%d, 数据前3字节=[% 02X]\n",
-			iMessage.GetMsgID(), msgData[:min(len(msgData), 3)])
+			iMessage.GetMsgID(), rawData[:min(len(rawData), 3)])
 		logger.Debugf("DNYDecoder Intercept: 非DNY协议数据，保持原消息ID=%d",
 			iMessage.GetMsgID())
 	}

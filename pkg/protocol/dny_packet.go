@@ -308,15 +308,17 @@ func (dp *DNYPacket) handleDNYProtocolData(data []byte) (ziface.IMessage, error)
 		}).Debug("DNY协议数据校验和验证通过")
 	}
 
-	// 创建DNY消息对象
-	msg := dny_protocol.NewMessage(command, physicalId, make([]byte, payloadLen))
+	// 🔧 修复拦截器问题：先创建带有默认MsgID的消息对象，让拦截器后续设置正确的路由ID
+	// 这样确保拦截器链能够正常执行，从原始数据中提取命令ID并设置正确的MsgID
+	msg := dny_protocol.NewMessage(0, physicalId, make([]byte, payloadLen))
 
 	// 拷贝数据部分（如果有）
 	if payloadLen > 0 {
 		copy(msg.GetData(), data[12:12+payloadLen])
 	}
 
-	// 保存原始数据
+	// 💡 关键：保存完整的原始DNY协议数据，供拦截器使用
+	// 拦截器将从这个原始数据中提取命令ID(位置11)并设置正确的MsgID用于路由
 	msg.SetRawData(data[:totalLen])
 
 	// 记录十六进制日志
