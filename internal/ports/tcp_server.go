@@ -37,16 +37,13 @@ func StartTCPServer() error {
 	// 2. 创建服务器实例
 	server := znet.NewUserConfServer(zconf.GlobalObject)
 
-	// 3. 创建自定义数据包封包与解包器
-	dataPack := pkg.Protocol.NewDNYDataPackFactory().NewDataPack(cfg.Logger.LogHexDump)
-
-	// 3.1 创建DNY协议拦截器（修复：使用正确的IInterceptor而不是IDecoder）
+	// 3. 创建DNY协议拦截器 - 直接处理DNY协议数据
 	dnyInterceptor := pkg.Protocol.NewDNYProtocolInterceptorFactory().NewInterceptor()
 
-	// 4. 设置拦截器和数据包处理器
-	// 🔧 修复：使用正确的拦截器架构
+	// 4. 只设置拦截器，不设置DataPack
+	// 🔧 关键修复：不使用原生DataPack，让拦截器直接处理DNY协议数据
 	server.AddInterceptor(dnyInterceptor) // 使用DNYProtocolInterceptor进行协议解析和路由
-	server.SetPacket(dataPack)            // 使用DNYDataPack进行基本消息框架处理
+	// 注意：不设置server.SetPacket()，让拦截器直接处理原始TCP数据
 
 	// 5. 注册路由 - 确保在初始化包之后再注册路由
 	handlers.RegisterRouters(server)
