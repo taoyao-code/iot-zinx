@@ -192,7 +192,7 @@ func (dp *DNYPacket) Unpack(binaryData []byte) (ziface.IMessage, error) {
 			}
 
 			// 检查是否为ICCID（解码后为纯数字字符串）
-			if dp.isAllDigits(decoded) {
+			if IsAllDigits(decoded) {
 				fmt.Printf("📱 解码后发现ICCID: %s\n", string(decoded))
 				msg := dny_protocol.NewMessage(0, 0, decoded)
 				msg.SetRawData(binaryData) // 保存原始十六进制数据
@@ -328,12 +328,4 @@ func IsHexString(data []byte) bool {
 	return true
 }
 
-// isAllDigits 检查字节数组是否全为数字字符
-func (dp *DNYPacket) isAllDigits(data []byte) bool {
-	for _, b := range data {
-		if b < '0' || b > '9' {
-			return false
-		}
-	}
-	return true
-}
+// 🔧 已删除重复的isAllDigits函数，请使用special_handler.go中的IsAllDigits函数

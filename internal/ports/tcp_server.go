@@ -39,16 +39,6 @@ func StartTCPServer() error {
 	zconf.GlobalObject.WorkerPoolSize = uint32(zinxCfg.WorkerPoolSize)
 	zconf.GlobalObject.MaxWorkerTaskLen = uint32(zinxCfg.MaxWorkerTaskLen)
 
-	// 🔧 强制输出配置信息
-	fmt.Printf("🔧 Zinx配置已设置:\n")
-	fmt.Printf("   GlobalObject.Host: %s\n", zconf.GlobalObject.Host)
-	fmt.Printf("   GlobalObject.TCPPort: %d\n", zconf.GlobalObject.TCPPort)
-	fmt.Printf("   GlobalObject.Name: %s\n", zconf.GlobalObject.Name)
-
-	// 注意：不再设置Zinx原生日志配置，因为我们已经在main.go中通过utils.SetupZinxLogger()
-	// 设置了自定义日志系统，两者会发生冲突
-	// 2. 🔧 关键修复：创建服务器实例时使用配置
-	fmt.Printf("🔧 正在创建Zinx服务器实例...\n")
 	server := znet.NewUserConfServer(zconf.GlobalObject)
 	if server == nil {
 		errMsg := "创建Zinx服务器实例失败"
@@ -56,40 +46,22 @@ func StartTCPServer() error {
 		logger.Error(errMsg)
 		return fmt.Errorf("%s", errMsg)
 	}
-	fmt.Printf("✅ Zinx服务器实例创建成功\n")
 
-	// 3. 🔧 关键修复：创建并设置DNY协议数据包处理器
-	// DNYPacket负责将原始TCP数据解析为IMessage对象
-	fmt.Printf("🔧 正在创建DNY数据包处理器...\n")
-	dnyPacket := pkg.Protocol.NewDNYDataPackFactory().NewDataPack(true) // 启用十六进制日志记录
-	if dnyPacket == nil {
-		errMsg := "创建DNY数据包处理器失败"
-		fmt.Printf("❌ %s\n", errMsg)
-		logger.Error(errMsg)
-		return fmt.Errorf("%s", errMsg)
-	}
-	server.SetPacket(dnyPacket)
-	fmt.Printf("✅ DNY数据包处理器设置成功\n")
-
-	// 4. 创建DNY协议拦截器 - 负责协议解析和路由设置
-	fmt.Printf("🔧 正在创建DNY协议拦截器...\n")
-	dnyInterceptor := pkg.Protocol.NewDNYProtocolInterceptorFactory().NewInterceptor()
-	if dnyInterceptor == nil {
-		errMsg := "创建DNY协议拦截器失败"
+	// 🔧 关键修复：使用IDecoder方式进行协议解析，避免多重解析
+	// 创建DNY协议解码器实例
+	dnyDecoder := pkg.Protocol.NewDNYDecoder()
+	if dnyDecoder == nil {
+		errMsg := "创建DNY协议解码器失败"
 		fmt.Printf("❌ %s\n", errMsg)
 		logger.Error(errMsg)
 		return fmt.Errorf("%s", errMsg)
 	}
 
-	// 5. 设置拦截器（必须在SetPacket之后调用）
-	// 🔧 关键修复：确保拦截器能够正确处理DNYPacket解析后的数据
-	server.AddInterceptor(dnyInterceptor)
-	fmt.Printf("✅ DNY协议拦截器设置成功\n")
+	// 🔧 修复：正确设置解码器实例（不是类型）
+	server.SetDecoder(dnyDecoder)
 
-	// 6. 注册路由 - 确保在初始化包之后再注册路由
-	fmt.Printf("🔧 正在注册路由...\n")
+	// 注册路由 - 确保在初始化包之后再注册路由
 	handlers.RegisterRouters(server)
-	fmt.Printf("✅ 路由注册完成\n")
 
 	// 设置连接钩子
 	// 使用配置中的连接参数
@@ -98,7 +70,6 @@ func StartTCPServer() error {
 	keepAliveTimeout := time.Duration(deviceCfg.HeartbeatIntervalSeconds) * time.Second
 
 	// 使用pkg包中的连接钩子
-	fmt.Printf("🔧 正在设置连接钩子...\n")
 	connectionHooks := pkg.Network.NewConnectionHooks(
 		readTimeout,      // 读超时
 		writeTimeout,     // 写超时
@@ -120,7 +91,6 @@ func StartTCPServer() error {
 	// 设置连接钩子到服务器
 	server.SetOnConnStart(connectionHooks.OnConnectionStart)
 	server.SetOnConnStop(connectionHooks.OnConnectionStop)
-	fmt.Printf("✅ 连接钩子设置成功\n")
 
 	// 根据AP3000协议，设备主动发送心跳，服务器被动接收
 	// 不再使用Zinx的主动心跳机制，改为被动监听设备心跳超时
@@ -128,7 +98,6 @@ func StartTCPServer() error {
 	logger.Info("TCP服务器配置完成，等待设备连接和心跳消息")
 
 	// 创建设备监控器
-	fmt.Printf("🔧 正在创建设备监控器...\n")
 	deviceMonitor := pkg.Monitor.NewDeviceMonitor(func(callback func(deviceId string, conn ziface.IConnection) bool) {
 		// 遍历所有设备连接并传递给回调函数
 		tcpMonitor := pkg.Monitor.GetGlobalMonitor()
@@ -144,14 +113,11 @@ func StartTCPServer() error {
 
 	// 启动设备监控器
 	deviceMonitor.Start()
-	fmt.Printf("✅ 设备监控器启动成功\n")
 
 	// 🔧 关键修复：添加详细的启动日志和错误处理
-	fmt.Printf("🔧 准备启动TCP服务器在 %s:%d\n", cfg.TCPServer.Host, zinxCfg.TCPPort)
 	logger.Infof("TCP服务器启动在 %s:%d", cfg.TCPServer.Host, zinxCfg.TCPPort)
 
 	// 🔧 启动服务器 - 添加错误捕获
-	fmt.Printf("🔧 调用 server.Serve()...\n")
 
 	// Serve() 方法通常是阻塞的，我们需要在defer中处理错误
 	defer func() {
@@ -176,7 +142,6 @@ func StartTCPServer() error {
 			}()
 
 			// 尝试启动服务器
-			fmt.Printf("🔧 正在调用server.Serve()，这是阻塞调用...\n")
 			server.Serve() // 这是阻塞调用
 
 			// 如果Serve()返回，说明服务器停止了
@@ -189,7 +154,6 @@ func StartTCPServer() error {
 			return err
 		case <-time.After(2 * time.Second):
 			// 2秒后如果没有错误，认为启动成功
-			fmt.Printf("✅ TCP服务器启动成功！\n")
 			logger.Info("TCP服务器启动成功")
 			return nil
 		}

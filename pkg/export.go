@@ -46,6 +46,8 @@ var Protocol = struct {
 	NewDNYDataPackFactory func() protocol.IDataPackFactory
 	// 创建DNY协议拦截器工厂
 	NewDNYProtocolInterceptorFactory func() protocol.IInterceptorFactory
+	// 🔧 创建DNY协议解码器
+	NewDNYDecoder func() ziface.IDecoder
 	// 🚫 ParseDNYProtocol 已删除，请使用 ParseDNYData 替代
 	// 手动解析十六进制数据
 	ParseManualData func(hexData, description string)
@@ -81,6 +83,7 @@ var Protocol = struct {
 }{
 	NewDNYDataPackFactory:            protocol.NewDNYDataPackFactory,
 	NewDNYProtocolInterceptorFactory: protocol.NewDNYProtocolInterceptorFactory,
+	NewDNYDecoder:                    protocol.NewDNYDecoder,
 	ParseManualData:                  protocol.ParseManualData,
 	ParseDNYData:                     protocol.ParseDNYData,
 	ParseDNYHexString:                protocol.ParseDNYHexString,

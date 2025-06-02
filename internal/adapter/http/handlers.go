@@ -270,8 +270,8 @@ func HandleSendDNYCommand(c *gin.Context) {
 		}
 	}
 
-	// 构建DNY协议帧
-	packetData := dny_protocol.BuildDNYPacket(uint32(physicalID), req.MessageID, req.Command, data)
+	// 🔧 使用pkg包中的统一接口构建DNY协议帧
+	packetData := pkg.Protocol.BuildDNYResponsePacket(uint32(physicalID), req.MessageID, req.Command, data)
 
 	// 发送到设备
 	err = conn.SendBuffMsg(0, packetData)

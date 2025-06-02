@@ -2,7 +2,6 @@ package dny_protocol
 
 import (
 	"encoding/binary"
-	"fmt"
 
 	"github.com/aceld/zinx/ziface"
 )
@@ -107,79 +106,11 @@ type MessageInfo struct {
 	Direction   string           `json:"direction"` // "ingress" 或 "egress"
 }
 
-// 🔧 BuildDNYPacket 已标记为废弃 - 请使用 pkg.Protocol.BuildDNYResponsePacket() 统一接口
-// 为了避免导入循环，此函数将被删除
-func BuildDNYPacket(physicalID uint32, messageID uint16, command byte, data []byte) []byte {
-	// ⚠️ 此函数已废弃，请使用 pkg.Protocol.BuildDNYResponsePacket() 替代
-	// 临时保留基本实现以维持向后兼容性
-
-	// 简化的构建逻辑
-	dataLen := 4 + 2 + 1 + len(data)
-	packet := make([]byte, 0, 5+dataLen+2)
-
-	// 包头 "DNY"
-	packet = append(packet, 'D', 'N', 'Y')
-
-	// 长度（小端模式）
-	packet = append(packet, byte(dataLen), byte(dataLen>>8))
-
-	// 物理ID（小端模式）
-	packet = append(packet, byte(physicalID), byte(physicalID>>8),
-		byte(physicalID>>16), byte(physicalID>>24))
-
-	// 消息ID（小端模式）
-	packet = append(packet, byte(messageID), byte(messageID>>8))
-
-	// 命令
-	packet = append(packet, command)
-
-	// 数据
-	packet = append(packet, data...)
-
-	// 🔧 重复实现的临时校验和计算，应该使用统一接口
-	checksum := CalculateChecksum(packet[5:])
-	packet = append(packet, byte(checksum), byte(checksum>>8))
-
-	return packet
-}
-
-// 🔧 CalculateChecksum 已标记为废弃 - 请使用 pkg.Protocol.CalculatePacketChecksum() 统一接口
-// 保留此函数仅为了避免导入循环，实际应该使用统一接口
-func CalculateChecksum(data []byte) uint16 {
-	var sum uint16
-	for _, b := range data {
-		sum += uint16(b)
-	}
-	return sum
-}
-
-// 🔧 ParseDNYPacket 已标记为废弃 - 请使用 pkg.Protocol.ParseDNYData() 统一接口
-// 为了避免导入循环，此函数将被删除
-func ParseDNYPacket(packet []byte) (*DNYPacketInfo, error) {
-	// ⚠️ 此函数已废弃，请使用 pkg.Protocol.ParseDNYData() 替代
-	// 临时保留基本实现以维持向后兼容性
-	if len(packet) < MinPackageLen {
-		return nil, fmt.Errorf("数据包长度不足，最小需要%d字节", MinPackageLen)
-	}
-
-	// 检查包头
-	if string(packet[0:3]) != DnyHeader {
-		return nil, fmt.Errorf("无效的DNY包头")
-	}
-
-	// 基本解析 - 仅用于向后兼容
-	physicalID := binary.LittleEndian.Uint32(packet[5:9])
-	messageID := binary.LittleEndian.Uint16(packet[9:11])
-	command := packet[11]
-
-	return &DNYPacketInfo{
-		PhysicalID:    physicalID,
-		MessageID:     messageID,
-		Command:       command,
-		Payload:       []byte{},
-		ChecksumValid: false, // 简化实现
-	}, nil
-}
+// 🔧 已删除重复的废弃函数：BuildDNYPacket、CalculateChecksum、ParseDNYPacket
+// 请使用pkg/protocol中的统一接口：
+// - pkg.Protocol.BuildDNYResponsePacket() 替代 BuildDNYPacket
+// - pkg.Protocol.CalculatePacketChecksum() 替代 CalculateChecksum
+// - pkg.Protocol.ParseDNYData() 替代 ParseDNYPacket
 
 // DNYPacketInfo DNY数据包解析信息
 type DNYPacketInfo struct {
@@ -225,6 +156,37 @@ func BuildChargeControlPacket(physicalID uint32, messageID uint16, rateMode byte
 	// 二维码灯(1字节)
 	data[29] = qrCodeLight
 
-	// 构建完整的DNY协议包
-	return BuildDNYPacket(physicalID, messageID, CmdChargeControl, data)
+	// 🔧 使用pkg包中的统一接口构建DNY协议包
+	// 注意：这里需要导入pkg包，但可能会引起循环导入
+	// 临时方案：手动构建协议包
+	dataLen := 4 + 2 + 1 + len(data)
+	packet := make([]byte, 0, 5+dataLen+2)
+
+	// 包头 "DNY"
+	packet = append(packet, 'D', 'N', 'Y')
+
+	// 长度（小端模式）
+	packet = append(packet, byte(dataLen), byte(dataLen>>8))
+
+	// 物理ID（小端模式）
+	packet = append(packet, byte(physicalID), byte(physicalID>>8),
+		byte(physicalID>>16), byte(physicalID>>24))
+
+	// 消息ID（小端模式）
+	packet = append(packet, byte(messageID), byte(messageID>>8))
+
+	// 命令
+	packet = append(packet, CmdChargeControl)
+
+	// 数据
+	packet = append(packet, data...)
+
+	// 校验和计算
+	var checksum uint16
+	for _, b := range packet[5:] {
+		checksum += uint16(b)
+	}
+	packet = append(packet, byte(checksum), byte(checksum>>8))
+
+	return packet
 }

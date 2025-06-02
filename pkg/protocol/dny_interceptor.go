@@ -1,8 +1,6 @@
 package protocol
 
 import (
-	"encoding/binary"
-	"encoding/hex"
 	"fmt"
 	"time"
 
@@ -73,29 +71,7 @@ func (interceptor *DNYProtocolInterceptor) Intercept(chain ziface.IChain) ziface
 	}
 }
 
-// decodeHexIfNeeded 如果是十六进制字符串则解码
-func (interceptor *DNYProtocolInterceptor) decodeHexIfNeeded(data []byte) []byte {
-	// 检查是否为十六进制字符串
-	if len(data) > 0 && len(data)%2 == 0 {
-		allHex := true
-		for _, b := range data {
-			if !((b >= '0' && b <= '9') || (b >= 'a' && b <= 'f') || (b >= 'A' && b <= 'F')) {
-				allHex = false
-				break
-			}
-		}
-
-		if allHex {
-			decoded, err := hex.DecodeString(string(data))
-			if err == nil {
-				fmt.Printf("🔄 解码十六进制数据: %d -> %d 字节\n", len(data), len(decoded))
-				return decoded
-			}
-		}
-	}
-
-	return data
-}
+// 🔧 删除了重复的decodeHexIfNeeded函数，使用dny_packet.go中的IsHexString和hex.DecodeString
 
 // isDNYProtocol 检查是否为DNY协议数据
 func (interceptor *DNYProtocolInterceptor) isDNYProtocol(data []byte) bool {
@@ -110,57 +86,37 @@ func (interceptor *DNYProtocolInterceptor) handleDNYProtocol(
 	message ziface.IMessage,
 	data []byte,
 ) ziface.IcResp {
-	if len(data) < 12 { // DNY最小长度检查
-		fmt.Printf("⚠️ DNY数据长度不足: %d\n", len(data))
+	// 🔧 使用统一的解析接口
+	result, err := ParseDNYData(data)
+	if err != nil {
+		fmt.Printf("⚠️ DNY数据解析失败: %v\n", err)
 		return chain.Proceed(iRequest)
 	}
 
-	// 解析DNY协议字段
-	dataLen := binary.LittleEndian.Uint16(data[3:5])
-	totalLen := 5 + int(dataLen)
-
-	if len(data) < totalLen {
-		fmt.Printf("⚠️ DNY数据不完整: %d < %d\n", len(data), totalLen)
-		return chain.Proceed(iRequest)
-	}
-
-	// 提取关键字段
-	physicalID := binary.LittleEndian.Uint32(data[5:9])
-	messageID := binary.LittleEndian.Uint16(data[9:11])
-	commandID := uint32(data[11])
-
-	// 数据部分
-	payloadLen := int(dataLen) - 4 - 2 - 1 - 2 // 减去物理ID+消息ID+命令+校验
-	var payload []byte
-	if payloadLen > 0 && len(data) >= 12+payloadLen {
-		payload = data[12 : 12+payloadLen]
-	}
-
-	fmt.Printf("✅ DNY协议解析: 命令=0x%02X, 物理ID=0x%08X, 消息ID=0x%04X, 载荷长度=%d\n",
-		commandID, physicalID, messageID, payloadLen)
+	fmt.Printf("✅ DNY协议解析: %s\n", result.String())
 
 	// 🎯 强制控制台输出路由信息
-	fmt.Printf("🎯 准备路由到 MsgID: 0x%02x (命令ID)\n", commandID)
+	fmt.Printf("🎯 准备路由到 MsgID: 0x%02x (命令ID)\n", result.Command)
 
 	// 创建DNY消息对象，设置正确的MsgID用于路由
-	dnyMsg := dny_protocol.NewMessage(commandID, physicalID, payload)
-	dnyMsg.SetRawData(data[:totalLen])
+	dnyMsg := dny_protocol.NewMessage(uint32(result.Command), result.PhysicalID, result.Data)
+	dnyMsg.SetRawData(data)
 
 	// 设置消息ID用于路由
-	message.SetMsgID(commandID)
+	message.SetMsgID(uint32(result.Command))
 
 	// 替换请求中的消息对象
-	// 注意：这里需要创建新的Request对象，因为IRequest接口通常不支持直接修改Message
 	newRequest := &RequestWrapper{
 		originalRequest: iRequest,
 		newMessage:      dnyMsg,
 	}
 
 	logger.WithFields(logrus.Fields{
-		"command":    fmt.Sprintf("0x%02X", commandID),
-		"physicalID": fmt.Sprintf("0x%08X", physicalID),
-		"messageID":  fmt.Sprintf("0x%04X", messageID),
-		"payloadLen": payloadLen,
+		"command":    fmt.Sprintf("0x%02X", result.Command),
+		"physicalID": fmt.Sprintf("0x%08X", result.PhysicalID),
+		"messageID":  fmt.Sprintf("0x%04X", result.MessageID),
+		"dataLen":    len(result.Data),
+		"valid":      result.ChecksumValid,
 	}).Info("DNY协议消息处理完成，路由到处理器")
 
 	return chain.Proceed(newRequest)
@@ -175,14 +131,17 @@ func (interceptor *DNYProtocolInterceptor) handleSpecialMessage(
 ) ziface.IcResp {
 	var msgID uint32 = 0 // 默认路由到特殊处理器
 
-	if len(data) == 20 && interceptor.isAllDigits(data) {
-		// ICCID (20位数字)
-		msgID = 0xFF01
-		fmt.Printf("📱 检测到ICCID: %s\n", string(data))
-	} else if len(data) == 4 && string(data) == "link" {
-		// link心跳
-		msgID = 0xFF02
-		fmt.Printf("💓 检测到link心跳\n")
+	// 🔧 使用统一的特殊消息处理函数
+	if HandleSpecialMessage(data) {
+		if len(data) == IOT_SIM_CARD_LENGTH && IsAllDigits(data) {
+			// ICCID (20位数字)
+			msgID = 0xFF01
+			fmt.Printf("📱 检测到ICCID: %s\n", string(data))
+		} else if len(data) == 4 && string(data) == IOT_LINK_HEARTBEAT {
+			// link心跳
+			msgID = 0xFF02
+			fmt.Printf("💓 检测到link心跳\n")
+		}
 	} else {
 		// 其他未知数据
 		fmt.Printf("❓ 未知数据类型，长度: %d\n", len(data))
@@ -206,15 +165,7 @@ func (interceptor *DNYProtocolInterceptor) handleSpecialMessage(
 	return chain.Proceed(newRequest)
 }
 
-// isAllDigits 检查是否全为数字字符
-func (interceptor *DNYProtocolInterceptor) isAllDigits(data []byte) bool {
-	for _, b := range data {
-		if b < '0' || b > '9' {
-			return false
-		}
-	}
-	return true
-}
+// 🔧 删除了重复的isAllDigits函数，使用special_handler.go中的IsAllDigits函数
 
 // RequestWrapper 包装器，用于替换请求中的消息对象
 type RequestWrapper struct {
