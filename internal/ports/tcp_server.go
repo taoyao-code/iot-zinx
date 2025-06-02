@@ -35,7 +35,8 @@ func StartTCPServer() error {
 	// 注意：不再设置Zinx原生日志配置，因为我们已经在main.go中通过utils.SetupZinxLogger()
 	// 设置了自定义日志系统，两者会发生冲突
 	// 2. 创建服务器实例
-	server := znet.NewUserConfServer(zconf.GlobalObject)
+	server := znet.NewServer()
+	// server := znet.NewUserConfServer(zconf.GlobalObject)
 
 	// 3. 🔧 关键修复：创建并设置DNY协议数据包处理器
 	// DNYPacket负责将原始TCP数据解析为IMessage对象

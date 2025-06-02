@@ -1,1 +1,12 @@
-{}
+{
+  "Name": "zinx server Demo",
+  "Host": "0.0.0.0",
+  "TCPPort": 7054,
+  "MaxConn": 3,
+  "WorkerMode": "",
+  "WorkerPoolSize": 10,
+  "LogDir": "./logs",
+  "LogFile": "zinx.log",
+  "LogIsolationLevel": 0,
+  "Mode": "kcp"
+}
