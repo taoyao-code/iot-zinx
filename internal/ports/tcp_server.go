@@ -37,21 +37,16 @@ func StartTCPServer() error {
 	// 2. 创建服务器实例
 	server := znet.NewUserConfServer(zconf.GlobalObject)
 
-	// 注意：自定义日志已在main.go中通过utils.SetupZinxLogger()设置
-	// 不再使用Zinx原生日志配置，避免冲突
-
 	// 3. 创建自定义数据包封包与解包器
 	dataPack := pkg.Protocol.NewDNYDataPackFactory().NewDataPack(cfg.Logger.LogHexDump)
 
 	// 3.1 创建DNY协议拦截器（修复：使用正确的IInterceptor而不是IDecoder）
-	// dnyInterceptor := pkg.Protocol.NewDNYProtocolInterceptorFactory().NewInterceptor()
+	dnyInterceptor := pkg.Protocol.NewDNYProtocolInterceptorFactory().NewInterceptor()
 
 	// 4. 设置拦截器和数据包处理器
 	// 🔧 修复：使用正确的拦截器架构
-	// server.AddInterceptor(dnyInterceptor)                     // 使用DNYProtocolInterceptor进行协议解析和路由
-	// server.AddInterceptor(&protocol.DNYProtocolInterceptor{}) // 使用DNYProtocolInterceptor进行协议解析和路由
-	server.AddInterceptor(&IoTDecoder{}) // 使用DNYProtocolInterceptor进行协议解析和路由
-	server.SetPacket(dataPack)           // 使用DNYDataPack进行基本消息框架处理
+	server.AddInterceptor(dnyInterceptor) // 使用DNYProtocolInterceptor进行协议解析和路由
+	server.SetPacket(dataPack)            // 使用DNYDataPack进行基本消息框架处理
 
 	// 5. 注册路由 - 确保在初始化包之后再注册路由
 	handlers.RegisterRouters(server)
