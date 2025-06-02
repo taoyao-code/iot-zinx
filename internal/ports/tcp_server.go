@@ -43,14 +43,13 @@ func StartTCPServer() error {
 	// 3. 创建自定义数据包封包与解包器
 	dataPack := pkg.Protocol.NewDNYDataPackFactory().NewDataPack(cfg.Logger.LogHexDump)
 
-	// 3.1 创建自定义解码器
-	// 简化方案：先直接使用我们的DNY解码器，确保它能被调用
-	decoder := pkg.Protocol.NewDNYDecoderFactory().NewDecoder()
+	// 3.1 创建DNY协议拦截器（修复：使用正确的IInterceptor而不是IDecoder）
+	dnyInterceptor := pkg.Protocol.NewDNYProtocolInterceptorFactory().NewInterceptor()
 
 	// 4. 设置拦截器和数据包处理器
-	// 添加我们的自定义DNY解码器
-	server.AddInterceptor(decoder)
-	server.SetPacket(dataPack)
+	// 🔧 修复：使用正确的拦截器架构
+	server.AddInterceptor(dnyInterceptor) // 使用DNYProtocolInterceptor进行协议解析和路由
+	server.SetPacket(dataPack)            // 使用DNYDataPack进行基本消息框架处理
 
 	// 5. 注册路由 - 确保在初始化包之后再注册路由
 	handlers.RegisterRouters(server)

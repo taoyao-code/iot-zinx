@@ -132,28 +132,42 @@ func (dp *DNYPacket) packDNYMessage(msg ziface.IMessage) ([]byte, error) {
 }
 
 // Unpack 拆包方法
+// 🔧 修复：简化DataPack职责，只负责基本消息框架，协议解析交给拦截器
 // 将二进制数据解析为IMessage对象，支持十六进制编码和原始数据
 func (dp *DNYPacket) Unpack(binaryData []byte) (ziface.IMessage, error) {
 	// 首先尝试检测数据是否为十六进制编码字符串
 	actualData := dp.decodeHexDataIfNeeded(binaryData)
 
-	// 首先检查是否为特殊消息 (SIM卡号和link心跳)
-	// 这里添加对特殊消息的处理
-	specialMsg, err := dp.checkSpecialMessages(actualData)
-	if err != nil {
-		return nil, err
-	}
-	if specialMsg != nil {
-		return specialMsg, nil
+	// 🔧 关键修复：创建简单消息对象，保存完整原始数据，让拦截器负责协议解析
+	// 不再在DataPack中进行复杂的协议解析，这样确保拦截器链能够正常执行
+
+	// 检查数据长度是否足够
+	if len(actualData) == 0 {
+		return nil, ErrNotEnoughData
 	}
 
-	// 特殊处理：如果数据不符合DNY协议格式，创建特殊消息类型
-	if !IsDNYProtocolData(actualData) {
-		return dp.handleNonDNYData(actualData)
+	// 记录接收到的数据
+	if dp.logHexDump {
+		logger.WithFields(logrus.Fields{
+			"dataLen": len(actualData),
+			"dataHex": hex.EncodeToString(actualData),
+		}).Debug("DNYPacket.Unpack 接收数据")
 	}
 
-	// 处理DNY协议数据
-	return dp.handleDNYProtocolData(actualData)
+	// 创建消息对象，msgID=0（默认值），让拦截器后续设置正确的路由ID
+	// 拦截器将从原始数据中解析DNY协议并设置正确的MsgID用于路由
+	msg := dny_protocol.NewMessage(0, 0, actualData)
+
+	// 💡 关键：保存完整的原始数据，供拦截器使用
+	// 拦截器将从这个原始数据中提取命令ID并设置正确的MsgID用于路由
+	msg.SetRawData(actualData)
+
+	logger.WithFields(logrus.Fields{
+		"msgID":   msg.GetMsgID(),
+		"dataLen": len(actualData),
+	}).Debug("DNYPacket.Unpack 创建消息对象，等待拦截器处理")
+
+	return msg, nil
 }
 
 // checkSpecialMessages 检查是否为特殊消息 (SIM卡号和link心跳)

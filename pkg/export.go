@@ -43,8 +43,8 @@ const (
 var Protocol = struct {
 	// 创建DNY协议数据包工厂
 	NewDNYDataPackFactory func() protocol.IDataPackFactory
-	// 创建DNY协议解码器工厂
-	NewDNYDecoderFactory func() protocol.IDecoderFactory
+	// 创建DNY协议拦截器工厂
+	NewDNYProtocolInterceptorFactory func() protocol.IInterceptorFactory
 	// 解析DNY协议数据
 	ParseDNYProtocol func(data []byte) string
 	// 手动解析十六进制数据
@@ -75,23 +75,23 @@ var Protocol = struct {
 	// 判断命令是否需要确认回复
 	NeedConfirmation func(command uint8) bool
 }{
-	NewDNYDataPackFactory:   protocol.NewDNYDataPackFactory,
-	NewDNYDecoderFactory:    protocol.NewDNYDecoderFactory,
-	ParseDNYProtocol:        protocol.ParseDNYProtocol,
-	ParseManualData:         protocol.ParseManualData,
-	CalculatePacketChecksum: protocol.CalculatePacketChecksum,
-	IsDNYProtocolData:       protocol.IsDNYProtocolData,
-	IsHexString:             protocol.IsHexString,
-	IsAllDigits:             protocol.IsAllDigits,
-	HandleSpecialMessage:    protocol.HandleSpecialMessage,
-	IOT_SIM_CARD_LENGTH:     protocol.IOT_SIM_CARD_LENGTH,
-	IOT_LINK_HEARTBEAT:      protocol.IOT_LINK_HEARTBEAT,
-	NewRawDataHook:          protocol.NewRawDataHook,
-	DefaultRawDataHandler:   protocol.DefaultRawDataHandler,
-	PrintRawData:            protocol.PrintRawData,
-	SendDNYResponse:         protocol.SendDNYResponse,
-	BuildDNYResponsePacket:  protocol.BuildDNYResponsePacket,
-	NeedConfirmation:        protocol.NeedConfirmation,
+	NewDNYDataPackFactory:            protocol.NewDNYDataPackFactory,
+	NewDNYProtocolInterceptorFactory: protocol.NewDNYProtocolInterceptorFactory,
+	ParseDNYProtocol:                 protocol.ParseDNYProtocol,
+	ParseManualData:                  protocol.ParseManualData,
+	CalculatePacketChecksum:          protocol.CalculatePacketChecksum,
+	IsDNYProtocolData:                protocol.IsDNYProtocolData,
+	IsHexString:                      protocol.IsHexString,
+	IsAllDigits:                      protocol.IsAllDigits,
+	HandleSpecialMessage:             protocol.HandleSpecialMessage,
+	IOT_SIM_CARD_LENGTH:              protocol.IOT_SIM_CARD_LENGTH,
+	IOT_LINK_HEARTBEAT:               protocol.IOT_LINK_HEARTBEAT,
+	NewRawDataHook:                   protocol.NewRawDataHook,
+	DefaultRawDataHandler:            protocol.DefaultRawDataHandler,
+	PrintRawData:                     protocol.PrintRawData,
+	SendDNYResponse:                  protocol.SendDNYResponse,
+	BuildDNYResponsePacket:           protocol.BuildDNYResponsePacket,
+	NeedConfirmation:                 protocol.NeedConfirmation,
 }
 
 // Network 网络相关工具导出
