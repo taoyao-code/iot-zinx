@@ -94,8 +94,8 @@ tidy:
 # 生成 Swagger 文档
 swagger:
 	@echo "==> Generating Swagger documentation..."
-	@$(SWAG) init -g cmd/server/main.go -o internal/docs
-	@echo "==> Swagger documentation generated."
+	@$(SWAG) init -g cmd/gateway/main.go
+	@echo "==> Swagger documentation generated in docs/ directory"
 
 # 显示帮助信息
 help:

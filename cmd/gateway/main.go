@@ -1,3 +1,31 @@
+// Package main IoT充电设备管理网关
+// @title IoT充电设备管理网关API
+// @version 1.0
+// @description 基于DNY协议的IoT充电设备管理系统API接口文档
+// @termsOfService http://swagger.io/terms/
+
+// @contact.name API支持团队
+// @contact.url http://www.swagger.io/support
+// @contact.email support@swagger.io
+
+// @license.name MIT
+// @license.url https://opensource.org/licenses/MIT
+
+// @host localhost:8080
+// @BasePath /
+
+// @tag.name device "设备管理"
+// @tag.description "设备状态查询和管理相关接口"
+
+// @tag.name command "命令控制"
+// @tag.description "设备命令发送和控制相关接口"
+
+// @tag.name charging "充电管理"
+// @tag.description "充电控制和管理相关接口"
+
+// @tag.name system "系统监控"
+// @tag.description "系统健康检查和监控相关接口"
+
 package main
 
 import (

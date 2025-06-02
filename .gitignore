@@ -76,3 +76,14 @@ Thumbs.db
 /tmp
 
 internal/docs
+
+# Swagger生成的文档文件
+/docs/docs.go
+/docs/swagger.json
+/docs/swagger.yaml
+
+# 可执行文件
+/bin/
+/cmd/*/main
+gateway
+gateway.exe

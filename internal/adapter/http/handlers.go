@@ -17,12 +17,7 @@ import (
 	"github.com/sirupsen/logrus"
 )
 
-// API响应结构
-type APIResponse struct {
-	Code    int         `json:"code"`
-	Message string      `json:"message"`
-	Data    interface{} `json:"data,omitempty"`
-}
+// 移除重复定义，使用models.go中的APIResponse
 
 // 属性键常量 - 使用pkg包中定义的常量
 const (
@@ -39,14 +34,37 @@ const (
 )
 
 // HandleHealthCheck 健康检查处理
+// @Summary 健康检查
+// @Description 检查系统健康状态和运行状态
+// @Tags system
+// @Accept json
+// @Produce json
+// @Success 200 {object} APIResponse{data=HealthResponse} "系统正常"
+// @Router /health [get]
 func HandleHealthCheck(c *gin.Context) {
 	c.JSON(http.StatusOK, APIResponse{
 		Code:    0,
 		Message: "充电设备网关运行正常",
+		Data: HealthResponse{
+			Status:    "ok",
+			Timestamp: time.Now(),
+			Version:   "1.0.0",
+			Uptime:    "运行中",
+		},
 	})
 }
 
 // HandleDeviceStatus 处理设备状态查询
+// @Summary 查询设备状态
+// @Description 根据设备ID查询设备的详细状态信息
+// @Tags device
+// @Accept json
+// @Produce json
+// @Param deviceId path string true "设备ID" example("04ceaa40")
+// @Success 200 {object} APIResponse{data=DeviceInfo} "查询成功"
+// @Failure 400 {object} ErrorResponse "参数错误"
+// @Failure 404 {object} ErrorResponse "设备不在线"
+// @Router /api/v1/device/{deviceId}/status [get]
 func HandleDeviceStatus(c *gin.Context) {
 	deviceID := c.Param("deviceId")
 
@@ -114,6 +132,17 @@ func HandleDeviceStatus(c *gin.Context) {
 }
 
 // HandleSendCommand 处理发送命令到设备
+// @Summary 发送命令到设备
+// @Description 向指定设备发送控制命令
+// @Tags command
+// @Accept json
+// @Produce json
+// @Param request body SendCommandRequest true "命令参数"
+// @Success 200 {object} APIResponse "命令发送成功"
+// @Failure 400 {object} ErrorResponse "参数错误"
+// @Failure 404 {object} ErrorResponse "设备不在线"
+// @Failure 500 {object} ErrorResponse "发送失败"
+// @Router /api/v1/device/command [post]
 func HandleSendCommand(c *gin.Context) {
 	// 解析请求参数
 	var req struct {
@@ -177,6 +206,14 @@ func HandleSendCommand(c *gin.Context) {
 }
 
 // HandleDeviceList 获取当前在线设备列表
+// @Summary 获取设备列表
+// @Description 获取所有设备的状态列表，包括在线和离线设备
+// @Tags device
+// @Accept json
+// @Produce json
+// @Success 200 {object} APIResponse{data=DeviceListResponse} "获取成功"
+// @Failure 500 {object} ErrorResponse "系统错误"
+// @Router /api/v1/devices [get]
 func HandleDeviceList(c *gin.Context) {
 	// 获取设备服务
 	deviceService := app.GetServiceManager().DeviceService
@@ -249,6 +286,17 @@ func HandleDeviceList(c *gin.Context) {
 }
 
 // HandleSendDNYCommand 发送DNY协议命令
+// @Summary 发送DNY协议命令
+// @Description 向设备发送DNY协议格式的命令
+// @Tags command
+// @Accept json
+// @Produce json
+// @Param request body DNYCommandRequest true "DNY命令参数"
+// @Success 200 {object} APIResponse{data=DNYCommandResponse} "命令发送成功"
+// @Failure 400 {object} ErrorResponse "参数错误"
+// @Failure 404 {object} ErrorResponse "设备不在线"
+// @Failure 500 {object} ErrorResponse "发送失败"
+// @Router /api/v1/command/dny [post]
 func HandleSendDNYCommand(c *gin.Context) {
 	var req struct {
 		DeviceID  string `json:"deviceId" binding:"required"`
@@ -335,6 +383,16 @@ func HandleSendDNYCommand(c *gin.Context) {
 }
 
 // HandleQueryDeviceStatus 查询设备状态（0x81命令）
+// @Summary 查询设备状态
+// @Description 发送0x81命令查询设备联网状态
+// @Tags device
+// @Accept json
+// @Produce json
+// @Param deviceId path string true "设备ID" example("04ceaa40")
+// @Success 200 {object} APIResponse "查询命令发送成功"
+// @Failure 400 {object} ErrorResponse "参数错误"
+// @Failure 404 {object} ErrorResponse "设备不在线"
+// @Router /api/v1/device/{deviceId}/query [get]
 func HandleQueryDeviceStatus(c *gin.Context) {
 	deviceID := c.Param("deviceId")
 	if deviceID == "" {
@@ -364,6 +422,16 @@ func HandleQueryDeviceStatus(c *gin.Context) {
 }
 
 // HandleStartCharging 开始充电（使用统一的充电控制服务）
+// @Summary 开始充电
+// @Description 向指定设备端口发送开始充电命令
+// @Tags charging
+// @Accept json
+// @Produce json
+// @Param request body ChargingStartRequest true "充电参数"
+// @Success 200 {object} APIResponse{data=ChargingControlResponse} "充电启动成功"
+// @Failure 400 {object} ErrorResponse "参数错误"
+// @Failure 500 {object} ErrorResponse "充电启动失败"
+// @Router /api/v1/charging/start [post]
 func HandleStartCharging(c *gin.Context) {
 	var req struct {
 		DeviceID string `json:"deviceId" binding:"required"`
@@ -417,6 +485,16 @@ func HandleStartCharging(c *gin.Context) {
 }
 
 // HandleStopCharging 停止充电（使用统一的充电控制服务）
+// @Summary 停止充电
+// @Description 向指定设备端口发送停止充电命令
+// @Tags charging
+// @Accept json
+// @Produce json
+// @Param request body ChargingStopRequest true "停止充电参数"
+// @Success 200 {object} APIResponse{data=ChargingControlResponse} "充电停止成功"
+// @Failure 400 {object} ErrorResponse "参数错误"
+// @Failure 500 {object} ErrorResponse "充电停止失败"
+// @Router /api/v1/charging/stop [post]
 func HandleStopCharging(c *gin.Context) {
 	var req struct {
 		DeviceID string `json:"deviceId" binding:"required"`
