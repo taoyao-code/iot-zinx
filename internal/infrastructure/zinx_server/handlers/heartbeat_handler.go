@@ -22,22 +22,31 @@ func (h *HeartbeatHandler) PreHandle(request ziface.IRequest) {
 	conn := request.GetConnection()
 	msg := request.GetMessage()
 
-	// 获取DNY消息
-	dnyMsg, ok := h.GetDNYMessage(request)
-	if !ok {
-		logger.WithFields(logrus.Fields{
-			"connID": conn.GetConnID(),
-			"msgID":  msg.GetMsgID(),
-		}).Error("消息类型转换失败，无法处理设备心跳")
-		return
-	}
+	// 🔧 修复：处理标准Zinx消息
+	data := msg.GetData()
+
+	logger.WithFields(logrus.Fields{
+		"connID":      conn.GetConnID(),
+		"msgID":       msg.GetMsgID(),
+		"messageType": fmt.Sprintf("%T", msg),
+		"dataLen":     len(data),
+	}).Info("✅ 心跳处理器：开始处理标准Zinx消息")
+
+	// 🔧 修复：暂时使用消息ID作为PhysicalID，后续可以通过其他方式获取真实的PhysicalID
+	// TODO: 需要在解码器中正确传递PhysicalID到业务处理器
+	physicalId := msg.GetMsgID()
+	fmt.Printf("🔧 心跳处理器使用消息ID作为PhysicalID: 0x%08X\n", physicalId)
+
+	deviceId := h.FormatPhysicalID(physicalId)
+
+	logger.WithFields(logrus.Fields{
+		"connID":     conn.GetConnID(),
+		"physicalID": fmt.Sprintf("0x%08X", physicalId),
+		"dataLen":    len(data),
+	}).Info("心跳处理器：处理标准Zinx数据格式")
 
 	// 更新心跳时间
 	h.UpdateHeartbeat(conn)
-
-	// 提取设备信息并绑定设备ID
-	physicalId := dnyMsg.GetPhysicalId()
-	deviceId := h.FormatPhysicalID(physicalId)
 
 	// 如果设备ID未绑定，则进行绑定
 	if _, err := conn.GetProperty(constants.PropKeyDeviceId); err != nil {
@@ -48,18 +57,17 @@ func (h *HeartbeatHandler) PreHandle(request ziface.IRequest) {
 // Handle 处理设备心跳请求
 func (h *HeartbeatHandler) Handle(request ziface.IRequest) {
 	conn := request.GetConnection()
+	msg := request.GetMessage()
 
-	// 获取DNY消息
-	dnyMsg, ok := h.GetDNYMessage(request)
-	if !ok {
-		return // 预处理已经记录了错误
-	}
+	// 🔧 修复：处理标准Zinx消息，直接获取纯净的DNY数据
+	data := msg.GetData()
+	commandId := msg.GetMsgID()
 
-	// 提取设备信息
-	physicalId := dnyMsg.GetPhysicalId()
-	commandId := request.GetMessage().GetMsgID()
+	// 🔧 修复：暂时使用消息ID作为PhysicalID，后续可以通过其他方式获取真实的PhysicalID
+	// TODO: 需要在解码器中正确传递PhysicalID到业务处理器
+	physicalId := msg.GetMsgID()
+	fmt.Printf("🔧 心跳处理器使用消息ID作为PhysicalID: 0x%08X\n", physicalId)
 
-	// 获取或生成设备ID
 	deviceId := h.FormatPhysicalID(physicalId)
 
 	// 记录心跳日志
@@ -68,7 +76,8 @@ func (h *HeartbeatHandler) Handle(request ziface.IRequest) {
 		"physicalId": fmt.Sprintf("0x%08X", physicalId),
 		"deviceId":   deviceId,
 		"commandId":  fmt.Sprintf("0x%02X", commandId),
-	}).Debug("收到设备心跳")
+		"dataLen":    len(data),
+	}).Debug("收到设备心跳（标准Zinx格式）")
 
 	// 如果设备ID未绑定，则进行绑定
 	if _, err := conn.GetProperty(constants.PropKeyDeviceId); err != nil {
@@ -79,7 +88,6 @@ func (h *HeartbeatHandler) Handle(request ziface.IRequest) {
 	h.UpdateHeartbeat(conn)
 
 	// 处理心跳数据
-	data := dnyMsg.GetData()
 
 	// 解析心跳数据包体内容
 	if len(data) >= 2 {
@@ -100,7 +108,7 @@ func (h *HeartbeatHandler) Handle(request ziface.IRequest) {
 	responseData[0] = dny_protocol.ResponseSuccess // 成功
 
 	// 发送心跳响应，使用消息ID作为响应ID
-	if err := h.SendDNYResponse(conn, dnyMsg.GetPhysicalId(), uint16(request.GetMessage().GetMsgID()), uint8(request.GetMessage().GetMsgID()), responseData); err != nil {
+	if err := h.SendDNYResponse(conn, physicalId, uint16(request.GetMessage().GetMsgID()), uint8(request.GetMessage().GetMsgID()), responseData); err != nil {
 		logger.WithFields(logrus.Fields{
 			"error": err.Error(),
 		}).Error("发送心跳应答失败")

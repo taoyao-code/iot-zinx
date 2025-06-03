@@ -9,7 +9,7 @@ import (
 
 // DeviceRegisterData 设备注册数据 (0x20)
 type DeviceRegisterData struct {
-	ICCID           string    // 20字节 ICCID卡号
+	ICCID           string    // 20字节 ICCID卡号 - 修复：恢复为20字节，严格按照AP3000协议文档
 	DeviceVersion   [16]byte  // 16字节 设备版本
 	DeviceType      uint16    // 2字节 设备类型
 	HeartbeatPeriod uint16    // 2字节 心跳周期(秒)
@@ -17,9 +17,9 @@ type DeviceRegisterData struct {
 }
 
 func (d *DeviceRegisterData) MarshalBinary() ([]byte, error) {
-	buf := bytes.NewBuffer(make([]byte, 0, 40))
+	buf := bytes.NewBuffer(make([]byte, 0, 40)) // 修复：恢复为40字节
 
-	// ICCID (20字节)
+	// ICCID (20字节) - 修复：恢复为20字节
 	iccidBytes := make([]byte, 20)
 	copy(iccidBytes, []byte(d.ICCID))
 	buf.Write(iccidBytes)
@@ -41,20 +41,20 @@ func (d *DeviceRegisterData) MarshalBinary() ([]byte, error) {
 }
 
 func (d *DeviceRegisterData) UnmarshalBinary(data []byte) error {
-	if len(data) < 40 {
-		return fmt.Errorf("insufficient data length: %d", len(data))
+	if len(data) < 40 { // 修复：恢复为40字节
+		return fmt.Errorf("insufficient data length: %d, expected at least 40", len(data))
 	}
 
-	// ICCID (20字节)
+	// ICCID (20字节) - 修复：恢复为20字节
 	d.ICCID = string(bytes.TrimRight(data[0:20], "\x00"))
 
-	// 设备版本 (16字节)
+	// 设备版本 (16字节) - 修复：恢复偏移量为20
 	copy(d.DeviceVersion[:], data[20:36])
 
-	// 设备类型 (2字节, 小端序)
+	// 设备类型 (2字节, 小端序) - 修复：恢复偏移量为36
 	d.DeviceType = binary.LittleEndian.Uint16(data[36:38])
 
-	// 心跳周期 (2字节, 小端序)
+	// 心跳周期 (2字节, 小端序) - 修复：恢复偏移量为38
 	d.HeartbeatPeriod = binary.LittleEndian.Uint16(data[38:40])
 
 	d.Timestamp = time.Now()
@@ -214,8 +214,8 @@ func (s *SettlementData) MarshalBinary() ([]byte, error) {
 }
 
 func (s *SettlementData) UnmarshalBinary(data []byte) error {
-	if len(data) < 72 { // 增加了2字节
-		return fmt.Errorf("insufficient data length: %d", len(data))
+	if len(data) < 70 { // 修复：正确的最小长度应该是70字节
+		return fmt.Errorf("insufficient data length: %d, expected at least 70", len(data))
 	}
 
 	// 订单号 (20字节)
@@ -227,26 +227,26 @@ func (s *SettlementData) UnmarshalBinary(data []byte) error {
 	// 开始时间 (6字节)
 	s.StartTime = readTimeBytes(data[40:46])
 
-	// 结束时间 (6字节)
+	// 结算时间 (6字节)
 	s.EndTime = readTimeBytes(data[46:52])
 
-	// 充电电量 (4字节, 小端序) - 偏移2字节
-	s.ElectricEnergy = binary.LittleEndian.Uint32(data[54:58])
+	// 充电电量 (4字节, 小端序) - 修复：移除错误的偏移
+	s.ElectricEnergy = binary.LittleEndian.Uint32(data[52:56])
 
-	// 充电费用 (4字节, 小端序) - 偏移2字节
-	s.ChargeFee = binary.LittleEndian.Uint32(data[58:62])
+	// 充电费用 (4字节, 小端序) - 修复：移除错误的偏移
+	s.ChargeFee = binary.LittleEndian.Uint32(data[56:60])
 
-	// 服务费 (4字节, 小端序) - 偏移2字节
-	s.ServiceFee = binary.LittleEndian.Uint32(data[62:66])
+	// 服务费 (4字节, 小端序) - 修复：移除错误的偏移
+	s.ServiceFee = binary.LittleEndian.Uint32(data[60:64])
 
-	// 总费用 (4字节, 小端序) - 偏移2字节
-	s.TotalFee = binary.LittleEndian.Uint32(data[66:70])
+	// 总费用 (4字节, 小端序) - 修复：移除错误的偏移
+	s.TotalFee = binary.LittleEndian.Uint32(data[64:68])
 
-	// 枪号 (1字节) - 偏移2字节
-	s.GunNumber = data[70]
+	// 枪号 (1字节) - 修复：移除错误的偏移
+	s.GunNumber = data[68]
 
-	// 停止原因 (1字节) - 偏移2字节
-	s.StopReason = data[71]
+	// 停止原因 (1字节) - 修复：移除错误的偏移
+	s.StopReason = data[69]
 
 	return nil
 }
@@ -594,7 +594,7 @@ func readTimeBytes(data []byte) time.Time {
 	day := data[3]
 	hour := data[4]
 	minute := data[5]
-	second := uint8(0) // 当前实现中秒数设为0
+	second := uint8(0) // 6字节格式中没有秒数字段，设为0
 
 	return time.Date(int(year), time.Month(month), int(day),
 		int(hour), int(minute), int(second), 0, time.Local)

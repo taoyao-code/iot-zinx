@@ -33,8 +33,9 @@ func SendDNYResponse(conn ziface.IConnection, physicalId uint32, messageId uint1
 		cmdMgr.RegisterCommand(conn, physicalId, messageId, command, data)
 	}
 
-	// 发送数据包
-	err := conn.SendBuffMsg(0, packet)
+	// 🔧 修复：使用SendMsg发送原始数据包，避免Zinx框架添加额外封装
+	// 使用命令ID作为msgID，确保数据包不被额外包装
+	err := conn.SendMsg(uint32(command), packet)
 	if err != nil {
 		logger.WithFields(logrus.Fields{
 			"connID":     conn.GetConnID(),
@@ -45,6 +46,9 @@ func SendDNYResponse(conn ziface.IConnection, physicalId uint32, messageId uint1
 		}).Error("发送DNY响应失败")
 		return err
 	}
+
+	// 强制控制台输出发送信息
+	fmt.Printf("🔧 发送DNY响应: 命令=0x%02X, 长度=%d字节, PhysicalID=0x%08X\n", command, len(packet), physicalId)
 
 	// 通知监视器发送了原始数据
 	if tcpMonitor := GetTCPMonitor(); tcpMonitor != nil {

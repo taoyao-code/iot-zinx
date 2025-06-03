@@ -5,7 +5,6 @@ import (
 	"fmt"
 
 	"github.com/aceld/zinx/ziface"
-	"github.com/bujia-iot/iot-zinx/internal/domain/dny_protocol"
 	"github.com/bujia-iot/iot-zinx/internal/infrastructure/logger"
 	"github.com/sirupsen/logrus"
 )
@@ -96,34 +95,38 @@ func (d *DNY_Decoder) Intercept(chain ziface.IChain) ziface.IcResp {
 
 // createDNYResponse 创建DNY响应的统一方法
 func (d *DNY_Decoder) createDNYResponse(chain ziface.IChain, iMessage ziface.IMessage, result *DNYParseResult, originalData []byte) ziface.IcResp {
-	// 创建DNY消息对象
-	dnyMessage := dny_protocol.NewMessage(
-		uint32(result.Command), // 使用命令作为MsgID
-		result.PhysicalID,      // 物理ID
-		result.Data,            // 数据部分
-	)
-	dnyMessage.SetRawData(originalData) // 保存原始数据
+	// 🔧 关键修复：创建自定义消息类型，包含PhysicalID信息
+	customMessage := &DNYMessage{
+		IMessage:   iMessage,
+		PhysicalID: result.PhysicalID,
+		MessageID:  result.MessageID,
+		Command:    result.Command,
+		Checksum:   result.Checksum,
+		Valid:      result.ChecksumValid,
+	}
 
-	// 更新IMessage的字段，供Zinx路由使用
-	iMessage.SetMsgID(uint32(result.Command))     // 命令ID作为路由键
-	iMessage.SetDataLen(uint32(len(result.Data))) // 设置数据长度
-	iMessage.SetData(result.Data)                 // 设置解析后的数据
+	// 设置标准Zinx消息字段
+	customMessage.SetMsgID(uint32(result.Command))     // 命令ID作为路由键
+	customMessage.SetDataLen(uint32(len(result.Data))) // 设置原始数据长度
+	customMessage.SetData(result.Data)                 // 设置纯净的DNY数据
 
 	// 记录解码信息
 	logger.WithFields(logrus.Fields{
-		"command":    fmt.Sprintf("0x%02X", result.Command),
-		"physicalID": fmt.Sprintf("0x%08X", result.PhysicalID),
-		"messageID":  fmt.Sprintf("0x%04X", result.MessageID),
-		"dataLen":    len(result.Data),
-		"checksum":   fmt.Sprintf("0x%04X", result.Checksum),
-		"valid":      result.ChecksumValid,
-	}).Info("DNY协议解码成功")
+		"command":     fmt.Sprintf("0x%02X", result.Command),
+		"physicalID":  fmt.Sprintf("0x%08X", result.PhysicalID),
+		"messageID":   fmt.Sprintf("0x%04X", result.MessageID),
+		"dataLen":     len(result.Data),
+		"checksum":    fmt.Sprintf("0x%04X", result.Checksum),
+		"valid":       result.ChecksumValid,
+		"messageType": fmt.Sprintf("%T", customMessage),
+	}).Info("DNY协议解码成功，传递包含PhysicalID的自定义消息")
 
 	// 强制控制台输出解码结果
 	fmt.Printf("✅ DNY解码成功: %s\n", result.String())
+	fmt.Printf("🔧 传递包含PhysicalID的自定义消息，长度: %d字节，物理ID: 0x%08X\n", len(result.Data), result.PhysicalID)
 
-	// 继续处理链，传递解码后的数据
-	return chain.ProceedWithIMessage(iMessage, nil)
+	// 🔧 正确方法：传递包含PhysicalID的自定义消息对象
+	return chain.ProceedWithIMessage(customMessage, nil)
 }
 
 // handleNonDNYData 处理非DNY协议数据
@@ -161,4 +164,39 @@ func (d *DNY_Decoder) handleNonDNYData(chain ziface.IChain, iMessage ziface.IMes
 	}).Debug("处理非DNY协议数据")
 
 	return chain.ProceedWithIMessage(iMessage, nil)
+}
+
+// DNYMessage 自定义消息类型，包含DNY协议的PhysicalID信息
+type DNYMessage struct {
+	ziface.IMessage
+	PhysicalID uint32
+	MessageID  uint16
+	Command    uint8
+	Checksum   uint16
+	Valid      bool
+}
+
+// GetPhysicalID 获取物理ID
+func (m *DNYMessage) GetPhysicalID() uint32 {
+	return m.PhysicalID
+}
+
+// GetDNYMessageID 获取DNY消息ID
+func (m *DNYMessage) GetDNYMessageID() uint16 {
+	return m.MessageID
+}
+
+// GetCommand 获取命令
+func (m *DNYMessage) GetCommand() uint8 {
+	return m.Command
+}
+
+// GetChecksum 获取校验和
+func (m *DNYMessage) GetChecksum() uint16 {
+	return m.Checksum
+}
+
+// IsValid 检查校验是否有效
+func (m *DNYMessage) IsValid() bool {
+	return m.Valid
 }

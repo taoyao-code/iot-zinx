@@ -4,7 +4,7 @@ import (
 	"strings"
 )
 
-// IOT_SIM_CARD_LENGTH SIM卡号长度
+// IOT_SIM_CARD_LENGTH SIM卡号长度 - 修复：恢复为20字节，严格按照AP3000协议文档
 const IOT_SIM_CARD_LENGTH = 20
 
 // IOT_LINK_HEARTBEAT link心跳字符串
