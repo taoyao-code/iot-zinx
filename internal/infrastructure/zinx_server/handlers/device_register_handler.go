@@ -99,8 +99,20 @@ func (h *DeviceRegisterHandler) Handle(request ziface.IRequest) {
 			"connID":     conn.GetConnID(),
 			"physicalId": fmt.Sprintf("0x%08X", physicalId),
 			"dataLen":    len(data),
+			"dataHex":    fmt.Sprintf("%x", data),
 			"error":      err.Error(),
 		}).Error("设备注册数据解析失败")
+
+		// 🔧 新增：发送错误响应而不是直接返回
+		responseData := []byte{dny_protocol.ResponseFailed}
+		messageID := uint16(time.Now().Unix() & 0xFFFF)
+		if sendErr := pkg.Protocol.SendDNYResponse(conn, physicalId, messageID, uint8(dny_protocol.CmdDeviceRegister), responseData); sendErr != nil {
+			logger.WithFields(logrus.Fields{
+				"connID":     conn.GetConnID(),
+				"physicalId": fmt.Sprintf("0x%08X", physicalId),
+				"sendError":  sendErr.Error(),
+			}).Error("发送设备注册错误响应失败")
+		}
 		return
 	}
 

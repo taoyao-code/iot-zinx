@@ -41,10 +41,11 @@ func (d *DeviceRegisterData) MarshalBinary() ([]byte, error) {
 }
 
 func (d *DeviceRegisterData) UnmarshalBinary(data []byte) error {
-	// 🔧 关键修复：根据AP3000协议文档，设备注册(0x20)实际只有8字节数据
-	// 协议格式：固件版本(2字节) + 端口数量(1字节) + 虚拟ID(1字节) + 设备类型(1字节) + 工作模式(1字节) + 电源板版本号(2字节) + 设备分时计费功能(1字节)
-	if len(data) < 8 {
-		return fmt.Errorf("insufficient data length: %d, expected at least 8 for device register", len(data))
+	// 🔧 关键修复：支持不同长度的设备注册数据
+	// 根据AP3000协议，最小6字节，完整8字节
+	// 协议格式：固件版本(2字节) + 端口数量(1字节) + 虚拟ID(1字节) + 设备类型(1字节) + 工作模式(1字节) + [电源板版本号(2字节)]
+	if len(data) < 6 {
+		return fmt.Errorf("insufficient data length: %d, expected at least 6 for device register", len(data))
 	}
 
 	// 固件版本 (2字节, 小端序)
@@ -62,10 +63,13 @@ func (d *DeviceRegisterData) UnmarshalBinary(data []byte) error {
 	// 工作模式 (1字节)
 	workMode := data[5]
 
-	// 电源板版本号 (2字节, 小端序)
-	powerBoardVersion := binary.LittleEndian.Uint16(data[6:8])
+	// 电源板版本号 (2字节, 小端序) - 可选字段
+	var powerBoardVersion uint16 = 0
+	if len(data) >= 8 {
+		powerBoardVersion = binary.LittleEndian.Uint16(data[6:8])
+	}
 
-	// 设备分时计费功能 (1字节)
+	// 设备分时计费功能 (1字节) - 可选字段
 	// TODO： 根据实际业务需求处理此字段
 
 	// 🔧 重要：ICCID从连接属性获取，而不是从DNY数据包中解析
@@ -86,8 +90,8 @@ func (d *DeviceRegisterData) UnmarshalBinary(data []byte) error {
 
 	d.Timestamp = time.Now()
 
-	fmt.Printf("🔧 设备注册解析成功: 固件版本=%d, 端口数=%d, 虚拟ID=%d, 设备类型=%d, 工作模式=%d, 电源板版本=%d\n",
-		firmwareVersion, portCount, virtualID, d.DeviceType, workMode, powerBoardVersion)
+	fmt.Printf("🔧 设备注册解析成功: 固件版本=%d, 端口数=%d, 虚拟ID=%d, 设备类型=%d, 工作模式=%d, 电源板版本=%d, 数据长度=%d\n",
+		firmwareVersion, portCount, virtualID, d.DeviceType, workMode, powerBoardVersion, len(data))
 
 	return nil
 }

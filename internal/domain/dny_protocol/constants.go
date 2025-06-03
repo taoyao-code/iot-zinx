@@ -27,6 +27,7 @@ const (
 	CmdDeviceRegister  = 0x20 // 设备注册包
 	CmdDeviceHeart     = 0x21 // 设备心跳包/分机心跳
 	CmdDeviceTime      = 0x22 // 设备获取服务器时间
+	CmdDeviceVersion   = 0x35 // 上传分机版本号与设备类型
 	CmdNetworkStatus   = 0x81 // 查询设备联网状态
 	CmdChargeControl   = 0x82 // 服务器开始、停止充电操作
 	CmdParamSetting    = 0x83 // 设置运行参数1.1

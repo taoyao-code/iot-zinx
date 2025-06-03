@@ -8,6 +8,7 @@ import (
 	"github.com/aceld/zinx/ziface"
 	"github.com/bujia-iot/iot-zinx/internal/domain/dny_protocol"
 	"github.com/bujia-iot/iot-zinx/internal/infrastructure/logger"
+	"github.com/bujia-iot/iot-zinx/pkg/metrics"
 	"github.com/sirupsen/logrus"
 )
 
@@ -127,6 +128,9 @@ func (d *DNY_Decoder) Intercept(chain ziface.IChain) ziface.IcResp {
 
 		fmt.Printf("✅ DNY解析成功: Command=0x%02X, PhysicalID=0x%08X, MessageID=0x%04X, DataLen=%d, Valid=%t, ConnID: %d\n",
 			result.Command, result.PhysicalID, result.MessageID, len(result.Data), result.ChecksumValid, connIDForLog)
+
+		// 🔧 新增：记录命令统计
+		metrics.IncrementCommandCount(result.Command)
 
 		// 存储DNY协议信息到连接属性
 		if conn != nil {

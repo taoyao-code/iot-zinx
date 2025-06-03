@@ -40,7 +40,10 @@ func RegisterRouters(server ziface.IServer) {
 	// 6. 🟢 参数设置 (已实现)
 	server.AddRouter(dny_protocol.CmdParamSetting, &ParameterSettingHandler{}) // 0x83 设置运行参数1.1
 
-	// 7. 🟡 暂未实现的命令 (根据需要添加)
+	// 7. 🟢 设备版本信息 (新增)
+	server.AddRouter(dny_protocol.CmdDeviceVersion, &DeviceVersionHandler{}) // 0x35 上传分机版本号与设备类型
+
+	// 8. 🟡 暂未实现的命令 (根据需要添加)
 	// server.AddRouter(dny_protocol.CmdPoll, &PollHandler{})                    // 0x00 主机轮询完整指令
 	// server.AddRouter(dny_protocol.CmdOrderConfirm, &OrderConfirmHandler{})    // 0x04 充电端口订单确认
 	// server.AddRouter(dny_protocol.CmdUpgradeRequest, &UpgradeRequestHandler{}) // 0x05 设备主动请求升级

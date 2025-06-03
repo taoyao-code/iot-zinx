@@ -172,12 +172,12 @@ func StartTCPServer() error {
 
 	// 启动自定义心跳机制：直接发送纯DNY协议数据，不添加Zinx框架头部
 	go func() {
-		// 🔧 修复：改为更合理的30秒间隔
-		ticker := time.NewTicker(30 * time.Second)
+		// 🔧 修复：改为更合理的60秒间隔，减少网络压力
+		ticker := time.NewTicker(60 * time.Second)
 		defer ticker.Stop()
 
 		logger.WithFields(logrus.Fields{
-			"interval": "30秒",
+			"interval": "60秒",
 			"purpose":  "发送纯DNY协议心跳(0x81)",
 		}).Info("🚀 自定义心跳协程已启动")
 
