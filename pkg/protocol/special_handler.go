@@ -4,16 +4,16 @@ import (
 	"strings"
 )
 
-// IOT_SIM_CARD_LENGTH SIM卡号长度 - 修复：恢复为20字节，严格按照AP3000协议文档
+// IOT_SIM_CARD_LENGTH SIM卡号长度 - 支持标准ICCID长度范围
 const IOT_SIM_CARD_LENGTH = 20
 
 // IOT_LINK_HEARTBEAT link心跳字符串
 const IOT_LINK_HEARTBEAT = "link"
 
-// isAllDigits 检查是否全部为数字
+// IsAllDigits 检查是否为合法的ICCID格式（数字和十六进制字符A-F）
 func IsAllDigits(data []byte) bool {
 	return strings.IndexFunc(string(data), func(r rune) bool {
-		return r < '0' || r > '9'
+		return !((r >= '0' && r <= '9') || (r >= 'A' && r <= 'F') || (r >= 'a' && r <= 'f'))
 	}) == -1
 }
 
@@ -26,8 +26,9 @@ func HandleSpecialMessage(data []byte) bool {
 		return true
 	}
 
-	// 处理SIM卡号 (长度为20的数字字符串)
-	if len(data) == IOT_SIM_CARD_LENGTH && IsAllDigits(data) {
+	// 处理SIM卡号 (ICCID标准长度范围: 19-20字节有效位，实际可能更长)
+	// 支持标准ICCID格式，包含数字和十六进制字符
+	if len(data) >= 19 && len(data) <= 25 && IsAllDigits(data) {
 		return true
 	}
 

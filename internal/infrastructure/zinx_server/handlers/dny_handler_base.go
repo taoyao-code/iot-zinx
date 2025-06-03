@@ -36,17 +36,29 @@ func (h *DNYHandlerBase) PreHandle(request ziface.IRequest) {
 
 	// 确认命令完成
 	physicalID := dnyMsg.GetPhysicalId()
-	commandID := uint8(msg.GetMsgID())
-	messageID := uint16(msg.GetMsgID()) // 使用消息ID作为messageID
+	command := uint8(msg.GetMsgID()) // msg.GetMsgID() 实际是DNY的Command
 
-	// 尝试确认命令
-	if pkg.Network.GetCommandManager().ConfirmCommand(physicalID, messageID, commandID) {
+	// 从连接属性获取真正的DNY MessageID
+	var messageID uint16
+	if val, err := conn.GetProperty("DNY_MessageID"); err == nil && val != nil {
+		messageID = val.(uint16)
+	}
+
+	// 尝试确认命令 - 修复参数顺序：physicalID, messageID, command
+	if pkg.Network.GetCommandManager().ConfirmCommand(physicalID, messageID, command) {
 		logger.WithFields(logrus.Fields{
 			"connID":     conn.GetConnID(),
-			"physicalID": physicalID,
-			"commandID":  commandID,
+			"physicalID": fmt.Sprintf("0x%08X", physicalID),
+			"command":    fmt.Sprintf("0x%02X", command),
 			"messageID":  messageID,
-		}).Debug("已确认命令完成")
+		}).Debug("✅ 已确认命令完成")
+	} else {
+		logger.WithFields(logrus.Fields{
+			"connID":     conn.GetConnID(),
+			"physicalID": fmt.Sprintf("0x%08X", physicalID),
+			"command":    fmt.Sprintf("0x%02X", command),
+			"messageID":  messageID,
+		}).Debug("⚠️  命令确认失败 - 可能不是待确认的命令")
 	}
 
 	// 更新心跳时间

@@ -88,6 +88,32 @@ func (m *TCPMonitor) OnConnectionClosed(conn ziface.IConnection) {
 				// 确认是当前连接，才清理设备映射
 				m.deviceIdToConnMap.Delete(deviceID)
 
+				// 🔧 新增：处理设备组中的设备断开
+				sessionManager := GetSessionManager()
+				if session, exists := sessionManager.GetSession(deviceID); exists {
+					// 挂起设备会话
+					sessionManager.SuspendSession(deviceID)
+
+					// 检查同一ICCID下的其他设备
+					if session.ICCID != "" {
+						allDevices := sessionManager.GetAllSessionsByICCID(session.ICCID)
+						activeDevices := 0
+
+						for otherDeviceID, otherSession := range allDevices {
+							if otherDeviceID != deviceID && otherSession.Status == constants.DeviceStatusOnline {
+								activeDevices++
+							}
+						}
+
+						logger.WithFields(logrus.Fields{
+							"deviceId":      deviceID,
+							"iccid":         session.ICCID,
+							"activeDevices": activeDevices,
+							"totalDevices":  len(allDevices),
+						}).Info("设备断开连接，ICCID下仍有其他活跃设备")
+					}
+				}
+
 				// 记录设备离线
 				logger.WithFields(logrus.Fields{
 					"deviceId":   deviceID,
@@ -471,14 +497,14 @@ func (m *TCPMonitor) ForEachConnection(callback func(deviceId string, conn zifac
 			return true
 		}
 
-		// 检查连接状态
+		// 检查连接状态 - 只跳过已关闭的连接，保留inactive状态的连接用于心跳
 		if val, err := conn.GetProperty(constants.PropKeyConnStatus); err == nil && val != nil {
 			status := val.(string)
-			if status == constants.ConnStatusClosed || status == constants.ConnStatusInactive {
+			if status == constants.ConnStatusClosed {
 				logger.WithFields(logrus.Fields{
 					"deviceId": deviceId,
 					"status":   status,
-				}).Debug("跳过非活跃连接")
+				}).Debug("跳过已关闭连接")
 				return true
 			}
 		}

@@ -1,13 +1,11 @@
 package monitor
 
 import (
-	"fmt"
+	"context"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	"github.com/aceld/zinx/ziface"
-	"github.com/bujia-iot/iot-zinx/internal/infrastructure/config"
 	"github.com/bujia-iot/iot-zinx/internal/infrastructure/logger"
 	"github.com/bujia-iot/iot-zinx/pkg/constants"
 	"github.com/sirupsen/logrus"
@@ -16,29 +14,45 @@ import (
 // 监控服务是否运行中
 var monitorRunning int32
 
-// DeviceMonitor 设备监控器，监控设备心跳状态
+// DeviceMonitor 设备监控器，负责监控设备状态和健康检查
 type DeviceMonitor struct {
-	// 设备连接访问器，用于获取当前所有设备连接
-	deviceConnAccessor func(func(deviceId string, conn ziface.IConnection) bool)
+	// 监控配置
+	enabled                bool
+	heartbeatCheckInterval time.Duration
+	deviceTimeout          time.Duration
 
-	// 心跳超时时间
-	heartbeatTimeout time.Duration
+	// 监控状态
+	running bool
+	ctx     context.Context
+	cancel  context.CancelFunc
+	wg      sync.WaitGroup
 
-	// 心跳检查间隔
-	checkInterval time.Duration
+	// 依赖组件
+	sessionManager     ISessionManager
+	deviceGroupManager IDeviceGroupManager
+	connectionMonitor  IConnectionMonitor
 
-	// 心跳警告阈值
-	warningThreshold time.Duration
-
-	// 会话管理器
-	sessionManager *SessionManager
-
-	// 事件总线
-	eventBus *EventBus
+	// 事件回调
+	onDeviceTimeout     func(deviceID string, lastHeartbeat time.Time)
+	onDeviceReconnect   func(deviceID string, oldConnID, newConnID uint64)
+	onGroupStatusChange func(iccid string, activeDevices, totalDevices int)
 }
 
-// 确保DeviceMonitor实现了IDeviceMonitor接口
-var _ IDeviceMonitor = (*DeviceMonitor)(nil)
+// DeviceMonitorConfig 设备监控器配置
+type DeviceMonitorConfig struct {
+	HeartbeatCheckInterval time.Duration // 心跳检查间隔
+	DeviceTimeout          time.Duration // 设备超时时间
+	Enabled                bool          // 是否启用监控
+}
+
+// DefaultDeviceMonitorConfig 默认配置
+func DefaultDeviceMonitorConfig() *DeviceMonitorConfig {
+	return &DeviceMonitorConfig{
+		HeartbeatCheckInterval: 30 * time.Second, // 30秒检查一次
+		DeviceTimeout:          5 * time.Minute,  // 5分钟超时
+		Enabled:                true,
+	}
+}
 
 // 全局设备监控器
 var (
@@ -49,272 +63,282 @@ var (
 // GetGlobalDeviceMonitor 获取全局设备监控器实例
 func GetGlobalDeviceMonitor() *DeviceMonitor {
 	globalDeviceMonitorOnce.Do(func() {
-		// 创建设备连接访问器，通过全局TCP监控器获取连接
-		deviceConnAccessor := func(fn func(deviceId string, conn ziface.IConnection) bool) {
-			tcpMonitor := GetGlobalMonitor()
-			if tcpMonitor != nil {
-				tcpMonitor.ForEachConnection(fn)
-			}
-		}
-
-		globalDeviceMonitor = NewDeviceMonitor(deviceConnAccessor)
+		globalDeviceMonitor = NewDeviceMonitor(DefaultDeviceMonitorConfig())
 		logger.Info("全局设备监控器已初始化")
 	})
 	return globalDeviceMonitor
 }
 
 // NewDeviceMonitor 创建设备监控器
-func NewDeviceMonitor(deviceConnAccessor func(func(deviceId string, conn ziface.IConnection) bool)) *DeviceMonitor {
-	// 从配置中获取心跳参数
-	cfg := config.GetConfig().DeviceConnection
-
-	// 使用配置值，如果配置未设置则使用默认值
-	heartbeatTimeout := time.Duration(cfg.HeartbeatTimeoutSeconds) * time.Second
-	if heartbeatTimeout == 0 {
-		heartbeatTimeout = 60 * time.Second // 默认60秒
+func NewDeviceMonitor(config *DeviceMonitorConfig) *DeviceMonitor {
+	if config == nil {
+		config = DefaultDeviceMonitorConfig()
 	}
 
-	checkInterval := time.Duration(cfg.HeartbeatIntervalSeconds) * time.Second
-	if checkInterval == 0 {
-		checkInterval = 30 * time.Second // 默认30秒
+	ctx, cancel := context.WithCancel(context.Background())
+
+	monitor := &DeviceMonitor{
+		enabled:                config.Enabled,
+		heartbeatCheckInterval: config.HeartbeatCheckInterval,
+		deviceTimeout:          config.DeviceTimeout,
+		ctx:                    ctx,
+		cancel:                 cancel,
+		sessionManager:         GetSessionManager(),
+		deviceGroupManager:     GetDeviceGroupManager(),
+		connectionMonitor:      GetGlobalMonitor(),
 	}
 
-	warningThreshold := time.Duration(cfg.HeartbeatWarningThreshold) * time.Second
-	if warningThreshold == 0 {
-		warningThreshold = 30 * time.Second // 默认30秒
-	}
+	logger.WithFields(logrus.Fields{
+		"heartbeatInterval": config.HeartbeatCheckInterval,
+		"deviceTimeout":     config.DeviceTimeout,
+		"enabled":           config.Enabled,
+	}).Info("设备监控器已创建")
 
-	return &DeviceMonitor{
-		deviceConnAccessor: deviceConnAccessor,
-		heartbeatTimeout:   heartbeatTimeout,
-		checkInterval:      checkInterval,
-		warningThreshold:   warningThreshold,
-		sessionManager:     GetSessionManager(),
-		eventBus:           GetEventBus(),
-	}
+	return monitor
 }
 
-// StartDeviceMonitor 启动设备状态监控服务
-// 定期检查设备心跳状态，断开长时间未心跳的连接
+// Start 启动设备监控器
 func (dm *DeviceMonitor) Start() error {
-	// 原子操作确保只启动一次
-	if !atomic.CompareAndSwapInt32(&monitorRunning, 0, 1) {
-		logger.Info("设备状态监控服务已在运行中")
+	if !dm.enabled {
+		logger.Info("设备监控器已禁用，跳过启动")
 		return nil
 	}
 
-	fmt.Printf("\n🔄🔄🔄 设备状态监控服务启动 🔄🔄🔄\n")
-	fmt.Printf("检查间隔: %s\n", dm.checkInterval)
-	fmt.Printf("心跳超时: %s\n", dm.heartbeatTimeout)
-	fmt.Printf("警告阈值: %s\n", dm.warningThreshold)
+	if dm.running {
+		logger.Warn("设备监控器已在运行")
+		return nil
+	}
 
-	logger.WithFields(logrus.Fields{
-		"checkInterval":    dm.checkInterval / time.Second,
-		"heartbeatTimeout": dm.heartbeatTimeout / time.Second,
-		"warningThreshold": dm.warningThreshold / time.Second,
-	}).Info("设备状态监控服务启动")
+	dm.running = true
 
-	// 启动定时检查心跳
-	go func() {
-		ticker := time.NewTicker(dm.checkInterval)
-		defer ticker.Stop()
+	// 启动心跳检查协程
+	dm.wg.Add(1)
+	go dm.heartbeatCheckLoop()
 
-		for range ticker.C {
-			dm.checkDeviceHeartbeats()
-		}
-	}()
+	// 启动设备组状态监控协程
+	dm.wg.Add(1)
+	go dm.groupStatusMonitorLoop()
 
-	// 启动定时清理过期会话
-	go func() {
-		ticker := time.NewTicker(10 * time.Minute) // 每10分钟清理一次
-		defer ticker.Stop()
-
-		for range ticker.C {
-			expiredCount := dm.sessionManager.CleanupExpiredSessions()
-			if expiredCount > 0 {
-				logger.WithFields(logrus.Fields{
-					"expiredCount": expiredCount,
-				}).Info("清理过期会话完成")
-			}
-		}
-	}()
-
+	logger.Info("设备监控器已启动")
 	return nil
 }
 
-// Stop 停止设备监控
+// Stop 停止设备监控器
 func (dm *DeviceMonitor) Stop() {
-	atomic.StoreInt32(&monitorRunning, 0)
-	logger.Info("设备状态监控服务已停止")
-}
-
-// checkDeviceHeartbeats 检查所有设备的心跳状态
-func (dm *DeviceMonitor) checkDeviceHeartbeats() {
-	if dm.deviceConnAccessor == nil {
-		logger.Error("设备连接访问器未设置，无法检查设备心跳")
+	if !dm.running {
 		return
 	}
 
-	now := time.Now().Unix()
-	timeoutThreshold := now - int64(dm.heartbeatTimeout/time.Second)
-	warningThreshold := now - int64(dm.warningThreshold/time.Second)
+	logger.Info("正在停止设备监控器...")
 
-	deviceCount := 0
-	timeoutCount := 0
-	warningCount := 0
+	dm.cancel()
+	dm.running = false
 
-	// 遍历设备连接
-	dm.deviceConnAccessor(func(deviceId string, conn ziface.IConnection) bool {
-		deviceCount++
+	// 等待所有协程结束
+	dm.wg.Wait()
 
-		// 获取最后一次心跳时间
-		lastHeartbeatVal, err := conn.GetProperty(constants.PropKeyLastHeartbeat)
-		if err != nil {
-			// 对于正式注册的设备，如果没有心跳时间属性，说明可能有问题
-			logger.WithFields(logrus.Fields{
-				"connID":   conn.GetConnID(),
-				"deviceId": deviceId,
-				"error":    err.Error(),
-			}).Warn("无法获取设备最后心跳时间，关闭连接")
-			conn.Stop()
-			timeoutCount++
-			return true
-		}
+	logger.Info("设备监控器已停止")
+}
 
-		lastHeartbeat := lastHeartbeatVal.(int64)
-		if lastHeartbeat < timeoutThreshold {
-			// 已经超时，关闭连接
-			logger.WithFields(logrus.Fields{
-				"connID":          conn.GetConnID(),
-				"deviceId":        deviceId,
-				"lastHeartbeatAt": time.Unix(lastHeartbeat, 0).Format("2006-01-02 15:04:05"),
-				"nowAt":           time.Unix(now, 0).Format("2006-01-02 15:04:05"),
-				"timeoutSeconds":  dm.heartbeatTimeout / time.Second,
-			}).Warn("设备心跳超时，关闭连接")
+// SetOnDeviceTimeout 设置设备超时回调
+func (dm *DeviceMonitor) SetOnDeviceTimeout(callback func(deviceID string, lastHeartbeat time.Time)) {
+	dm.onDeviceTimeout = callback
+}
 
-			// 发布心跳超时事件
-			dm.eventBus.PublishDeviceHeartbeat(deviceId, conn.GetConnID(), "timeout")
+// SetOnDeviceReconnect 设置设备重连回调
+func (dm *DeviceMonitor) SetOnDeviceReconnect(callback func(deviceID string, oldConnID, newConnID uint64)) {
+	dm.onDeviceReconnect = callback
+}
 
-			// 挂起会话（允许设备在会话超时内重连）
-			dm.sessionManager.SuspendSession(deviceId)
+// SetOnGroupStatusChange 设置设备组状态变更回调
+func (dm *DeviceMonitor) SetOnGroupStatusChange(callback func(iccid string, activeDevices, totalDevices int)) {
+	dm.onGroupStatusChange = callback
+}
 
-			// 更新设备状态为重连中
-			if UpdateDeviceStatusFunc != nil {
-				UpdateDeviceStatusFunc(deviceId, constants.DeviceStatusReconnecting)
+// OnDeviceRegistered 设备注册事件处理
+func (dm *DeviceMonitor) OnDeviceRegistered(deviceID string, conn ziface.IConnection) {
+	logger.WithFields(logrus.Fields{
+		"deviceID": deviceID,
+		"connID":   conn.GetConnID(),
+	}).Debug("设备监控器：设备已注册")
+
+	// 检查是否为重连设备
+	if session, exists := dm.sessionManager.GetSession(deviceID); exists {
+		if session.ReconnectCount > 0 {
+			// 触发重连回调
+			if dm.onDeviceReconnect != nil {
+				dm.onDeviceReconnect(deviceID, session.LastConnID, conn.GetConnID())
 			}
-
-			// 关闭连接
-			conn.Stop()
-			timeoutCount++
-		} else if lastHeartbeat < warningThreshold {
-			// 接近超时但尚未超时，记录警告
-			logger.WithFields(logrus.Fields{
-				"connID":           conn.GetConnID(),
-				"deviceId":         deviceId,
-				"lastHeartbeatAt":  time.Unix(lastHeartbeat, 0).Format("2006-01-02 15:04:05"),
-				"nowAt":            time.Unix(now, 0).Format("2006-01-02 15:04:05"),
-				"timeoutSeconds":   dm.heartbeatTimeout / time.Second,
-				"remainingSeconds": timeoutThreshold - lastHeartbeat,
-			}).Warn("设备心跳接近超时")
-
-			// 发布心跳警告事件
-			dm.eventBus.PublishDeviceHeartbeat(deviceId, conn.GetConnID(), "warning")
-
-			warningCount++
 		}
+	}
+}
 
+// OnDeviceHeartbeat 设备心跳事件处理
+func (dm *DeviceMonitor) OnDeviceHeartbeat(deviceID string, conn ziface.IConnection) {
+	logger.WithFields(logrus.Fields{
+		"deviceID": deviceID,
+		"connID":   conn.GetConnID(),
+	}).Debug("设备监控器：收到设备心跳")
+
+	// 更新会话心跳时间
+	dm.sessionManager.UpdateSession(deviceID, func(session *DeviceSession) {
+		session.LastHeartbeatTime = time.Now()
+		session.Status = constants.DeviceStatusOnline
+	})
+}
+
+// OnDeviceDisconnect 设备断开事件处理
+func (dm *DeviceMonitor) OnDeviceDisconnect(deviceID string, conn ziface.IConnection, reason string) {
+	logger.WithFields(logrus.Fields{
+		"deviceID": deviceID,
+		"connID":   conn.GetConnID(),
+		"reason":   reason,
+	}).Info("设备监控器：设备已断开")
+
+	// 挂起设备会话
+	dm.sessionManager.SuspendSession(deviceID)
+}
+
+// heartbeatCheckLoop 心跳检查循环
+func (dm *DeviceMonitor) heartbeatCheckLoop() {
+	defer dm.wg.Done()
+
+	ticker := time.NewTicker(dm.heartbeatCheckInterval)
+	defer ticker.Stop()
+
+	logger.WithFields(logrus.Fields{
+		"interval": dm.heartbeatCheckInterval,
+		"timeout":  dm.deviceTimeout,
+	}).Info("设备心跳检查循环已启动")
+
+	for {
+		select {
+		case <-dm.ctx.Done():
+			logger.Debug("设备心跳检查循环已停止")
+			return
+		case <-ticker.C:
+			dm.checkDeviceHeartbeats()
+		}
+	}
+}
+
+// checkDeviceHeartbeats 检查所有设备心跳
+func (dm *DeviceMonitor) checkDeviceHeartbeats() {
+	now := time.Now()
+	timeoutDevices := make([]string, 0)
+
+	// 检查所有在线设备的心跳
+	dm.connectionMonitor.ForEachConnection(func(deviceID string, conn ziface.IConnection) bool {
+		// 获取最后心跳时间
+		if prop, err := conn.GetProperty(constants.PropKeyLastHeartbeat); err == nil {
+			if lastHeartbeat, ok := prop.(int64); ok {
+				lastTime := time.Unix(lastHeartbeat, 0)
+				if now.Sub(lastTime) > dm.deviceTimeout {
+					timeoutDevices = append(timeoutDevices, deviceID)
+				}
+			}
+		}
 		return true
 	})
 
-	// 输出检查结果统计
-	if deviceCount > 0 {
+	// 处理超时设备
+	for _, deviceID := range timeoutDevices {
+		dm.handleDeviceTimeout(deviceID)
+	}
+
+	if len(timeoutDevices) > 0 {
 		logger.WithFields(logrus.Fields{
-			"deviceCount":  deviceCount,
-			"timeoutCount": timeoutCount,
-			"warningCount": warningCount,
-		}).Debug("设备心跳检查完成")
+			"timeoutDevices": len(timeoutDevices),
+			"devices":        timeoutDevices,
+		}).Warn("发现超时设备")
 	}
 }
 
-// OnDeviceRegistered 设备注册处理
-func (dm *DeviceMonitor) OnDeviceRegistered(deviceID string, conn ziface.IConnection) {
-	// 检查是否存在会话
-	if session, exists := dm.sessionManager.GetSession(deviceID); exists {
-		// 存在会话，恢复会话
-		dm.sessionManager.ResumeSession(deviceID, conn)
+// handleDeviceTimeout 处理设备超时
+func (dm *DeviceMonitor) handleDeviceTimeout(deviceID string) {
+	logger.WithFields(logrus.Fields{
+		"deviceID": deviceID,
+		"timeout":  dm.deviceTimeout,
+	}).Warn("设备心跳超时")
 
-		// 发布设备重连事件
-		dm.eventBus.PublishDeviceReconnect(deviceID, session.LastConnID, conn.GetConnID())
-
-		logger.WithFields(logrus.Fields{
-			"deviceID":  deviceID,
-			"sessionID": session.SessionID,
-			"connID":    conn.GetConnID(),
-			"oldConnID": session.LastConnID,
-		}).Info("设备重连，恢复会话")
-	} else {
-		// 不存在会话，创建新会话
-		session := dm.sessionManager.CreateSession(deviceID, conn)
-
-		// 发布设备连接事件
-		dm.eventBus.PublishDeviceConnect(deviceID, conn.GetConnID())
-
-		logger.WithFields(logrus.Fields{
-			"deviceID":  deviceID,
-			"sessionID": session.SessionID,
-			"connID":    conn.GetConnID(),
-		}).Info("设备首次连接，创建会话")
+	// 获取设备会话
+	session, exists := dm.sessionManager.GetSession(deviceID)
+	if !exists {
+		return
 	}
 
-	// 更新设备状态为在线（通过优化器）
+	// 触发超时回调
+	if dm.onDeviceTimeout != nil {
+		dm.onDeviceTimeout(deviceID, session.LastHeartbeatTime)
+	}
+
+	// 挂起设备会话
+	dm.sessionManager.SuspendSession(deviceID)
+
+	// 更新设备状态
 	if UpdateDeviceStatusFunc != nil {
-		// 直接调用原始函数，因为这是设备注册事件，需要确保执行
-		UpdateDeviceStatusFunc(deviceID, constants.DeviceStatusOnline)
-	}
-
-	// 发布状态变更事件
-	dm.eventBus.PublishDeviceStatusChange(deviceID, constants.DeviceStatusReconnecting, constants.DeviceStatusOnline)
-}
-
-// OnDeviceHeartbeat 设备心跳处理
-func (dm *DeviceMonitor) OnDeviceHeartbeat(deviceID string, conn ziface.IConnection) {
-	// 更新会话心跳时间
-	if session, exists := dm.sessionManager.GetSession(deviceID); exists {
-		dm.sessionManager.UpdateSession(deviceID, func(s *DeviceSession) {
-			s.LastHeartbeatTime = time.Now()
-		})
-
-		// 发布心跳事件
-		dm.eventBus.PublishDeviceHeartbeat(deviceID, conn.GetConnID(), "normal")
-
-		logger.WithFields(logrus.Fields{
-			"deviceID":  deviceID,
-			"sessionID": session.SessionID,
-			"connID":    conn.GetConnID(),
-		}).Debug("更新设备心跳时间")
+		UpdateDeviceStatusFunc(deviceID, constants.DeviceStatusOffline)
 	}
 }
 
-// OnDeviceDisconnect 设备断开连接处理
-func (dm *DeviceMonitor) OnDeviceDisconnect(deviceID string, conn ziface.IConnection, reason string) {
-	// 挂起会话
-	if dm.sessionManager.SuspendSession(deviceID) {
-		// 发布断开连接事件
-		dm.eventBus.PublishDeviceDisconnect(deviceID, conn.GetConnID(), reason)
+// groupStatusMonitorLoop 设备组状态监控循环
+func (dm *DeviceMonitor) groupStatusMonitorLoop() {
+	defer dm.wg.Done()
 
-		// 更新设备状态为重连中
-		if UpdateDeviceStatusFunc != nil {
-			oldStatus := constants.DeviceStatusOnline
-			UpdateDeviceStatusFunc(deviceID, constants.DeviceStatusReconnecting)
+	ticker := time.NewTicker(1 * time.Minute) // 每分钟检查一次设备组状态
+	defer ticker.Stop()
 
-			// 发布状态变更事件
-			dm.eventBus.PublishDeviceStatusChange(deviceID, oldStatus, constants.DeviceStatusReconnecting)
+	logger.Info("设备组状态监控循环已启动")
+
+	for {
+		select {
+		case <-dm.ctx.Done():
+			logger.Debug("设备组状态监控循环已停止")
+			return
+		case <-ticker.C:
+			dm.checkGroupStatus()
 		}
+	}
+}
 
-		logger.WithFields(logrus.Fields{
-			"deviceID": deviceID,
-			"connID":   conn.GetConnID(),
-			"reason":   reason,
-		}).Info("设备断开连接，会话已挂起")
+// checkGroupStatus 检查设备组状态
+func (dm *DeviceMonitor) checkGroupStatus() {
+	stats := dm.deviceGroupManager.GetGroupStatistics()
+
+	logger.WithFields(logrus.Fields{
+		"totalGroups":  stats["totalGroups"],
+		"totalDevices": stats["totalDevices"],
+	}).Debug("设备组状态检查")
+
+	// 检查每个设备组的状态
+	// 这里可以添加更详细的设备组健康检查逻辑
+}
+
+// GetMonitorStatistics 获取监控统计信息
+func (dm *DeviceMonitor) GetMonitorStatistics() map[string]interface{} {
+	sessionStats := dm.sessionManager.GetSessionStatistics()
+	groupStats := dm.deviceGroupManager.GetGroupStatistics()
+
+	return map[string]interface{}{
+		"enabled":       dm.enabled,
+		"running":       dm.running,
+		"checkInterval": dm.heartbeatCheckInterval.String(),
+		"deviceTimeout": dm.deviceTimeout.String(),
+		"sessionStats":  sessionStats,
+		"groupStats":    groupStats,
+		"lastCheckTime": time.Now().Format("2006-01-02 15:04:05"),
+	}
+}
+
+// StartGlobalDeviceMonitor 启动全局设备监控器
+func StartGlobalDeviceMonitor() error {
+	monitor := GetGlobalDeviceMonitor()
+	return monitor.Start()
+}
+
+// StopGlobalDeviceMonitor 停止全局设备监控器
+func StopGlobalDeviceMonitor() {
+	if globalDeviceMonitor != nil {
+		globalDeviceMonitor.Stop()
 	}
 }

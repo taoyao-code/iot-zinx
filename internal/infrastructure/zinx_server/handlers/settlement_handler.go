@@ -5,7 +5,6 @@ import (
 	"time"
 
 	"github.com/bujia-iot/iot-zinx/pkg"
-	"github.com/bujia-iot/iot-zinx/pkg/protocol"
 
 	"github.com/aceld/zinx/ziface"
 	"github.com/bujia-iot/iot-zinx/internal/app"
@@ -21,6 +20,10 @@ type SettlementHandler struct {
 
 // PreHandle 预处理结算数据上报
 func (h *SettlementHandler) PreHandle(request ziface.IRequest) {
+	// 🔧 关键修复：调用基类PreHandle确保命令确认逻辑执行
+	// 这将调用CommandManager.ConfirmCommand()以避免超时重传
+	h.DNYHandlerBase.PreHandle(request)
+
 	logger.WithFields(logrus.Fields{
 		"connID":     request.GetConnection().GetConnID(),
 		"remoteAddr": request.GetConnection().RemoteAddr().String(),
@@ -43,15 +46,26 @@ func (h *SettlementHandler) Handle(request ziface.IRequest) {
 		"dataLen":     len(data),
 	}).Info("✅ 结算处理器：开始处理标准Zinx消息")
 
-	// 🔧 关键修复：从DNYMessage中获取真实的PhysicalID
+	// 🔧 关键修复：从DNY协议消息中获取真实的PhysicalID
 	var physicalId uint32
-	if dnyMsg, ok := msg.(*protocol.DNYMessage); ok {
-		physicalId = dnyMsg.GetPhysicalID()
-		fmt.Printf("🔧 结算处理器从DNYMessage获取真实PhysicalID: 0x%08X\n", physicalId)
+	if dnyMsg, ok := msg.(*dny_protocol.Message); ok {
+		physicalId = dnyMsg.GetPhysicalId()
+		fmt.Printf("🔧 结算处理器从DNY协议消息获取真实PhysicalID: 0x%08X\n", physicalId)
 	} else {
-		// 如果不是DNYMessage，使用消息ID作为临时方案
-		physicalId = msg.GetMsgID()
-		fmt.Printf("🔧 结算处理器非DNYMessage，使用消息ID作为临时PhysicalID: 0x%08X\n", physicalId)
+		// 从连接属性中获取PhysicalID
+		if prop, err := conn.GetProperty("DNY_PhysicalID"); err == nil {
+			if pid, ok := prop.(uint32); ok {
+				physicalId = pid
+				fmt.Printf("🔧 结算处理器从连接属性获取PhysicalID: 0x%08X\n", physicalId)
+			}
+		}
+		if physicalId == 0 {
+			logger.WithFields(logrus.Fields{
+				"connID": conn.GetConnID(),
+				"msgID":  msg.GetMsgID(),
+			}).Error("结算处理器无法获取PhysicalID")
+			return
+		}
 	}
 	deviceId := fmt.Sprintf("%08X", physicalId)
 

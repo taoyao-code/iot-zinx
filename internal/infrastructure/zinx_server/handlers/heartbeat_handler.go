@@ -32,16 +32,37 @@ func (h *HeartbeatHandler) PreHandle(request ziface.IRequest) {
 		"dataLen":     len(data),
 	}).Info("✅ 心跳处理器：开始处理标准Zinx消息")
 
-	// 🔧 修复：暂时使用消息ID作为PhysicalID，后续可以通过其他方式获取真实的PhysicalID
-	// TODO: 需要在解码器中正确传递PhysicalID到业务处理器
-	physicalId := msg.GetMsgID()
-	fmt.Printf("🔧 心跳处理器使用消息ID作为PhysicalID: 0x%08X\n", physicalId)
+	// 🔧 修复：从DNY协议消息中获取真实的PhysicalID
+	var physicalId uint32
+	if dnyMsg, ok := msg.(*dny_protocol.Message); ok {
+		physicalId = dnyMsg.GetPhysicalId()
+		logger.WithFields(logrus.Fields{
+			"physicalID": fmt.Sprintf("0x%08X", physicalId),
+		}).Debug("从DNY协议消息获取真实PhysicalID")
+	} else {
+		// 从连接属性中获取PhysicalID
+		if prop, err := conn.GetProperty("DNY_PhysicalID"); err == nil {
+			if pid, ok := prop.(uint32); ok {
+				physicalId = pid
+				logger.WithFields(logrus.Fields{
+					"physicalID": fmt.Sprintf("0x%08X", physicalId),
+				}).Debug("从连接属性获取PhysicalID")
+			}
+		}
+		if physicalId == 0 {
+			physicalId = msg.GetMsgID()
+			logger.WithFields(logrus.Fields{
+				"physicalID": fmt.Sprintf("0x%08X", physicalId),
+			}).Warn("使用消息ID作为临时PhysicalID")
+		}
+	}
 
 	deviceId := h.FormatPhysicalID(physicalId)
 
 	logger.WithFields(logrus.Fields{
 		"connID":     conn.GetConnID(),
 		"physicalID": fmt.Sprintf("0x%08X", physicalId),
+		"deviceID":   deviceId,
 		"dataLen":    len(data),
 	}).Info("心跳处理器：处理标准Zinx数据格式")
 
@@ -63,10 +84,30 @@ func (h *HeartbeatHandler) Handle(request ziface.IRequest) {
 	data := msg.GetData()
 	commandId := msg.GetMsgID()
 
-	// 🔧 修复：暂时使用消息ID作为PhysicalID，后续可以通过其他方式获取真实的PhysicalID
-	// TODO: 需要在解码器中正确传递PhysicalID到业务处理器
-	physicalId := msg.GetMsgID()
-	fmt.Printf("🔧 心跳处理器使用消息ID作为PhysicalID: 0x%08X\n", physicalId)
+	// 🔧 修复：从DNY协议消息中获取真实的PhysicalID
+	var physicalId uint32
+	if dnyMsg, ok := msg.(*dny_protocol.Message); ok {
+		physicalId = dnyMsg.GetPhysicalId()
+		logger.WithFields(logrus.Fields{
+			"physicalID": fmt.Sprintf("0x%08X", physicalId),
+		}).Debug("从DNY协议消息获取真实PhysicalID")
+	} else {
+		// 从连接属性中获取PhysicalID
+		if prop, err := conn.GetProperty("DNY_PhysicalID"); err == nil {
+			if pid, ok := prop.(uint32); ok {
+				physicalId = pid
+				logger.WithFields(logrus.Fields{
+					"physicalID": fmt.Sprintf("0x%08X", physicalId),
+				}).Debug("从连接属性获取PhysicalID")
+			}
+		}
+		if physicalId == 0 {
+			physicalId = msg.GetMsgID()
+			logger.WithFields(logrus.Fields{
+				"physicalID": fmt.Sprintf("0x%08X", physicalId),
+			}).Warn("使用消息ID作为临时PhysicalID")
+		}
+	}
 
 	deviceId := h.FormatPhysicalID(physicalId)
 

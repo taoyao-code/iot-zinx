@@ -78,6 +78,8 @@ var Protocol = struct {
 	SendDNYResponse func(conn ziface.IConnection, physicalId uint32, messageId uint16, command uint8, data []byte) error
 	// 构建DNY协议响应数据包
 	BuildDNYResponsePacket func(physicalID uint32, messageID uint16, command uint8, data []byte) []byte
+	// 构建DNY协议请求数据包
+	BuildDNYRequestPacket func(physicalID uint32, messageID uint16, command uint8, data []byte) []byte
 	// 判断命令是否需要确认回复
 	NeedConfirmation func(command uint8) bool
 }{
@@ -99,6 +101,7 @@ var Protocol = struct {
 	PrintRawData:                     protocol.PrintRawData,
 	SendDNYResponse:                  protocol.SendDNYResponse,
 	BuildDNYResponsePacket:           protocol.BuildDNYResponsePacket,
+	BuildDNYRequestPacket:            protocol.BuildDNYRequestPacket,
 	NeedConfirmation:                 protocol.NeedConfirmation,
 }
 
@@ -129,60 +132,103 @@ var Network = struct {
 	SetUpdateDeviceStatusFunc: network.SetUpdateDeviceStatusFunc,
 }
 
-// Monitor 监控相关工具导出
-var Monitor = struct {
-	// 获取TCP监视器
+// Monitor 监控器相关接口
+type MonitorInterface struct {
 	GetGlobalMonitor func() monitor.IConnectionMonitor
-	// 获取全局设备监控器
+
+	// 🔧 新增：设备组管理接口
+	GetDeviceGroupManager func() monitor.IDeviceGroupManager
+	GetSessionManager     func() monitor.ISessionManager
+
+	// 🔧 新增：设备监控器接口
 	GetGlobalDeviceMonitor func() monitor.IDeviceMonitor
-	// 创建设备监控器（已弃用，推荐使用GetGlobalDeviceMonitor）
-	NewDeviceMonitor func(deviceConnAccessor func(func(deviceId string, conn ziface.IConnection) bool)) monitor.IDeviceMonitor
-	// 设置更新设备状态函数
-	SetUpdateDeviceStatusFunc func(fn monitor.UpdateDeviceStatusFuncType)
-	// 获取会话管理器
-	GetSessionManager func() *monitor.SessionManager
-	// 获取事件总线
-	GetEventBus func() *monitor.EventBus
-	// 设备事件类型常量
-	EventType struct {
-		StatusChange string
-		Connect      string
-		Disconnect   string
-		Reconnect    string
-		Heartbeat    string
-		Data         string
-	}
-}{
+
+	// 设备会话管理
+	CreateDeviceSession  func(deviceID string, conn ziface.IConnection) *monitor.DeviceSession
+	GetDeviceSession     func(deviceID string) (*monitor.DeviceSession, bool)
+	GetSessionsByICCID   func(iccid string) map[string]*monitor.DeviceSession
+	SuspendDeviceSession func(deviceID string) bool
+	ResumeDeviceSession  func(deviceID string, conn ziface.IConnection) bool
+	RemoveDeviceSession  func(deviceID string) bool
+
+	// 设备组管理
+	GetDeviceGroup        func(iccid string) (*monitor.DeviceGroup, bool)
+	AddDeviceToGroup      func(iccid, deviceID string, session *monitor.DeviceSession)
+	RemoveDeviceFromGroup func(iccid, deviceID string)
+	BroadcastToGroup      func(iccid string, data []byte) int
+	GetGroupStatistics    func() map[string]interface{}
+
+	// 连接管理
+	GetConnectionByDeviceId  func(deviceId string) (ziface.IConnection, bool)
+	BindDeviceIdToConnection func(deviceId string, conn ziface.IConnection)
+	UpdateLastHeartbeatTime  func(conn ziface.IConnection)
+}
+
+// Monitor 监控相关工具导出
+var Monitor = MonitorInterface{
 	GetGlobalMonitor: func() monitor.IConnectionMonitor {
 		return monitor.GetGlobalMonitor()
 	},
+
+	// 🔧 新增：设备组管理接口实现
+	GetDeviceGroupManager: func() monitor.IDeviceGroupManager {
+		return monitor.GetDeviceGroupManager()
+	},
+	GetSessionManager: func() monitor.ISessionManager {
+		return monitor.GetSessionManager()
+	},
+
+	// 🔧 新增：设备监控器接口实现
 	GetGlobalDeviceMonitor: func() monitor.IDeviceMonitor {
 		return monitor.GetGlobalDeviceMonitor()
 	},
-	NewDeviceMonitor: func(deviceConnAccessor func(func(deviceId string, conn ziface.IConnection) bool)) monitor.IDeviceMonitor {
-		return monitor.NewDeviceMonitor(deviceConnAccessor)
+
+	// 设备会话管理实现
+	CreateDeviceSession: func(deviceID string, conn ziface.IConnection) *monitor.DeviceSession {
+		return monitor.GetSessionManager().CreateSession(deviceID, conn)
 	},
-	SetUpdateDeviceStatusFunc: monitor.SetUpdateDeviceStatusFunc,
-	GetSessionManager: func() *monitor.SessionManager {
-		return monitor.GetSessionManager()
+	GetDeviceSession: func(deviceID string) (*monitor.DeviceSession, bool) {
+		return monitor.GetSessionManager().GetSession(deviceID)
 	},
-	GetEventBus: func() *monitor.EventBus {
-		return monitor.GetEventBus()
+	GetSessionsByICCID: func(iccid string) map[string]*monitor.DeviceSession {
+		return monitor.GetSessionManager().GetAllSessionsByICCID(iccid)
 	},
-	EventType: struct {
-		StatusChange string
-		Connect      string
-		Disconnect   string
-		Reconnect    string
-		Heartbeat    string
-		Data         string
-	}{
-		StatusChange: monitor.EventTypeStatusChange,
-		Connect:      monitor.EventTypeConnect,
-		Disconnect:   monitor.EventTypeDisconnect,
-		Reconnect:    monitor.EventTypeReconnect,
-		Heartbeat:    monitor.EventTypeHeartbeat,
-		Data:         monitor.EventTypeData,
+	SuspendDeviceSession: func(deviceID string) bool {
+		return monitor.GetSessionManager().SuspendSession(deviceID)
+	},
+	ResumeDeviceSession: func(deviceID string, conn ziface.IConnection) bool {
+		return monitor.GetSessionManager().ResumeSession(deviceID, conn)
+	},
+	RemoveDeviceSession: func(deviceID string) bool {
+		return monitor.GetSessionManager().RemoveSession(deviceID)
+	},
+
+	// 设备组管理实现
+	GetDeviceGroup: func(iccid string) (*monitor.DeviceGroup, bool) {
+		return monitor.GetDeviceGroupManager().GetGroup(iccid)
+	},
+	AddDeviceToGroup: func(iccid, deviceID string, session *monitor.DeviceSession) {
+		monitor.GetDeviceGroupManager().AddDeviceToGroup(iccid, deviceID, session)
+	},
+	RemoveDeviceFromGroup: func(iccid, deviceID string) {
+		monitor.GetDeviceGroupManager().RemoveDeviceFromGroup(iccid, deviceID)
+	},
+	BroadcastToGroup: func(iccid string, data []byte) int {
+		return monitor.GetDeviceGroupManager().BroadcastToGroup(iccid, data)
+	},
+	GetGroupStatistics: func() map[string]interface{} {
+		return monitor.GetDeviceGroupManager().GetGroupStatistics()
+	},
+
+	// 连接管理实现
+	GetConnectionByDeviceId: func(deviceId string) (ziface.IConnection, bool) {
+		return monitor.GetGlobalMonitor().GetConnectionByDeviceId(deviceId)
+	},
+	BindDeviceIdToConnection: func(deviceId string, conn ziface.IConnection) {
+		monitor.GetGlobalMonitor().BindDeviceIdToConnection(deviceId, conn)
+	},
+	UpdateLastHeartbeatTime: func(conn ziface.IConnection) {
+		monitor.GetGlobalMonitor().UpdateLastHeartbeatTime(conn)
 	},
 }
 

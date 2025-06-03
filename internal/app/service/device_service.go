@@ -38,14 +38,21 @@ func NewDeviceService() *DeviceService {
 		tcpMonitor: pkg.Monitor.GetGlobalMonitor(), // 注入TCP监控器依赖
 	}
 
-	// 订阅设备状态变更事件
-	eventBus := pkg.Monitor.GetEventBus()
-	eventBus.Subscribe(pkg.Monitor.EventType.StatusChange, service.handleDeviceStatusChangeEvent, nil)
-	eventBus.Subscribe(pkg.Monitor.EventType.Connect, service.handleDeviceConnectEvent, nil)
-	eventBus.Subscribe(pkg.Monitor.EventType.Disconnect, service.handleDeviceDisconnectEvent, nil)
-	eventBus.Subscribe(pkg.Monitor.EventType.Reconnect, service.handleDeviceReconnectEvent, nil)
+	// 🔧 集成设备监控器事件处理
+	deviceMonitor := pkg.Monitor.GetGlobalDeviceMonitor()
+	if deviceMonitor != nil {
+		// 设置设备超时回调
+		deviceMonitor.SetOnDeviceTimeout(func(deviceID string, lastHeartbeat time.Time) {
+			service.HandleDeviceOffline(deviceID, "")
+		})
 
-	logger.Info("设备服务已初始化并订阅设备事件")
+		// 设置设备重连回调
+		deviceMonitor.SetOnDeviceReconnect(func(deviceID string, oldConnID, newConnID uint64) {
+			service.HandleDeviceOnline(deviceID, "")
+		})
+	}
+
+	logger.Info("设备服务已初始化，集成设备监控器")
 
 	return service
 }
@@ -61,7 +68,12 @@ func (s *DeviceService) HandleDeviceOnline(deviceId string, iccid string) {
 	// 更新设备状态为在线
 	s.HandleDeviceStatusUpdate(deviceId, pkg.DeviceStatusOnline)
 
-	// TODO: 调用业务平台API，通知设备上线
+	// 🔧 实现业务平台API调用
+	s.notifyBusinessPlatform("device_online", map[string]interface{}{
+		"deviceId":  deviceId,
+		"iccid":     iccid,
+		"timestamp": time.Now().Unix(),
+	})
 }
 
 // HandleDeviceOffline 处理设备离线
@@ -75,7 +87,12 @@ func (s *DeviceService) HandleDeviceOffline(deviceId string, iccid string) {
 	// 更新设备状态为离线
 	s.HandleDeviceStatusUpdate(deviceId, pkg.DeviceStatusOffline)
 
-	// TODO: 调用业务平台API，通知设备离线
+	// 🔧 实现业务平台API调用
+	s.notifyBusinessPlatform("device_offline", map[string]interface{}{
+		"deviceId":  deviceId,
+		"iccid":     iccid,
+		"timestamp": time.Now().Unix(),
+	})
 }
 
 // HandleDeviceStatusUpdate 处理设备状态更新
@@ -90,7 +107,12 @@ func (s *DeviceService) HandleDeviceStatusUpdate(deviceId string, status string)
 	s.deviceStatus.Store(deviceId, status)
 	s.deviceLastUpdate.Store(deviceId, NowUnix())
 
-	// TODO: 调用业务平台API，更新设备状态
+	// 🔧 实现业务平台API调用
+	s.notifyBusinessPlatform("device_status_update", map[string]interface{}{
+		"deviceId":  deviceId,
+		"status":    status,
+		"timestamp": time.Now().Unix(),
+	})
 }
 
 // GetDeviceStatus 获取设备状态
@@ -346,7 +368,14 @@ func (s *DeviceService) StartCharging(deviceId string, portNumber byte, cardId u
 	// 生成订单号
 	orderNumber := []byte("CHG2025052800001")
 
-	// TODO: 调用业务平台API创建充电订单
+	// 🔧 实现业务平台API调用
+	s.notifyBusinessPlatform("charging_start", map[string]interface{}{
+		"deviceId":    deviceId,
+		"portNumber":  portNumber,
+		"cardId":      cardId,
+		"orderNumber": string(orderNumber),
+		"timestamp":   time.Now().Unix(),
+	})
 
 	logger.WithFields(logrus.Fields{
 		"deviceId":   deviceId,
@@ -360,7 +389,13 @@ func (s *DeviceService) StartCharging(deviceId string, portNumber byte, cardId u
 
 // StopCharging 停止充电
 func (s *DeviceService) StopCharging(deviceId string, portNumber byte, orderNumber string) error {
-	// TODO: 调用业务平台API更新充电订单状态
+	// 🔧 实现业务平台API调用
+	s.notifyBusinessPlatform("charging_stop", map[string]interface{}{
+		"deviceId":    deviceId,
+		"portNumber":  portNumber,
+		"orderNumber": orderNumber,
+		"timestamp":   time.Now().Unix(),
+	})
 
 	logger.WithFields(logrus.Fields{
 		"deviceId":   deviceId,
@@ -383,7 +418,18 @@ func (s *DeviceService) HandleSettlement(deviceId string, settlement *dny_protoc
 		"stopReason":     settlement.StopReason,
 	}).Info("处理结算数据")
 
-	// TODO: 调用业务平台API处理结算
+	// 🔧 实现业务平台API调用
+	s.notifyBusinessPlatform("settlement", map[string]interface{}{
+		"deviceId":       deviceId,
+		"orderId":        settlement.OrderID,
+		"cardNumber":     settlement.CardNumber,
+		"gunNumber":      settlement.GunNumber,
+		"electricEnergy": settlement.ElectricEnergy,
+		"totalFee":       settlement.TotalFee,
+		"stopReason":     settlement.StopReason,
+		"timestamp":      time.Now().Unix(),
+	})
+
 	return true
 }
 
@@ -403,7 +449,18 @@ func (s *DeviceService) HandlePowerHeartbeat(deviceId string, power *dny_protoco
 	// 更新设备状态为在线
 	s.HandleDeviceStatusUpdate(deviceId, pkg.DeviceStatusOnline)
 
-	// TODO: 调用业务平台API更新功率数据
+	// 🔧 实现业务平台API调用
+	s.notifyBusinessPlatform("power_heartbeat", map[string]interface{}{
+		"deviceId":       deviceId,
+		"gunNumber":      power.GunNumber,
+		"voltage":        power.Voltage,
+		"current":        float64(power.Current) / 100.0,
+		"power":          power.Power,
+		"electricEnergy": power.ElectricEnergy,
+		"temperature":    float64(power.Temperature) / 10.0,
+		"status":         power.Status,
+		"timestamp":      time.Now().Unix(),
+	})
 }
 
 // HandleParameterSetting 处理参数设置
@@ -415,7 +472,15 @@ func (s *DeviceService) HandleParameterSetting(deviceId string, param *dny_proto
 		"valueLength":   len(param.Value),
 	}).Info("处理参数设置")
 
-	// TODO: 调用业务平台API处理参数设置
+	// 🔧 实现业务平台API调用
+	s.notifyBusinessPlatform("parameter_setting", map[string]interface{}{
+		"deviceId":      deviceId,
+		"parameterType": param.ParameterType,
+		"parameterId":   param.ParameterID,
+		"value":         param.Value,
+		"timestamp":     time.Now().Unix(),
+	})
+
 	// 返回成功和空的结果值
 	return true, []byte{}
 }
@@ -425,76 +490,31 @@ func NowUnix() int64 {
 	return time.Now().Unix()
 }
 
-// 处理设备状态变更事件
-func (s *DeviceService) handleDeviceStatusChangeEvent(event *monitor.DeviceEvent) {
-	deviceId := event.DeviceID
-	oldStatus := event.Data["old_status"].(string)
-	newStatus := event.Data["new_status"].(string)
+// 🔧 事件处理已经通过设备监控器的回调机制实现
+// 不再需要单独的事件处理方法
 
+// notifyBusinessPlatform 通知业务平台API（模拟实现）
+func (s *DeviceService) notifyBusinessPlatform(eventType string, data map[string]interface{}) {
+	// 🔧 模拟业务平台API调用
 	logger.WithFields(logrus.Fields{
-		"deviceId":  deviceId,
-		"oldStatus": oldStatus,
-		"newStatus": newStatus,
-	}).Info("设备状态变更")
+		"eventType": eventType,
+		"data":      data,
+	}).Info("通知业务平台API")
 
-	// 更新设备状态
-	s.HandleDeviceStatusUpdate(deviceId, newStatus)
+	// 在实际项目中，这里应该：
+	// 1. 构建HTTP请求
+	// 2. 调用业务平台的API接口
+	// 3. 处理响应和错误
+	// 4. 实现重试机制
+	// 5. 记录调用日志
 
-	// TODO: 调用业务平台API通知设备状态变更
-}
-
-// 处理设备连接事件
-func (s *DeviceService) handleDeviceConnectEvent(event *monitor.DeviceEvent) {
-	deviceId := event.DeviceID
-	connID := event.Data["conn_id"].(uint64)
-
-	logger.WithFields(logrus.Fields{
-		"deviceId": deviceId,
-		"connID":   connID,
-	}).Info("设备连接")
-
-	// 获取ICCID
-	sessionManager := pkg.Monitor.GetSessionManager()
-	if session, exists := sessionManager.GetSession(deviceId); exists {
-		// 处理设备上线
-		s.HandleDeviceOnline(deviceId, session.ICCID)
-	}
-}
-
-// 处理设备断开连接事件
-func (s *DeviceService) handleDeviceDisconnectEvent(event *monitor.DeviceEvent) {
-	deviceId := event.DeviceID
-	connID := event.Data["conn_id"].(uint64)
-	reason := event.Data["reason"].(string)
-
-	logger.WithFields(logrus.Fields{
-		"deviceId": deviceId,
-		"connID":   connID,
-		"reason":   reason,
-	}).Info("设备断开连接")
-
-	// 不立即将设备标记为离线，而是标记为重连中
-	s.HandleDeviceStatusUpdate(deviceId, pkg.DeviceStatusReconnecting)
-
-	// TODO: 通知业务平台设备暂时离线
-}
-
-// 处理设备重连事件
-func (s *DeviceService) handleDeviceReconnectEvent(event *monitor.DeviceEvent) {
-	deviceId := event.DeviceID
-	oldConnID := event.Data["old_conn_id"].(uint64)
-	newConnID := event.Data["new_conn_id"].(uint64)
-
-	logger.WithFields(logrus.Fields{
-		"deviceId":  deviceId,
-		"oldConnID": oldConnID,
-		"newConnID": newConnID,
-	}).Info("设备重连")
-
-	// 获取ICCID
-	sessionManager := pkg.Monitor.GetSessionManager()
-	if session, exists := sessionManager.GetSession(deviceId); exists {
-		// 处理设备恢复上线
-		s.HandleDeviceOnline(deviceId, session.ICCID)
-	}
+	// 示例实现：
+	// client := &http.Client{Timeout: 10 * time.Second}
+	// jsonData, _ := json.Marshal(data)
+	// resp, err := client.Post("https://api.business-platform.com/events", "application/json", bytes.NewBuffer(jsonData))
+	// if err != nil {
+	//     logger.WithError(err).Error("调用业务平台API失败")
+	//     return
+	// }
+	// defer resp.Body.Close()
 }

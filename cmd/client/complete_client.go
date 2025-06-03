@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"encoding/binary"
 	"encoding/hex"
 	"fmt"
@@ -309,9 +310,16 @@ func (c *TestClient) HandleServerMessages() {
 
 		if n > 0 {
 			receivedData := buffer[:n]
+			// 打印解析的数据
 			c.logger.GetLogger().WithFields(logrus.Fields{
-				"dataLen": n,
-				"dataHex": hex.EncodeToString(receivedData),
+				"dataLen":    n,
+				"dataHex":    hex.EncodeToString(receivedData),
+				"dataStr":    string(receivedData),
+				"remoteAddr": c.conn.RemoteAddr().String(),
+				"localAddr":  c.conn.LocalAddr().String(),
+				"timestamp":  time.Now().Format(time.RFC3339),
+				"messageID":  c.getNextMessageID(),
+				"physicalID": fmt.Sprintf("0x%08X", c.physicalID),
 			}).Info("📥 收到服务器数据")
 
 			// 使用已有的解析函数
@@ -383,7 +391,7 @@ func (c *TestClient) handleRegisterResponse(result *protocol.DNYParseResult) {
 func (c *TestClient) handleHeartbeatResponse(result *protocol.DNYParseResult) {
 	if len(result.Data) >= 1 {
 		response := result.Data[0]
-		if response == 0x00 {
+		if response == 0x00 || response == 0x81 {
 			c.logger.GetLogger().Debug("💓 心跳响应正常")
 		} else {
 			c.logger.GetLogger().WithFields(logrus.Fields{
@@ -475,15 +483,27 @@ func (c *TestClient) handleSwipeCardResponse(result *protocol.DNYParseResult) {
 
 // handleSettlementResponse 处理结算响应
 func (c *TestClient) handleSettlementResponse(result *protocol.DNYParseResult) {
-	if len(result.Data) >= 1 {
-		response := result.Data[0]
+	if len(result.Data) >= 21 { // 需要至少21字节：订单号(20) + 状态(1)
+		// 提取订单号 (前20字节)
+		orderNumber := string(bytes.TrimRight(result.Data[0:20], "\x00"))
+
+		// 提取状态码 (第21字节)
+		response := result.Data[20]
+
 		if response == 0x00 {
-			c.logger.GetLogger().Info("✅ 结算信息上传成功")
+			c.logger.GetLogger().WithFields(logrus.Fields{
+				"orderNumber": orderNumber,
+			}).Info("✅ 结算信息上传成功")
 		} else {
 			c.logger.GetLogger().WithFields(logrus.Fields{
-				"response": fmt.Sprintf("0x%02X", response),
+				"orderNumber": orderNumber,
+				"response":    fmt.Sprintf("0x%02X", response),
 			}).Warn("⚠️ 结算信息上传失败")
 		}
+	} else {
+		c.logger.GetLogger().WithFields(logrus.Fields{
+			"dataLen": len(result.Data),
+		}).Error("❌ 结算响应数据长度不足")
 	}
 }
 
@@ -502,10 +522,10 @@ func (c *TestClient) getNextMessageID() uint16 {
 
 // StartHeartbeat 启动心跳协程
 func (c *TestClient) StartHeartbeat() {
-	c.logger.GetLogger().Info("💓 启动心跳协程，间隔3分钟...")
+	c.logger.GetLogger().Info("💓 启动心跳协程，间隔60秒...")
 
 	go func() {
-		ticker := time.NewTicker(3 * time.Minute)
+		ticker := time.NewTicker(60 * time.Second) // 修改为60秒，确保在服务器180秒超时前有足够的心跳包
 		defer ticker.Stop()
 
 		for c.isRunning {

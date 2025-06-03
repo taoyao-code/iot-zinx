@@ -1,10 +1,12 @@
 package protocol
 
 import (
+	"bytes"
 	"encoding/hex"
 	"fmt"
 
 	"github.com/aceld/zinx/ziface"
+	"github.com/bujia-iot/iot-zinx/internal/domain/dny_protocol"
 	"github.com/bujia-iot/iot-zinx/internal/infrastructure/logger"
 	"github.com/sirupsen/logrus"
 )
@@ -21,182 +23,190 @@ func NewDNYDecoder() ziface.IDecoder {
 // GetLengthField 返回长度字段配置
 // 根据AP3000协议文档，配置正确的长度字段解析参数
 func (d *DNY_Decoder) GetLengthField() *ziface.LengthField {
-	// 🔧 关键修复：根据Zinx文档，当LengthFieldLength=0时，Zinx会使用默认的TLV解析
-	// 这会导致我们的十六进制字符串数据无法正确传递到Intercept方法
-	// 解决方案：设置为nil，让Zinx传递原始数据而不进行任何长度字段解析
+	// 🔧 关键修复：设置为nil，让Zinx传递原始数据而不进行任何长度字段解析
+	// 这样可以避免Zinx的默认TLV解析干扰我们的十六进制字符串数据
 	return nil
 }
 
 // Intercept 拦截器方法，实现IDecoder接口
 // 负责DNY协议的解码和消息转换
 func (d *DNY_Decoder) Intercept(chain ziface.IChain) ziface.IcResp {
-	// 1. 获取Zinx的IMessage
-	iMessage := chain.GetIMessage()
-	if iMessage == nil {
-		logger.Error("IMessage为空，无法进行DNY协议解码")
-		return chain.ProceedWithIMessage(iMessage, nil)
+	// 1. 获取原始IMessage
+	originalIMessage := chain.GetIMessage()
+	if originalIMessage == nil {
+		logger.Error("Interceptor: originalIMessage is nil")
+		return chain.ProceedWithIMessage(nil, nil)
 	}
 
-	// 2. 获取原始数据
-	data := iMessage.GetData()
-	if len(data) == 0 {
-		logger.Debug("数据为空，跳过DNY协议解码")
-		return chain.ProceedWithIMessage(iMessage, nil)
+	// 2. 获取连接对象 - 通过Request获取
+	request := chain.Request()
+
+	var conn ziface.IConnection
+	connIDForLog := uint64(0)
+	if request != nil {
+		if iRequest, ok := request.(ziface.IRequest); ok {
+			conn = iRequest.GetConnection()
+			if conn != nil {
+				connIDForLog = conn.GetConnID()
+			}
+		}
 	}
 
-	// 3. 强制控制台输出，便于调试
-	fmt.Printf("\n🔧 DNY_Decoder.Intercept() 被调用! 数据长度: %d\n", len(data))
-	fmt.Printf("📦 原始数据: %s\n", hex.EncodeToString(data))
+	// 3. 获取原始数据
+	rawData := originalIMessage.GetData()
+	if len(rawData) == 0 {
+		logger.Debug("Interceptor: Raw data is empty.", logrus.Fields{"connID": connIDForLog})
+		return chain.ProceedWithIMessage(originalIMessage, nil)
+	}
 
-	// 4. 🔧 关键修复：优先检查是否为十六进制编码的DNY数据
-	if IsHexString(data) {
+	fmt.Printf("\n🔧 DNY_Decoder.Intercept() ConnID: %d, DataLen: %d\n", connIDForLog, len(rawData))
+	fmt.Printf("📦 RawData: %s\n", hex.EncodeToString(rawData))
+
+	// 4. 检查是否为十六进制编码的DNY数据
+	if IsHexString(rawData) {
+
 		fmt.Printf("🔍 检测到十六进制字符串数据\n")
-
-		// 检查十六进制字符串是否以"444e59"开头（DNY的hex表示）
-		hexStr := string(data)
+		hexStr := string(rawData)
 		if len(hexStr) >= 6 && (hexStr[:6] == "444e59" || hexStr[:6] == "444E59") {
-			fmt.Printf("✅ 发现十六进制编码的DNY协议数据\n")
-
-			// 🔧 使用统一的解析接口
+			fmt.Printf("✅ 检测到十六进制编码的DNY协议数据, ConnID: %d\n", connIDForLog)
 			result, err := ParseDNYHexString(hexStr)
 			if err != nil {
-				logger.WithFields(logrus.Fields{
-					"error":  err.Error(),
-					"hexStr": hexStr,
-				}).Error("DNY协议解析失败")
-				return chain.ProceedWithIMessage(iMessage, nil)
+				logger.WithFields(logrus.Fields{"error": err, "hexStr": hexStr, "connID": connIDForLog}).Error("Interceptor: Failed to parse HEX DNY")
+				return chain.ProceedWithIMessage(originalIMessage, nil)
 			}
 
-			fmt.Printf("🔄 十六进制解码成功，协议解析完成\n")
-			return d.createDNYResponse(chain, iMessage, result, data)
+			// 修改这里：直接设置原始IMessage对象
+			originalIMessage.SetMsgID(uint32(result.Command))
+			originalIMessage.SetData(result.Data)
+			originalIMessage.SetDataLen(uint32(len(result.Data)))
+
+			// 创建新的DNY消息，使用DNY命令作为消息ID
+			newMsg := dny_protocol.NewMessage(uint32(result.Command), result.PhysicalID, result.Data)
+
+			// 将DNY协议信息存储到连接属性中，供业务处理器使用
+			if conn != nil {
+				conn.SetProperty("DNY_PhysicalID", result.PhysicalID)
+				conn.SetProperty("DNY_MessageID", result.MessageID)
+				conn.SetProperty("DNY_Command", result.Command)
+				conn.SetProperty("DNY_ChecksumValid", result.ChecksumValid)
+			}
+
+			fmt.Printf("🔄 十六进制解码成功，协议解析完成, MsgID: 0x%02X\n", result.Command)
+			return chain.ProceedWithIMessage(newMsg, nil)
 		}
 	}
 
 	// 5. 检查是否为二进制DNY协议数据
-	if len(data) >= 3 && string(data[0:3]) == "DNY" {
-		fmt.Printf("📦 检测到二进制DNY协议数据\n")
-
-		// 🔧 使用统一的解析接口
-		result, err := ParseDNYData(data)
+	if len(rawData) >= 3 && string(rawData[0:3]) == "DNY" {
+		fmt.Printf("📦 检测到二进制DNY协议数据, ConnID: %d\n", connIDForLog)
+		result, err := ParseDNYData(rawData)
 		if err != nil {
-			logger.WithFields(logrus.Fields{
-				"error":   err.Error(),
-				"dataHex": hex.EncodeToString(data),
-			}).Error("DNY协议解析失败")
-			return chain.ProceedWithIMessage(iMessage, nil)
+			fmt.Printf("❌ DNY解析失败: %v, ConnID: %d\n", err, connIDForLog)
+			logger.WithFields(logrus.Fields{"error": err, "dataHex": hex.EncodeToString(rawData), "connID": connIDForLog}).Error("Interceptor: Failed to parse Binary DNY")
+			return chain.ProceedWithIMessage(originalIMessage, nil)
 		}
 
-		return d.createDNYResponse(chain, iMessage, result, data)
+		// 检查校验和
+		if !result.ChecksumValid {
+			fmt.Printf("❌ DNY校验和验证失败, Command: 0x%02X, ConnID: %d\n", result.Command, connIDForLog)
+			logger.WithFields(logrus.Fields{
+				"command":            fmt.Sprintf("0x%02X", result.Command),
+				"expectedChecksum":   fmt.Sprintf("0x%04X", result.Checksum),
+				"calculatedChecksum": fmt.Sprintf("0x%04X", CalculatePacketChecksum(rawData[:len(rawData)-2])),
+				"connID":             connIDForLog,
+			}).Warn("DNY校验和验证失败，但仍继续处理")
+		}
+
+		// 修改这里：直接设置原始IMessage对象
+		originalIMessage.SetMsgID(uint32(result.Command))
+		originalIMessage.SetData(result.Data)
+		originalIMessage.SetDataLen(uint32(len(result.Data)))
+
+		// 创建新的DNY消息，使用DNY命令作为消息ID
+		newMsg := dny_protocol.NewMessage(uint32(result.Command), result.PhysicalID, result.Data)
+
+		fmt.Printf("✅ DNY解析成功: Command=0x%02X, PhysicalID=0x%08X, MessageID=0x%04X, DataLen=%d, Valid=%t, ConnID: %d\n",
+			result.Command, result.PhysicalID, result.MessageID, len(result.Data), result.ChecksumValid, connIDForLog)
+
+		// 存储DNY协议信息到连接属性
+		if conn != nil {
+			conn.SetProperty("DNY_PhysicalID", result.PhysicalID)
+			conn.SetProperty("DNY_MessageID", result.MessageID)
+			conn.SetProperty("DNY_Command", result.Command)
+			conn.SetProperty("DNY_ChecksumValid", result.ChecksumValid)
+		}
+
+		fmt.Printf("🚀 传递DNY消息到处理器: MsgID=0x%02X, ConnID: %d\n", result.Command, connIDForLog)
+		return chain.ProceedWithIMessage(newMsg, nil)
 	}
 
 	// 6. 处理其他非DNY协议数据（如ICCID、link心跳等）
-	return d.handleNonDNYData(chain, iMessage, data)
-}
-
-// createDNYResponse 创建DNY响应的统一方法
-func (d *DNY_Decoder) createDNYResponse(chain ziface.IChain, iMessage ziface.IMessage, result *DNYParseResult, originalData []byte) ziface.IcResp {
-	// 🔧 关键修复：创建自定义消息类型，包含PhysicalID信息
-	customMessage := &DNYMessage{
-		IMessage:   iMessage,
-		PhysicalID: result.PhysicalID,
-		MessageID:  result.MessageID,
-		Command:    result.Command,
-		Checksum:   result.Checksum,
-		Valid:      result.ChecksumValid,
-	}
-
-	// 设置标准Zinx消息字段
-	customMessage.SetMsgID(uint32(result.Command))     // 命令ID作为路由键
-	customMessage.SetDataLen(uint32(len(result.Data))) // 设置原始数据长度
-	customMessage.SetData(result.Data)                 // 设置纯净的DNY数据
-
-	// 记录解码信息
-	logger.WithFields(logrus.Fields{
-		"command":     fmt.Sprintf("0x%02X", result.Command),
-		"physicalID":  fmt.Sprintf("0x%08X", result.PhysicalID),
-		"messageID":   fmt.Sprintf("0x%04X", result.MessageID),
-		"dataLen":     len(result.Data),
-		"checksum":    fmt.Sprintf("0x%04X", result.Checksum),
-		"valid":       result.ChecksumValid,
-		"messageType": fmt.Sprintf("%T", customMessage),
-	}).Info("DNY协议解码成功，传递包含PhysicalID的自定义消息")
-
-	// 强制控制台输出解码结果
-	fmt.Printf("✅ DNY解码成功: %s\n", result.String())
-	fmt.Printf("🔧 传递包含PhysicalID的自定义消息，长度: %d字节，物理ID: 0x%08X\n", len(result.Data), result.PhysicalID)
-
-	// 🔧 正确方法：传递包含PhysicalID的自定义消息对象
-	return chain.ProceedWithIMessage(customMessage, nil)
+	return d.handleNonDNYData(conn, originalIMessage, rawData, chain)
 }
 
 // handleNonDNYData 处理非DNY协议数据
-func (d *DNY_Decoder) handleNonDNYData(chain ziface.IChain, iMessage ziface.IMessage, data []byte) ziface.IcResp {
-	// 处理特殊消息类型
-	var msgID uint32 = 0
-
-	// 🔧 使用统一的特殊消息处理函数
-	if HandleSpecialMessage(data) {
-		if len(data) == IOT_SIM_CARD_LENGTH && IsAllDigits(data) {
-			// ICCID (20位数字)
-			msgID = 0xFF01
-			fmt.Printf("📱 检测到ICCID: %s\n", string(data))
-		} else if len(data) == 4 && string(data) == IOT_LINK_HEARTBEAT {
-			// link心跳
-			msgID = 0xFF02
-			fmt.Printf("💓 检测到link心跳\n")
-		}
-	} else if len(data) > 0 {
-		// 其他未知数据，尝试作为十六进制解码
-		if IsHexString(data) {
-			fmt.Printf("🔍 尝试解码未知十六进制数据: %s\n", string(data))
-		} else {
-			fmt.Printf("❓ 未知数据类型，长度: %d, 内容: %s\n", len(data), string(data))
-		}
+func (d *DNY_Decoder) handleNonDNYData(conn ziface.IConnection, msgToPass ziface.IMessage, data []byte, chain ziface.IChain) ziface.IcResp {
+	connIDForLog := uint64(0)
+	if conn != nil {
+		connIDForLog = conn.GetConnID()
 	}
 
-	// 设置消息ID用于路由
-	iMessage.SetMsgID(msgID)
+	var specialMsgID uint32 = 0xFFFF
+	dataType := "未知"
+
+	// 🔧 关键修复：在检测特殊消息前先清理数据中的空白字符
+	// 这解决了客户端发送ICCID时包含额外字符导致路由失败的问题
+	cleanedData := bytes.TrimSpace(data)
+	fmt.Printf("🧹 数据清理: 原始长度=%d, 清理后长度=%d, ConnID: %d\n", len(data), len(cleanedData), connIDForLog)
+
+	if HandleSpecialMessage(cleanedData) {
+		// 检查是否为ICCID (支持标准ICCID长度范围: 19-25字节)
+		if len(cleanedData) >= 19 && len(cleanedData) <= 25 && IsAllDigits(cleanedData) {
+			specialMsgID = 0xFF01
+			dataType = "ICCID"
+			iccidStr := string(cleanedData)
+			fmt.Printf("📱 检测到ICCID: %s (清理后长度: %d), ConnID: %d\n", iccidStr, len(cleanedData), connIDForLog)
+			if conn != nil {
+				conn.SetProperty(PropKeyICCID, iccidStr)
+				fmt.Printf("🔧 ICCID '%s' 已存储到连接属性 ConnID: %d\n", iccidStr, connIDForLog)
+			}
+			// 🔧 重要：使用清理后的数据而不是原始数据
+			msgToPass.SetData(cleanedData)
+			msgToPass.SetDataLen(uint32(len(cleanedData)))
+		} else if len(cleanedData) == 4 && string(cleanedData) == IOT_LINK_HEARTBEAT {
+			specialMsgID = 0xFF02
+			dataType = "Link心跳"
+			fmt.Printf("💓 检测到link心跳, ConnID: %d\n", connIDForLog)
+			msgToPass.SetData(cleanedData)
+			msgToPass.SetDataLen(uint32(len(cleanedData)))
+		}
+	} else if len(data) > 0 {
+		hexStr := hex.EncodeToString(data)
+		if IsHexString(data) {
+			dataType = "未知十六进制字符串"
+			fmt.Printf("🔍 %s: %s (原始: %s), ConnID: %d\n", dataType, string(data), hexStr, connIDForLog)
+		} else {
+			dataType = "未知二进制数据"
+			fmt.Printf("❓ %s, 长度: %d, 内容(HEX): %s, 内容(STR): %s, ConnID: %d\n", dataType, len(data), hexStr, string(data), connIDForLog)
+		}
+		// 对于未知数据，保持原始数据
+		msgToPass.SetData(data)
+		msgToPass.SetDataLen(uint32(len(data)))
+	}
+
+	msgToPass.SetMsgID(specialMsgID)
 
 	logger.WithFields(logrus.Fields{
-		"msgID":    fmt.Sprintf("0x%04X", msgID),
-		"dataLen":  len(data),
-		"dataType": "非DNY协议",
-	}).Debug("处理非DNY协议数据")
+		"connID":   connIDForLog,
+		"msgID":    fmt.Sprintf("0x%04X", specialMsgID),
+		"dataLen":  len(cleanedData),
+		"dataType": dataType,
+	}).Debug("Interceptor: Processed special/non-DNY data.")
 
-	return chain.ProceedWithIMessage(iMessage, nil)
+	return chain.ProceedWithIMessage(msgToPass, nil)
 }
 
-// DNYMessage 自定义消息类型，包含DNY协议的PhysicalID信息
-type DNYMessage struct {
-	ziface.IMessage
-	PhysicalID uint32
-	MessageID  uint16
-	Command    uint8
-	Checksum   uint16
-	Valid      bool
-}
+// PropKeyICCID 连接属性中存储ICCID的键
+const PropKeyICCID = "ICCID"
 
-// GetPhysicalID 获取物理ID
-func (m *DNYMessage) GetPhysicalID() uint32 {
-	return m.PhysicalID
-}
-
-// GetDNYMessageID 获取DNY消息ID
-func (m *DNYMessage) GetDNYMessageID() uint16 {
-	return m.MessageID
-}
-
-// GetCommand 获取命令
-func (m *DNYMessage) GetCommand() uint8 {
-	return m.Command
-}
-
-// GetChecksum 获取校验和
-func (m *DNYMessage) GetChecksum() uint16 {
-	return m.Checksum
-}
-
-// IsValid 检查校验是否有效
-func (m *DNYMessage) IsValid() bool {
-	return m.Valid
-}
+// 删除错误的decode函数，使用正确的ParseDNYData和ParseDNYHexString函数

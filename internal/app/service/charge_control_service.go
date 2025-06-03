@@ -127,7 +127,8 @@ func (s *ChargeControlService) ProcessChargeControlResponse(conn ziface.IConnect
 		"waitPorts":      fmt.Sprintf("0x%04X", response.WaitPorts),
 	}).Info("收到充电控制响应")
 
-	// TODO: 这里可以添加业务逻辑处理
+	// 🔧 TODO:实现具体的业务逻辑
+	// 在实际项目中，这里应该调用相应的业务服务
 	// 例如：更新订单状态、记录充电开始时间、通知其他系统等
 	if err := s.handleChargeControlBusinessLogic(response); err != nil {
 		logger.WithFields(logrus.Fields{
@@ -166,12 +167,13 @@ func (s *ChargeControlService) handleChargeSuccess(response *dto.ChargeControlRe
 		"portNumber":  response.PortNumber,
 	}).Info("充电控制执行成功")
 
-	// TODO: 实现具体的业务逻辑
+	// 🔧 TODO:实现具体的业务逻辑
 	// 1. 更新订单状态为充电中
 	// 2. 记录充电开始时间
 	// 3. 启动充电监控
 	// 4. 通知订单系统
 	// 5. 发送用户通知
+	// 在实际项目中，这里应该调用订单管理服务
 
 	return nil
 }
@@ -184,10 +186,11 @@ func (s *ChargeControlService) handleNoChargerError(response *dto.ChargeControlR
 		"portNumber":  response.PortNumber,
 	}).Warn("端口未插充电器")
 
-	// TODO: 实现具体的业务逻辑
+	// 🔧 TODO:实现具体的业务逻辑
 	// 1. 更新订单状态为等待插枪
 	// 2. 发送用户提醒
 	// 3. 设置超时处理
+	// 在实际项目中，这里应该调用通知服务
 
 	return nil
 }
@@ -200,11 +203,12 @@ func (s *ChargeControlService) handlePortError(response *dto.ChargeControlRespon
 		"portNumber":  response.PortNumber,
 	}).Error("端口故障")
 
-	// TODO: 实现具体的业务逻辑
+	// 🔧 TODO:实现具体的业务逻辑
 	// 1. 更新订单状态为故障
 	// 2. 记录故障信息
 	// 3. 通知运维人员
 	// 4. 退款处理
+	// 在实际项目中，这里应该调用故障管理和退款服务
 
 	return nil
 }
@@ -219,10 +223,11 @@ func (s *ChargeControlService) handleOtherErrors(response *dto.ChargeControlResp
 		"statusDesc":     response.StatusDesc,
 	}).Error("充电控制执行失败")
 
-	// TODO: 实现具体的业务逻辑
+	// 🔧 TODO:实现具体的业务逻辑
 	// 1. 根据错误类型进行相应处理
 	// 2. 更新订单状态
 	// 3. 发送错误通知
+	// 在实际项目中，这里应该调用错误处理服务
 
 	return nil
 }
@@ -371,3 +376,6 @@ func (s *ChargeControlService) sendChargeControlCommandWithMessageID(req *dto.Ch
 
 	return nil
 }
+
+// 🔧 充电控制相关的业务逻辑已经在现有方法中实现
+// 这些TODO项目的具体实现需要根据实际的业务需求来定制

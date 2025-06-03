@@ -7,7 +7,6 @@ import (
 	"github.com/bujia-iot/iot-zinx/internal/domain/dny_protocol"
 	"github.com/bujia-iot/iot-zinx/internal/infrastructure/logger"
 	"github.com/bujia-iot/iot-zinx/pkg"
-	"github.com/bujia-iot/iot-zinx/pkg/protocol"
 	"github.com/sirupsen/logrus"
 )
 
@@ -43,9 +42,14 @@ func (h *MainHeartbeatHandler) Handle(request ziface.IRequest) {
 	// 🔧 关键修复：从DNYMessage中获取真实的PhysicalID
 	var physicalId uint32
 	var messageId uint16
-	if dnyMsg, ok := msg.(*protocol.DNYMessage); ok {
-		physicalId = dnyMsg.GetPhysicalID()
-		messageId = dnyMsg.GetDNYMessageID()
+	if dnyMsg, ok := msg.(*dny_protocol.Message); ok {
+		physicalId = dnyMsg.GetPhysicalId()
+		// 从连接属性获取MessageID
+		if prop, err := conn.GetProperty("DNY_MessageID"); err == nil {
+			if mid, ok := prop.(uint16); ok {
+				messageId = mid
+			}
+		}
 		fmt.Printf("🔧 主机心跳处理器从DNYMessage获取真实PhysicalID: 0x%08X, MessageID: 0x%04X\n", physicalId, messageId)
 	} else {
 		// 如果不是DNYMessage，使用消息ID作为临时方案

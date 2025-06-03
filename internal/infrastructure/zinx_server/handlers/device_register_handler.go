@@ -6,7 +6,6 @@ import (
 
 	"github.com/bujia-iot/iot-zinx/pkg"
 	"github.com/bujia-iot/iot-zinx/pkg/constants"
-	"github.com/bujia-iot/iot-zinx/pkg/protocol"
 
 	"github.com/aceld/zinx/ziface"
 	"github.com/bujia-iot/iot-zinx/internal/app"
@@ -23,6 +22,10 @@ type DeviceRegisterHandler struct {
 
 // 预处理
 func (h *DeviceRegisterHandler) PreHandle(request ziface.IRequest) {
+	// 🔧 关键修复：调用基类PreHandle确保命令确认逻辑执行
+	// 这将调用CommandManager.ConfirmCommand()以避免超时重传
+	h.DNYHandlerBase.PreHandle(request)
+
 	logger.WithFields(logrus.Fields{
 		"connID":     request.GetConnection().GetConnID(),
 		"remoteAddr": request.GetConnection().RemoteAddr().String(),
@@ -45,15 +48,42 @@ func (h *DeviceRegisterHandler) Handle(request ziface.IRequest) {
 		"dataLen":     len(data),
 	}).Info("✅ 设备注册处理器：开始处理标准Zinx消息")
 
-	// 🔧 关键修复：从DNYMessage中获取真实的PhysicalID
+	// 🔧 关键修复：从DNY协议消息中获取真实的PhysicalID
 	var physicalId uint32
-	if dnyMsg, ok := msg.(*protocol.DNYMessage); ok {
-		physicalId = dnyMsg.GetPhysicalID()
-		fmt.Printf("🔧 从DNYMessage获取真实PhysicalID: 0x%08X\n", physicalId)
+	if dnyMsg, ok := msg.(*dny_protocol.Message); ok {
+		physicalId = dnyMsg.GetPhysicalId()
+		fmt.Printf("🔧 从DNY协议消息获取真实PhysicalID: 0x%08X\n", physicalId)
 	} else {
-		// 如果不是DNYMessage，使用消息ID作为临时方案
-		physicalId = msg.GetMsgID()
-		fmt.Printf("🔧 非DNYMessage，使用消息ID作为临时PhysicalID: 0x%08X\n", physicalId)
+		// 从连接属性中获取PhysicalID
+		if prop, err := conn.GetProperty("DNY_PhysicalID"); err == nil {
+			if pid, ok := prop.(uint32); ok {
+				physicalId = pid
+				fmt.Printf("🔧 从连接属性获取PhysicalID: 0x%08X\n", physicalId)
+			}
+		}
+		if physicalId == 0 {
+			logger.WithFields(logrus.Fields{
+				"connID": conn.GetConnID(),
+				"msgID":  msg.GetMsgID(),
+			}).Error("无法获取PhysicalID，设备注册失败")
+			return
+		}
+	}
+
+	// 🔧 重要修复：从连接属性获取ICCID，因为ICCID是通过单独的特殊消息发送的
+	var iccid string
+	if prop, err := conn.GetProperty(constants.PropKeyICCID); err == nil {
+		if iccidStr, ok := prop.(string); ok {
+			iccid = iccidStr
+			fmt.Printf("🔧 从连接属性获取ICCID: %s\n", iccid)
+		}
+	}
+	if iccid == "" {
+		logger.WithFields(logrus.Fields{
+			"connID":     conn.GetConnID(),
+			"physicalId": fmt.Sprintf("0x%08X", physicalId),
+		}).Error("无法获取ICCID，设备注册失败")
+		return
 	}
 
 	logger.WithFields(logrus.Fields{
@@ -74,6 +104,11 @@ func (h *DeviceRegisterHandler) Handle(request ziface.IRequest) {
 		return
 	}
 
+	// 🔧 重要：将解析出的ICCID与连接属性中的ICCID合并
+	if registerData.ICCID == "" {
+		registerData.ICCID = iccid // 使用从连接属性获取的ICCID
+	}
+
 	logger.WithFields(logrus.Fields{
 		"connID":          conn.GetConnID(),
 		"physicalId":      fmt.Sprintf("0x%08X", physicalId),
@@ -86,47 +121,57 @@ func (h *DeviceRegisterHandler) Handle(request ziface.IRequest) {
 	// 将设备ID绑定到连接
 	deviceIdStr := fmt.Sprintf("%08X", physicalId)
 
-	// 存储ICCID
-	iccid := registerData.ICCID
+	// 存储ICCID - 🔧 修复：不要重复声明iccid变量
 	conn.SetProperty(constants.PropKeyICCID, iccid)
 
-	// 检查是否存在会话
+	// 🔧 重构：支持多设备管理的会话处理
 	sessionManager := monitor.GetSessionManager()
 	var session *monitor.DeviceSession
 	var isReconnect bool
 
-	// 1. 先尝试使用ICCID查找会话
-	if iccid != "" && len(iccid) > 0 {
-		if existSession, exists := sessionManager.GetSessionByICCID(iccid); exists {
-			oldDeviceID := existSession.DeviceID
+	// 1. 检查该设备是否已有会话（设备重连）
+	if existSession, exists := sessionManager.GetSession(deviceIdStr); exists {
+		session = existSession
+		isReconnect = true
 
-			// 设备ID变更，记录日志并更新会话
-			if oldDeviceID != deviceIdStr {
+		logger.WithFields(logrus.Fields{
+			"deviceID":  deviceIdStr,
+			"iccid":     iccid,
+			"sessionID": existSession.SessionID,
+		}).Info("设备重连，恢复现有会话")
+
+		// 恢复会话
+		sessionManager.ResumeSession(deviceIdStr, conn)
+	} else {
+		// 2. 新设备注册，检查同一ICCID下是否有其他设备
+		existingDevices := sessionManager.GetAllSessionsByICCID(iccid)
+
+		if len(existingDevices) > 0 {
+			logger.WithFields(logrus.Fields{
+				"newDeviceID":     deviceIdStr,
+				"iccid":           iccid,
+				"existingDevices": len(existingDevices),
+			}).Info("同一ICCID下发现其他设备，支持多设备并发")
+
+			// 记录现有设备信息
+			for existingDeviceID := range existingDevices {
 				logger.WithFields(logrus.Fields{
-					"oldDeviceID": oldDeviceID,
-					"newDeviceID": deviceIdStr,
-					"iccid":       iccid,
-					"sessionID":   existSession.SessionID,
-				}).Info("设备ID已变更，但ICCID相同，可能是设备重启或更换了物理ID")
-
-				// 更新会话中的设备ID
-				existSession.DeviceID = deviceIdStr
-				sessionManager.UpdateSession(deviceIdStr, func(s *monitor.DeviceSession) {
-					*s = *existSession
-				})
+					"iccid":            iccid,
+					"existingDeviceID": existingDeviceID,
+					"newDeviceID":      deviceIdStr,
+				}).Debug("ICCID下的现有设备")
 			}
-
-			session = existSession
-			isReconnect = true
 		}
-	}
 
-	// 2. 再尝试使用设备ID查找会话
-	if session == nil {
-		if existSession, exists := sessionManager.GetSession(deviceIdStr); exists {
-			session = existSession
-			isReconnect = true
-		}
+		// 3. 创建新的设备会话
+		session = sessionManager.CreateSession(deviceIdStr, conn)
+		isReconnect = false
+
+		logger.WithFields(logrus.Fields{
+			"deviceID":  deviceIdStr,
+			"iccid":     iccid,
+			"sessionID": session.SessionID,
+		}).Info("创建新设备会话")
 	}
 
 	// 绑定设备ID到连接
@@ -161,6 +206,7 @@ func (h *DeviceRegisterHandler) Handle(request ziface.IRequest) {
 		"physicalId":  fmt.Sprintf("0x%08X", physicalId),
 		"deviceId":    deviceIdStr,
 		"isReconnect": isReconnect,
+		"iccid":       iccid,
 	}).Debug("设备注册响应发送成功")
 
 	// 更新心跳时间

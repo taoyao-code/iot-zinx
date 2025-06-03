@@ -41,23 +41,54 @@ func (d *DeviceRegisterData) MarshalBinary() ([]byte, error) {
 }
 
 func (d *DeviceRegisterData) UnmarshalBinary(data []byte) error {
-	if len(data) < 40 { // 修复：恢复为40字节
-		return fmt.Errorf("insufficient data length: %d, expected at least 40", len(data))
+	// 🔧 关键修复：根据AP3000协议文档，设备注册(0x20)实际只有8字节数据
+	// 协议格式：固件版本(2字节) + 端口数量(1字节) + 虚拟ID(1字节) + 设备类型(1字节) + 工作模式(1字节) + 电源板版本号(2字节) + 设备分时计费功能(1字节)
+	if len(data) < 8 {
+		return fmt.Errorf("insufficient data length: %d, expected at least 8 for device register", len(data))
 	}
 
-	// ICCID (20字节) - 修复：恢复为20字节
-	d.ICCID = string(bytes.TrimRight(data[0:20], "\x00"))
+	// 固件版本 (2字节, 小端序)
+	firmwareVersion := binary.LittleEndian.Uint16(data[0:2])
 
-	// 设备版本 (16字节) - 修复：恢复偏移量为20
-	copy(d.DeviceVersion[:], data[20:36])
+	// 端口数量 (1字节)
+	portCount := data[2]
 
-	// 设备类型 (2字节, 小端序) - 修复：恢复偏移量为36
-	d.DeviceType = binary.LittleEndian.Uint16(data[36:38])
+	// 虚拟ID (1字节)
+	virtualID := data[3]
 
-	// 心跳周期 (2字节, 小端序) - 修复：恢复偏移量为38
-	d.HeartbeatPeriod = binary.LittleEndian.Uint16(data[38:40])
+	// 设备类型 (1字节)
+	d.DeviceType = uint16(data[4])
+
+	// 工作模式 (1字节)
+	workMode := data[5]
+
+	// 电源板版本号 (2字节, 小端序)
+	powerBoardVersion := binary.LittleEndian.Uint16(data[6:8])
+
+	// 设备分时计费功能 (1字节)
+	// TODO： 根据实际业务需求处理此字段
+
+	// 🔧 重要：ICCID从连接属性获取，而不是从DNY数据包中解析
+	// 因为ICCID是通过单独的特殊消息(0xFF01)发送的
+	d.ICCID = "" // 将在处理器中从连接属性获取
+
+	// 🔧 版本字符串优化：将固件版本转换为版本字符串格式并正确处理空字符
+	versionStr := fmt.Sprintf("V%d.%02d", firmwareVersion/100, firmwareVersion%100)
+	// 清零整个数组，避免遗留的垃圾数据
+	for i := range d.DeviceVersion {
+		d.DeviceVersion[i] = 0
+	}
+	// 复制版本字符串，确保不会有冗余的空字符
+	copy(d.DeviceVersion[:], []byte(versionStr))
+
+	// 设置默认心跳周期（从工作模式或其他配置推导）
+	d.HeartbeatPeriod = 180 // 默认3分钟
 
 	d.Timestamp = time.Now()
+
+	fmt.Printf("🔧 设备注册解析成功: 固件版本=%d, 端口数=%d, 虚拟ID=%d, 设备类型=%d, 工作模式=%d, 电源板版本=%d\n",
+		firmwareVersion, portCount, virtualID, d.DeviceType, workMode, powerBoardVersion)
+
 	return nil
 }
 
@@ -121,32 +152,49 @@ func (s *SwipeCardRequestData) MarshalBinary() ([]byte, error) {
 }
 
 func (s *SwipeCardRequestData) UnmarshalBinary(data []byte) error {
-	if len(data) < 30 {
-		return fmt.Errorf("insufficient data length: %d", len(data))
+	// 🔧 关键修复：根据AP3000协议文档，刷卡操作(0x02)数据格式
+	// 协议格式：卡片ID(4字节) + 卡片类型(1字节) + 端口号(1字节) + 余额卡内金额(2字节) + 时间戳(4字节) + 卡号2字节数(1字节) + 卡号2(N字节)
+	// 基础长度：4+1+1+2+4+1 = 13字节，再加上可变长度的卡号2
+	if len(data) < 13 {
+		return fmt.Errorf("insufficient data length: %d, expected at least 13 for swipe card", len(data))
 	}
 
-	// 卡号 (20字节)
-	s.CardNumber = string(bytes.TrimRight(data[0:20], "\x00"))
+	// 卡片ID (4字节) - 需要转换为字符串
+	cardID := binary.LittleEndian.Uint32(data[0:4])
+	s.CardNumber = fmt.Sprintf("%08X", cardID) // 转换为8位十六进制字符串
 
-	// 卡类型 (1字节)
-	s.CardType = data[20]
+	// 卡片类型 (1字节)
+	s.CardType = data[4]
 
-	// 刷卡时间 (6字节)
-	year := binary.LittleEndian.Uint16(data[21:23])
-	month := data[23]
-	day := data[24]
-	hour := data[25]
-	minute := data[26]
-	second := data[27]
+	// 端口号 (1字节) - 存储到GunNumber
+	s.GunNumber = data[5]
 
-	s.SwipeTime = time.Date(int(year), time.Month(month), int(day),
-		int(hour), int(minute), int(second), 0, time.Local)
+	// 余额卡内金额 (2字节, 小端序) - 暂时忽略，根据业务需要可以扩展结构体
 
-	// 设备状态 (1字节)
-	s.DeviceStatus = data[28]
+	// 时间戳 (4字节, 小端序)
+	timestamp := binary.LittleEndian.Uint32(data[8:12])
+	s.SwipeTime = time.Unix(int64(timestamp), 0)
 
-	// 枪号 (1字节)
-	s.GunNumber = data[29]
+	// 卡号2字节数 (1字节)
+	cardNumber2Length := data[12]
+
+	// 验证数据长度是否包含完整的卡号2
+	expectedLength := 13 + int(cardNumber2Length)
+	if len(data) < expectedLength {
+		return fmt.Errorf("insufficient data length: %d, expected %d with card number 2", len(data), expectedLength)
+	}
+
+	// 卡号2 (N字节) - 如果需要可以扩展处理
+	if cardNumber2Length > 0 {
+		cardNumber2 := data[13 : 13+cardNumber2Length]
+		fmt.Printf("🔧 刷卡数据包含卡号2: 长度=%d, 内容=%s\n", cardNumber2Length, string(cardNumber2))
+	}
+
+	// 设置默认设备状态
+	s.DeviceStatus = 0 // 正常状态
+
+	fmt.Printf("🔧 刷卡请求解析成功: 卡号=%s, 卡类型=%d, 端口号=%d, 时间戳=%d\n",
+		s.CardNumber, s.CardType, s.GunNumber, timestamp)
 
 	return nil
 }
@@ -214,39 +262,62 @@ func (s *SettlementData) MarshalBinary() ([]byte, error) {
 }
 
 func (s *SettlementData) UnmarshalBinary(data []byte) error {
-	if len(data) < 70 { // 修复：正确的最小长度应该是70字节
-		return fmt.Errorf("insufficient data length: %d, expected at least 70", len(data))
+	// 🔧 关键修复：根据AP3000协议文档，结算数据(0x03)数据格式
+	// 协议格式：充电时长(2字节) + 最大功率(2字节) + 耗电量(2字节) + 端口号(1字节) + 在线/离线启动(1字节) + 卡号(4字节) + 停止原因(1字节) + 订单编号(16字节) + 第二最大功率(2字节) + 时间戳(4字节) + 占位时长(2字节)
+	// 总共：2+2+2+1+1+4+1+16+2+4+2 = 37字节，但基础功能35字节即可
+	if len(data) < 35 {
+		return fmt.Errorf("insufficient data length: %d, expected at least 35 for settlement", len(data))
 	}
 
-	// 订单号 (20字节)
-	s.OrderID = string(bytes.TrimRight(data[0:20], "\x00"))
+	// 充电时长 (2字节, 小端序) - 转换为开始时间和结束时间
+	chargeDuration := binary.LittleEndian.Uint16(data[0:2])
+	now := time.Now()
+	s.EndTime = now
+	s.StartTime = now.Add(-time.Duration(chargeDuration) * time.Second)
 
-	// 卡号 (20字节)
-	s.CardNumber = string(bytes.TrimRight(data[20:40], "\x00"))
+	// 最大功率 (2字节, 小端序) - 暂时忽略，可扩展
 
-	// 开始时间 (6字节)
-	s.StartTime = readTimeBytes(data[40:46])
+	// 耗电量 (2字节, 小端序)
+	s.ElectricEnergy = uint32(binary.LittleEndian.Uint16(data[4:6]))
 
-	// 结算时间 (6字节)
-	s.EndTime = readTimeBytes(data[46:52])
+	// 端口号 (1字节)
+	s.GunNumber = data[6]
 
-	// 充电电量 (4字节, 小端序) - 修复：移除错误的偏移
-	s.ElectricEnergy = binary.LittleEndian.Uint32(data[52:56])
+	// 在线/离线启动 (1字节) - 暂时忽略
 
-	// 充电费用 (4字节, 小端序) - 修复：移除错误的偏移
-	s.ChargeFee = binary.LittleEndian.Uint32(data[56:60])
+	// 卡号/验证码 (4字节)
+	cardID := binary.LittleEndian.Uint32(data[8:12])
+	s.CardNumber = fmt.Sprintf("%08X", cardID) // 转换为8位十六进制字符串
 
-	// 服务费 (4字节, 小端序) - 修复：移除错误的偏移
-	s.ServiceFee = binary.LittleEndian.Uint32(data[60:64])
+	// 停止原因 (1字节)
+	s.StopReason = data[12]
 
-	// 总费用 (4字节, 小端序) - 修复：移除错误的偏移
-	s.TotalFee = binary.LittleEndian.Uint32(data[64:68])
+	// 订单编号 (16字节)
+	s.OrderID = string(bytes.TrimRight(data[13:29], "\x00"))
 
-	// 枪号 (1字节) - 修复：移除错误的偏移
-	s.GunNumber = data[68]
+	// 第二最大功率 (2字节, 小端序) - 如果数据足够长
+	if len(data) >= 31 {
+		// secondMaxPower := binary.LittleEndian.Uint16(data[29:31])
+	}
 
-	// 停止原因 (1字节) - 修复：移除错误的偏移
-	s.StopReason = data[69]
+	// 时间戳 (4字节, 小端序) - 如果数据足够长
+	if len(data) >= 35 {
+		timestamp := binary.LittleEndian.Uint32(data[31:35])
+		s.EndTime = time.Unix(int64(timestamp), 0)
+	}
+
+	// 占位时长 (2字节, 小端序) - 如果数据足够长，充电柜专用
+	if len(data) >= 37 {
+		// occupyDuration := binary.LittleEndian.Uint16(data[35:37])
+	}
+
+	// 设置默认费用值
+	s.ChargeFee = 0
+	s.ServiceFee = 0
+	s.TotalFee = 0
+
+	fmt.Printf("🔧 结算数据解析成功: 订单号=%s, 卡号=%s, 充电时长=%d秒, 耗电量=%d, 端口号=%d, 停止原因=%d\n",
+		s.OrderID, s.CardNumber, chargeDuration, s.ElectricEnergy, s.GunNumber, s.StopReason)
 
 	return nil
 }

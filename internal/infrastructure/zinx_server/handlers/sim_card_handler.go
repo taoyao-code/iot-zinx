@@ -22,8 +22,8 @@ func (h *SimCardHandler) Handle(request ziface.IRequest) {
 	conn := request.GetConnection()
 	data := request.GetData()
 
-	// 确保数据是有效的SIM卡号
-	if len(data) == protocol.IOT_SIM_CARD_LENGTH && protocol.IsAllDigits(data) {
+	// 确保数据是有效的SIM卡号 (支持标准ICCID长度范围: 19-25字节)
+	if len(data) >= 19 && len(data) <= 25 && protocol.IsAllDigits(data) {
 		// 存储SIM卡号到连接属性
 		iccidStr := string(data)
 		conn.SetProperty(constants.PropKeyICCID, iccidStr)
@@ -32,7 +32,8 @@ func (h *SimCardHandler) Handle(request ziface.IRequest) {
 			"connID":     conn.GetConnID(),
 			"remoteAddr": conn.RemoteAddr().String(),
 			"iccid":      iccidStr,
-		}).Debug("收到SIM卡号数据")
+			"dataLen":    len(data),
+		}).Info("收到SIM卡号数据")
 
 		// 更新心跳时间
 		now := time.Now()
@@ -41,5 +42,12 @@ func (h *SimCardHandler) Handle(request ziface.IRequest) {
 
 		// 更新设备监控
 		monitor.GetGlobalMonitor().UpdateLastHeartbeatTime(conn)
+	} else {
+		logger.WithFields(logrus.Fields{
+			"connID":     conn.GetConnID(),
+			"remoteAddr": conn.RemoteAddr().String(),
+			"dataLen":    len(data),
+			"data":       string(data),
+		}).Warn("收到无效的SIM卡号数据")
 	}
 }

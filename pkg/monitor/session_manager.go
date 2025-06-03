@@ -56,6 +56,9 @@ type SessionManager struct {
 
 	// ICCID到会话ID的映射
 	iccidMap sync.Map // map[string]string - iccid -> sessionID
+
+	// 🔧 新增：集成设备组管理器
+	deviceGroupManager *DeviceGroupManager
 }
 
 // 全局会话管理器
@@ -75,9 +78,10 @@ func GetSessionManager() *SessionManager {
 		}
 
 		globalSessionManager = &SessionManager{
-			sessionTimeout: sessionTimeout,
+			sessionTimeout:     sessionTimeout,
+			deviceGroupManager: GetDeviceGroupManager(),
 		}
-		logger.Info("设备会话管理器已初始化")
+		logger.Info("设备会话管理器已初始化，集成设备组管理")
 	})
 	return globalSessionManager
 }
@@ -110,9 +114,15 @@ func (m *SessionManager) CreateSession(deviceID string, conn ziface.IConnection)
 	// 保存会话
 	m.sessions.Store(deviceID, session)
 
-	// 如果有ICCID，建立映射
+	// 🔧 新增：将设备添加到设备组
 	if iccid != "" {
-		m.iccidMap.Store(iccid, sessionID)
+		m.deviceGroupManager.AddDeviceToGroup(iccid, deviceID, session)
+		logger.WithFields(logrus.Fields{
+			"sessionID": sessionID,
+			"deviceID":  deviceID,
+			"iccid":     iccid,
+			"connID":    conn.GetConnID(),
+		}).Info("设备已添加到设备组")
 	}
 
 	// 设置连接属性
@@ -137,14 +147,49 @@ func (m *SessionManager) GetSession(deviceID string) (*DeviceSession, bool) {
 	return nil, false
 }
 
-// GetSessionByICCID 通过ICCID获取会话
+// GetSessionByICCID 通过ICCID获取会话（返回第一个找到的设备会话）
+// 🔧 修改：支持多设备场景，返回主设备或最近活跃的设备
 func (m *SessionManager) GetSessionByICCID(iccid string) (*DeviceSession, bool) {
-	if sessionID, ok := m.iccidMap.Load(iccid); ok {
-		if value, ok := m.sessions.Load(sessionID.(string)); ok {
-			return value.(*DeviceSession), true
+	devices := m.deviceGroupManager.GetAllDevicesInGroup(iccid)
+	if len(devices) == 0 {
+		return nil, false
+	}
+
+	// 如果只有一个设备，直接返回
+	if len(devices) == 1 {
+		for _, session := range devices {
+			return session, true
 		}
 	}
+
+	// 多个设备时，返回最近活跃的设备
+	var latestSession *DeviceSession
+	var latestTime time.Time
+
+	for _, session := range devices {
+		if session.LastHeartbeatTime.After(latestTime) {
+			latestTime = session.LastHeartbeatTime
+			latestSession = session
+		}
+	}
+
+	if latestSession != nil {
+		logger.WithFields(logrus.Fields{
+			"iccid":          iccid,
+			"selectedDevice": latestSession.DeviceID,
+			"totalDevices":   len(devices),
+			"lastHeartbeat":  latestSession.LastHeartbeatTime.Format("2006-01-02 15:04:05"),
+		}).Debug("从设备组中选择最近活跃的设备")
+		return latestSession, true
+	}
+
 	return nil, false
+}
+
+// GetAllSessionsByICCID 通过ICCID获取所有设备会话
+// 🔧 新增：支持获取同一ICCID下的所有设备会话
+func (m *SessionManager) GetAllSessionsByICCID(iccid string) map[string]*DeviceSession {
+	return m.deviceGroupManager.GetAllDevicesInGroup(iccid)
 }
 
 // GetSessionByConnID 通过连接ID获取会话
@@ -170,6 +215,12 @@ func (m *SessionManager) UpdateSession(deviceID string, updateFunc func(*DeviceS
 	if session, ok := m.GetSession(deviceID); ok {
 		updateFunc(session)
 		m.sessions.Store(deviceID, session)
+
+		// 🔧 新增：同步更新设备组中的会话信息
+		if session.ICCID != "" {
+			m.deviceGroupManager.AddDeviceToGroup(session.ICCID, deviceID, session)
+		}
+
 		return true
 	}
 	return false
@@ -214,6 +265,29 @@ func (m *SessionManager) ResumeSession(deviceID string, conn ziface.IConnection)
 	return success
 }
 
+// RemoveSession 移除设备会话
+// 🔧 新增：支持从设备组中移除设备
+func (m *SessionManager) RemoveSession(deviceID string) bool {
+	if session, ok := m.GetSession(deviceID); ok {
+		// 从会话存储中删除
+		m.sessions.Delete(deviceID)
+
+		// 从设备组中移除
+		if session.ICCID != "" {
+			m.deviceGroupManager.RemoveDeviceFromGroup(session.ICCID, deviceID)
+		}
+
+		logger.WithFields(logrus.Fields{
+			"sessionID": session.SessionID,
+			"deviceID":  deviceID,
+			"iccid":     session.ICCID,
+		}).Info("设备会话已移除")
+
+		return true
+	}
+	return false
+}
+
 // CleanupExpiredSessions 清理过期会话
 func (m *SessionManager) CleanupExpiredSessions() int {
 	now := time.Now()
@@ -227,9 +301,9 @@ func (m *SessionManager) CleanupExpiredSessions() int {
 			// 会话已过期，删除
 			m.sessions.Delete(deviceID)
 
-			// 删除ICCID映射
+			// 🔧 修改：从设备组中移除过期设备
 			if session.ICCID != "" {
-				m.iccidMap.Delete(session.ICCID)
+				m.deviceGroupManager.RemoveDeviceFromGroup(session.ICCID, deviceID)
 			}
 
 			expiredCount++
@@ -265,9 +339,13 @@ func (m *SessionManager) GetSessionStatistics() map[string]interface{} {
 		return true
 	})
 
+	// 🔧 新增：包含设备组统计信息
+	groupStats := m.deviceGroupManager.GetGroupStatistics()
+
 	return map[string]interface{}{
 		"totalSessions":     totalCount,
 		"activeSessions":    activeCount,
 		"suspendedSessions": suspendedCount,
+		"deviceGroups":      groupStats,
 	}
 }

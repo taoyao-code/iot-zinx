@@ -1,6 +1,8 @@
 package monitor
 
 import (
+	"time"
+
 	"github.com/aceld/zinx/ziface"
 )
 
@@ -53,4 +55,77 @@ type IDeviceMonitor interface {
 
 	// OnDeviceDisconnect 设备断开连接处理
 	OnDeviceDisconnect(deviceID string, conn ziface.IConnection, reason string)
+
+	// 🔧 新增：设备监控器回调设置方法
+	SetOnDeviceTimeout(callback func(deviceID string, lastHeartbeat time.Time))
+	SetOnDeviceReconnect(callback func(deviceID string, oldConnID, newConnID uint64))
+	SetOnGroupStatusChange(callback func(iccid string, activeDevices, totalDevices int))
+
+	// 🔧 新增：获取监控统计信息
+	GetMonitorStatistics() map[string]interface{}
+}
+
+// 🔧 新增：设备组管理接口
+// IDeviceGroupManager 设备组管理器接口
+type IDeviceGroupManager interface {
+	// GetOrCreateGroup 获取或创建设备组
+	GetOrCreateGroup(iccid string) *DeviceGroup
+
+	// GetGroup 获取设备组
+	GetGroup(iccid string) (*DeviceGroup, bool)
+
+	// AddDeviceToGroup 将设备添加到设备组
+	AddDeviceToGroup(iccid, deviceID string, session *DeviceSession)
+
+	// RemoveDeviceFromGroup 从设备组移除设备
+	RemoveDeviceFromGroup(iccid, deviceID string)
+
+	// GetDeviceFromGroup 从设备组获取特定设备
+	GetDeviceFromGroup(iccid, deviceID string) (*DeviceSession, bool)
+
+	// GetAllDevicesInGroup 获取设备组中的所有设备
+	GetAllDevicesInGroup(iccid string) map[string]*DeviceSession
+
+	// BroadcastToGroup 向设备组中的所有设备广播消息
+	BroadcastToGroup(iccid string, data []byte) int
+
+	// GetGroupStatistics 获取设备组统计信息
+	GetGroupStatistics() map[string]interface{}
+}
+
+// 🔧 新增：扩展的会话管理器接口
+// ISessionManager 会话管理器接口
+type ISessionManager interface {
+	// CreateSession 创建设备会话
+	CreateSession(deviceID string, conn ziface.IConnection) *DeviceSession
+
+	// GetSession 获取设备会话
+	GetSession(deviceID string) (*DeviceSession, bool)
+
+	// GetSessionByICCID 通过ICCID获取会话（返回最近活跃的设备）
+	GetSessionByICCID(iccid string) (*DeviceSession, bool)
+
+	// GetAllSessionsByICCID 通过ICCID获取所有设备会话
+	GetAllSessionsByICCID(iccid string) map[string]*DeviceSession
+
+	// GetSessionByConnID 通过连接ID获取会话
+	GetSessionByConnID(connID uint64) (*DeviceSession, bool)
+
+	// UpdateSession 更新设备会话
+	UpdateSession(deviceID string, updateFunc func(*DeviceSession)) bool
+
+	// SuspendSession 挂起设备会话
+	SuspendSession(deviceID string) bool
+
+	// ResumeSession 恢复设备会话
+	ResumeSession(deviceID string, conn ziface.IConnection) bool
+
+	// RemoveSession 移除设备会话
+	RemoveSession(deviceID string) bool
+
+	// CleanupExpiredSessions 清理过期会话
+	CleanupExpiredSessions() int
+
+	// GetSessionStatistics 获取会话统计信息
+	GetSessionStatistics() map[string]interface{}
 }
