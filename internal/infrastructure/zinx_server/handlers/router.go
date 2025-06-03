@@ -9,14 +9,17 @@ import (
 // RegisterRouters 注册所有路由
 func RegisterRouters(server ziface.IServer) {
 	// 🔧 架构重构后的路由配置
-	// 只有MsgID=0的消息会被拦截器处理，其他消息直接路由到对应处理器
+	// DNY解码器会处理DNY协议数据并转换为对应的命令ID
+	// 非DNY数据（如ICCID、link心跳）会被解码器设置为特殊的消息ID
 
-	// 1. 处理原始数据（非DNY协议）
-	server.AddRouter(0, &NonDNYDataHandler{})
+	// 1. 🔧 重要修复：移除catch-all路由器，避免DNY数据被重复处理
+	// 原来的：server.AddRouter(0, &NonDNYDataHandler{}) 会导致DNY解码后的原始数据被重复处理
+	// 现在只处理特定的非DNY消息类型
 
-	// 1.1 处理特殊消息类型
-	server.AddRouter(0xFF01, &SimCardHandler{})       // SIM卡号处理
+	// 1.1 处理特殊消息类型（由DNY解码器设置的特殊消息ID）
+	server.AddRouter(0xFF01, &SimCardHandler{})       // SIM卡号/ICCID处理
 	server.AddRouter(0xFF02, &LinkHeartbeatHandler{}) // link心跳处理
+	server.AddRouter(0xFFFF, &NonDNYDataHandler{})    // 未知数据处理
 
 	// 2. 🟢 设备心跳相关 (已实现)
 	server.AddRouter(dny_protocol.CmdHeartbeat, &HeartbeatHandler{})         // 0x01 设备心跳包(旧版)
