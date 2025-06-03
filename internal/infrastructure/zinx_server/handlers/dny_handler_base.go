@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"encoding/hex"
 	"fmt"
 	"time"
 
@@ -28,8 +29,13 @@ func (h *DNYHandlerBase) PreHandle(request ziface.IRequest) {
 	dnyMsg, ok := dny_protocol.IMessageToDnyMessage(msg)
 	if !ok {
 		logger.WithFields(logrus.Fields{
-			"connID": conn.GetConnID(),
-			"msgID":  msg.GetMsgID(),
+			"connID":        conn.GetConnID(),
+			"msgID":         msg.GetMsgID(),
+			"msg":           msg.GetData(),
+			"Length":        len(msg.GetData()),
+			"data":          hex.EncodeToString(msg.GetData()),
+			"rawData":       hex.EncodeToString(msg.GetRawData()),
+			"rawDataLength": len(msg.GetRawData()),
 		}).Error("消息类型转换失败，无法处理DNY消息")
 		return
 	}
