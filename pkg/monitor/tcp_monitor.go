@@ -176,7 +176,7 @@ func (m *TCPMonitor) OnRawDataReceived(conn ziface.IConnection, data []byte) {
 				logger.WithFields(logrus.Fields{
 					"connID":     connID,
 					"command":    fmt.Sprintf("0x%02X", result.Command),
-					"physicalID": result.PhysicalID,
+					"physicalID": fmt.Sprintf("0x%08X", result.PhysicalID),
 					"messageID":  result.MessageID,
 					"dataHex":    hex.EncodeToString(data),
 				}).Info("接收DNY协议数据")
@@ -220,7 +220,7 @@ func (m *TCPMonitor) OnRawDataSent(conn ziface.IConnection, data []byte) {
 				logger.WithFields(logrus.Fields{
 					"connID":     connID,
 					"command":    fmt.Sprintf("0x%02X", result.Command),
-					"physicalID": result.PhysicalID,
+					"physicalID": fmt.Sprintf("0x%08X", result.PhysicalID),
 					"messageID":  result.MessageID,
 					"dataHex":    hex.EncodeToString(data),
 				}).Info("发送DNY协议数据1")

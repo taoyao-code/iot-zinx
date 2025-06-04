@@ -56,7 +56,7 @@ func (h *DeviceRegisterHandler) Handle(request ziface.IRequest) {
 		fmt.Printf("🔧 从DNY协议消息获取真实PhysicalID: 0x%08X\n", physicalId)
 	} else {
 		// 从连接属性中获取PhysicalID
-		if prop, err := conn.GetProperty("DNY_PhysicalID"); err == nil {
+		if prop, err := conn.GetProperty(network.PropKeyDNYPhysicalID); err == nil {
 			if pid, ok := prop.(uint32); ok {
 				physicalId = pid
 				fmt.Printf("🔧 从连接属性获取PhysicalID: 0x%08X\n", physicalId)
@@ -72,7 +72,7 @@ func (h *DeviceRegisterHandler) Handle(request ziface.IRequest) {
 	}
 
 	// 将物理ID保存到连接属性，确保一致性
-	conn.SetProperty("DNY_PhysicalID", physicalId)
+	conn.SetProperty(network.PropKeyDNYPhysicalID, physicalId)
 
 	// 🔧 重要修复：从连接属性获取ICCID，因为ICCID是通过单独的特殊消息发送的
 	var iccid string

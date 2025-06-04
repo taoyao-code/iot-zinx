@@ -5,12 +5,12 @@ import (
 	"time"
 
 	"github.com/bujia-iot/iot-zinx/pkg"
-	"github.com/bujia-iot/iot-zinx/pkg/protocol"
 
 	"github.com/aceld/zinx/ziface"
 	"github.com/bujia-iot/iot-zinx/internal/app"
 	"github.com/bujia-iot/iot-zinx/internal/domain/dny_protocol"
 	"github.com/bujia-iot/iot-zinx/internal/infrastructure/logger"
+	"github.com/bujia-iot/iot-zinx/pkg/network"
 	"github.com/sirupsen/logrus"
 )
 
@@ -54,7 +54,7 @@ func (h *SettlementHandler) Handle(request ziface.IRequest) {
 		fmt.Printf("🔧 结算处理器从DNY协议消息获取真实PhysicalID: 0x%08X\n", physicalId)
 	} else {
 		// 从连接属性中获取PhysicalID
-		if prop, err := conn.GetProperty(protocol.PROP_DNY_PHYSICAL_ID); err == nil {
+		if prop, err := conn.GetProperty(network.PropKeyDNYPhysicalID); err == nil {
 			if pid, ok := prop.(uint32); ok {
 				physicalId = pid
 				fmt.Printf("🔧 结算处理器从连接属性获取PhysicalID: 0x%08X\n", physicalId)

@@ -6,6 +6,7 @@ import (
 	"github.com/aceld/zinx/ziface"
 	"github.com/bujia-iot/iot-zinx/internal/domain/dny_protocol"
 	"github.com/bujia-iot/iot-zinx/internal/infrastructure/logger"
+	"github.com/bujia-iot/iot-zinx/pkg/network"
 	"github.com/sirupsen/logrus"
 )
 
@@ -154,19 +155,19 @@ func (d *DNY_Decoder) Intercept(chain ziface.IChain) ziface.IcResp {
 
 		// 设置物理ID属性
 		physicalID := dnyMsg.GetPhysicalId()
-		conn.SetProperty(PROP_DNY_PHYSICAL_ID, physicalID)
+		conn.SetProperty(network.PropKeyDNYPhysicalID, physicalID)
 		logger.WithField("physicalId", fmt.Sprintf("0x%08X", physicalID)).
 			Debug("已设置连接物理ID属性")
 
 		// 设置消息ID属性
 		messageID := dnyMsg.MessageId
-		conn.SetProperty(PROP_DNY_MESSAGE_ID, messageID)
+		conn.SetProperty(network.PropKeyDNYMessageID, messageID)
 		logger.WithField("messageId", messageID).
 			Debug("已设置连接消息ID属性")
 
 		// 设置命令属性
 		command := uint8(dnyMsg.GetMsgID())
-		conn.SetProperty(PROP_DNY_COMMAND, command)
+		conn.SetProperty(network.PropKeyDNYCommand, command)
 		logger.WithField("command", fmt.Sprintf("0x%02X", command)).
 			Debug("已设置连接命令属性")
 

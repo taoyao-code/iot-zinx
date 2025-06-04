@@ -9,7 +9,7 @@ import (
 	"github.com/bujia-iot/iot-zinx/internal/infrastructure/logger"
 	"github.com/bujia-iot/iot-zinx/pkg"
 	"github.com/bujia-iot/iot-zinx/pkg/constants"
-	"github.com/bujia-iot/iot-zinx/pkg/protocol"
+	"github.com/bujia-iot/iot-zinx/pkg/network"
 	"github.com/sirupsen/logrus"
 )
 
@@ -42,7 +42,7 @@ func (h *HeartbeatHandler) PreHandle(request ziface.IRequest) {
 		}).Debug("从DNY协议消息获取真实PhysicalID")
 	} else {
 		// 从连接属性中获取PhysicalID
-		if prop, err := conn.GetProperty(protocol.PROP_DNY_PHYSICAL_ID); err == nil {
+		if prop, err := conn.GetProperty(network.PropKeyDNYPhysicalID); err == nil {
 			if pid, ok := prop.(uint32); ok {
 				physicalId = pid
 				logger.WithFields(logrus.Fields{
@@ -94,7 +94,7 @@ func (h *HeartbeatHandler) Handle(request ziface.IRequest) {
 		}).Debug("从DNY协议消息获取真实PhysicalID")
 	} else {
 		// 从连接属性中获取PhysicalID
-		if prop, err := conn.GetProperty(protocol.PROP_DNY_PHYSICAL_ID); err == nil {
+		if prop, err := conn.GetProperty(network.PropKeyDNYPhysicalID); err == nil {
 			if pid, ok := prop.(uint32); ok {
 				physicalId = pid
 				logger.WithFields(logrus.Fields{
