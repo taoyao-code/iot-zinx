@@ -8,6 +8,7 @@ import (
 	"github.com/aceld/zinx/ziface"
 	"github.com/bujia-iot/iot-zinx/internal/domain/dny_protocol"
 	"github.com/bujia-iot/iot-zinx/internal/infrastructure/logger"
+	"github.com/bujia-iot/iot-zinx/pkg/constants"
 	"github.com/bujia-iot/iot-zinx/pkg/metrics"
 	"github.com/sirupsen/logrus"
 )
@@ -31,7 +32,6 @@ const (
 	ICCID_MAX_LEN = 25
 
 	// 连接属性键
-	PropKeyICCID            = "ICCID"
 	PROP_DNY_PHYSICAL_ID    = "DNY_PhysicalID"
 	PROP_DNY_MESSAGE_ID     = "DNY_MessageID"
 	PROP_DNY_COMMAND        = "DNY_Command"
@@ -305,7 +305,7 @@ func (d *DNY_Decoder) detectSpecialMessage(cleanedData []byte, conn ziface.IConn
 		fmt.Printf("📱 检测到ICCID: %s (清理后长度: %d), 连接ID: %d\n", iccidStr, dataLen, connID)
 
 		if conn != nil {
-			conn.SetProperty(PropKeyICCID, iccidStr)
+			conn.SetProperty(constants.PropKeyICCID, iccidStr)
 			fmt.Printf("🔧 ICCID '%s' 已存储到连接属性 连接ID: %d\n", iccidStr, connID)
 		}
 		return MSG_ID_ICCID, "ICCID"
@@ -379,20 +379,14 @@ func (d *DNY_Decoder) processFrameDirectly(msg ziface.IMessage, conn ziface.ICon
 // processHeartbeatFrame 处理心跳帧
 func (d *DNY_Decoder) processHeartbeatFrame(msg ziface.IMessage, conn ziface.IConnection, frame *DNYParseResult) {
 	deviceID := fmt.Sprintf("%08X", frame.PhysicalID)
-
-	// 设置连接属性
 	d.setFrameConnectionProperties(conn, frame, deviceID)
-
 	fmt.Printf("💓 心跳帧处理完成: 设备ID=%s\n", deviceID)
 }
 
 // processRegisterFrame 处理注册帧
 func (d *DNY_Decoder) processRegisterFrame(msg ziface.IMessage, conn ziface.IConnection, frame *DNYParseResult) {
 	deviceID := fmt.Sprintf("%08X", frame.PhysicalID)
-
-	// 设置连接属性
 	d.setFrameConnectionProperties(conn, frame, deviceID)
-
 	fmt.Printf("📝 注册帧处理完成: 设备ID=%s\n", deviceID)
 }
 
@@ -412,10 +406,14 @@ func (d *DNY_Decoder) processGenericFrame(msg ziface.IMessage, conn ziface.IConn
 
 // setFrameConnectionProperties 设置帧连接属性 - 统一的属性设置方法
 func (d *DNY_Decoder) setFrameConnectionProperties(conn ziface.IConnection, frame *DNYParseResult, deviceID string) {
+	if conn == nil {
+		return
+	}
+
 	conn.SetProperty(PROP_DNY_PHYSICAL_ID, frame.PhysicalID)
 	conn.SetProperty(PROP_DNY_MESSAGE_ID, frame.MessageID)
 	conn.SetProperty(PROP_DNY_COMMAND, frame.Command)
-	conn.SetProperty("DeviceId", deviceID)
+	conn.SetProperty(constants.PropKeyDeviceId, deviceID)
 }
 
 // 🔧 DNY解码器架构说明：
