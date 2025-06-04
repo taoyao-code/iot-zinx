@@ -136,31 +136,82 @@ func (c *TestClient) ConnectOnly() error {
 	return nil
 }
 
-// StartHeartbeat 启动心跳协程
+// StartHeartbeat 启动主机协议心跳协程
 func (c *TestClient) StartHeartbeat() {
-	c.logger.GetLogger().Info("💓 启动心跳协程，间隔60秒...")
+	c.logger.GetLogger().Info("💓 启动主机协议心跳协程...")
 
-	go func() {
-		ticker := time.NewTicker(60 * time.Second) // 60秒间隔，确保在服务器180秒超时前有足够的心跳包
-		defer ticker.Stop()
+	// 启动"link"心跳协程（每30秒）
+	go c.startLinkHeartbeat()
 
-		for {
-			select {
-			case <-ticker.C:
-				if c.isRunning {
-					if err := c.SendHeartbeat(); err != nil {
-						c.logger.GetLogger().WithError(err).Error("❌ 心跳发送失败")
-					}
-				}
-			case <-c.stopChan:
-				c.logger.GetLogger().Info("🛑 心跳协程已停止")
-				return
-			}
-		}
-	}()
+	// 启动主机状态心跳协程（每30分钟）
+	go c.startMainHeartbeat()
 }
 
-// Start 启动客户端
+// startLinkHeartbeat 启动"link"心跳协程（每30秒当没有数据时）
+func (c *TestClient) startLinkHeartbeat() {
+	c.logger.GetLogger().Info("💓 启动 'link' 心跳协程，间隔30秒...")
+
+	ticker := time.NewTicker(30 * time.Second)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ticker.C:
+			if c.isRunning {
+				// 发送简单的"link"字符串作为心跳
+				if err := c.SendLinkHeartbeat(); err != nil {
+					c.logger.GetLogger().WithError(err).Error("❌ link心跳发送失败")
+				}
+			}
+		case <-c.stopChan:
+			c.logger.GetLogger().Info("🛑 link心跳协程已停止")
+			return
+		}
+	}
+}
+
+// startMainHeartbeat 启动主机状态心跳协程（每30分钟）
+func (c *TestClient) startMainHeartbeat() {
+	c.logger.GetLogger().Info("💓 启动主机状态心跳协程，间隔30分钟...")
+
+	// 首次立即发送一次心跳包
+	time.Sleep(5 * time.Second) // 等待连接稳定
+	if c.isRunning {
+		if err := c.SendMainHeartbeat(); err != nil {
+			c.logger.GetLogger().WithError(err).Error("❌ 初始主机心跳发送失败")
+		}
+		time.Sleep(2 * time.Second)
+		if err := c.SendMainStatusReport(); err != nil {
+			c.logger.GetLogger().WithError(err).Error("❌ 初始主机状态包发送失败")
+		}
+	}
+
+	ticker := time.NewTicker(30 * time.Minute)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ticker.C:
+			if c.isRunning {
+				// 发送主机状态心跳包
+				if err := c.SendMainHeartbeat(); err != nil {
+					c.logger.GetLogger().WithError(err).Error("❌ 主机心跳发送失败")
+				}
+
+				// 等待2秒后发送状态包
+				time.Sleep(2 * time.Second)
+				if err := c.SendMainStatusReport(); err != nil {
+					c.logger.GetLogger().WithError(err).Error("❌ 主机状态包发送失败")
+				}
+			}
+		case <-c.stopChan:
+			c.logger.GetLogger().Info("🛑 主机心跳协程已停止")
+			return
+		}
+	}
+}
+
+// Start 启动主机协议客户端
 func (c *TestClient) Start() error {
 	// 连接服务器
 	if err := c.Connect(); err != nil {
@@ -173,21 +224,28 @@ func (c *TestClient) Start() error {
 	// 启动消息处理协程
 	go c.HandleServerMessages()
 
-	// 发送ICCID
+	// 1. 发送ICCID（主机协议第一步）
 	if err := c.SendICCID(); err != nil {
 		return err
 	}
 	time.Sleep(1 * time.Second)
 
-	// 发送设备注册包
+	// 2. 请求服务器时间（主机协议第二步）
+	if err := c.SendGetServerTime(); err != nil {
+		c.logger.GetLogger().WithError(err).Warn("⚠️ 获取服务器时间失败，继续执行...")
+	}
+	time.Sleep(2 * time.Second)
+
+	// 3. 发送设备注册包（兼容性）
 	if err := c.SendRegister(); err != nil {
 		return err
 	}
 	time.Sleep(2 * time.Second)
 
-	// 启动心跳
+	// 4. 启动主机协议心跳机制
 	c.StartHeartbeat()
 
+	c.logger.GetLogger().Info("✅ 主机协议客户端启动完成")
 	return nil
 }
 

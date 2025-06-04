@@ -194,7 +194,7 @@ func (dp *DNYPacket) Unpack(binaryData []byte) (ziface.IMessage, error) {
 			// 检查是否为ICCID（解码后为纯数字字符串）
 			if IsAllDigits(decoded) {
 				fmt.Printf("📱 解码后发现ICCID: %s\n", string(decoded))
-				msg := dny_protocol.NewMessage(0, 0, decoded)
+				msg := dny_protocol.NewMessage(0, 0, decoded, 0)
 				msg.SetRawData(binaryData) // 保存原始十六进制数据
 				return msg, nil
 			}
@@ -212,7 +212,7 @@ func (dp *DNYPacket) Unpack(binaryData []byte) (ziface.IMessage, error) {
 
 	// 处理其他非DNY协议数据（如纯ICCID、link心跳等）
 	// 创建消息对象，保存完整原始数据，交给拦截器处理
-	msg := dny_protocol.NewMessage(0, 0, binaryData)
+	msg := dny_protocol.NewMessage(0, 0, binaryData, 0)
 	msg.SetRawData(binaryData)
 
 	fmt.Printf("📦 创建非DNY协议消息，MsgID=0，交给拦截器处理\n")
@@ -263,7 +263,7 @@ func (dp *DNYPacket) handleDNYProtocolBasic(data []byte) (ziface.IMessage, error
 
 	// 🔧 关键改变：只创建基础消息对象，不进行完整的协议解析
 	// 设置MsgID为0，表示需要拦截器进一步处理
-	msg := dny_protocol.NewMessage(0, 0, data[:totalLen])
+	msg := dny_protocol.NewMessage(0, 0, data[:totalLen], 0)
 	msg.SetRawData(data[:totalLen])
 
 	// 📦 强制控制台输出
@@ -276,56 +276,6 @@ func (dp *DNYPacket) handleDNYProtocolBasic(data []byte) (ziface.IMessage, error
 	}
 
 	return msg, nil
-}
-
-// CalculatePacketChecksum 计算校验和（从包头到数据的累加和）
-func CalculatePacketChecksum(data []byte) uint16 {
-	var checksum uint16
-	for _, b := range data {
-		checksum += uint16(b)
-	}
-	return checksum
-}
-
-// IsDNYProtocolData 检查数据是否符合DNY协议格式
-func IsDNYProtocolData(data []byte) bool {
-	// 检查最小长度
-	if len(data) < dny_protocol.MinPackageLen {
-		return false
-	}
-
-	// 检查包头是否为"DNY"
-	if !bytes.HasPrefix(data, []byte(dny_protocol.DnyHeader)) {
-		return false
-	}
-
-	// 解析数据长度字段
-	dataLen := binary.LittleEndian.Uint16(data[3:5])
-	totalLen := dny_protocol.DnyHeaderLen + int(dataLen)
-
-	// 检查实际长度是否匹配
-	if len(data) < totalLen {
-		return false
-	}
-
-	return true
-}
-
-// IsHexString 检查字节数组是否为有效的十六进制字符串
-func IsHexString(data []byte) bool {
-	// 检查是否为合适的十六进制长度
-	if len(data) == 0 || len(data)%2 != 0 {
-		return false
-	}
-
-	// 检查是否都是十六进制字符
-	for _, b := range data {
-		if !((b >= '0' && b <= '9') || (b >= 'a' && b <= 'f') || (b >= 'A' && b <= 'F')) {
-			return false
-		}
-	}
-
-	return true
 }
 
 // 🔧 已删除重复的isAllDigits函数，请使用special_handler.go中的IsAllDigits函数

@@ -15,7 +15,11 @@ type Message struct {
 	RawData []byte // 原始数据
 
 	// DNY协议特有字段
-	PhysicalId uint32 // 物理ID (4字节)
+	PacketHeader string // 包头 (3字节)
+	PhysicalId   uint32 // 物理ID (4字节)
+	CommandId    uint32 // 命令ID (1字节)
+	MessageId    uint16 // 消息ID (2字节)
+	Checksum     uint16 // 校验和 (2字节)
 }
 
 // GetMsgID 实现IMessage接口，获取消息ID
@@ -70,12 +74,16 @@ func (m *Message) SetPhysicalId(physicalId uint32) {
 }
 
 // NewMessage 创建一个新的DNY消息
-func NewMessage(id uint32, physicalId uint32, data []byte) *Message {
+func NewMessage(id uint32, physicalId uint32, data []byte, messageId uint16) *Message {
 	return &Message{
-		Id:         id,
-		DataLen:    uint32(len(data)),
-		Data:       data,
-		PhysicalId: physicalId,
+		Id:           id,
+		DataLen:      uint32(len(data)),
+		Data:         data,
+		PhysicalId:   physicalId,
+		MessageId:    messageId,
+		CommandId:    id,
+		PacketHeader: "DNY",
+		Checksum:     0,
 	}
 }
 

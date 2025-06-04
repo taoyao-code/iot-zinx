@@ -2,9 +2,11 @@ package main
 
 import (
 	"time"
+
+	"github.com/bujia-iot/iot-zinx/internal/domain/dny_protocol"
 )
 
-// DeviceConfig 设备配置
+// DeviceConfig 设备配置 - 主机设备配置
 type DeviceConfig struct {
 	PhysicalID  uint32 // 物理ID
 	DeviceType  uint8  // 设备类型
@@ -12,6 +14,15 @@ type DeviceConfig struct {
 	FirmwareVer uint16 // 固件版本
 	ICCID       string // ICCID号
 	ServerAddr  string // 服务器地址
+	// 主机相关配置
+	HostType       uint8  // 主机类型
+	CommType       uint8  // 通讯模块类型
+	RTCType        uint8  // RTC模块类型
+	SignalStrength uint8  // 信号强度
+	Frequency      uint16 // LORA使用的中心频率
+	IMEI           string // 模块的IMEI号
+	ModuleVersion  string // 通讯模块的固件版本号
+	HasRTC         bool   // 是否有RTC模块
 }
 
 // generateUniqueDeviceID 生成唯一的设备ID
@@ -24,7 +35,7 @@ func generateUniqueDeviceID() uint32 {
 	return 0x04000000 | deviceNumber
 }
 
-// NewDeviceConfig 创建默认设备配置
+// NewDeviceConfig 创建默认主机设备配置
 func NewDeviceConfig() *DeviceConfig {
 	return &DeviceConfig{
 		PhysicalID:  generateUniqueDeviceID(), // 生成唯一的设备ID
@@ -33,6 +44,15 @@ func NewDeviceConfig() *DeviceConfig {
 		FirmwareVer: 200,                      // V2.00
 		ICCID:       "89860404D91623904882979",
 		ServerAddr:  "localhost:7054",
+		// 主机相关默认配置
+		HostType:       dny_protocol.HostType485Old, // 旧款485主机
+		CommType:       dny_protocol.CommType4G_7S4, // 4G（7S4/G405）
+		RTCType:        dny_protocol.RTCTypeSD2068,  // SD2068 RTC模块
+		SignalStrength: 20,                          // 信号强度（0-31）
+		Frequency:      0,                           // 非LORA设备为0
+		IMEI:           "860123456789012",           // 模拟IMEI号
+		ModuleVersion:  "4G_MODULE_V1.0.0_20240601", // 模块版本号（24字节）
+		HasRTC:         true,                        // 有RTC模块
 	}
 }
 

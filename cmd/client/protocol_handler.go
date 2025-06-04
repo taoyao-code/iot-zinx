@@ -9,6 +9,7 @@ import (
 
 	"github.com/bujia-iot/iot-zinx/internal/domain/dny_protocol"
 	"github.com/bujia-iot/iot-zinx/pkg"
+	"github.com/bujia-iot/iot-zinx/pkg/protocol"
 	"github.com/sirupsen/logrus"
 )
 
@@ -81,6 +82,12 @@ func (c *TestClient) handleDNYMessage(data []byte) {
 	switch result.Command {
 	case dny_protocol.CmdDeviceRegister:
 		c.handleRegisterResponse(result)
+	case dny_protocol.CmdMainHeartbeat:
+		c.handleMainHeartbeatResponse(result)
+	case dny_protocol.CmdGetServerTime:
+		c.handleServerTimeResponse(result)
+	case dny_protocol.CmdMainStatusReport:
+		c.handleMainStatusResponse(result)
 	case dny_protocol.CmdDeviceHeart:
 		c.handleHeartbeatResponse(result)
 	case dny_protocol.CmdNetworkStatus:
@@ -91,6 +98,8 @@ func (c *TestClient) handleDNYMessage(data []byte) {
 		c.handleSwipeCardResponse(result)
 	case dny_protocol.CmdSettlement:
 		c.handleSettlementResponse(result)
+	case dny_protocol.CmdUpgradeNew:
+		c.handleFirmwareUpgrade(result)
 	default:
 		c.logger.GetLogger().WithFields(logrus.Fields{
 			"command": fmt.Sprintf("0x%02X", result.Command),
@@ -146,154 +155,517 @@ func (c *TestClient) SendRegister() error {
 	return nil
 }
 
-// SendHeartbeat 发送心跳包（21指令）
-func (c *TestClient) SendHeartbeat() error {
-	c.logger.GetLogger().Debug("💓 发送心跳包（0x21指令）...")
+// SendMainHeartbeat 发送主机状态心跳包（0x11指令）- 每30分钟发送一次
+func (c *TestClient) SendMainHeartbeat() error {
+	c.logger.GetLogger().Info("💓 发送主机状态心跳包（0x11指令）...")
 
-	// 构建心跳包数据
-	data := make([]byte, 5+c.config.PortCount)
+	// 构建主机心跳数据 - 按照协议文档：
+	// 固件版本(2) + RTC模块(1) + 时间戳(4) + 信号强度(1) + 通讯模块类型(1) + SIM卡号(20) + 主机类型(1) + 频率(2) + IMEI(15) + 模块版本号(24)
+	data := make([]byte, 71)
+	offset := 0
 
-	// 电压（2字节，小端序）- 模拟220V
-	binary.LittleEndian.PutUint16(data[0:2], 2200) // 220.0V
+	// 固件版本（2字节，小端序）
+	binary.LittleEndian.PutUint16(data[offset:offset+2], c.config.FirmwareVer)
+	offset += 2
 
-	// 端口数量（1字节）
-	data[2] = c.config.PortCount
+	// RTC模块类型（1字节）
+	data[offset] = c.config.RTCType
+	offset += 1
 
-	// 各端口状态（n字节）- 0=空闲
-	for i := uint8(0); i < c.config.PortCount; i++ {
-		data[3+i] = 0x00 // 空闲状态
+	// 主机当前时间戳（4字节，小端序）- 如无RTC模块则为全0
+	if c.config.HasRTC {
+		binary.LittleEndian.PutUint32(data[offset:offset+4], uint32(time.Now().Unix()))
+	} else {
+		binary.LittleEndian.PutUint32(data[offset:offset+4], 0)
+	}
+	offset += 4
+
+	// 信号强度（1字节）
+	data[offset] = c.config.SignalStrength
+	offset += 1
+
+	// 通讯模块类型（1字节）
+	data[offset] = c.config.CommType
+	offset += 1
+
+	// SIM卡号（20字节）- ICCID
+	iccidBytes := []byte(c.config.ICCID)
+	if len(iccidBytes) > 20 {
+		copy(data[offset:offset+20], iccidBytes[:20])
+	} else {
+		copy(data[offset:offset+len(iccidBytes)], iccidBytes)
+	}
+	offset += 20
+
+	// 主机类型（1字节）
+	data[offset] = c.config.HostType
+	offset += 1
+
+	// 频率（2字节，小端序）- LORA使用的中心频率，如无此数据则为0
+	binary.LittleEndian.PutUint16(data[offset:offset+2], c.config.Frequency)
+	offset += 2
+
+	// IMEI号（15字节）
+	imeiBytes := []byte(c.config.IMEI)
+	if len(imeiBytes) > 15 {
+		copy(data[offset:offset+15], imeiBytes[:15])
+	} else {
+		copy(data[offset:offset+len(imeiBytes)], imeiBytes)
+	}
+	offset += 15
+
+	// 模块版本号（24字节）
+	moduleVerBytes := []byte(c.config.ModuleVersion)
+	if len(moduleVerBytes) > 24 {
+		copy(data[offset:offset+24], moduleVerBytes[:24])
+	} else {
+		copy(data[offset:offset+len(moduleVerBytes)], moduleVerBytes)
 	}
 
-	// 信号强度（1字节）- 有线组网为00
-	data[3+c.config.PortCount] = 0x00
+	// 使用已有的包构建函数
+	packet := pkg.Protocol.BuildDNYResponsePacket(c.config.PhysicalID, c.getNextMessageID(), dny_protocol.CmdMainHeartbeat, data)
 
-	// 当前环境温度（1字节）- 模拟25度，需要加65
-	data[4+c.config.PortCount] = 65 + 25
+	c.logger.GetLogger().WithFields(logrus.Fields{
+		"physicalID":     fmt.Sprintf("0x%08X", c.config.PhysicalID),
+		"firmwareVer":    c.config.FirmwareVer,
+		"rtcType":        fmt.Sprintf("0x%02X", c.config.RTCType),
+		"signalStrength": c.config.SignalStrength,
+		"commType":       fmt.Sprintf("0x%02X", c.config.CommType),
+		"hostType":       fmt.Sprintf("0x%02X", c.config.HostType),
+		"frequency":      c.config.Frequency,
+		"imei":           c.config.IMEI,
+		"moduleVersion":  c.config.ModuleVersion,
+		"packetHex":      hex.EncodeToString(packet),
+		"packetLen":      len(packet),
+	}).Info("📦 主机心跳包详情")
+
+	// 发送数据包
+	_, err := c.conn.Write(packet)
+	if err != nil {
+		c.logger.GetLogger().WithError(err).Error("❌ 发送主机心跳包失败")
+		return err
+	}
+
+	c.logger.GetLogger().Info("✅ 主机心跳包发送成功")
+	return nil
+}
+
+// SendGetServerTime 发送获取服务器时间请求（0x12指令）
+func (c *TestClient) SendGetServerTime() error {
+	c.logger.GetLogger().Info("🕐 发送获取服务器时间请求（0x12指令）...")
+
+	// 无数据，只发送命令
+	data := make([]byte, 0)
 
 	// 使用已有的包构建函数
+	packet := pkg.Protocol.BuildDNYResponsePacket(c.config.PhysicalID, c.getNextMessageID(), dny_protocol.CmdGetServerTime, data)
+
+	c.logger.GetLogger().WithFields(logrus.Fields{
+		"physicalID": fmt.Sprintf("0x%08X", c.config.PhysicalID),
+		"packetHex":  hex.EncodeToString(packet),
+		"packetLen":  len(packet),
+	}).Info("📦 获取服务器时间请求包详情")
+
+	// 发送数据包
+	_, err := c.conn.Write(packet)
+	if err != nil {
+		c.logger.GetLogger().WithError(err).Error("❌ 发送获取服务器时间请求失败")
+		return err
+	}
+
+	c.logger.GetLogger().Info("✅ 获取服务器时间请求发送成功")
+	return nil
+}
+
+// SendMainStatusReport 发送主机状态包上报（0x17指令）- 每30分钟发送一次
+func (c *TestClient) SendMainStatusReport() error {
+	c.logger.GetLogger().Info("📊 发送主机状态包上报（0x17指令）...")
+
+	// 构建状态包数据 - 根据实际需要调整数据结构
+	data := make([]byte, 8)
+
+	// 主机工作状态（1字节）- 0x00=正常
+	data[0] = 0x00
+
+	// 电压（2字节，小端序）- 模拟220V
+	binary.LittleEndian.PutUint16(data[1:3], 2200) // 220.0V
+
+	// 当前环境温度（1字节）- 模拟25度，需要加65
+	data[3] = 65 + 25
+
+	// 端口数量（1字节）
+	data[4] = c.config.PortCount
+
+	// 各端口状态（n字节，这里简化为2字节）- 0=空闲
+	data[5] = 0x00 // 端口1状态
+	data[6] = 0x00 // 端口2状态
+
+	// 预留字节
+	data[7] = 0x00
+
+	// 使用已有的包构建函数
+	packet := pkg.Protocol.BuildDNYResponsePacket(c.config.PhysicalID, c.getNextMessageID(), dny_protocol.CmdMainStatusReport, data)
+
+	c.logger.GetLogger().WithFields(logrus.Fields{
+		"physicalID":  fmt.Sprintf("0x%08X", c.config.PhysicalID),
+		"voltage":     "220.0V",
+		"temperature": "25°C",
+		"portCount":   c.config.PortCount,
+		"packetHex":   hex.EncodeToString(packet),
+		"packetLen":   len(packet),
+	}).Info("📦 主机状态包详情")
+
+	// 发送数据包
+	_, err := c.conn.Write(packet)
+	if err != nil {
+		c.logger.GetLogger().WithError(err).Error("❌ 发送主机状态包失败")
+		return err
+	}
+
+	c.logger.GetLogger().Info("✅ 主机状态包发送成功")
+	return nil
+}
+
+// handleMainHeartbeatResponse 处理主机心跳响应
+func (c *TestClient) handleMainHeartbeatResponse(result *protocol.DNYParseResult) {
+	c.logger.GetLogger().WithFields(logrus.Fields{
+		"command":    fmt.Sprintf("0x%02X", result.Command),
+		"physicalID": fmt.Sprintf("0x%08X", result.PhysicalID),
+		"messageID":  result.MessageID,
+		"dataLen":    len(result.Data),
+	}).Info("📥 收到主机心跳响应")
+
+	// 主机心跳通常无需服务器响应，这里仅记录日志
+	if len(result.Data) > 0 {
+		responseCode := result.Data[0]
+		c.logger.GetLogger().WithFields(logrus.Fields{
+			"responseCode": fmt.Sprintf("0x%02X", responseCode),
+		}).Info("📋 主机心跳响应码")
+	}
+}
+
+// handleServerTimeResponse 处理服务器时间响应
+func (c *TestClient) handleServerTimeResponse(result *protocol.DNYParseResult) {
+	c.logger.GetLogger().WithFields(logrus.Fields{
+		"command":    fmt.Sprintf("0x%02X", result.Command),
+		"physicalID": fmt.Sprintf("0x%08X", result.PhysicalID),
+		"messageID":  result.MessageID,
+		"dataLen":    len(result.Data),
+	}).Info("📥 收到服务器时间响应")
+
+	if len(result.Data) >= 5 {
+		// 解析服务器时间响应：应答码(1) + 时间戳(4)
+		responseCode := result.Data[0]
+		if responseCode == 0x00 {
+			timestamp := binary.LittleEndian.Uint32(result.Data[1:5])
+			serverTime := time.Unix(int64(timestamp), 0)
+
+			c.logger.GetLogger().WithFields(logrus.Fields{
+				"serverTime":      serverTime.Format("2006-01-02 15:04:05"),
+				"serverTimestamp": timestamp,
+				"localTime":       time.Now().Format("2006-01-02 15:04:05"),
+			}).Info("🕐 服务器时间获取成功")
+
+			// 这里可以实现时间同步逻辑
+			timeDiff := time.Now().Unix() - int64(timestamp)
+			if abs(timeDiff) > 60 { // 如果时间差超过1分钟
+				c.logger.GetLogger().WithFields(logrus.Fields{
+					"timeDifference": fmt.Sprintf("%d秒", timeDiff),
+				}).Warn("⚠️ 本地时间与服务器时间差异较大")
+			}
+		} else {
+			c.logger.GetLogger().WithFields(logrus.Fields{
+				"responseCode": fmt.Sprintf("0x%02X", responseCode),
+			}).Error("❌ 获取服务器时间失败")
+		}
+	} else {
+		c.logger.GetLogger().Error("❌ 服务器时间响应数据格式错误")
+	}
+}
+
+// handleMainStatusResponse 处理主机状态包响应
+func (c *TestClient) handleMainStatusResponse(result *protocol.DNYParseResult) {
+	c.logger.GetLogger().WithFields(logrus.Fields{
+		"command":    fmt.Sprintf("0x%02X", result.Command),
+		"physicalID": fmt.Sprintf("0x%08X", result.PhysicalID),
+		"messageID":  result.MessageID,
+		"dataLen":    len(result.Data),
+	}).Info("📥 收到主机状态包响应")
+
+	// 主机状态包通常无需服务器响应，这里仅记录日志
+	if len(result.Data) > 0 {
+		responseCode := result.Data[0]
+		c.logger.GetLogger().WithFields(logrus.Fields{
+			"responseCode": fmt.Sprintf("0x%02X", responseCode),
+		}).Info("📋 主机状态包响应码")
+	}
+}
+
+// handleFirmwareUpgrade 处理固件升级指令
+func (c *TestClient) handleFirmwareUpgrade(result *protocol.DNYParseResult) {
+	c.logger.GetLogger().WithFields(logrus.Fields{
+		"command":    fmt.Sprintf("0x%02X", result.Command),
+		"physicalID": fmt.Sprintf("0x%08X", result.PhysicalID),
+		"messageID":  result.MessageID,
+		"dataLen":    len(result.Data),
+	}).Info("📥 收到固件升级指令")
+
+	// 根据不同的升级命令处理
+	switch result.Command {
+	case dny_protocol.CmdUpgradeNew: // 0xFA - 主机固件升级（新版）
+		c.handleNewFirmwareUpgrade(result)
+	case dny_protocol.CmdUpgradeOld: // 0xF8 - 设备固件升级（旧版）
+		c.handleOldFirmwareUpgrade(result)
+	default:
+		c.logger.GetLogger().WithFields(logrus.Fields{
+			"command": fmt.Sprintf("0x%02X", result.Command),
+		}).Warn("⚠️ 未知的固件升级命令")
+	}
+}
+
+// handleNewFirmwareUpgrade 处理新版固件升级（0xFA）
+func (c *TestClient) handleNewFirmwareUpgrade(result *protocol.DNYParseResult) {
+	if len(result.Data) == 0 {
+		// 触发升级模式指令
+		c.logger.GetLogger().Info("🔄 收到触发固件升级模式指令")
+
+		// 发送设备请求固件升级响应
+		responseData := make([]byte, 3)
+		responseData[0] = 0x00                                   // 应答：0=成功
+		binary.LittleEndian.PutUint16(responseData[1:3], 0x0000) // 请求升级固定为0000
+
+		packet := pkg.Protocol.BuildDNYResponsePacket(c.config.PhysicalID, c.getNextMessageID(), dny_protocol.CmdUpgradeNew, responseData)
+		c.conn.Write(packet)
+
+		c.logger.GetLogger().Info("✅ 已发送设备请求固件升级响应")
+	} else if len(result.Data) >= 4 {
+		// 固件数据包
+		totalPackets := binary.LittleEndian.Uint16(result.Data[0:2])
+		currentPacket := binary.LittleEndian.Uint16(result.Data[2:4])
+		firmwareData := result.Data[4:]
+
+		c.logger.GetLogger().WithFields(logrus.Fields{
+			"totalPackets":  totalPackets,
+			"currentPacket": currentPacket,
+			"firmwareSize":  len(firmwareData),
+		}).Info("📦 收到固件数据包")
+
+		// 模拟固件包处理成功
+		responseData := make([]byte, 3)
+		responseData[0] = 0x00 // 应答：0=成功，可以发送下一包
+		binary.LittleEndian.PutUint16(responseData[1:3], currentPacket)
+
+		packet := pkg.Protocol.BuildDNYResponsePacket(c.config.PhysicalID, c.getNextMessageID(), dny_protocol.CmdUpgradeNew, responseData)
+		c.conn.Write(packet)
+
+		if currentPacket == totalPackets {
+			c.logger.GetLogger().Info("🎉 固件升级完成")
+		} else {
+			c.logger.GetLogger().WithFields(logrus.Fields{
+				"progress": fmt.Sprintf("%d/%d", currentPacket, totalPackets),
+			}).Info("⏳ 固件升级进度")
+		}
+	}
+}
+
+// handleOldFirmwareUpgrade 处理旧版固件升级（0xF8）
+func (c *TestClient) handleOldFirmwareUpgrade(result *protocol.DNYParseResult) {
+	if len(result.Data) >= 4 {
+		totalPackets := binary.LittleEndian.Uint16(result.Data[0:2])
+		currentPacket := binary.LittleEndian.Uint16(result.Data[2:4])
+		firmwareData := result.Data[4:]
+
+		c.logger.GetLogger().WithFields(logrus.Fields{
+			"totalPackets":  totalPackets,
+			"currentPacket": currentPacket,
+			"firmwareSize":  len(firmwareData),
+		}).Info("📦 收到旧版固件数据包")
+
+		// 模拟固件包处理成功
+		responseData := make([]byte, 3)
+		responseData[0] = 0x00 // 应答：0=成功，可以发送下一包
+		binary.LittleEndian.PutUint16(responseData[1:3], currentPacket)
+
+		packet := pkg.Protocol.BuildDNYResponsePacket(c.config.PhysicalID, c.getNextMessageID(), dny_protocol.CmdUpgradeOld, responseData)
+		c.conn.Write(packet)
+
+		if currentPacket == totalPackets {
+			c.logger.GetLogger().Info("🎉 旧版固件升级完成")
+		} else {
+			c.logger.GetLogger().WithFields(logrus.Fields{
+				"progress": fmt.Sprintf("%d/%d", currentPacket, totalPackets),
+			}).Info("⏳ 旧版固件升级进度")
+		}
+	}
+}
+
+// SendLinkHeartbeat 发送"link"心跳（每30秒当没有数据时）
+func (c *TestClient) SendLinkHeartbeat() error {
+	c.logger.GetLogger().Debug("💓 发送 'link' 心跳...")
+
+	// 发送简单的"link"字符串
+	_, err := c.conn.Write([]byte("link"))
+	if err != nil {
+		c.logger.GetLogger().WithError(err).Error("❌ 发送link心跳失败")
+		return err
+	}
+
+	c.logger.GetLogger().Debug("✅ link心跳发送成功")
+	return nil
+}
+
+// =====================================================================
+// 向后兼容性方法 - 保持测试序列正常运行
+// =====================================================================
+
+// SendSwipeCard 发送刷卡请求（向后兼容方法）
+func (c *TestClient) SendSwipeCard(cardID uint32, portNumber uint8) error {
+	c.logger.GetLogger().WithFields(logrus.Fields{
+		"cardID":     fmt.Sprintf("0x%08X", cardID),
+		"portNumber": portNumber,
+	}).Info("💳 发送刷卡请求...")
+
+	// 构建刷卡数据包
+	data := make([]byte, 13) // 基础长度：4+1+1+2+4+1 = 13字节
+	offset := 0
+
+	// 卡片ID（4字节，小端序）
+	binary.LittleEndian.PutUint32(data[offset:offset+4], cardID)
+	offset += 4
+
+	// 卡片类型（1字节）- 默认为新卡
+	data[offset] = 1
+	offset += 1
+
+	// 端口号（1字节）
+	data[offset] = portNumber
+	offset += 1
+
+	// 余额卡内金额（2字节，小端序）- 默认5000分
+	binary.LittleEndian.PutUint16(data[offset:offset+2], 5000)
+	offset += 2
+
+	// 时间戳（4字节，小端序）
+	binary.LittleEndian.PutUint32(data[offset:offset+4], uint32(time.Now().Unix()))
+	offset += 4
+
+	// 卡号2字节数（1字节）- 无额外卡号
+	data[offset] = 0
+
+	// 构建DNY包
+	packet := pkg.Protocol.BuildDNYResponsePacket(c.config.PhysicalID, c.getNextMessageID(), dny_protocol.CmdSwipeCard, data)
+
+	// 发送数据包
+	_, err := c.conn.Write(packet)
+	if err != nil {
+		c.logger.GetLogger().WithError(err).Error("❌ 发送刷卡请求失败")
+		return err
+	}
+
+	c.logger.GetLogger().Info("✅ 刷卡请求发送成功")
+	return nil
+}
+
+// SendSettlement 发送结算数据（向后兼容方法）
+func (c *TestClient) SendSettlement(gunNumber uint8, chargeDuration uint32, electricEnergy uint32, totalFee uint32) error {
+	c.logger.GetLogger().WithFields(logrus.Fields{
+		"gunNumber":      gunNumber,
+		"chargeDuration": chargeDuration,
+		"electricEnergy": electricEnergy,
+		"totalFee":       totalFee,
+	}).Info("💰 发送结算数据...")
+
+	now := time.Now()
+	startTime := now.Add(-time.Duration(chargeDuration) * time.Second)
+
+	// 构建结算数据包 - 总长度：20+20+4+4+4+4+4+4+1+1 = 66字节
+	data := make([]byte, 66)
+	offset := 0
+
+	// 订单号（20字节）
+	orderID := fmt.Sprintf("ORDER%d", now.Unix())
+	copy(data[offset:offset+20], []byte(orderID))
+	offset += 20
+
+	// 卡号（20字节）
+	cardNumber := "1234567890123456"
+	copy(data[offset:offset+20], []byte(cardNumber))
+	offset += 20
+
+	// 开始时间戳（4字节，小端序）
+	binary.LittleEndian.PutUint32(data[offset:offset+4], uint32(startTime.Unix()))
+	offset += 4
+
+	// 结束时间戳（4字节，小端序）
+	binary.LittleEndian.PutUint32(data[offset:offset+4], uint32(now.Unix()))
+	offset += 4
+
+	// 充电电量（4字节，小端序）- Wh
+	binary.LittleEndian.PutUint32(data[offset:offset+4], electricEnergy)
+	offset += 4
+
+	// 充电费用（4字节，小端序）- 分
+	chargeFee := totalFee * 80 / 100 // 假设充电费用占总费用的80%
+	binary.LittleEndian.PutUint32(data[offset:offset+4], chargeFee)
+	offset += 4
+
+	// 服务费（4字节，小端序）- 分
+	serviceFee := totalFee - chargeFee
+	binary.LittleEndian.PutUint32(data[offset:offset+4], serviceFee)
+	offset += 4
+
+	// 总费用（4字节，小端序）- 分
+	binary.LittleEndian.PutUint32(data[offset:offset+4], totalFee)
+	offset += 4
+
+	// 枪号（1字节）
+	data[offset] = gunNumber
+	offset += 1
+
+	// 停止原因（1字节）- 0表示正常停止
+	data[offset] = 0
+
+	// 构建DNY包
+	packet := pkg.Protocol.BuildDNYResponsePacket(c.config.PhysicalID, c.getNextMessageID(), dny_protocol.CmdSettlement, data)
+
+	// 发送数据包
+	_, err := c.conn.Write(packet)
+	if err != nil {
+		c.logger.GetLogger().WithError(err).Error("❌ 发送结算数据失败")
+		return err
+	}
+
+	c.logger.GetLogger().Info("✅ 结算数据发送成功")
+	return nil
+}
+
+// SendHeartbeat 发送普通设备心跳（向后兼容方法）
+func (c *TestClient) SendHeartbeat() error {
+	c.logger.GetLogger().Info("💓 发送设备心跳包（向后兼容）...")
+
+	// 构建心跳数据包 - 简单的2字节数据
+	data := make([]byte, 2)
+	data[0] = 0x01 // 心跳类型
+	data[1] = 0x00 // 设备状态：正常
+
+	// 构建DNY包
 	packet := pkg.Protocol.BuildDNYResponsePacket(c.config.PhysicalID, c.getNextMessageID(), dny_protocol.CmdDeviceHeart, data)
 
 	// 发送数据包
 	_, err := c.conn.Write(packet)
 	if err != nil {
-		c.logger.GetLogger().WithError(err).Error("❌ 发送心跳包失败")
+		c.logger.GetLogger().WithError(err).Error("❌ 发送设备心跳失败")
 		return err
 	}
 
-	c.logger.GetLogger().WithFields(logrus.Fields{
-		"voltage":     "220.0V",
-		"portCount":   c.config.PortCount,
-		"temperature": "25°C",
-	}).Debug("✅ 心跳包发送成功")
-
+	c.logger.GetLogger().Info("✅ 设备心跳发送成功")
 	return nil
 }
 
-// SendSwipeCard 发送刷卡操作（02指令）
-func (c *TestClient) SendSwipeCard(cardID uint32, portNumber uint8) error {
-	c.logger.GetLogger().WithFields(logrus.Fields{
-		"cardID":     fmt.Sprintf("0x%08X", cardID),
-		"portNumber": portNumber,
-	}).Info("📤 发送刷卡操作（0x02指令）...")
-
-	// 构建刷卡数据
-	data := make([]byte, 13)
-
-	// 卡片ID（4字节，小端序）
-	binary.LittleEndian.PutUint32(data[0:4], cardID)
-
-	// 卡片类型（1字节）- 0=旧卡
-	data[4] = 0x00
-
-	// 端口号（1字节）
-	data[5] = portNumber
-
-	// 余额卡内金额（2字节，小端序）- 0表示非余额卡
-	binary.LittleEndian.PutUint16(data[6:8], 0)
-
-	// 时间戳（4字节，小端序）
-	binary.LittleEndian.PutUint32(data[8:12], uint32(time.Now().Unix()))
-
-	// 卡号2字节数（1字节）- 0表示无额外卡号
-	data[12] = 0x00
-
-	// 使用已有的包构建函数
-	packet := pkg.Protocol.BuildDNYResponsePacket(c.config.PhysicalID, c.getNextMessageID(), dny_protocol.CmdSwipeCard, data)
-
-	c.logger.GetLogger().WithFields(logrus.Fields{
-		"packetHex": hex.EncodeToString(packet),
-		"packetLen": len(packet),
-	}).Info("📦 刷卡包详情")
-
-	// 发送数据包
-	_, err := c.conn.Write(packet)
-	if err != nil {
-		c.logger.GetLogger().WithError(err).Error("❌ 发送刷卡包失败")
-		return err
+// abs 计算绝对值
+func abs(x int64) int64 {
+	if x < 0 {
+		return -x
 	}
-
-	c.logger.GetLogger().Info("✅ 刷卡包发送成功")
-	return nil
-}
-
-// SendSettlement 发送结算信息（03指令）
-func (c *TestClient) SendSettlement(portNumber uint8, chargeDuration uint16, maxPower uint16, energyConsumed uint16) error {
-	c.logger.GetLogger().WithFields(logrus.Fields{
-		"portNumber":     portNumber,
-		"chargeDuration": chargeDuration,
-		"maxPower":       maxPower,
-		"energyConsumed": energyConsumed,
-	}).Info("📤 发送结算信息（0x03指令）...")
-
-	// 构建结算数据（35字节）
-	data := make([]byte, 35)
-
-	// 充电时长（2字节，小端序）
-	binary.LittleEndian.PutUint16(data[0:2], chargeDuration)
-
-	// 最大功率（2字节，小端序）
-	binary.LittleEndian.PutUint16(data[2:4], maxPower)
-
-	// 耗电量（2字节，小端序）
-	binary.LittleEndian.PutUint16(data[4:6], energyConsumed)
-
-	// 端口号（1字节）
-	data[6] = portNumber
-
-	// 在线/离线启动（1字节）- 1=在线启动
-	data[7] = 0x01
-
-	// 卡号/验证码（4字节）- 在线启动时为全0
-	binary.LittleEndian.PutUint32(data[8:12], 0)
-
-	// 停止原因（1字节）- 1=充满自停
-	data[12] = 0x01
-
-	// 订单编号（16字节）- 模拟订单号
-	orderNumber := "TEST_ORDER_001234"
-	copy(data[13:29], []byte(orderNumber))
-
-	// 第二最大功率（2字节，小端序）
-	binary.LittleEndian.PutUint16(data[29:31], maxPower)
-
-	// 时间戳（4字节，小端序）
-	binary.LittleEndian.PutUint32(data[31:35], uint32(time.Now().Unix()))
-
-	// 使用已有的包构建函数
-	packet := pkg.Protocol.BuildDNYResponsePacket(c.config.PhysicalID, c.getNextMessageID(), dny_protocol.CmdSettlement, data)
-
-	c.logger.GetLogger().WithFields(logrus.Fields{
-		"packetHex": hex.EncodeToString(packet),
-		"packetLen": len(packet),
-	}).Info("📦 结算包详情")
-
-	// 发送数据包
-	_, err := c.conn.Write(packet)
-	if err != nil {
-		c.logger.GetLogger().WithError(err).Error("❌ 发送结算包失败")
-		return err
-	}
-
-	c.logger.GetLogger().Info("✅ 结算包发送成功")
-	return nil
+	return x
 }

@@ -44,20 +44,17 @@ const (
 var Protocol = struct {
 	// 创建DNY协议数据包工厂
 	NewDNYDataPackFactory func() protocol.IDataPackFactory
-	// 创建DNY协议拦截器工厂
-	NewDNYProtocolInterceptorFactory func() protocol.IInterceptorFactory
-	// 🔧 创建DNY协议解码器
+	// 创建DNY协议解码器 - 集成了特殊消息处理功能
 	NewDNYDecoder func() ziface.IDecoder
-	// 🚫 ParseDNYProtocol 已删除，请使用 ParseDNYData 替代
 	// 手动解析十六进制数据
 	ParseManualData func(hexData, description string)
-	// 🔧 统一的协议解析接口，用于日志和监控
+	// 统一的协议解析接口，用于日志和监控
 	ParseDNYData func(data []byte) (*protocol.DNYParseResult, error)
-	// 🔧 解析十六进制字符串
+	// 解析十六进制字符串
 	ParseDNYHexString func(hexStr string) (*protocol.DNYParseResult, error)
-	// 🔧 解析DNY数据并返回消费的字节数
+	// 解析DNY数据并返回消费的字节数
 	ParseDNYDataWithConsumed func(data []byte) (*protocol.DNYParseResult, int, error)
-	// 🔧 解析包含多个DNY帧的数据包
+	// 解析包含多个DNY帧的数据包
 	ParseMultipleDNYFrames func(data []byte) ([]*protocol.DNYParseResult, error)
 	// 计算包校验和
 	CalculatePacketChecksum func(data []byte) uint16
@@ -87,28 +84,27 @@ var Protocol = struct {
 	// 判断命令是否需要确认回复
 	NeedConfirmation func(command uint8) bool
 }{
-	NewDNYDataPackFactory:            protocol.NewDNYDataPackFactory,
-	NewDNYProtocolInterceptorFactory: protocol.NewDNYProtocolInterceptorFactory,
-	NewDNYDecoder:                    protocol.NewDNYDecoder,
-	ParseManualData:                  protocol.ParseManualData,
-	ParseDNYData:                     protocol.ParseDNYData,
-	ParseDNYHexString:                protocol.ParseDNYHexString,
-	ParseDNYDataWithConsumed:         protocol.ParseDNYDataWithConsumed,
-	ParseMultipleDNYFrames:           protocol.ParseMultipleDNYFrames,
-	CalculatePacketChecksum:          protocol.CalculatePacketChecksum,
-	IsDNYProtocolData:                protocol.IsDNYProtocolData,
-	IsHexString:                      protocol.IsHexString,
-	IsAllDigits:                      protocol.IsAllDigits,
-	HandleSpecialMessage:             protocol.HandleSpecialMessage,
-	IOT_SIM_CARD_LENGTH:              protocol.IOT_SIM_CARD_LENGTH,
-	IOT_LINK_HEARTBEAT:               protocol.IOT_LINK_HEARTBEAT,
-	NewRawDataHook:                   protocol.NewRawDataHook,
-	DefaultRawDataHandler:            protocol.DefaultRawDataHandler,
-	PrintRawData:                     protocol.PrintRawData,
-	SendDNYResponse:                  protocol.SendDNYResponse,
-	BuildDNYResponsePacket:           protocol.BuildDNYResponsePacket,
-	BuildDNYRequestPacket:            protocol.BuildDNYRequestPacket,
-	NeedConfirmation:                 protocol.NeedConfirmation,
+	NewDNYDataPackFactory:    protocol.NewDNYDataPackFactory,
+	NewDNYDecoder:            protocol.NewDNYDecoder,
+	ParseManualData:          protocol.ParseManualData,
+	ParseDNYData:             protocol.ParseDNYData,
+	ParseDNYHexString:        protocol.ParseDNYHexString,
+	ParseDNYDataWithConsumed: protocol.ParseDNYDataWithConsumed,
+	ParseMultipleDNYFrames:   protocol.ParseMultipleDNYFrames,
+	CalculatePacketChecksum:  protocol.CalculatePacketChecksum,
+	IsDNYProtocolData:        protocol.IsDNYProtocolData,
+	IsHexString:              protocol.IsHexString,
+	IsAllDigits:              protocol.IsAllDigits,
+	HandleSpecialMessage:     protocol.HandleSpecialMessage,
+	IOT_SIM_CARD_LENGTH:      protocol.IOT_SIM_CARD_LENGTH,
+	IOT_LINK_HEARTBEAT:       protocol.IOT_LINK_HEARTBEAT,
+	NewRawDataHook:           protocol.NewRawDataHook,
+	DefaultRawDataHandler:    protocol.DefaultRawDataHandler,
+	PrintRawData:             protocol.PrintRawData,
+	SendDNYResponse:          protocol.SendDNYResponse,
+	BuildDNYResponsePacket:   protocol.BuildDNYResponsePacket,
+	BuildDNYRequestPacket:    protocol.BuildDNYRequestPacket,
+	NeedConfirmation:         protocol.NeedConfirmation,
 }
 
 // Network 网络相关工具导出
