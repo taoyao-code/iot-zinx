@@ -15,7 +15,7 @@ import (
 
 // SendDNYResponse 发送DNY协议响应
 // 该函数用于发送DNY协议响应数据包，并注册到命令管理器进行跟踪
-func SendDNYResponse(conn ziface.IConnection, physicalId uint32, messageId uint16, command uint8, data []byte) error {
+func SendDNYResponse(conn ziface.IConnection, physicalID uint32, messageID uint16, command uint8, data []byte) error {
 	// 参数验证
 	if conn == nil {
 		err := fmt.Errorf("连接为空，无法发送DNY响应")
@@ -24,21 +24,21 @@ func SendDNYResponse(conn ziface.IConnection, physicalId uint32, messageId uint1
 	}
 
 	// 物理ID校验和修复
-	if physicalId == 0 {
+	if physicalID == 0 {
 		// 尝试从连接属性获取物理ID
 		if propPhysicalID, err := conn.GetProperty(network.PropKeyDNYPhysicalID); err == nil && propPhysicalID != nil {
 			if id, ok := propPhysicalID.(uint32); ok && id != 0 {
-				physicalId = id
+				physicalID = id
 				logger.WithFields(logrus.Fields{
 					"connID":     conn.GetConnID(),
-					"physicalId": fmt.Sprintf("0x%08X", physicalId),
+					"physicalID": fmt.Sprintf("0x%08X", physicalID),
 					"command":    fmt.Sprintf("0x%02X", command),
 				}).Info("已从连接属性获取物理ID")
 			}
 		}
 
 		// 如果仍为0，尝试从ICCID生成
-		if physicalId == 0 {
+		if physicalID == 0 {
 			if prop, err := conn.GetProperty(network.PropKeyDeviceICCID); err == nil && prop != nil {
 				if iccid, ok := prop.(string); ok && len(iccid) > 0 {
 					// 从ICCID后8位生成物理ID
@@ -46,11 +46,11 @@ func SendDNYResponse(conn ziface.IConnection, physicalId uint32, messageId uint1
 						tail := iccid[len(iccid)-8:]
 						tempID, err := strconv.ParseUint(tail, 16, 32)
 						if err == nil {
-							physicalId = uint32(tempID)
+							physicalID = uint32(tempID)
 							logger.WithFields(logrus.Fields{
 								"connID":     conn.GetConnID(),
 								"iccid":      iccid,
-								"physicalId": fmt.Sprintf("0x%08X", physicalId),
+								"physicalID": fmt.Sprintf("0x%08X", physicalID),
 							}).Info("已从ICCID生成物理ID")
 						}
 					}
@@ -58,27 +58,28 @@ func SendDNYResponse(conn ziface.IConnection, physicalId uint32, messageId uint1
 			}
 		}
 
-		// 如果仍为0，使用临时值
-		if physicalId == 0 {
-			physicalId = uint32(conn.GetConnID())
+		// 如果仍为0，记录错误并拒绝发送
+		if physicalID == 0 {
+			err := fmt.Errorf("❌ 严重错误：无法获取有效的PhysicalID，拒绝发送DNY响应")
 			logger.WithFields(logrus.Fields{
-				"connID":     conn.GetConnID(),
-				"physicalId": fmt.Sprintf("0x%08X", physicalId),
-			}).Warn("使用连接ID作为临时物理ID")
+				"connID":  conn.GetConnID(),
+				"command": fmt.Sprintf("0x%02X", command),
+			}).Error(err.Error())
+			return err
 		}
 	}
 
 	// 将获取到的物理ID保存到连接属性，确保一致性
-	conn.SetProperty(network.PropKeyDNYPhysicalID, physicalId)
+	conn.SetProperty(network.PropKeyDNYPhysicalID, physicalID)
 
 	// 构建响应数据包
-	packet := BuildDNYResponsePacket(physicalId, messageId, command, data)
+	packet := BuildDNYResponsePacket(physicalID, messageID, command, data)
 
 	// 日志记录发送的数据包
 	logger.WithFields(logrus.Fields{
 		"connID":     conn.GetConnID(),
-		"physicalId": fmt.Sprintf("0x%08X", physicalId),
-		"messageId":  messageId,
+		"physicalID": fmt.Sprintf("0x%08X", physicalID),
+		"messageID":  fmt.Sprintf("0x%04X", messageID),
 		"command":    fmt.Sprintf("0x%02X", command),
 		"dataHex":    hex.EncodeToString(packet),
 		"dataLen":    len(packet),
@@ -89,7 +90,7 @@ func SendDNYResponse(conn ziface.IConnection, physicalId uint32, messageId uint1
 	// 将命令注册到命令管理器进行跟踪，除非是不需要回复的命令
 	if NeedConfirmation(command) {
 		cmdMgr := network.GetCommandManager()
-		cmdMgr.RegisterCommand(conn, physicalId, messageId, command, data)
+		cmdMgr.RegisterCommand(conn, physicalID, messageID, command, data)
 	}
 
 	// 🔧 关键修复：直接使用原始TCP连接发送纯DNY协议数据
@@ -99,8 +100,8 @@ func SendDNYResponse(conn ziface.IConnection, physicalId uint32, messageId uint1
 		if err != nil {
 			logger.WithFields(logrus.Fields{
 				"connID":     conn.GetConnID(),
-				"physicalId": fmt.Sprintf("0x%08X", physicalId),
-				"messageId":  messageId,
+				"physicalID": fmt.Sprintf("0x%08X", physicalID),
+				"messageID":  fmt.Sprintf("0x%04X", messageID),
 				"command":    fmt.Sprintf("0x%02X", command),
 				"error":      err.Error(),
 			}).Error("发送DNY响应失败")
@@ -110,8 +111,8 @@ func SendDNYResponse(conn ziface.IConnection, physicalId uint32, messageId uint1
 		err := fmt.Errorf("无法获取TCP连接")
 		logger.WithFields(logrus.Fields{
 			"connID":     conn.GetConnID(),
-			"physicalId": fmt.Sprintf("0x%08X", physicalId),
-			"messageId":  messageId,
+			"physicalID": fmt.Sprintf("0x%08X", physicalID),
+			"messageID":  fmt.Sprintf("0x%04X", messageID),
 			"command":    fmt.Sprintf("0x%02X", command),
 		}).Error("发送DNY响应失败：无法获取TCP连接")
 		return err
@@ -126,8 +127,8 @@ func SendDNYResponse(conn ziface.IConnection, physicalId uint32, messageId uint1
 		hex.EncodeToString(packet),
 		command,
 		cmdDesc,
-		physicalId,
-		messageId,
+		physicalID,
+		messageID,
 		len(data),
 	)
 
@@ -136,8 +137,8 @@ func SendDNYResponse(conn ziface.IConnection, physicalId uint32, messageId uint1
 		"command":    fmt.Sprintf("0x%02X", command),
 		"connID":     conn.GetConnID(),
 		"dataHex":    hex.EncodeToString(packet),
-		"messageID":  messageId,
-		"physicalID": fmt.Sprintf("0x%08X", physicalId),
+		"messageID":  fmt.Sprintf("0x%04X", messageID),
+		"physicalID": fmt.Sprintf("0x%08X", physicalID),
 	}).Info("发送DNY协议数据")
 
 	// 通知监视器发送了原始数据

@@ -51,10 +51,11 @@ func (h *HeartbeatHandler) PreHandle(request ziface.IRequest) {
 			}
 		}
 		if physicalId == 0 {
-			physicalId = msg.GetMsgID()
 			logger.WithFields(logrus.Fields{
-				"physicalID": fmt.Sprintf("0x%08X", physicalId),
-			}).Warn("使用消息ID作为临时PhysicalID")
+				"connID": conn.GetConnID(),
+				"msgID":  msg.GetMsgID(),
+			}).Error("❌ 心跳PreHandle：无法获取PhysicalID，拒绝处理")
+			return
 		}
 	}
 
@@ -103,10 +104,11 @@ func (h *HeartbeatHandler) Handle(request ziface.IRequest) {
 			}
 		}
 		if physicalId == 0 {
-			physicalId = msg.GetMsgID()
 			logger.WithFields(logrus.Fields{
-				"physicalID": fmt.Sprintf("0x%08X", physicalId),
-			}).Warn("使用消息ID作为临时PhysicalID")
+				"connID": conn.GetConnID(),
+				"msgID":  msg.GetMsgID(),
+			}).Error("❌ 心跳Handle：无法获取PhysicalID，拒绝处理")
+			return
 		}
 	}
 

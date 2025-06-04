@@ -101,7 +101,7 @@ func (cm *CommandManager) Stop() {
 // GenerateCommandKey 生成命令唯一标识
 // 使用连接ID-物理ID-消息ID-命令 作为唯一键
 func (cm *CommandManager) GenerateCommandKey(conn ziface.IConnection, physicalID uint32, messageID uint16, command uint8) string {
-	return fmt.Sprintf("%d-%d-%d-%d", conn.GetConnID(), physicalID, messageID, command)
+	return fmt.Sprintf("%d-0x%08X-%d-%d", conn.GetConnID(), physicalID, messageID, command)
 }
 
 // RegisterCommand 注册命令

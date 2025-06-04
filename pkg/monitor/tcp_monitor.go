@@ -177,7 +177,7 @@ func (m *TCPMonitor) OnRawDataReceived(conn ziface.IConnection, data []byte) {
 					"connID":     connID,
 					"command":    fmt.Sprintf("0x%02X", result.Command),
 					"physicalID": fmt.Sprintf("0x%08X", result.PhysicalID),
-					"messageID":  result.MessageID,
+					"messageID":  fmt.Sprintf("0x%04X", result.MessageID),
 					"dataHex":    hex.EncodeToString(data),
 				}).Info("接收DNY协议数据")
 			} else {
@@ -212,16 +212,14 @@ func (m *TCPMonitor) OnRawDataSent(conn ziface.IConnection, data []byte) {
 
 		// 🔧 使用统一的DNY协议检查和解析接口
 		if protocol.IsDNYProtocolData(data) {
-			// 使用新的统一解析接口
+			// 使用统一解析接口正确解析DNY协议数据
 			if result, err := protocol.ParseDNYData(data); err == nil {
-				fmt.Println(result.String())
-
 				// 记录详细的解析信息
 				logger.WithFields(logrus.Fields{
 					"connID":     connID,
 					"command":    fmt.Sprintf("0x%02X", result.Command),
 					"physicalID": fmt.Sprintf("0x%08X", result.PhysicalID),
-					"messageID":  result.MessageID,
+					"messageID":  fmt.Sprintf("0x%04X", result.MessageID),
 					"dataHex":    hex.EncodeToString(data),
 				}).Info("发送DNY协议数据1")
 			} else {

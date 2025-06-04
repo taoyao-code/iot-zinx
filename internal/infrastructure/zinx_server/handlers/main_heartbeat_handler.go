@@ -7,6 +7,7 @@ import (
 	"github.com/bujia-iot/iot-zinx/internal/domain/dny_protocol"
 	"github.com/bujia-iot/iot-zinx/internal/infrastructure/logger"
 	"github.com/bujia-iot/iot-zinx/pkg"
+	"github.com/bujia-iot/iot-zinx/pkg/network"
 	"github.com/sirupsen/logrus"
 )
 
@@ -52,10 +53,28 @@ func (h *MainHeartbeatHandler) Handle(request ziface.IRequest) {
 		}
 		fmt.Printf("🔧 主机心跳处理器从DNYMessage获取真实PhysicalID: 0x%08X, MessageID: 0x%04X\n", physicalId, messageId)
 	} else {
-		// 如果不是DNYMessage，使用消息ID作为临时方案
-		physicalId = msg.GetMsgID()
-		messageId = uint16(msg.GetMsgID())
-		fmt.Printf("🔧 主机心跳处理器非DNYMessage，使用消息ID作为临时PhysicalID: 0x%08X\n", physicalId)
+		// 从连接属性中获取PhysicalID
+		if prop, err := conn.GetProperty(network.PropKeyDNYPhysicalID); err == nil {
+			if pid, ok := prop.(uint32); ok {
+				physicalId = pid
+				logger.WithFields(logrus.Fields{
+					"physicalID": fmt.Sprintf("0x%08X", physicalId),
+				}).Debug("主机心跳处理器：从连接属性获取PhysicalID")
+			}
+		}
+		if physicalId == 0 {
+			logger.WithFields(logrus.Fields{
+				"connID": conn.GetConnID(),
+				"msgID":  msg.GetMsgID(),
+			}).Error("❌ 主机心跳Handle：无法获取PhysicalID，拒绝处理")
+			return
+		}
+		// 从连接属性获取MessageID
+		if prop, err := conn.GetProperty("DNY_MessageID"); err == nil {
+			if mid, ok := prop.(uint16); ok {
+				messageId = mid
+			}
+		}
 	}
 
 	deviceId := fmt.Sprintf("%08X", physicalId)
