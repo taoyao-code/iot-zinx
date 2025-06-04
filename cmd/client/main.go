@@ -44,7 +44,47 @@ func main() {
 	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
 
 	// 根据不同模式启动设备
-	if params.mode == "sim" {
+	if params.mode == "real" {
+		// 真实设备模拟模式
+		fmt.Printf("🎯 使用真实设备模拟模式：基于线上日志数据\n")
+
+		// 创建多个真实设备配置
+		deviceConfigs := CreateMultipleDevicesConfig()
+
+		for i, config := range deviceConfigs {
+			fmt.Printf("🚀 启动真实设备模拟 #%d: 物理ID=0x%08X, ICCID=%s\n",
+				i+1, config.PhysicalID, config.ICCID)
+
+			// 设置服务器地址
+			config.ServerAddr = params.serverAddr
+
+			// 创建客户端
+			client := NewTestClient(config)
+
+			// 启动客户端
+			go func(c *TestClient, idx int) {
+				if err := c.Start(); err != nil {
+					fmt.Printf("❌ 真实设备模拟 #%d 启动失败: %s\n", idx+1, err)
+					return
+				}
+
+				// 运行测试序列（如果需要）
+				if params.runTests {
+					time.Sleep(10 * time.Second) // 等待设备注册完成
+					fmt.Printf("🧪 开始设备 #%d 测试序列\n", idx+1)
+					c.RunTestSequence()
+				}
+			}(client, i)
+
+			clients = append(clients, client)
+
+			// 间隔启动下一个设备
+			time.Sleep(3 * time.Second)
+		}
+
+		fmt.Printf("📊 总计启动: %d个真实设备模拟\n", len(deviceConfigs))
+
+	} else if params.mode == "sim" {
 		// SIM卡模式
 		fmt.Printf("📱 使用SIM卡模式：%d张SIM卡，每卡%d个设备\n", params.simCount, params.devicePerSim)
 
@@ -247,7 +287,7 @@ func parseFlags() *ClientParams {
 	params.startID = uint32(startIDVar)
 	flag.BoolVar(&params.runTests, "test", false, "是否运行测试序列")
 	flag.BoolVar(&params.verbose, "verbose", false, "是否输出详细日志")
-	flag.StringVar(&params.mode, "mode", "sim", "启动模式: sim=SIM卡模式, device=设备模式")
+	flag.StringVar(&params.mode, "mode", "real", "启动模式: sim=SIM卡模式, device=设备模式, real=真实设备模拟模式")
 	flag.StringVar(&params.simMode, "sim-mode", "shared", "SIM卡模式: shared=共享SIM卡, individual=独立SIM卡")
 
 	flag.Usage = func() {
@@ -255,6 +295,8 @@ func parseFlags() *ClientParams {
 		fmt.Fprintf(os.Stderr, "选项:\n")
 		flag.PrintDefaults()
 		fmt.Fprintf(os.Stderr, "\n示例:\n")
+		fmt.Fprintf(os.Stderr, "  【真实设备模拟模式】基于线上日志数据:\n")
+		fmt.Fprintf(os.Stderr, "  %s -mode real -server localhost:7054 -test\n\n", os.Args[0])
 		fmt.Fprintf(os.Stderr, "  【共享SIM卡模式】一个SIM卡管理多个设备:\n")
 		fmt.Fprintf(os.Stderr, "  %s -mode sim -sim-mode shared -sim-count 2 -dev-per-sim 3\n\n", os.Args[0])
 		fmt.Fprintf(os.Stderr, "  【独立SIM卡模式】每个设备有独立SIM卡:\n")

@@ -23,6 +23,12 @@ type ICommandManager interface {
 
 	// ConfirmCommand 确认命令已完成
 	ConfirmCommand(physicalID uint32, messageID uint16, command uint8) bool
+
+	// ClearConnectionCommands 清理指定连接的所有命令
+	ClearConnectionCommands(connID uint64)
+
+	// GenerateCommandKey 生成命令唯一标识
+	GenerateCommandKey(conn ziface.IConnection, physicalID uint32, messageID uint16, command uint8) string
 }
 
 // IConnectionHooks 定义了连接钩子接口

@@ -93,7 +93,7 @@ func ParseDNYProtocolData(data []byte) (*dny_protocol.Message, error) {
 
 	// 包头检查
 	if string(data[0:3]) != "DNY" {
-		return nil, fmt.Errorf("无效的包头，期望为DNY")
+		return nil, fmt.Errorf("无效的包头，期望为DNY，实际为: %s", string(data[0:3]))
 	}
 
 	// 解析长度 (小端序)
@@ -158,6 +158,8 @@ func ParseDNYProtocolData(data []byte) (*dny_protocol.Message, error) {
 			"method1Valid":     isValid1,
 			"method2Checksum":  fmt.Sprintf("0x%04X", checksum2),
 			"method2Valid":     isValid2,
+			"physicalID":       fmt.Sprintf("0x%08X", physicalID),
+			"messageID":        messageID,
 			"rawData":          hex.EncodeToString(data),
 		}).Warn("DNY校验和验证失败，但仍继续处理")
 
@@ -179,6 +181,14 @@ func ParseDNYProtocolData(data []byte) (*dny_protocol.Message, error) {
 	} else {
 		dnyMsg.SetRawData(data)
 	}
+
+	logger.WithFields(logrus.Fields{
+		"command":    fmt.Sprintf("0x%02X", command),
+		"physicalID": fmt.Sprintf("0x%08X", physicalID),
+		"messageID":  messageID,
+		"dataLength": dataLength,
+		"checksumOK": checksumValid,
+	}).Debug("DNY协议解析成功")
 
 	return dnyMsg, nil
 }

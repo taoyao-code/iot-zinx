@@ -107,30 +107,33 @@ func (c *TestClient) handleDNYMessage(data []byte) {
 	}
 }
 
-// SendRegister 发送设备注册包（20指令）
+// SendRegister 发送设备注册包（20指令）- 匹配真实设备格式
 func (c *TestClient) SendRegister() error {
 	c.logger.GetLogger().Info("📤 发送设备注册包（0x20指令）...")
 
-	// 构建注册包数据
-	data := make([]byte, 8)
+	// 构建注册包数据 - 根据线上数据调整为6字节格式
+	// 线上数据示例：8002021e3106 (固件版本=640, 端口数=2, 虚拟ID=30, 设备类型=49, 工作模式=6)
+	data := make([]byte, 6)
 
-	// 固件版本（2字节，小端序）
-	binary.LittleEndian.PutUint16(data[0:2], c.config.FirmwareVer)
+	// 固件版本（2字节，线上显示为0x8002，表示版本640）
+	data[0] = 0x80
+	data[1] = 0x02
 
 	// 端口数量（1字节）
 	data[2] = c.config.PortCount
 
-	// 虚拟ID（1字节）- 不需组网设备默认为00
-	data[3] = 0x00
+	// 虚拟ID（1字节）- 使用配置中的虚拟ID或根据物理ID生成
+	if c.config.VirtualID > 0 {
+		data[3] = c.config.VirtualID
+	} else {
+		data[3] = byte(c.config.PhysicalID & 0xFF) // 使用物理ID的低8位作为虚拟ID
+	}
 
-	// 设备类型（1字节）
-	data[4] = c.config.DeviceType
+	// 设备类型（1字节）- 线上数据显示为0x31（49）
+	data[4] = 0x31
 
-	// 工作模式（1字节）- 第0位：0=联网，其他位保留
-	data[5] = 0x00
-
-	// 电源板版本号（2字节）- 无电源板为0
-	binary.LittleEndian.PutUint16(data[6:8], 0)
+	// 工作模式（1字节）- 线上数据显示为0x06
+	data[5] = 0x06
 
 	// 使用已有的包构建函数
 	packet := pkg.Protocol.BuildDNYResponsePacket(c.config.PhysicalID, c.getNextMessageID(), dny_protocol.CmdDeviceRegister, data)
@@ -333,14 +336,17 @@ func (c *TestClient) handleMainHeartbeatResponse(result *protocol.DNYParseResult
 		"physicalID": fmt.Sprintf("0x%08X", result.PhysicalID),
 		"messageID":  result.MessageID,
 		"dataLen":    len(result.Data),
+		"dataHex":    hex.EncodeToString(result.Data),
 	}).Info("📥 收到主机心跳响应")
 
-	// 主机心跳通常无需服务器响应，这里仅记录日志
+	// 根据协议文档，主机心跳(0x11)服务器应答：无须应答
+	// 如果收到数据，说明可能是其他设备发送的心跳数据，记录但不解析响应码
 	if len(result.Data) > 0 {
-		responseCode := result.Data[0]
 		c.logger.GetLogger().WithFields(logrus.Fields{
-			"responseCode": fmt.Sprintf("0x%02X", responseCode),
-		}).Info("📋 主机心跳响应码")
+			"note": "协议规定服务器无须应答主机心跳，此数据可能来自其他设备",
+		}).Info("📋 主机心跳包含数据")
+	} else {
+		c.logger.GetLogger().Info("✅ 主机心跳确认成功（无数据，符合协议规范）")
 	}
 }
 
@@ -351,35 +357,36 @@ func (c *TestClient) handleServerTimeResponse(result *protocol.DNYParseResult) {
 		"physicalID": fmt.Sprintf("0x%08X", result.PhysicalID),
 		"messageID":  result.MessageID,
 		"dataLen":    len(result.Data),
+		"dataHex":    hex.EncodeToString(result.Data),
+		"dataStr":    string(result.Data),
+		// 原始数据
+		"rawDataHex": hex.EncodeToString(result.RawData),
 	}).Info("📥 收到服务器时间响应")
 
-	if len(result.Data) >= 5 {
-		// 解析服务器时间响应：应答码(1) + 时间戳(4)
-		responseCode := result.Data[0]
-		if responseCode == 0x00 {
-			timestamp := binary.LittleEndian.Uint32(result.Data[1:5])
-			serverTime := time.Unix(int64(timestamp), 0)
+	if len(result.Data) >= 4 {
+		// 根据协议文档，服务器时间响应格式：时间戳(4字节)，无应答码
+		// 协议规定：命令 + 时间戳(4字节)，这里的 result.Data 只包含时间戳部分
+		timestamp := binary.LittleEndian.Uint32(result.Data[0:4])
+		serverTime := time.Unix(int64(timestamp), 0)
 
-			c.logger.GetLogger().WithFields(logrus.Fields{
-				"serverTime":      serverTime.Format("2006-01-02 15:04:05"),
-				"serverTimestamp": timestamp,
-				"localTime":       time.Now().Format("2006-01-02 15:04:05"),
-			}).Info("🕐 服务器时间获取成功")
+		c.logger.GetLogger().WithFields(logrus.Fields{
+			"serverTime":      serverTime.Format("2006-01-02 15:04:05"),
+			"serverTimestamp": timestamp,
+			"localTime":       time.Now().Format("2006-01-02 15:04:05"),
+		}).Info("🕐 服务器时间获取成功")
 
-			// 这里可以实现时间同步逻辑
-			timeDiff := time.Now().Unix() - int64(timestamp)
-			if abs(timeDiff) > 60 { // 如果时间差超过1分钟
-				c.logger.GetLogger().WithFields(logrus.Fields{
-					"timeDifference": fmt.Sprintf("%d秒", timeDiff),
-				}).Warn("⚠️ 本地时间与服务器时间差异较大")
-			}
-		} else {
+		// 实现时间同步逻辑
+		timeDiff := time.Now().Unix() - int64(timestamp)
+		if abs(timeDiff) > 60 { // 如果时间差超过1分钟
 			c.logger.GetLogger().WithFields(logrus.Fields{
-				"responseCode": fmt.Sprintf("0x%02X", responseCode),
-			}).Error("❌ 获取服务器时间失败")
+				"timeDifference": fmt.Sprintf("%d秒", timeDiff),
+			}).Warn("⚠️ 本地时间与服务器时间差异较大")
 		}
 	} else {
-		c.logger.GetLogger().Error("❌ 服务器时间响应数据格式错误")
+		c.logger.GetLogger().WithFields(logrus.Fields{
+			"expectedLength": 4,
+			"actualLength":   len(result.Data),
+		}).Error("❌ 服务器时间响应数据长度不足，应为4字节时间戳")
 	}
 }
 
@@ -390,14 +397,17 @@ func (c *TestClient) handleMainStatusResponse(result *protocol.DNYParseResult) {
 		"physicalID": fmt.Sprintf("0x%08X", result.PhysicalID),
 		"messageID":  result.MessageID,
 		"dataLen":    len(result.Data),
+		"dataHex":    hex.EncodeToString(result.Data),
 	}).Info("📥 收到主机状态包响应")
 
-	// 主机状态包通常无需服务器响应，这里仅记录日志
+	// 根据协议文档，主机状态包(0x17)服务器无需应答
+	// 如果收到数据，说明可能是其他设备发送的状态数据，记录但不解析响应码
 	if len(result.Data) > 0 {
-		responseCode := result.Data[0]
 		c.logger.GetLogger().WithFields(logrus.Fields{
-			"responseCode": fmt.Sprintf("0x%02X", responseCode),
-		}).Info("📋 主机状态包响应码")
+			"note": "协议规定服务器无需应答主机状态包，此数据可能来自其他设备",
+		}).Info("📋 主机状态包含数据")
+	} else {
+		c.logger.GetLogger().Info("✅ 主机状态包确认成功（无数据，符合协议规范）")
 	}
 }
 
@@ -499,18 +509,140 @@ func (c *TestClient) handleOldFirmwareUpgrade(result *protocol.DNYParseResult) {
 	}
 }
 
-// SendLinkHeartbeat 发送"link"心跳（每30秒当没有数据时）
-func (c *TestClient) SendLinkHeartbeat() error {
-	c.logger.GetLogger().Debug("💓 发送 'link' 心跳...")
+// SendDeviceHeartbeat01 发送设备心跳（0x01指令）- 模拟线上真实数据
+func (c *TestClient) SendDeviceHeartbeat01() error {
+	c.logger.GetLogger().Info("💓 发送设备心跳包（0x01指令）...")
 
-	// 发送简单的"link"字符串
-	_, err := c.conn.Write([]byte("link"))
+	// 构建心跳数据 - 根据线上数据：8002e80802000000000000000000000a00316100（20字节）
+	data := make([]byte, 20)
+
+	// 固件版本（2字节）
+	data[0] = 0x80
+	data[1] = 0x02
+
+	// 时间戳或状态标识（4字节）
+	data[2] = 0xe8
+	data[3] = 0x08
+	data[4] = 0x02
+	data[5] = 0x00
+
+	// 预留字段（10字节全零）
+	for i := 6; i < 16; i++ {
+		data[i] = 0x00
+	}
+
+	// 状态信息（4字节）
+	data[16] = 0x0a
+	data[17] = 0x00
+	data[18] = 0x31
+	data[19] = 0x61
+
+	// 使用已有的包构建函数
+	packet := pkg.Protocol.BuildDNYResponsePacket(c.config.PhysicalID, c.getNextMessageID(), 0x01, data)
+
+	c.logger.GetLogger().WithFields(logrus.Fields{
+		"physicalID": fmt.Sprintf("0x%08X", c.config.PhysicalID),
+		"packetHex":  hex.EncodeToString(packet),
+		"packetLen":  len(packet),
+		"dataHex":    hex.EncodeToString(data),
+	}).Info("📦 设备心跳包（0x01）详情")
+
+	// 发送数据包
+	_, err := c.conn.Write(packet)
+	if err != nil {
+		c.logger.GetLogger().WithError(err).Error("❌ 发送设备心跳包（0x01）失败")
+		return err
+	}
+
+	c.logger.GetLogger().Info("✅ 设备心跳包（0x01）发送成功")
+	return nil
+}
+
+// SendDeviceHeartbeat21 发送设备心跳（0x21指令）- 模拟线上真实数据
+func (c *TestClient) SendDeviceHeartbeat21() error {
+	c.logger.GetLogger().Info("💓 发送设备心跳包（0x21指令）...")
+
+	// 构建心跳数据 - 根据线上数据：e8080200000061（7字节）
+	data := make([]byte, 7)
+
+	data[0] = 0xe8
+	data[1] = 0x08
+	data[2] = 0x02
+	data[3] = 0x00
+	data[4] = 0x00
+	data[5] = 0x00
+	data[6] = 0x61
+
+	// 使用已有的包构建函数
+	packet := pkg.Protocol.BuildDNYResponsePacket(c.config.PhysicalID, c.getNextMessageID(), 0x21, data)
+
+	c.logger.GetLogger().WithFields(logrus.Fields{
+		"physicalID": fmt.Sprintf("0x%08X", c.config.PhysicalID),
+		"packetHex":  hex.EncodeToString(packet),
+		"packetLen":  len(packet),
+		"dataHex":    hex.EncodeToString(data),
+	}).Info("📦 设备心跳包（0x21）详情")
+
+	// 发送数据包
+	_, err := c.conn.Write(packet)
+	if err != nil {
+		c.logger.GetLogger().WithError(err).Error("❌ 发送设备心跳包（0x21）失败")
+		return err
+	}
+
+	c.logger.GetLogger().Info("✅ 设备心跳包（0x21）发送成功")
+	return nil
+}
+
+// SendLinkHeartbeat 发送"link"字符串心跳 - 模拟线上真实数据
+func (c *TestClient) SendLinkHeartbeat() error {
+	c.logger.GetLogger().Info("💓 发送link字符串心跳...")
+
+	// 直接发送"link"字符串
+	linkData := []byte("link")
+
+	c.logger.GetLogger().WithFields(logrus.Fields{
+		"physicalID": fmt.Sprintf("0x%08X", c.config.PhysicalID),
+		"dataStr":    string(linkData),
+		"dataHex":    hex.EncodeToString(linkData),
+		"dataLen":    len(linkData),
+	}).Info("📦 link心跳详情")
+
+	// 发送数据包
+	_, err := c.conn.Write(linkData)
 	if err != nil {
 		c.logger.GetLogger().WithError(err).Error("❌ 发送link心跳失败")
 		return err
 	}
 
-	c.logger.GetLogger().Debug("✅ link心跳发送成功")
+	c.logger.GetLogger().Info("✅ link心跳发送成功")
+	return nil
+}
+
+// SendServerTimeRequest 发送服务器时间请求（0x22指令）- 模拟线上真实数据
+func (c *TestClient) SendServerTimeRequest() error {
+	c.logger.GetLogger().Info("🕐 发送服务器时间请求（0x22指令）...")
+
+	// 无数据，只发送命令
+	data := make([]byte, 0)
+
+	// 使用已有的包构建函数
+	packet := pkg.Protocol.BuildDNYResponsePacket(c.config.PhysicalID, c.getNextMessageID(), 0x22, data)
+
+	c.logger.GetLogger().WithFields(logrus.Fields{
+		"physicalID": fmt.Sprintf("0x%08X", c.config.PhysicalID),
+		"packetHex":  hex.EncodeToString(packet),
+		"packetLen":  len(packet),
+	}).Info("📦 服务器时间请求包详情")
+
+	// 发送数据包
+	_, err := c.conn.Write(packet)
+	if err != nil {
+		c.logger.GetLogger().WithError(err).Error("❌ 发送服务器时间请求失败")
+		return err
+	}
+
+	c.logger.GetLogger().Info("✅ 服务器时间请求发送成功")
 	return nil
 }
 

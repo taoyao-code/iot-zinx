@@ -12,6 +12,7 @@ type DeviceConfig struct {
 	DeviceType  uint8  // 设备类型
 	PortCount   uint8  // 端口数量
 	FirmwareVer uint16 // 固件版本
+	VirtualID   uint8  // 虚拟ID（用于区分同一ICCID下的不同设备）
 	ICCID       string // ICCID号
 	ServerAddr  string // 服务器地址
 	// 主机相关配置
@@ -35,14 +36,15 @@ func generateUniqueDeviceID() uint32 {
 	return 0x04000000 | deviceNumber
 }
 
-// NewDeviceConfig 创建默认主机设备配置
+// NewDeviceConfig 创建默认主机设备配置 - 基于线上真实数据
 func NewDeviceConfig() *DeviceConfig {
 	return &DeviceConfig{
 		PhysicalID:  generateUniqueDeviceID(), // 生成唯一的设备ID
-		DeviceType:  0x21,                     // 新款485双模
+		DeviceType:  0x31,                     // 设备类型49（线上数据）
 		PortCount:   2,                        // 双路插座
-		FirmwareVer: 200,                      // V2.00
-		ICCID:       "89860404D91623904882979",
+		FirmwareVer: 640,                      // 固件版本640（线上数据）
+		VirtualID:   0x1e,                     // 虚拟ID 30（线上数据）
+		ICCID:       "898604D9162390488297",   // 真实ICCID（线上数据）
 		ServerAddr:  "localhost:7054",
 		// 主机相关默认配置
 		HostType:       dny_protocol.HostType485Old, // 旧款485主机
@@ -54,6 +56,31 @@ func NewDeviceConfig() *DeviceConfig {
 		ModuleVersion:  "4G_MODULE_V1.0.0_20240601", // 模块版本号（24字节）
 		HasRTC:         true,                        // 有RTC模块
 	}
+}
+
+// NewDeviceConfigWithPhysicalID 创建指定物理ID的设备配置
+func NewDeviceConfigWithPhysicalID(physicalID uint32, virtualID uint8) *DeviceConfig {
+	config := NewDeviceConfig()
+	config.PhysicalID = physicalID
+	config.VirtualID = virtualID
+	return config
+}
+
+// CreateMultipleDevicesConfig 创建多个设备配置（模拟线上多设备场景）
+func CreateMultipleDevicesConfig() []*DeviceConfig {
+	// 基于线上数据的两个设备ID
+	devices := []*DeviceConfig{
+		NewDeviceConfigWithPhysicalID(0x04A228CD, 0x1e), // 第一个设备
+		NewDeviceConfigWithPhysicalID(0x04A26CF3, 0x1f), // 第二个设备
+	}
+
+	// 设置相同的ICCID
+	iccid := "898604D9162390488297"
+	for _, device := range devices {
+		device.ICCID = iccid
+	}
+
+	return devices
 }
 
 // WithPhysicalID 设置物理ID

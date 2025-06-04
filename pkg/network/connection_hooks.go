@@ -1,6 +1,7 @@
 package network
 
 import (
+	"fmt"
 	"net"
 	"time"
 
@@ -142,6 +143,21 @@ func (ch *ConnectionHooks) OnConnectionStop(conn ziface.IConnection) {
 		deviceIdStr = "unregistered"
 	}
 
+	// 🔧 重要：清理该连接的所有命令队列
+	commandManager := GetCommandManager()
+	if commandManager != nil {
+		commandManager.ClearConnectionCommands(connID)
+	}
+
+	// 尝试获取物理ID
+	var physicalIDStr string
+	physicalID, hasPhysicalID := conn.GetProperty("DNY_PhysicalID")
+	if hasPhysicalID == nil && physicalID != nil {
+		if id, ok := physicalID.(uint32); ok {
+			physicalIDStr = fmt.Sprintf("0x%08X", id)
+		}
+	}
+
 	// 记录连接断开日志
 	logFields := logrus.Fields{
 		"deviceId":       deviceIdStr,
@@ -150,6 +166,11 @@ func (ch *ConnectionHooks) OnConnectionStop(conn ziface.IConnection) {
 		"lastHeartbeat":  lastHeartbeatStr,
 		"timeSinceHeart": timeSinceHeart,
 		"connStatus":     constants.ConnStatusClosed,
+	}
+
+	// 如果有物理ID，添加到日志字段
+	if physicalIDStr != "" {
+		logFields["physicalID"] = physicalIDStr
 	}
 
 	logger.WithFields(logFields).Info("设备连接断开")

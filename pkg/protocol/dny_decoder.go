@@ -4,6 +4,7 @@ import (
 	"fmt"
 
 	"github.com/aceld/zinx/ziface"
+	"github.com/bujia-iot/iot-zinx/internal/domain/dny_protocol"
 	"github.com/bujia-iot/iot-zinx/internal/infrastructure/logger"
 	"github.com/sirupsen/logrus"
 )
@@ -61,7 +62,14 @@ func (d *DNY_Decoder) Intercept(chain ziface.IChain) ziface.IcResp {
 		return chain.ProceedWithIMessage(iMessage, nil)
 	}
 
-	// 4. 先尝试处理特殊消息（ICCID、心跳等）
+	// 4. 获取连接
+	conn := d.getConnection(chain)
+	if conn != nil {
+		// 保存原始数据到连接属性，以便在后续处理中使用
+		conn.SetProperty("DNY_RawData", data)
+	}
+
+	// 5. 先尝试处理特殊消息（ICCID、心跳等）
 	if IsSpecialMessage(data) {
 		// 使用统一的特殊消息解析函数
 		dnyMsg := ParseSpecialMessage(data)
@@ -73,46 +81,83 @@ func (d *DNY_Decoder) Intercept(chain ziface.IChain) ziface.IcResp {
 
 		logger.Info(LOG_SPECIAL_DATA_PROCESSED)
 
+		// 设置连接属性
+		if conn != nil {
+			if dnyMsg.GetMsgID() == MSG_ID_ICCID {
+				// 保存ICCID到连接属性
+				iccid := string(dnyMsg.GetData())
+				conn.SetProperty("ICCID", iccid)
+				logger.WithField("iccid", iccid).Info("已设置连接ICCID属性")
+			}
+		}
+
 		// 将特殊消息传递给下一层
 		return chain.ProceedWithIMessage(iMessage, dnyMsg)
 	}
 
-	// 5. 检查数据是否满足DNY协议最小长度
+	// 6. 检查数据是否满足DNY协议最小长度
 	if len(data) < DNY_MIN_PACKET_LEN {
+		logger.WithFields(logrus.Fields{
+			"dataLen": len(data),
+			"minLen":  DNY_MIN_PACKET_LEN,
+			"dataHex": fmt.Sprintf("%x", data),
+		}).Debug("数据长度不足，无法解析为DNY协议")
 		return chain.ProceedWithIMessage(iMessage, nil)
 	}
 
-	// 6. DNY协议解码 - 使用统一的解析函数
+	// 7. DNY协议解码 - 使用统一的解析函数
 	dnyMsg, err := ParseDNYProtocolData(data)
 	if err != nil {
 		logger.WithFields(logrus.Fields{
-			"data": data,
+			"data": fmt.Sprintf("%x", data),
 			"err":  err.Error(),
 		}).Debug(LOG_BIN_DNY_PARSE_FAILED)
 
-		return chain.ProceedWithIMessage(iMessage, nil)
+		// 在解析失败时不再继续，而是返回明确的错误
+		if conn != nil {
+			conn.SetProperty("DNY_ParseError", err.Error())
+		}
+
+		// 创建一个错误消息以便路由器能明确知道这是一个解析失败的消息
+		errorMsg := dny_protocol.NewMessage(0xFFFF, 0, data, 0)
+		errorMsg.SetRawData(data)
+
+		// 设置原始消息信息
+		iMessage.SetMsgID(0xFFFF) // 使用特殊ID标记解析失败
+		iMessage.SetData(data)
+		iMessage.SetDataLen(uint32(len(data)))
+
+		return chain.ProceedWithIMessage(iMessage, errorMsg)
 	}
 
-	// 7. 将解码后的命令设置为消息ID，Zinx的Router需要MsgID来寻址
+	// 8. 将解码后的命令设置为消息ID，Zinx的Router需要MsgID来寻址
 	iMessage.SetMsgID(dnyMsg.GetMsgID())
 
-	// 8. 设置消息数据为命令数据
+	// 9. 设置消息数据为命令数据
 	iMessage.SetData(dnyMsg.GetData())
 
-	// 9. 设置消息长度
+	// 10. 设置消息长度
 	iMessage.SetDataLen(dnyMsg.GetDataLen())
 
-	// 10. 设置连接属性
-	conn := d.getConnection(chain)
+	// 11. 设置连接属性
 	if conn != nil {
-		conn.SetProperty(PROP_DNY_PHYSICAL_ID, dnyMsg.GetPhysicalId())
-		// MessageID需要从解析的消息中提取
-		if len(data) >= 11 {
-			// 从原始数据中提取MessageID (小端序)
-			messageID := uint16(data[9]) | uint16(data[10])<<8
-			conn.SetProperty(PROP_DNY_MESSAGE_ID, messageID)
-		}
-		conn.SetProperty(PROP_DNY_COMMAND, uint8(dnyMsg.GetMsgID()))
+		// 设置物理ID属性
+		physicalID := dnyMsg.GetPhysicalId()
+		conn.SetProperty(PROP_DNY_PHYSICAL_ID, physicalID)
+		logger.WithField("physicalId", fmt.Sprintf("0x%08X", physicalID)).
+			Debug("已设置连接物理ID属性")
+
+		// 设置消息ID属性
+		messageID := dnyMsg.MessageId
+		conn.SetProperty(PROP_DNY_MESSAGE_ID, messageID)
+		logger.WithField("messageId", messageID).
+			Debug("已设置连接消息ID属性")
+
+		// 设置命令属性
+		command := uint8(dnyMsg.GetMsgID())
+		conn.SetProperty(PROP_DNY_COMMAND, command)
+		logger.WithField("command", fmt.Sprintf("0x%02X", command)).
+			Debug("已设置连接命令属性")
 
 		// 校验和验证 - 使用统一的校验和验证方法
 		if len(data) >= 14 {
@@ -138,10 +183,11 @@ func (d *DNY_Decoder) Intercept(chain ziface.IChain) ziface.IcResp {
 				SetChecksumMethod(originalMethod)
 
 				// 设置校验和有效属性 - 如果任何一种方法有效，则认为校验和有效
-				conn.SetProperty(PROP_DNY_CHECKSUM_VALID, isValid1 || isValid2)
+				checksumValid := isValid1 || isValid2
+				conn.SetProperty(PROP_DNY_CHECKSUM_VALID, checksumValid)
 
 				// 记录详细的校验和信息
-				if !isValid1 && !isValid2 {
+				if !checksumValid {
 					logger.WithFields(logrus.Fields{
 						"command":          fmt.Sprintf("0x%02X", uint8(dnyMsg.GetMsgID())),
 						"expectedChecksum": fmt.Sprintf("0x%04X", checksum),
@@ -149,13 +195,14 @@ func (d *DNY_Decoder) Intercept(chain ziface.IChain) ziface.IcResp {
 						"method1Valid":     isValid1,
 						"method2Checksum":  fmt.Sprintf("0x%04X", checksum2),
 						"method2Valid":     isValid2,
+						"rawData":          fmt.Sprintf("%x", data),
 					}).Debug("校验和验证详情")
 				}
 			}
 		}
 	}
 
-	// 11. 将解析结果传递给下一层
+	// 12. 将解析结果传递给下一层
 	return chain.ProceedWithIMessage(iMessage, dnyMsg)
 }
 
