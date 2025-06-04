@@ -195,7 +195,7 @@ func handleUserChoice(choice string, opManager *operations.OperationManager, rea
 
 		// 其他参数使用默认值
 		payType := 1
-		rateMode := 1
+		rateMode := mode // 使用用户选择的充电模式
 		maxPower := 2200
 
 		result, err := opManager.StartCharging(deviceID, port, duration, amount, orderNumber, payType, rateMode, maxPower)

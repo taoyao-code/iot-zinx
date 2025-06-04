@@ -158,11 +158,21 @@ func (om *OperationManager) SendDNYCommand(deviceID string, command byte, dataHe
 // StartCharging 开始充电
 func (om *OperationManager) StartCharging(deviceID string, portNumber, duration int, amount float64, orderNumber string, paymentType, rateMode, maxPower int) (interface{}, error) {
 	// 将客户端参数转换为服务器端期望的格式
-	// 充电模式：0=按时间，1=按电量，这里默认使用按时间模式
-	mode := byte(0)                // 按时间充电
-	value := uint16(duration / 60) // 将秒转换为分钟
-	if value == 0 {
-		value = 1 // 至少1分钟
+	// 充电模式映射：客户端 1=按时间 2=按电量 -> 协议 0=按时间 1=按电量
+	var mode byte
+	var value uint16
+
+	if rateMode == 2 {
+		// 按电量充电
+		mode = byte(1)
+		value = uint16(duration) // duration 在按电量模式下已经是 0.1度 单位
+	} else {
+		// 按时间充电（默认）
+		mode = byte(0)
+		value = uint16(duration / 60) // 将秒转换为分钟
+		if value == 0 {
+			value = 1 // 至少1分钟
+		}
 	}
 
 	// 准备请求数据

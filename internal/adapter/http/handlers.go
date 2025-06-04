@@ -360,7 +360,7 @@ func HandleStartCharging(c *gin.Context) {
 	var req struct {
 		DeviceID string `json:"deviceId" binding:"required"`
 		Port     byte   `json:"port" binding:"required"`    // 端口号
-		Mode     byte   `json:"mode" binding:"required"`    // 充电模式 0=按时间 1=按电量
+		Mode     byte   `json:"mode"`                       // 充电模式 0=按时间 1=按电量 (移除required标签以允许0值)
 		Value    uint16 `json:"value" binding:"required"`   // 充电时间(分钟)或电量(0.1度)
 		OrderNo  string `json:"orderNo" binding:"required"` // 订单号
 		Balance  uint32 `json:"balance"`                    // 余额（可选）
