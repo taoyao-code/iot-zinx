@@ -92,12 +92,17 @@ func ParseDNYProtocolData(data []byte) (*dny_protocol.Message, error) {
 	}
 
 	// 包头检查
-	if string(data[0:3]) != "DNY" {
+	if string(data[0:3]) != DNY_PROTOCOL_PREFIX {
 		return nil, fmt.Errorf("无效的包头，期望为DNY，实际为: %s", string(data[0:3]))
 	}
 
 	// 解析长度 (小端序)
 	length := binary.LittleEndian.Uint16(data[3:5])
+
+	// 长度合理性检查
+	if length > 1024 {
+		return nil, fmt.Errorf("数据长度异常，长度值: %d", length)
+	}
 
 	// 检查数据长度是否完整
 	totalLen := 5 + int(length)
@@ -108,6 +113,11 @@ func ParseDNYProtocolData(data []byte) (*dny_protocol.Message, error) {
 	// 解析物理ID (小端序)
 	physicalID := binary.LittleEndian.Uint32(data[5:9])
 
+	// 物理ID合理性检查
+	if physicalID == 0 {
+		logger.WithField("rawData", hex.EncodeToString(data)).Warn("解析到物理ID为0的DNY数据包")
+	}
+
 	// 解析消息ID (小端序)
 	messageID := binary.LittleEndian.Uint16(data[9:11])
 
@@ -116,6 +126,12 @@ func ParseDNYProtocolData(data []byte) (*dny_protocol.Message, error) {
 
 	// 解析数据部分
 	dataLength := int(length) - 9 // 减去物理ID(4) + 消息ID(2) + 命令(1) + 校验(2)
+
+	// 数据长度合理性检查
+	if dataLength < 0 {
+		return nil, fmt.Errorf("数据部分长度计算错误，值为负数: %d", dataLength)
+	}
+
 	var payload []byte
 	if dataLength > 0 && len(data) >= 12+dataLength {
 		payload = data[12 : 12+dataLength]
@@ -161,6 +177,7 @@ func ParseDNYProtocolData(data []byte) (*dny_protocol.Message, error) {
 			"physicalID":       fmt.Sprintf("0x%08X", physicalID),
 			"messageID":        messageID,
 			"rawData":          hex.EncodeToString(data),
+			"dataLength":       dataLength,
 		}).Warn("DNY校验和验证失败，但仍继续处理")
 
 		// 如果某种方法有效，建议更改默认方法
@@ -188,6 +205,8 @@ func ParseDNYProtocolData(data []byte) (*dny_protocol.Message, error) {
 		"messageID":  messageID,
 		"dataLength": dataLength,
 		"checksumOK": checksumValid,
+		"totalLen":   totalLen,
+		"actualLen":  len(data),
 	}).Debug("DNY协议解析成功")
 
 	return dnyMsg, nil
@@ -303,11 +322,25 @@ func IsDNYProtocolData(data []byte) bool {
 
 	// 检查包头是否为"DNY"
 	if !bytes.HasPrefix(data, []byte(DNY_PROTOCOL_PREFIX)) {
-		return false
+		// 检查是否为十六进制表示的DNY前缀
+		dataHex := hex.EncodeToString(data[:3])
+		if !strings.EqualFold(dataHex, DNY_HEX_PREFIX_LOWER) {
+			return false
+		}
 	}
 
 	// 解析数据长度字段
+	if len(data) < 5 {
+		return false
+	}
+
 	dataLen := binary.LittleEndian.Uint16(data[3:5])
+
+	// 数据长度合理性检查 - 防止异常值
+	if dataLen > 1024 { // 设置一个合理的上限
+		return false
+	}
+
 	totalLen := 5 + int(dataLen)
 
 	// 检查实际长度是否匹配

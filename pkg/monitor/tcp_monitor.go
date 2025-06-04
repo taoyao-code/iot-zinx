@@ -9,6 +9,7 @@ import (
 	"github.com/aceld/zinx/ziface"
 	"github.com/bujia-iot/iot-zinx/internal/infrastructure/logger"
 	"github.com/bujia-iot/iot-zinx/pkg/constants"
+	"github.com/bujia-iot/iot-zinx/pkg/network"
 	"github.com/bujia-iot/iot-zinx/pkg/protocol"
 	"github.com/sirupsen/logrus"
 )
@@ -262,6 +263,26 @@ func (m *TCPMonitor) BindDeviceIdToConnection(deviceId string, conn ziface.IConn
 					"oldConnID": oldConnID,
 					"newConnID": connID,
 				}).Info("设备更换连接，可能是重连")
+
+				// 尝试获取物理ID，用于清理命令队列
+				var physicalID uint32
+				if propPhysicalID, err := oldConnObj.GetProperty(network.PropKeyDNYPhysicalID); err == nil && propPhysicalID != nil {
+					if id, ok := propPhysicalID.(uint32); ok && id != 0 {
+						physicalID = id
+
+						// 清理物理ID对应的命令队列
+						commandManager := network.GetCommandManager()
+						if commandManager != nil {
+							commandManager.ClearPhysicalIDCommands(physicalID)
+							logger.WithFields(logrus.Fields{
+								"physicalID": fmt.Sprintf("0x%08X", physicalID),
+								"deviceId":   deviceId,
+								"oldConnID":  oldConnID,
+								"newConnID":  connID,
+							}).Info("设备重连，已清理物理ID对应的命令队列")
+						}
+					}
+				}
 
 				// 安全地移除旧连接的映射（避免资源泄漏）
 				m.connIdToDeviceIdMap.Delete(oldConnID)

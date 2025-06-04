@@ -6,6 +6,7 @@ import (
 
 	"github.com/bujia-iot/iot-zinx/pkg"
 	"github.com/bujia-iot/iot-zinx/pkg/constants"
+	"github.com/bujia-iot/iot-zinx/pkg/network"
 
 	"github.com/aceld/zinx/ziface"
 	"github.com/bujia-iot/iot-zinx/internal/app"
@@ -69,6 +70,9 @@ func (h *DeviceRegisterHandler) Handle(request ziface.IRequest) {
 			return
 		}
 	}
+
+	// 将物理ID保存到连接属性，确保一致性
+	conn.SetProperty("DNY_PhysicalID", physicalId)
 
 	// 🔧 重要修复：从连接属性获取ICCID，因为ICCID是通过单独的特殊消息发送的
 	var iccid string
@@ -151,6 +155,16 @@ func (h *DeviceRegisterHandler) Handle(request ziface.IRequest) {
 			"iccid":     iccid,
 			"sessionID": existSession.SessionID,
 		}).Info("设备重连，恢复现有会话")
+
+		// 清理该物理ID的所有命令队列，防止旧命令干扰
+		commandManager := network.GetCommandManager()
+		if commandManager != nil {
+			commandManager.ClearPhysicalIDCommands(physicalId)
+			logger.WithFields(logrus.Fields{
+				"physicalID": fmt.Sprintf("0x%08X", physicalId),
+				"deviceID":   deviceIdStr,
+			}).Info("设备重连，已清理物理ID对应的命令队列")
+		}
 
 		// 恢复会话
 		sessionManager.ResumeSession(deviceIdStr, conn)

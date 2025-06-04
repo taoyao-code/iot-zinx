@@ -27,6 +27,10 @@ type ICommandManager interface {
 	// ClearConnectionCommands 清理指定连接的所有命令
 	ClearConnectionCommands(connID uint64)
 
+	// ClearPhysicalIDCommands 清理指定物理ID的所有命令
+	// 当设备重新连接或更换连接时使用
+	ClearPhysicalIDCommands(physicalID uint32)
+
 	// GenerateCommandKey 生成命令唯一标识
 	GenerateCommandKey(conn ziface.IConnection, physicalID uint32, messageID uint16, command uint8) string
 }
@@ -45,3 +49,17 @@ type IConnectionHooks interface {
 	// SetOnConnectionClosedFunc 设置连接关闭回调函数
 	SetOnConnectionClosedFunc(fn func(conn ziface.IConnection))
 }
+
+// 连接属性键常量
+const (
+	// DNY协议相关属性
+	PropKeyDNYPhysicalID    = "DNY_PhysicalID"    // 物理ID属性键
+	PropKeyDNYMessageID     = "DNY_MessageID"     // 消息ID属性键
+	PropKeyDNYCommand       = "DNY_Command"       // 命令属性键
+	PropKeyDNYChecksumValid = "DNY_ChecksumValid" // 校验和有效性属性键
+	PropKeyDNYRawData       = "DNY_RawData"       // 原始数据属性键
+	PropKeyNotDNYMessage    = "NOT_DNY_MESSAGE"   // 非DNY消息标识
+
+	// 设备标识相关属性
+	PropKeyDeviceICCID = "ICCID" // 设备ICCID属性键
+)

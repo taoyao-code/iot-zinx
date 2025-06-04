@@ -146,15 +146,27 @@ func (ch *ConnectionHooks) OnConnectionStop(conn ziface.IConnection) {
 	// 🔧 重要：清理该连接的所有命令队列
 	commandManager := GetCommandManager()
 	if commandManager != nil {
+		// 在连接关闭前确保命令队列被清理
 		commandManager.ClearConnectionCommands(connID)
+		logger.WithFields(logrus.Fields{
+			"connID":   connID,
+			"deviceID": deviceIdStr,
+		}).Info("已清理断开连接的命令队列")
 	}
 
 	// 尝试获取物理ID
 	var physicalIDStr string
-	physicalID, hasPhysicalID := conn.GetProperty("DNY_PhysicalID")
+	physicalID, hasPhysicalID := conn.GetProperty(PropKeyDNYPhysicalID)
 	if hasPhysicalID == nil && physicalID != nil {
 		if id, ok := physicalID.(uint32); ok {
 			physicalIDStr = fmt.Sprintf("0x%08X", id)
+
+			// 如果设备有物理ID，通知其他系统组件该设备已断开连接
+			// 这可以帮助其他组件及时清理与该设备相关的资源
+			logger.WithFields(logrus.Fields{
+				"physicalID": physicalIDStr,
+				"connID":     connID,
+			}).Info("设备物理ID连接已断开")
 		}
 	}
 

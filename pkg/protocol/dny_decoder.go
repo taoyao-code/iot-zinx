@@ -19,6 +19,7 @@ const (
 	LOG_BIN_DNY_PARSE_FAILED   = "拦截器：二进制DNY数据解析失败"
 	LOG_CHECKSUM_FAILED        = "DNY校验和验证失败，但仍继续处理"
 	LOG_SPECIAL_DATA_PROCESSED = "拦截器：已处理特殊/非DNY数据"
+	LOG_NOT_DNY_PROTOCOL       = "拦截器：数据不符合DNY协议格式，交由其他处理器处理"
 )
 
 // -----------------------------------------------------------------------------
@@ -95,13 +96,18 @@ func (d *DNY_Decoder) Intercept(chain ziface.IChain) ziface.IcResp {
 		return chain.ProceedWithIMessage(iMessage, dnyMsg)
 	}
 
-	// 6. 检查数据是否满足DNY协议最小长度
-	if len(data) < DNY_MIN_PACKET_LEN {
+	// 6. 快速检查是否为DNY协议数据
+	if !IsDNYProtocolData(data) {
+		// 非DNY协议数据，记录日志并继续责任链
 		logger.WithFields(logrus.Fields{
 			"dataLen": len(data),
-			"minLen":  DNY_MIN_PACKET_LEN,
 			"dataHex": fmt.Sprintf("%x", data),
-		}).Debug("数据长度不足，无法解析为DNY协议")
+		}).Debug(LOG_NOT_DNY_PROTOCOL)
+
+		// 设置一个明确的非DNY消息标识
+		conn.SetProperty("NOT_DNY_MESSAGE", true)
+
+		// 将未修改的消息传递给下一层处理器
 		return chain.ProceedWithIMessage(iMessage, nil)
 	}
 
@@ -109,16 +115,18 @@ func (d *DNY_Decoder) Intercept(chain ziface.IChain) ziface.IcResp {
 	dnyMsg, err := ParseDNYProtocolData(data)
 	if err != nil {
 		logger.WithFields(logrus.Fields{
-			"data": fmt.Sprintf("%x", data),
-			"err":  err.Error(),
-		}).Debug(LOG_BIN_DNY_PARSE_FAILED)
+			"data":    fmt.Sprintf("%x", data),
+			"dataLen": len(data),
+			"err":     err.Error(),
+		}).Error(LOG_BIN_DNY_PARSE_FAILED)
 
-		// 在解析失败时不再继续，而是返回明确的错误
+		// 设置错误属性
 		if conn != nil {
 			conn.SetProperty("DNY_ParseError", err.Error())
+			conn.SetProperty("NOT_DNY_MESSAGE", true)
 		}
 
-		// 创建一个错误消息以便路由器能明确知道这是一个解析失败的消息
+		// 创建一个错误消息，使用特殊消息ID
 		errorMsg := dny_protocol.NewMessage(0xFFFF, 0, data, 0)
 		errorMsg.SetRawData(data)
 
@@ -141,6 +149,9 @@ func (d *DNY_Decoder) Intercept(chain ziface.IChain) ziface.IcResp {
 
 	// 11. 设置连接属性
 	if conn != nil {
+		// 清除可能存在的非DNY消息标识
+		conn.RemoveProperty("NOT_DNY_MESSAGE")
+
 		// 设置物理ID属性
 		physicalID := dnyMsg.GetPhysicalId()
 		conn.SetProperty(PROP_DNY_PHYSICAL_ID, physicalID)

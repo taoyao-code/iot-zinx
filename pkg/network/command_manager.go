@@ -119,6 +119,32 @@ func (cm *CommandManager) RegisterCommand(conn ziface.IConnection, physicalID ui
 	cm.lock.Lock()
 	defer cm.lock.Unlock()
 
+	// 检查相同物理ID的相同命令是否已存在，如果存在则更新而不是添加新条目
+	if cmdKeys, exists := cm.physicalCommands[physicalID]; exists {
+		for _, key := range cmdKeys {
+			if existingCmd, ok := cm.commands[key]; ok &&
+				existingCmd.Command == command &&
+				existingCmd.ConnID == connID {
+				// 更新已存在的命令条目
+				existingCmd.MessageID = messageID
+				existingCmd.Data = data
+				existingCmd.LastSentTime = time.Now()
+				existingCmd.RetryCount = 0
+				existingCmd.Confirmed = false
+
+				logger.WithFields(logrus.Fields{
+					"connID":     connID,
+					"physicalID": fmt.Sprintf("0x%08X", physicalID),
+					"messageID":  messageID,
+					"command":    fmt.Sprintf("0x%02X", command),
+					"cmdKey":     cmdKey,
+				}).Debug("更新已存在的命令")
+
+				return
+			}
+		}
+	}
+
 	// 创建命令条目
 	entry := &CommandEntry{
 		Connection:   conn,
@@ -171,8 +197,8 @@ func (cm *CommandManager) ConfirmCommand(physicalID uint32, messageID uint16, co
 			continue
 		}
 
-		// 检查消息ID和命令是否匹配
-		if cmd.MessageID == messageID && cmd.Command == command {
+		// 检查命令是否匹配 - 更宽松的匹配条件
+		if cmd.Command == command {
 			// 标记为已确认
 			cmd.Confirmed = true
 			confirmed = true
@@ -234,6 +260,34 @@ func (cm *CommandManager) ClearConnectionCommands(connID uint64) {
 		"connID":       connID,
 		"commandCount": len(cmdKeys),
 	}).Info("已清理连接的所有命令")
+}
+
+// ClearPhysicalIDCommands 清理指定物理ID的所有命令
+// 当设备重新连接或更换连接时使用
+func (cm *CommandManager) ClearPhysicalIDCommands(physicalID uint32) {
+	cm.lock.Lock()
+	defer cm.lock.Unlock()
+
+	// 获取物理ID关联的所有命令键
+	cmdKeys, exists := cm.physicalCommands[physicalID]
+	if !exists {
+		logger.WithField("physicalID", fmt.Sprintf("0x%08X", physicalID)).
+			Debug("未找到物理ID关联的命令")
+		return
+	}
+
+	// 删除所有关联的命令
+	for _, cmdKey := range cmdKeys {
+		cm.deleteCommand(cmdKey)
+	}
+
+	// 删除物理ID映射
+	delete(cm.physicalCommands, physicalID)
+
+	logger.WithFields(logrus.Fields{
+		"physicalID":   fmt.Sprintf("0x%08X", physicalID),
+		"commandCount": len(cmdKeys),
+	}).Info("已清理物理ID的所有命令")
 }
 
 // deleteCommand 删除指定命令（内部方法，调用前需加锁）

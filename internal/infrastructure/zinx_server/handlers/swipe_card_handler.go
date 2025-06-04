@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/bujia-iot/iot-zinx/pkg"
+	"github.com/bujia-iot/iot-zinx/pkg/network"
 
 	"github.com/aceld/zinx/ziface"
 	"github.com/bujia-iot/iot-zinx/internal/app"
@@ -90,7 +91,7 @@ func (h *SwipeCardHandler) Handle(request ziface.IRequest) {
 		fmt.Printf("🔧 刷卡处理器从DNY协议消息获取真实PhysicalID: 0x%08X\n", physicalId)
 	} else {
 		// 从连接属性中获取PhysicalID
-		if prop, err := conn.GetProperty("DNY_PhysicalID"); err == nil {
+		if prop, err := conn.GetProperty(network.PropKeyDNYPhysicalID); err == nil {
 			if pid, ok := prop.(uint32); ok {
 				physicalId = pid
 				fmt.Printf("🔧 刷卡处理器从连接属性获取PhysicalID: 0x%08X\n", physicalId)

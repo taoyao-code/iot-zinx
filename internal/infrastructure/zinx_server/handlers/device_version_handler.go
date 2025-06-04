@@ -10,6 +10,7 @@ import (
 	"github.com/bujia-iot/iot-zinx/internal/domain/dny_protocol"
 	"github.com/bujia-iot/iot-zinx/internal/infrastructure/logger"
 	"github.com/bujia-iot/iot-zinx/pkg"
+	"github.com/bujia-iot/iot-zinx/pkg/protocol"
 	"github.com/sirupsen/logrus"
 )
 
@@ -46,7 +47,7 @@ func (h *DeviceVersionHandler) Handle(request ziface.IRequest) {
 	if dnyMsg, ok := msg.(*dny_protocol.Message); ok {
 		physicalId = dnyMsg.GetPhysicalId()
 		fmt.Printf("🔧 从DNY协议消息获取PhysicalID: 0x%08X\n", physicalId)
-	} else if prop, err := conn.GetProperty("DNY_PhysicalID"); err == nil {
+	} else if prop, err := conn.GetProperty(protocol.PROP_DNY_PHYSICAL_ID); err == nil {
 		if pid, ok := prop.(uint32); ok {
 			physicalId = pid
 			fmt.Printf("🔧 从连接属性获取PhysicalID: 0x%08X\n", physicalId)

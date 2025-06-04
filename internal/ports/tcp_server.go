@@ -13,6 +13,7 @@ import (
 	"github.com/bujia-iot/iot-zinx/internal/infrastructure/zinx_server/handlers"
 	"github.com/bujia-iot/iot-zinx/pkg"
 	"github.com/bujia-iot/iot-zinx/pkg/constants"
+	"github.com/bujia-iot/iot-zinx/pkg/network"
 	"github.com/sirupsen/logrus"
 )
 
@@ -118,7 +119,7 @@ func StartTCPServer() error {
 
 		// 如果没有获取到有效的物理ID，尝试从DNY_PhysicalID属性获取
 		if physicalId == 0xFFFFFFFF {
-			if pidProp, err := conn.GetProperty("DNY_PhysicalID"); err == nil && pidProp != nil {
+			if pidProp, err := conn.GetProperty(network.PropKeyDNYPhysicalID); err == nil && pidProp != nil {
 				if pid, ok := pidProp.(uint32); ok {
 					physicalId = pid
 				}

@@ -26,7 +26,7 @@ func SendDNYResponse(conn ziface.IConnection, physicalId uint32, messageId uint1
 	// 物理ID校验和修复
 	if physicalId == 0 {
 		// 尝试从连接属性获取物理ID
-		if propPhysicalID, err := conn.GetProperty("DNY_PhysicalID"); err == nil && propPhysicalID != nil {
+		if propPhysicalID, err := conn.GetProperty(network.PropKeyDNYPhysicalID); err == nil && propPhysicalID != nil {
 			if id, ok := propPhysicalID.(uint32); ok && id != 0 {
 				physicalId = id
 				logger.WithFields(logrus.Fields{
@@ -39,7 +39,7 @@ func SendDNYResponse(conn ziface.IConnection, physicalId uint32, messageId uint1
 
 		// 如果仍为0，尝试从ICCID生成
 		if physicalId == 0 {
-			if prop, err := conn.GetProperty("ICCID"); err == nil && prop != nil {
+			if prop, err := conn.GetProperty(network.PropKeyDeviceICCID); err == nil && prop != nil {
 				if iccid, ok := prop.(string); ok && len(iccid) > 0 {
 					// 从ICCID后8位生成物理ID
 					if len(iccid) >= 8 {
@@ -67,6 +67,9 @@ func SendDNYResponse(conn ziface.IConnection, physicalId uint32, messageId uint1
 			}).Warn("使用连接ID作为临时物理ID")
 		}
 	}
+
+	// 将获取到的物理ID保存到连接属性，确保一致性
+	conn.SetProperty(network.PropKeyDNYPhysicalID, physicalId)
 
 	// 构建响应数据包
 	packet := BuildDNYResponsePacket(physicalId, messageId, command, data)
@@ -128,14 +131,14 @@ func SendDNYResponse(conn ziface.IConnection, physicalId uint32, messageId uint1
 		len(data),
 	)
 
-	// 记录详细的发送日志
+	// 记录详细的发送日志 - 确保使用十六进制格式的物理ID
 	logger.WithFields(logrus.Fields{
 		"command":    fmt.Sprintf("0x%02X", command),
 		"connID":     conn.GetConnID(),
 		"dataHex":    hex.EncodeToString(packet),
 		"messageID":  messageId,
-		"physicalID": physicalId,
-	}).Info("发送DNY协议数据2")
+		"physicalID": fmt.Sprintf("0x%08X", physicalId),
+	}).Info("发送DNY协议数据")
 
 	// 通知监视器发送了原始数据
 	if tcpMonitor := GetTCPMonitor(); tcpMonitor != nil {
