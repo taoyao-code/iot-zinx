@@ -73,7 +73,7 @@ Thumbs.db
 
 *.yaml
 
-/tmp
+**/tmp/*
 
 internal/docs
 
