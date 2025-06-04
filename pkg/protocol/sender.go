@@ -135,7 +135,7 @@ func SendDNYResponse(conn ziface.IConnection, physicalId uint32, messageId uint1
 		"dataHex":    hex.EncodeToString(packet),
 		"messageID":  messageId,
 		"physicalID": physicalId,
-	}).Info("发送DNY协议数据")
+	}).Info("发送DNY协议数据2")
 
 	// 通知监视器发送了原始数据
 	if tcpMonitor := GetTCPMonitor(); tcpMonitor != nil {

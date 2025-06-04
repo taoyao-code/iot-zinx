@@ -222,7 +222,7 @@ func (m *TCPMonitor) OnRawDataSent(conn ziface.IConnection, data []byte) {
 					"physicalID": result.PhysicalID,
 					"messageID":  result.MessageID,
 					"dataHex":    hex.EncodeToString(data),
-				}).Info("发送DNY协议数据")
+				}).Info("发送DNY协议数据1")
 			} else {
 				fmt.Printf("解析失败: %v\n", err)
 			}
