@@ -157,16 +157,22 @@ func (om *OperationManager) SendDNYCommand(deviceID string, command byte, dataHe
 
 // StartCharging 开始充电
 func (om *OperationManager) StartCharging(deviceID string, portNumber, duration int, amount float64, orderNumber string, paymentType, rateMode, maxPower int) (interface{}, error) {
+	// 将客户端参数转换为服务器端期望的格式
+	// 充电模式：0=按时间，1=按电量，这里默认使用按时间模式
+	mode := byte(0)                // 按时间充电
+	value := uint16(duration / 60) // 将秒转换为分钟
+	if value == 0 {
+		value = 1 // 至少1分钟
+	}
+
 	// 准备请求数据
 	req := models.ChargingStartRequest{
-		DeviceID:    deviceID,
-		PortNumber:  portNumber,
-		Duration:    duration,
-		Amount:      amount,
-		OrderNumber: orderNumber,
-		PaymentType: paymentType,
-		RateMode:    rateMode,
-		MaxPower:    maxPower,
+		DeviceID: deviceID,
+		Port:     byte(portNumber),
+		Mode:     mode,
+		Value:    value,
+		OrderNo:  orderNumber,
+		Balance:  uint32(amount * 100), // 将元转换为分
 	}
 
 	// 发送请求
@@ -197,12 +203,17 @@ func (om *OperationManager) StartCharging(deviceID string, portNumber, duration 
 
 // StopCharging 停止充电
 func (om *OperationManager) StopCharging(deviceID string, portNumber int, orderNumber, reason string) (interface{}, error) {
+	// 将客户端参数转换为服务器端期望的格式
+	port := byte(portNumber)
+	if port == 0 {
+		port = 0xFF // 0xFF表示停止所有端口
+	}
+
 	// 准备请求数据
 	req := models.ChargingStopRequest{
-		DeviceID:    deviceID,
-		PortNumber:  portNumber,
-		OrderNumber: orderNumber,
-		Reason:      reason,
+		DeviceID: deviceID,
+		Port:     port,
+		OrderNo:  orderNumber,
 	}
 
 	// 发送请求

@@ -44,24 +44,21 @@ type DNYCommandResponse struct {
 	ReplyLength int    `json:"replyLength,omitempty"`
 }
 
-// ChargingStartRequest 开始充电请求
+// ChargingStartRequest 开始充电请求 - 匹配服务器端期望的字段格式
 type ChargingStartRequest struct {
-	DeviceID    string  `json:"deviceId"`
-	PortNumber  int     `json:"portNumber"`
-	Duration    int     `json:"duration"`
-	Amount      float64 `json:"amount"`
-	OrderNumber string  `json:"orderNumber"`
-	PaymentType int     `json:"paymentType"`
-	RateMode    int     `json:"rateMode"`
-	MaxPower    int     `json:"maxPower"`
+	DeviceID string `json:"deviceId"`
+	Port     byte   `json:"port"`    // 端口号
+	Mode     byte   `json:"mode"`    // 充电模式 0=按时间 1=按电量
+	Value    uint16 `json:"value"`   // 充电时间(分钟)或电量(0.1度)
+	OrderNo  string `json:"orderNo"` // 订单号
+	Balance  uint32 `json:"balance"` // 余额（可选）
 }
 
-// ChargingStopRequest 停止充电请求
+// ChargingStopRequest 停止充电请求 - 匹配服务器端期望的字段格式
 type ChargingStopRequest struct {
-	DeviceID    string `json:"deviceId"`
-	PortNumber  int    `json:"portNumber"`
-	OrderNumber string `json:"orderNumber"`
-	Reason      string `json:"reason,omitempty"`
+	DeviceID string `json:"deviceId"`
+	Port     byte   `json:"port"`    // 端口号，0xFF表示停止所有端口
+	OrderNo  string `json:"orderNo"` // 订单号
 }
 
 // ChargingControlResponse 充电控制响应
