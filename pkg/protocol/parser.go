@@ -4,7 +4,6 @@ import (
 	"encoding/binary"
 	"encoding/hex"
 	"fmt"
-	"time"
 )
 
 // DNYParseResult DNY协议解析结果
@@ -23,35 +22,24 @@ type DNYParseResult struct {
 	CommandName   string
 }
 
-// ParseManualData 手动解析十六进制数据
+// ParseManualData 手动解析十六进制数据 - 简化版本，主要用于调试
 func ParseManualData(hexData, description string) {
-	// 打印数据日志
-	timestamp := time.Now().Format("2006-01-02 15:04:05.000")
-	fmt.Printf("\n[%s] 手动解析: %s\n", timestamp, description)
-	fmt.Printf("数据(HEX): %s\n", hexData)
-
-	// 使用统一的解析接口
 	result, err := ParseDNYHexString(hexData)
 	if err != nil {
-		fmt.Printf("解析失败: %v\n", err)
-	} else {
-		// 使用结构化输出
-		fmt.Println(result.String())
-		if result.ChecksumValid {
-			fmt.Println("✅ 校验和验证通过")
-		} else {
-			fmt.Println("❌ 校验和验证失败")
-		}
+		fmt.Printf("❌ [%s] 解析失败: %v\n", description, err)
+		return
 	}
 
-	fmt.Println("----------------------------------------")
+	fmt.Printf("✅ [%s] %s\n", description, result.String())
 }
 
 // ParseDNYData 统一的DNY协议解析函数
 // 🔧 这是唯一的官方解析接口，避免重复实现
 func ParseDNYData(data []byte) (*DNYParseResult, error) {
-	if len(data) < 14 { // 最小DNY包长度
-		return nil, fmt.Errorf("数据长度不足，至少需要14字节，实际长度: %d", len(data))
+	const minDNYLen = 14 // 最小DNY包长度
+
+	if len(data) < minDNYLen {
+		return nil, fmt.Errorf("数据长度不足，至少需要%d字节，实际长度: %d", minDNYLen, len(data))
 	}
 
 	// 检查包头
@@ -61,7 +49,6 @@ func ParseDNYData(data []byte) (*DNYParseResult, error) {
 
 	result := &DNYParseResult{
 		PacketHeader: "DNY",
-		RawData:      data,
 	}
 
 	// 解析长度 (小端序)
@@ -83,7 +70,7 @@ func ParseDNYData(data []byte) (*DNYParseResult, error) {
 	result.Command = data[11]
 
 	// 解析数据部分
-	dataLength := int(result.Length) - 4 - 2 - 1 - 2 // 减去物理ID(4) + 消息ID(2) + 命令(1) + 校验(2)
+	dataLength := int(result.Length) - 9 // 减去物理ID(4) + 消息ID(2) + 命令(1) + 校验(2)
 	if dataLength > 0 && len(data) >= 12+dataLength {
 		result.Data = data[12 : 12+dataLength]
 	} else {
@@ -160,16 +147,17 @@ func ParseMultipleDNYFrames(data []byte) ([]*DNYParseResult, error) {
 
 // ParseDNYHexString 解析十六进制字符串格式的DNY协议数据
 func ParseDNYHexString(hexStr string) (*DNYParseResult, error) {
-	// 移除可能的空格和其他分隔符
-	cleanHex := ""
-	for _, char := range hexStr {
+	// 清理十六进制字符串，只保留有效字符
+	cleanHex := make([]byte, 0, len(hexStr))
+	for i := 0; i < len(hexStr); i++ {
+		char := hexStr[i]
 		if (char >= '0' && char <= '9') || (char >= 'a' && char <= 'f') || (char >= 'A' && char <= 'F') {
-			cleanHex += string(char)
+			cleanHex = append(cleanHex, char)
 		}
 	}
 
 	// 解码十六进制字符串
-	data, err := hex.DecodeString(cleanHex)
+	data, err := hex.DecodeString(string(cleanHex))
 	if err != nil {
 		return nil, fmt.Errorf("解析十六进制字符串失败: %v", err)
 	}
@@ -236,10 +224,8 @@ func (r *DNYParseResult) String() string {
 }
 
 // 🔧 架构重构说明：
-// 已删除重复的解析函数：
-// - ParseDNYProtocol() - 请使用 ParseDNYData() 替代
-//
-// 统一使用以下接口：
+// 统一的DNY协议解析接口：
 // - ParseDNYData(data []byte) (*DNYParseResult, error) - 解析二进制数据
 // - ParseDNYHexString(hexStr string) (*DNYParseResult, error) - 解析十六进制字符串
-// - result.String() - 获取格式化字符串输出
+// - ParseMultipleDNYFrames(data []byte) ([]*DNYParseResult, error) - 解析多帧数据
+// - CalculatePacketChecksum(data []byte) uint16 - 计算校验和
