@@ -95,7 +95,7 @@ func BuildDNYResponsePacket(physicalID uint32, messageID uint16, command uint8, 
 	// 数据
 	packet = append(packet, data...)
 
-	// 🔧 关键修复：计算校验和时不包含即将添加的校验和字段本身
+	// 使用当前配置的校验和计算方法计算校验和
 	// 校验和是对包头到数据部分（不含校验和）的累加和
 	checksum := CalculatePacketChecksum(packet)
 
@@ -133,7 +133,7 @@ func BuildDNYRequestPacket(physicalID uint32, messageID uint16, command uint8, d
 	// 数据
 	packet = append(packet, data...)
 
-	// 🔧 关键修复：计算校验和时不包含即将添加的校验和字段本身
+	// 使用当前配置的校验和计算方法计算校验和
 	// 校验和是对包头到数据部分（不含校验和）的累加和
 	checksum := CalculatePacketChecksum(packet)
 

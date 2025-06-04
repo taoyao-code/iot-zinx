@@ -1,6 +1,8 @@
 package protocol
 
 import (
+	"fmt"
+
 	"github.com/aceld/zinx/ziface"
 	"github.com/bujia-iot/iot-zinx/internal/infrastructure/logger"
 	"github.com/sirupsen/logrus"
@@ -111,13 +113,44 @@ func (d *DNY_Decoder) Intercept(chain ziface.IChain) ziface.IcResp {
 			conn.SetProperty(PROP_DNY_MESSAGE_ID, messageID)
 		}
 		conn.SetProperty(PROP_DNY_COMMAND, uint8(dnyMsg.GetMsgID()))
-		// 检验和验证需要计算
+
+		// 校验和验证 - 使用统一的校验和验证方法
 		if len(data) >= 14 {
 			checksumPos := 12 + (len(dnyMsg.GetData()))
 			if checksumPos+1 < len(data) {
+				// 从数据中获取校验和
 				checksum := uint16(data[checksumPos]) | uint16(data[checksumPos+1])<<8
-				calculatedChecksum := CalculatePacketChecksum(data[:checksumPos])
-				conn.SetProperty(PROP_DNY_CHECKSUM_VALID, checksum == calculatedChecksum)
+
+				// 保存当前校验和计算方法
+				originalMethod := GetChecksumMethod()
+
+				// 尝试方法1
+				SetChecksumMethod(CHECKSUM_METHOD_1)
+				checksum1 := CalculatePacketChecksum(data[:checksumPos])
+				isValid1 := (checksum1 == checksum)
+
+				// 尝试方法2
+				SetChecksumMethod(CHECKSUM_METHOD_2)
+				checksum2 := CalculatePacketChecksum(data[:checksumPos])
+				isValid2 := (checksum2 == checksum)
+
+				// 恢复原始方法
+				SetChecksumMethod(originalMethod)
+
+				// 设置校验和有效属性 - 如果任何一种方法有效，则认为校验和有效
+				conn.SetProperty(PROP_DNY_CHECKSUM_VALID, isValid1 || isValid2)
+
+				// 记录详细的校验和信息
+				if !isValid1 && !isValid2 {
+					logger.WithFields(logrus.Fields{
+						"command":          fmt.Sprintf("0x%02X", uint8(dnyMsg.GetMsgID())),
+						"expectedChecksum": fmt.Sprintf("0x%04X", checksum),
+						"method1Checksum":  fmt.Sprintf("0x%04X", checksum1),
+						"method1Valid":     isValid1,
+						"method2Checksum":  fmt.Sprintf("0x%04X", checksum2),
+						"method2Valid":     isValid2,
+					}).Debug("校验和验证详情")
+				}
 			}
 		}
 	}

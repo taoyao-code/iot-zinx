@@ -3,6 +3,7 @@ package protocol
 import (
 	"bytes"
 	"encoding/binary"
+	"encoding/hex"
 	"fmt"
 	"strings"
 
@@ -52,6 +53,31 @@ const (
 	PROP_DNY_COMMAND        = "DNY_Command"       // 命令属性键
 	PROP_DNY_CHECKSUM_VALID = "DNY_ChecksumValid" // 校验和有效性属性键
 )
+
+// 校验和计算方法常量
+const (
+	// 校验和计算方法
+	CHECKSUM_METHOD_1 = 1 // 从物理ID开始计算(原始方法)
+	CHECKSUM_METHOD_2 = 2 // 计算整个数据包
+
+	// 默认使用的校验和计算方法
+	DEFAULT_CHECKSUM_METHOD = CHECKSUM_METHOD_1
+)
+
+// 当前使用的校验和计算方法
+var currentChecksumMethod = DEFAULT_CHECKSUM_METHOD
+
+// SetChecksumMethod 设置校验和计算方法
+func SetChecksumMethod(method int) {
+	if method == CHECKSUM_METHOD_1 || method == CHECKSUM_METHOD_2 {
+		currentChecksumMethod = method
+	}
+}
+
+// GetChecksumMethod 获取当前校验和计算方法
+func GetChecksumMethod() int {
+	return currentChecksumMethod
+}
 
 // ============================================================================
 // 核心解析函数 - 统一DNY协议解析接口
@@ -104,17 +130,43 @@ func ParseDNYProtocolData(data []byte) (*dny_protocol.Message, error) {
 		checksum = binary.LittleEndian.Uint16(data[checksumPos : checksumPos+2])
 	}
 
-	// 验证校验和
-	calculatedChecksum := CalculatePacketChecksum(data[:checksumPos])
-	checksumValid := (calculatedChecksum == checksum)
+	// 保存当前校验和计算方法
+	originalMethod := currentChecksumMethod
+
+	// 尝试方法1: 原始方法(从物理ID开始计算)
+	SetChecksumMethod(CHECKSUM_METHOD_1)
+	checksum1 := CalculatePacketChecksum(data[:checksumPos])
+	isValid1 := (checksum1 == checksum)
+
+	// 尝试方法2: 整个数据包
+	SetChecksumMethod(CHECKSUM_METHOD_2)
+	checksum2 := CalculatePacketChecksum(data[:checksumPos])
+	isValid2 := (checksum2 == checksum)
+
+	// 恢复原始方法
+	SetChecksumMethod(originalMethod)
+
+	// 判断校验和是否有效
+	checksumValid := isValid1 || isValid2
 
 	if !checksumValid {
-		// 校验和验证失败，记录日志但继续处理
+		// 校验和验证失败，记录增强的日志但继续处理
 		logger.WithFields(logrus.Fields{
-			"command":            fmt.Sprintf("0x%02X", command),
-			"expectedChecksum":   fmt.Sprintf("0x%04X", checksum),
-			"calculatedChecksum": fmt.Sprintf("0x%04X", calculatedChecksum),
+			"command":          fmt.Sprintf("0x%02X", command),
+			"expectedChecksum": fmt.Sprintf("0x%04X", checksum),
+			"method1Checksum":  fmt.Sprintf("0x%04X", checksum1),
+			"method1Valid":     isValid1,
+			"method2Checksum":  fmt.Sprintf("0x%04X", checksum2),
+			"method2Valid":     isValid2,
+			"rawData":          hex.EncodeToString(data),
 		}).Warn("DNY校验和验证失败，但仍继续处理")
+
+		// 如果某种方法有效，建议更改默认方法
+		if isValid1 && currentChecksumMethod != CHECKSUM_METHOD_1 {
+			logger.Info("建议将校验和计算方法更改为方法1(从物理ID开始)")
+		} else if isValid2 && currentChecksumMethod != CHECKSUM_METHOD_2 {
+			logger.Info("建议将校验和计算方法更改为方法2(整个数据包)")
+		}
 	}
 
 	// 创建dny_protocol.Message对象
@@ -202,13 +254,33 @@ func IsAllDigits(data []byte) bool {
 // 辅助函数 - 提供通用工具功能
 // ============================================================================
 
-// CalculatePacketChecksum 计算校验和（从包头到数据的累加和）
+// CalculatePacketChecksum 计算校验和
 func CalculatePacketChecksum(data []byte) uint16 {
-	var checksum uint16
-	// 计算从物理ID开始的数据累加和（跳过包头和长度字段）
-	for _, b := range data[5:] {
-		checksum += uint16(b)
+	// 检查数据是否足够长
+	if len(data) < 5 {
+		return 0
 	}
+
+	var checksum uint16
+
+	switch currentChecksumMethod {
+	case CHECKSUM_METHOD_1:
+		// 方法1: 从物理ID位置(5)开始计算校验和，排除DNY前缀和长度字段
+		for i := 5; i < len(data); i++ {
+			checksum += uint16(data[i])
+		}
+	case CHECKSUM_METHOD_2:
+		// 方法2: 计算整个数据包的校验和
+		for i := 0; i < len(data); i++ {
+			checksum += uint16(data[i])
+		}
+	default:
+		// 默认使用方法1
+		for i := 5; i < len(data); i++ {
+			checksum += uint16(data[i])
+		}
+	}
+
 	return checksum
 }
 
