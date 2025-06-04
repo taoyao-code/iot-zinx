@@ -55,6 +55,10 @@ var Protocol = struct {
 	ParseDNYData func(data []byte) (*protocol.DNYParseResult, error)
 	// 🔧 解析十六进制字符串
 	ParseDNYHexString func(hexStr string) (*protocol.DNYParseResult, error)
+	// 🔧 解析DNY数据并返回消费的字节数
+	ParseDNYDataWithConsumed func(data []byte) (*protocol.DNYParseResult, int, error)
+	// 🔧 解析包含多个DNY帧的数据包
+	ParseMultipleDNYFrames func(data []byte) ([]*protocol.DNYParseResult, error)
 	// 计算包校验和
 	CalculatePacketChecksum func(data []byte) uint16
 	// 检查是否为DNY协议数据
@@ -89,6 +93,8 @@ var Protocol = struct {
 	ParseManualData:                  protocol.ParseManualData,
 	ParseDNYData:                     protocol.ParseDNYData,
 	ParseDNYHexString:                protocol.ParseDNYHexString,
+	ParseDNYDataWithConsumed:         protocol.ParseDNYDataWithConsumed,
+	ParseMultipleDNYFrames:           protocol.ParseMultipleDNYFrames,
 	CalculatePacketChecksum:          protocol.CalculatePacketChecksum,
 	IsDNYProtocolData:                protocol.IsDNYProtocolData,
 	IsHexString:                      protocol.IsHexString,

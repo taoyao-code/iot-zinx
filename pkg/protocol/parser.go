@@ -103,7 +103,59 @@ func ParseDNYData(data []byte) (*DNYParseResult, error) {
 	// 获取命令名称
 	result.CommandName = GetCommandName(result.Command)
 
+	// 🔧 关键修复：只使用实际消费的数据作为RawData
+	result.RawData = data[:totalLen]
+
 	return result, nil
+}
+
+// ParseDNYDataWithConsumed 解析DNY协议数据并返回消费的字节数
+// 🔧 新增函数：用于处理包含多个DNY帧的数据包
+func ParseDNYDataWithConsumed(data []byte) (*DNYParseResult, int, error) {
+	result, err := ParseDNYData(data)
+	if err != nil {
+		return nil, 0, err
+	}
+
+	// 计算消费的字节数
+	consumed := 5 + int(result.Length) // 包头(3) + 长度字段(2) + 数据部分长度
+	return result, consumed, nil
+}
+
+// ParseMultipleDNYFrames 解析包含多个DNY帧的数据包
+// 🔧 新增函数：专门处理多帧数据包
+func ParseMultipleDNYFrames(data []byte) ([]*DNYParseResult, error) {
+	var results []*DNYParseResult
+	offset := 0
+
+	for offset < len(data) {
+		// 检查剩余数据是否足够解析一个DNY帧
+		if len(data[offset:]) < 14 {
+			break
+		}
+
+		// 检查是否为DNY协议帧
+		if offset+3 <= len(data) && string(data[offset:offset+3]) == "DNY" {
+			// 解析单个DNY帧
+			result, consumed, err := ParseDNYDataWithConsumed(data[offset:])
+			if err != nil {
+				// 如果解析失败，跳出循环
+				break
+			}
+
+			results = append(results, result)
+			offset += consumed
+		} else {
+			// 如果不是DNY帧，跳出循环
+			break
+		}
+	}
+
+	if len(results) == 0 {
+		return nil, fmt.Errorf("未找到有效的DNY协议帧")
+	}
+
+	return results, nil
 }
 
 // ParseDNYHexString 解析十六进制字符串格式的DNY协议数据

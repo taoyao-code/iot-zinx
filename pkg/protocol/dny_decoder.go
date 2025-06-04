@@ -171,9 +171,10 @@ func (d *DNY_Decoder) tryParseBinaryDNY(rawData []byte, conn ziface.IConnection,
 
 	fmt.Printf("📦 检测到二进制DNY协议数据, 连接ID: %d\n", connID)
 
-	result, err := ParseDNYData(rawData)
+	// 🔧 关键修复：检查是否包含多个DNY帧
+	frames, err := ParseMultipleDNYFrames(rawData)
 	if err != nil {
-		fmt.Printf("❌ DNY解析失败: %v, 连接ID: %d\n", err, connID)
+		fmt.Printf("❌ DNY多帧解析失败: %v, 连接ID: %d\n", err, connID)
 		logger.WithFields(logrus.Fields{
 			"错误信息":     err,
 			"数据十六进制编码": hex.EncodeToString(rawData),
@@ -182,15 +183,36 @@ func (d *DNY_Decoder) tryParseBinaryDNY(rawData []byte, conn ziface.IConnection,
 		return nil
 	}
 
-	// 检查校验和
-	if !result.ChecksumValid {
-		d.logChecksumFailure(result, rawData, connID)
+	// 🔧 关键修复：如果包含多个帧，记录信息并只处理第一个帧
+	if len(frames) > 1 {
+		fmt.Printf("🔍 检测到多个DNY帧: %d个, 将处理第一个帧, 连接ID: %d\n", len(frames), connID)
+		logger.WithFields(logrus.Fields{
+			"总帧数":  len(frames),
+			"连接ID": connID,
+		}).Info("检测到多个DNY帧，处理第一个帧")
+
+		// 打印所有帧的详细信息
+		for i, frame := range frames {
+			fmt.Printf("🔍 帧 %d: 命令=0x%02X, 物理ID=0x%08X, 消息ID=0x%04X, 数据长度=%d, 校验有效=%t\n",
+				i, frame.Command, frame.PhysicalID, frame.MessageID, len(frame.Data), frame.ChecksumValid)
+		}
 	}
 
+	// 使用第一个帧
+	result := frames[0]
+
+	// 检查校验和
+	if !result.ChecksumValid {
+		d.logChecksumFailure(result, result.RawData, connID)
+	}
+
+	// 🔧 关键修复：更新原始消息的数据为第一个帧的数据
 	d.updateMessageWithDNYResult(originalIMessage, result)
 	d.setDNYConnectionProperties(conn, result)
 
 	newMsg := dny_protocol.NewMessage(uint32(result.Command), result.PhysicalID, result.Data)
+	// 🔧 关键修复：设置RawData为第一个帧的完整数据
+	newMsg.SetRawData(result.RawData)
 
 	d.logDNYParseSuccess(result, connID)
 
