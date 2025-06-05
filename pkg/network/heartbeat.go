@@ -7,8 +7,24 @@ import (
 	"github.com/sirupsen/logrus"
 )
 
+// MasterSlaveMonitorInterface 主从设备监控接口
+// 用于心跳处理中访问主从设备绑定信息，避免循环依赖
+type MasterSlaveMonitorInterface interface {
+	GetSlaveDevicesForConnection(connID uint64) []string
+}
+
+// MasterSlaveMonitorAdapter 主从设备监控适配器
+// 通过依赖注入方式避免循环依赖
+var MasterSlaveMonitorAdapter MasterSlaveMonitorInterface
+
+// SetMasterSlaveMonitorAdapter 设置主从设备监控适配器
+func SetMasterSlaveMonitorAdapter(adapter MasterSlaveMonitorInterface) {
+	MasterSlaveMonitorAdapter = adapter
+}
+
 // OnDeviceNotAlive 设备心跳超时处理函数
 // 该函数实现zinx框架心跳机制的OnRemoteNotAlive接口，当设备心跳超时时调用
+// 🔧 支持主从设备架构：主机断开时处理所有绑定的分机设备
 func OnDeviceNotAlive(conn ziface.IConnection) {
 	connID := conn.GetConnID()
 	remoteAddr := conn.RemoteAddr().String()
@@ -39,13 +55,36 @@ func OnDeviceNotAlive(conn ziface.IConnection) {
 		return
 	}
 
+	// 🔧 主从设备架构支持：检查是否为主机设备
+	isMasterDevice := len(deviceID) >= 2 && deviceID[:2] == "09"
+
 	logger.WithFields(logrus.Fields{
 		"connID":        connID,
 		"remoteAddr":    remoteAddr,
 		"deviceID":      deviceID,
+		"deviceType":    map[bool]string{true: "master", false: "slave"}[isMasterDevice],
 		"lastHeartbeat": lastHeartbeatStr,
 		"reason":        "heartbeat_timeout",
 	}).Warn("设备心跳超时，断开连接")
+
+	// 🔧 主机设备断开时，需要处理所有绑定的分机设备
+	if isMasterDevice && MasterSlaveMonitorAdapter != nil {
+		// 获取该主机连接绑定的所有分机设备
+		if slaveDevices := MasterSlaveMonitorAdapter.GetSlaveDevicesForConnection(connID); len(slaveDevices) > 0 {
+			logger.WithFields(logrus.Fields{
+				"masterDeviceID": deviceID,
+				"slaveDevices":   slaveDevices,
+				"slaveCount":     len(slaveDevices),
+			}).Warn("主机设备断开，同时处理绑定的分机设备离线")
+
+			// 批量更新分机设备状态为离线
+			if UpdateDeviceStatusFunc != nil {
+				for _, slaveDeviceID := range slaveDevices {
+					UpdateDeviceStatusFunc(slaveDeviceID, constants.DeviceStatusOffline)
+				}
+			}
+		}
+	}
 
 	// 更新设备状态为离线
 	if UpdateDeviceStatusFunc != nil {
@@ -59,8 +98,9 @@ func OnDeviceNotAlive(conn ziface.IConnection) {
 	conn.Stop()
 
 	logger.WithFields(logrus.Fields{
-		"connID":   connID,
-		"deviceID": deviceID,
+		"connID":     connID,
+		"deviceID":   deviceID,
+		"deviceType": map[bool]string{true: "master", false: "slave"}[isMasterDevice],
 	}).Info("已断开心跳超时的设备连接")
 }
 

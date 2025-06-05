@@ -46,7 +46,51 @@ func (h *DNYHandlerBase) PreHandle(request ziface.IRequest) {
 			"data":          hex.EncodeToString(msg.GetData()),
 			"rawData":       hex.EncodeToString(msg.GetRawData()),
 			"rawDataLength": len(msg.GetRawData()),
-		}).Error("消息类型转换失败，无法处理DNY消息")
+		}).Debug("消息类型转换失败，尝试从连接属性获取DNY信息")
+
+		// 转换失败时，尝试从连接属性获取必要信息进行命令确认
+		var physicalID uint32
+		var messageID uint16
+		var command uint8
+
+		// 从连接属性获取物理ID
+		if prop, err := conn.GetProperty(network.PropKeyDNYPhysicalID); err == nil {
+			if pid, ok := prop.(uint32); ok {
+				physicalID = pid
+			}
+		}
+
+		// 从连接属性获取消息ID
+		if prop, err := conn.GetProperty(network.PropKeyDNYMessageID); err == nil {
+			if mid, ok := prop.(uint16); ok {
+				messageID = mid
+			}
+		}
+
+		// 从连接属性获取命令
+		if prop, err := conn.GetProperty(network.PropKeyDNYCommand); err == nil {
+			if cmd, ok := prop.(uint8); ok {
+				command = cmd
+			}
+		} else {
+			// 如果没有从属性获取到命令，使用消息ID作为命令
+			command = uint8(msg.GetMsgID())
+		}
+
+		// 如果有有效的物理ID，尝试确认命令
+		if physicalID != 0 {
+			if network.GetCommandManager().ConfirmCommand(physicalID, messageID, command) {
+				logger.WithFields(logrus.Fields{
+					"connID":     conn.GetConnID(),
+					"physicalID": fmt.Sprintf("0x%08X", physicalID),
+					"command":    fmt.Sprintf("0x%02X", command),
+					"messageID":  messageID,
+				}).Debug("✅ 已通过连接属性确认命令完成")
+			}
+		}
+
+		// 更新心跳时间并继续处理
+		monitor.GetGlobalMonitor().UpdateLastHeartbeatTime(conn)
 		return
 	}
 

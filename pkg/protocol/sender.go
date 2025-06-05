@@ -16,6 +16,7 @@ import (
 
 // SendDNYResponse 发送DNY协议响应
 // 该函数用于发送DNY协议响应数据包，并注册到命令管理器进行跟踪
+// 🔧 支持主从设备架构：分机设备响应通过主机连接发送
 func SendDNYResponse(conn ziface.IConnection, physicalID uint32, messageID uint16, command uint8, data []byte) error {
 	// 参数验证
 	if conn == nil {
@@ -30,17 +31,36 @@ func SendDNYResponse(conn ziface.IConnection, physicalID uint32, messageID uint1
 		return err
 	}
 
+	// 🔧 主从设备架构支持：检查是否需要通过主机连接发送
+	actualConn, masterDeviceId, err := getActualConnectionForDevice(conn, physicalID)
+	if err != nil {
+		return err
+	}
+
+	// 记录设备类型信息
+	deviceId := fmt.Sprintf("%08X", physicalID)
+	isSlaveDevice := !isMasterDeviceByPhysicalID(physicalID)
+
+	logger.WithFields(logrus.Fields{
+		"physicalID":     fmt.Sprintf("0x%08X", physicalID),
+		"deviceId":       deviceId,
+		"deviceType":     map[bool]string{true: "slave", false: "master"}[isSlaveDevice],
+		"connID":         conn.GetConnID(),
+		"actualConnID":   actualConn.GetConnID(),
+		"masterDeviceId": masterDeviceId,
+	}).Debug("准备发送DNY响应，设备类型检查完成")
+
 	// 构建响应数据包
 	packet := BuildDNYResponsePacket(physicalID, messageID, command, data)
 
 	// 将命令注册到命令管理器进行跟踪，除非是不需要回复的命令
 	if NeedConfirmation(command) {
 		cmdMgr := network.GetCommandManager()
-		cmdMgr.RegisterCommand(conn, physicalID, messageID, command, data)
+		cmdMgr.RegisterCommand(actualConn, physicalID, messageID, command, data)
 	}
 
-	// 发送数据包
-	return sendDNYPacket(conn, packet, physicalID, messageID, command, data)
+	// 🔧 通过实际连接（主机连接）发送数据包
+	return sendDNYPacket(actualConn, packet, physicalID, messageID, command, data)
 }
 
 // SendDNYRequest 发送DNY协议请求
@@ -310,4 +330,62 @@ func GetCommandDescription(command uint8) string {
 	default:
 		return "未知命令"
 	}
+}
+
+// 🔧 主从设备架构支持函数
+
+// isMasterDeviceByPhysicalID 根据物理ID判断是否为主机设备
+func isMasterDeviceByPhysicalID(physicalID uint32) bool {
+	// 将物理ID转换为设备ID字符串格式
+	deviceId := fmt.Sprintf("%08X", physicalID)
+	// 主机设备识别码为09
+	return len(deviceId) >= 2 && deviceId[:2] == "09"
+}
+
+// getActualConnectionForDevice 获取设备的实际连接（主从架构支持）
+// 返回：实际连接、主机设备ID、错误
+func getActualConnectionForDevice(conn ziface.IConnection, physicalID uint32) (ziface.IConnection, string, error) {
+	deviceId := fmt.Sprintf("%08X", physicalID)
+
+	// 如果是主机设备，直接使用当前连接
+	if isMasterDeviceByPhysicalID(physicalID) {
+		return conn, deviceId, nil
+	}
+
+	// 分机设备，需要通过TCP监控器找到主机连接
+	if GetTCPMonitor != nil {
+		if tcpMonitor := GetTCPMonitor(); tcpMonitor != nil {
+			// 尝试从monitor包获取主机连接信息
+			// 这里需要一个适配器函数来访问monitor包的功能
+			if masterConn, masterDeviceId, exists := getMasterConnectionForSlaveDevice(deviceId); exists {
+				logger.WithFields(logrus.Fields{
+					"slaveDeviceId":   deviceId,
+					"slavePhysicalID": fmt.Sprintf("0x%08X", physicalID),
+					"masterDeviceId":  masterDeviceId,
+					"connID":          conn.GetConnID(),
+					"masterConnID":    masterConn.GetConnID(),
+				}).Debug("分机设备使用主机连接发送数据")
+				return masterConn, masterDeviceId, nil
+			}
+		}
+	}
+
+	// 如果无法找到主机连接，使用原连接（兼容模式）
+	logger.WithFields(logrus.Fields{
+		"deviceId":   deviceId,
+		"physicalID": fmt.Sprintf("0x%08X", physicalID),
+		"connID":     conn.GetConnID(),
+	}).Warn("分机设备未找到主机连接，使用原连接发送")
+
+	return conn, deviceId, nil
+}
+
+// getMasterConnectionForSlaveDevice 为分机设备获取主机连接
+// 这是一个适配器函数，避免直接依赖monitor包
+var getMasterConnectionForSlaveDevice func(slaveDeviceId string) (ziface.IConnection, string, bool)
+
+// SetMasterConnectionAdapter 设置主机连接适配器函数
+// 在初始化时由主程序调用，避免循环依赖
+func SetMasterConnectionAdapter(adapter func(slaveDeviceId string) (ziface.IConnection, string, bool)) {
+	getMasterConnectionForSlaveDevice = adapter
 }

@@ -23,6 +23,18 @@ func InitPackages() {
 		return monitor.GetGlobalMonitor()
 	}
 
+	// 🔧 设置主从设备架构的适配器函数
+	protocol.SetMasterConnectionAdapter(func(slaveDeviceId string) (ziface.IConnection, string, bool) {
+		tcpMonitor := monitor.GetGlobalMonitor()
+		if tcpMonitor != nil {
+			return tcpMonitor.GetMasterConnectionForDevice(slaveDeviceId)
+		}
+		return nil, "", false
+	})
+
+	// 🔧 设置心跳管理的主从监控适配器
+	network.SetMasterSlaveMonitorAdapter(monitor.GetGlobalMonitor())
+
 	// 设置monitor包的DNY协议发送器
 	// 这里通过适配器模式解决循环依赖问题
 	monitor.SetDNYProtocolSender(&dnyProtocolSenderAdapter{})
