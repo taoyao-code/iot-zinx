@@ -2,15 +2,18 @@ package handlers
 
 import (
 	"github.com/aceld/zinx/ziface"
+	"github.com/aceld/zinx/znet"
 	"github.com/bujia-iot/iot-zinx/internal/infrastructure/logger"
 	"github.com/bujia-iot/iot-zinx/pkg/constants"
+	"github.com/bujia-iot/iot-zinx/pkg/monitor"
 	"github.com/bujia-iot/iot-zinx/pkg/protocol"
 	"github.com/sirupsen/logrus"
 )
 
 // SimCardHandler 处理SIM卡号上报 (命令ID: 0xFF01)
+// 注意：不继承DNYHandlerBase，因为这是特殊消息，不是标准DNY格式
 type SimCardHandler struct {
-	DNYHandlerBase
+	znet.BaseRouter
 }
 
 // Handle 处理SIM卡号上报
@@ -32,7 +35,7 @@ func (h *SimCardHandler) Handle(request ziface.IRequest) {
 		}).Info("收到SIM卡号数据")
 
 		// 更新心跳时间
-		h.UpdateHeartbeat(conn)
+		monitor.GetGlobalMonitor().UpdateLastHeartbeatTime(conn)
 	} else {
 		logger.WithFields(logrus.Fields{
 			"connID":     conn.GetConnID(),

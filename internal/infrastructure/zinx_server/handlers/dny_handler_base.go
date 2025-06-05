@@ -27,12 +27,20 @@ func (h *DNYHandlerBase) PreHandle(request ziface.IRequest) {
 	msg := request.GetMessage()
 	conn := request.GetConnection()
 
+	// 检查是否为特殊消息ID，特殊消息不需要DNY消息转换
+	msgID := msg.GetMsgID()
+	if msgID == 0xFF01 || msgID == 0xFF02 || msgID == 0xFFFF {
+		// 特殊消息不进行DNY消息转换，直接更新心跳时间
+		monitor.GetGlobalMonitor().UpdateLastHeartbeatTime(conn)
+		return
+	}
+
 	// 转换为DNY消息
 	dnyMsg, ok := dny_protocol.IMessageToDnyMessage(msg)
 	if !ok {
 		logger.WithFields(logrus.Fields{
 			"connID":        conn.GetConnID(),
-			"msgID":         msg.GetMsgID(),
+			"msgID":         fmt.Sprintf("0x%04X", msg.GetMsgID()),
 			"msg":           msg.GetData(),
 			"Length":        len(msg.GetData()),
 			"data":          hex.EncodeToString(msg.GetData()),
