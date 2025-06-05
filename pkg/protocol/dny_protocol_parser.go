@@ -46,14 +46,6 @@ const (
 	IOT_LINK_HEARTBEAT = "link" // link心跳字符串
 )
 
-// 连接属性键常量
-const (
-	PROP_DNY_PHYSICAL_ID    = "DNY_PhysicalID"    // 物理ID属性键
-	PROP_DNY_MESSAGE_ID     = "DNY_MessageID"     // 消息ID属性键
-	PROP_DNY_COMMAND        = "DNY_Command"       // 命令属性键
-	PROP_DNY_CHECKSUM_VALID = "DNY_ChecksumValid" // 校验和有效性属性键
-)
-
 // 校验和计算方法常量
 const (
 	// 校验和计算方法

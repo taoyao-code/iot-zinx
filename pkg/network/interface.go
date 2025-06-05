@@ -58,8 +58,6 @@ const (
 	PropKeyDNYCommand       = "DNY_Command"       // 命令属性键
 	PropKeyDNYChecksumValid = "DNY_ChecksumValid" // 校验和有效性属性键
 	PropKeyDNYRawData       = "DNY_RawData"       // 原始数据属性键
+	PropKeyDNYParseError    = "DNY_ParseError"    // DNY解析错误信息
 	PropKeyNotDNYMessage    = "NOT_DNY_MESSAGE"   // 非DNY消息标识
-
-	// 设备标识相关属性
-	PropKeyDeviceICCID = "ICCID" // 设备ICCID属性键
 )

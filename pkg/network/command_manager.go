@@ -2,6 +2,7 @@ package network
 
 import (
 	"fmt"
+	"sort"
 	"sync"
 	"time"
 
@@ -20,6 +21,9 @@ const (
 	// CommandMaxAge 命令最大生命周期(60秒)
 	// 无论重试次数，一个命令从创建到自动清除的最大时间
 	CommandMaxAge = 60 * time.Second
+
+	// CommandBatchSize 命令批处理大小
+	CommandBatchSize = 100
 )
 
 // CommandEntry 命令条目
@@ -34,6 +38,7 @@ type CommandEntry struct {
 	RetryCount   int
 	LastSentTime time.Time
 	Confirmed    bool // 是否已确认
+	Priority     int  // 命令优先级，值越小优先级越高
 }
 
 // CommandManager 命令管理器
@@ -356,9 +361,9 @@ func (cm *CommandManager) monitorCommands() {
 func (cm *CommandManager) checkTimeoutCommands() {
 	now := time.Now()
 	var timeoutCommands []*CommandEntry
-	var expiredCommands []string
+	var expiredCommandKeys []string
 
-	// 获取超时命令
+	// 批量收集超时和过期命令，减少锁持有时间
 	cm.lock.RLock()
 	for key, cmd := range cm.commands {
 		// 检查命令是否已确认
@@ -368,7 +373,7 @@ func (cm *CommandManager) checkTimeoutCommands() {
 
 		// 检查命令是否超过最大生命周期
 		if now.Sub(cmd.CreateTime) > CommandMaxAge {
-			expiredCommands = append(expiredCommands, key)
+			expiredCommandKeys = append(expiredCommandKeys, key)
 			logger.WithFields(logrus.Fields{
 				"cmdKey":     key,
 				"physicalID": fmt.Sprintf("0x%08X", cmd.PhysicalID),
@@ -382,39 +387,83 @@ func (cm *CommandManager) checkTimeoutCommands() {
 
 		// 检查命令是否超时
 		if now.Sub(cmd.LastSentTime) > CommandTimeout {
-			timeoutCommands = append(timeoutCommands, cmd)
-			logger.WithFields(logrus.Fields{
-				"cmdKey":     key,
-				"physicalID": fmt.Sprintf("0x%08X", cmd.PhysicalID),
-				"messageID":  cmd.MessageID,
-				"command":    fmt.Sprintf("0x%02X", cmd.Command),
-				"retryCount": cmd.RetryCount,
-				"timeSince":  now.Sub(cmd.LastSentTime).Seconds(),
-			}).Info("发现超时命令")
+			// 创建副本，避免后续处理时出现并发修改问题
+			cmdCopy := *cmd
+			timeoutCommands = append(timeoutCommands, &cmdCopy)
 		}
 	}
 	cm.lock.RUnlock()
 
-	// 删除过期命令
-	if len(expiredCommands) > 0 {
+	// 批量删除过期命令
+	if len(expiredCommandKeys) > 0 {
 		cm.lock.Lock()
-		for _, key := range expiredCommands {
+		for _, key := range expiredCommandKeys {
 			cm.deleteCommand(key)
 		}
 		cm.lock.Unlock()
+
+		logger.WithFields(logrus.Fields{
+			"count": len(expiredCommandKeys),
+		}).Info("已批量清理过期命令")
 	}
 
-	// 处理超时命令
-	for _, cmd := range timeoutCommands {
+	// 按批次处理超时命令，减少锁争用
+	if len(timeoutCommands) > 0 {
+		// 按优先级和物理ID排序，确保重要命令优先处理
+		sort.Slice(timeoutCommands, func(i, j int) bool {
+			// 首先按优先级排序（值越小优先级越高）
+			if timeoutCommands[i].Priority != timeoutCommands[j].Priority {
+				return timeoutCommands[i].Priority < timeoutCommands[j].Priority
+			}
+			// 其次按物理ID排序，保证同一设备的命令连续处理
+			return timeoutCommands[i].PhysicalID < timeoutCommands[j].PhysicalID
+		})
+
+		// 按批次处理，每批最多处理CommandBatchSize个命令
+		for i := 0; i < len(timeoutCommands); i += CommandBatchSize {
+			end := i + CommandBatchSize
+			if end > len(timeoutCommands) {
+				end = len(timeoutCommands)
+			}
+			batch := timeoutCommands[i:end]
+
+			// 处理当前批次
+			cm.processBatchTimeoutCommands(batch)
+
+			// 批次处理完后短暂休眠，避免网络拥塞
+			if end < len(timeoutCommands) {
+				time.Sleep(50 * time.Millisecond)
+			}
+		}
+
+		logger.WithFields(logrus.Fields{
+			"count": len(timeoutCommands),
+		}).Info("已批量处理超时命令")
+	}
+}
+
+// processBatchTimeoutCommands 批量处理超时命令
+func (cm *CommandManager) processBatchTimeoutCommands(commands []*CommandEntry) {
+	for _, cmd := range commands {
 		cmdKey := cm.GenerateCommandKey(cmd.Connection, cmd.PhysicalID, cmd.MessageID, cmd.Command)
 
+		// 先检查命令是否仍然需要重试
 		cm.lock.Lock()
-		// 再次检查命令是否存在，可能已被其他协程处理
 		existingCmd, exists := cm.commands[cmdKey]
-		if !exists {
+		if !exists || existingCmd.Confirmed {
 			cm.lock.Unlock()
 			continue
 		}
+
+		// 日志记录超时情况
+		logger.WithFields(logrus.Fields{
+			"cmdKey":     cmdKey,
+			"physicalID": fmt.Sprintf("0x%08X", existingCmd.PhysicalID),
+			"messageID":  existingCmd.MessageID,
+			"command":    fmt.Sprintf("0x%02X", existingCmd.Command),
+			"retryCount": existingCmd.RetryCount,
+			"timeSince":  time.Since(existingCmd.LastSentTime).Seconds(),
+		}).Info("发现超时命令")
 
 		// 如果重试次数已达上限，删除命令
 		if existingCmd.RetryCount >= CommandRetryCount {
@@ -431,9 +480,9 @@ func (cm *CommandManager) checkTimeoutCommands() {
 			continue
 		}
 
-		// 增加重试次数
+		// 增加重试次数并更新最后发送时间
 		existingCmd.RetryCount++
-		existingCmd.LastSentTime = now
+		existingCmd.LastSentTime = time.Now()
 		cm.lock.Unlock()
 
 		// 重发命令
@@ -461,7 +510,7 @@ func (cm *CommandManager) checkTimeoutCommands() {
 			continue
 		}
 
-		// 构建响应数据包并发送 (这里需要外部提供发送方法)
+		// 构建响应数据包并发送
 		if SendCommandFunc != nil {
 			err := SendCommandFunc(existingCmd.Connection, existingCmd.PhysicalID, existingCmd.MessageID, existingCmd.Command, existingCmd.Data)
 			if err != nil {

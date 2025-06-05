@@ -1,6 +1,8 @@
 package pkg
 
 import (
+	"fmt"
+
 	"github.com/aceld/zinx/ziface"
 	"github.com/bujia-iot/iot-zinx/internal/infrastructure/logger"
 	"github.com/bujia-iot/iot-zinx/pkg/monitor"
@@ -20,6 +22,10 @@ func InitPackages() {
 	} {
 		return monitor.GetGlobalMonitor()
 	}
+
+	// 设置monitor包的DNY协议发送器
+	// 这里通过适配器模式解决循环依赖问题
+	monitor.SetDNYProtocolSender(&dnyProtocolSenderAdapter{})
 
 	// 设置network包访问monitor包的函数
 	network.SetUpdateDeviceStatusFunc(func(deviceID string, status string) {
@@ -44,6 +50,11 @@ func InitPackages() {
 	network.SetSendCommandFunc(func(conn ziface.IConnection, physicalID uint32, messageID uint16, command uint8, data []byte) error {
 		return protocol.SendDNYResponse(conn, physicalID, messageID, command, data)
 	})
+
+	// 添加SendDNYRequest的导出实现
+	Protocol.SendDNYRequest = func(conn ziface.IConnection, physicalID uint32, messageID uint16, command uint8, data []byte) error {
+		return protocol.SendDNYRequest(conn, physicalID, messageID, command, data)
+	}
 
 	// 启动全局设备监控器
 	deviceMonitor := monitor.GetGlobalDeviceMonitor()
@@ -75,4 +86,19 @@ func CleanupPackages() {
 
 	// 其他清理工作
 	logger.Info("pkg包资源清理完成")
+}
+
+// dnyProtocolSenderAdapter 适配器，实现monitor.DNYProtocolSender接口
+// 用于解决循环依赖问题
+type dnyProtocolSenderAdapter struct{}
+
+// SendDNYData 发送DNY协议数据
+func (a *dnyProtocolSenderAdapter) SendDNYData(conn ziface.IConnection, data []byte) error {
+	// 在这里，我们只是简单地转发原始数据到TCP连接
+	// 这种方式避免了对pkg.Protocol的直接依赖
+	if tcpConn := conn.GetTCPConnection(); tcpConn != nil {
+		_, err := tcpConn.Write(data)
+		return err
+	}
+	return fmt.Errorf("无法获取TCP连接")
 }

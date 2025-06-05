@@ -3,6 +3,8 @@ package metrics
 import (
 	"sync"
 	"time"
+
+	"github.com/bujia-iot/iot-zinx/pkg/constants"
 )
 
 // DNYMetrics DNY协议性能指标
@@ -106,7 +108,7 @@ func GetMetricsSummary() map[string]interface{} {
 		"totalCommands":      GetTotalCommands(),
 		"totalParseErrors":   GetTotalParseErrors(),
 		"uptime":             time.Since(globalMetrics.lastResetTime),
-		"lastResetTime":      globalMetrics.lastResetTime.Format("2006-01-02 15:04:05"),
+		"lastResetTime":      globalMetrics.lastResetTime.Format(constants.TimeFormatDefault),
 	}
 }
 

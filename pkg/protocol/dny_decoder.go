@@ -6,6 +6,7 @@ import (
 	"github.com/aceld/zinx/ziface"
 	"github.com/bujia-iot/iot-zinx/internal/domain/dny_protocol"
 	"github.com/bujia-iot/iot-zinx/internal/infrastructure/logger"
+	"github.com/bujia-iot/iot-zinx/pkg/constants"
 	"github.com/bujia-iot/iot-zinx/pkg/network"
 	"github.com/sirupsen/logrus"
 )
@@ -68,7 +69,7 @@ func (d *DNY_Decoder) Intercept(chain ziface.IChain) ziface.IcResp {
 	conn := d.getConnection(chain)
 	if conn != nil {
 		// 保存原始数据到连接属性，以便在后续处理中使用
-		conn.SetProperty("DNY_RawData", data)
+		conn.SetProperty(network.PropKeyDNYRawData, data)
 	}
 
 	// 5. 先尝试处理特殊消息（ICCID、心跳等）
@@ -88,7 +89,7 @@ func (d *DNY_Decoder) Intercept(chain ziface.IChain) ziface.IcResp {
 			if dnyMsg.GetMsgID() == MSG_ID_ICCID {
 				// 保存ICCID到连接属性
 				iccid := string(dnyMsg.GetData())
-				conn.SetProperty("ICCID", iccid)
+				conn.SetProperty(constants.PropKeyICCID, iccid)
 				logger.WithField("iccid", iccid).Info("已设置连接ICCID属性")
 			}
 		}
@@ -106,7 +107,7 @@ func (d *DNY_Decoder) Intercept(chain ziface.IChain) ziface.IcResp {
 		}).Debug(LOG_NOT_DNY_PROTOCOL)
 
 		// 设置一个明确的非DNY消息标识
-		conn.SetProperty("NOT_DNY_MESSAGE", true)
+		conn.SetProperty(network.PropKeyNotDNYMessage, true)
 
 		// 将未修改的消息传递给下一层处理器
 		return chain.ProceedWithIMessage(iMessage, nil)
@@ -123,8 +124,8 @@ func (d *DNY_Decoder) Intercept(chain ziface.IChain) ziface.IcResp {
 
 		// 设置错误属性
 		if conn != nil {
-			conn.SetProperty("DNY_ParseError", err.Error())
-			conn.SetProperty("NOT_DNY_MESSAGE", true)
+			conn.SetProperty(network.PropKeyDNYParseError, err.Error())
+			conn.SetProperty(network.PropKeyNotDNYMessage, true)
 		}
 
 		// 创建一个错误消息，使用特殊消息ID
@@ -151,25 +152,25 @@ func (d *DNY_Decoder) Intercept(chain ziface.IChain) ziface.IcResp {
 	// 11. 设置连接属性
 	if conn != nil {
 		// 清除可能存在的非DNY消息标识
-		conn.RemoveProperty("NOT_DNY_MESSAGE")
+		conn.RemoveProperty(network.PropKeyNotDNYMessage)
 
 		// 设置物理ID属性
 		physicalID := dnyMsg.GetPhysicalId()
 		conn.SetProperty(network.PropKeyDNYPhysicalID, physicalID)
-		logger.WithField("physicalId", fmt.Sprintf("0x%08X", physicalID)).
-			Debug("已设置连接物理ID属性")
 
 		// 设置消息ID属性
 		messageID := dnyMsg.MessageId
 		conn.SetProperty(network.PropKeyDNYMessageID, messageID)
-		logger.WithField("messageId", messageID).
-			Debug("已设置连接消息ID属性")
 
 		// 设置命令属性
 		command := uint8(dnyMsg.GetMsgID())
 		conn.SetProperty(network.PropKeyDNYCommand, command)
-		logger.WithField("command", fmt.Sprintf("0x%02X", command)).
-			Debug("已设置连接命令属性")
+
+		logger.WithFields(logrus.Fields{
+			network.PropKeyDNYPhysicalID: fmt.Sprintf("0x%08X", physicalID),
+			network.PropKeyDNYMessageID:  fmt.Sprintf("0x%04X", messageID),
+			network.PropKeyDNYCommand:    fmt.Sprintf("0x%02X", command),
+		}).Debug("已设置连接物理ID属性")
 
 		// 校验和验证 - 使用统一的校验和验证方法
 		if len(data) >= 14 {
@@ -196,7 +197,7 @@ func (d *DNY_Decoder) Intercept(chain ziface.IChain) ziface.IcResp {
 
 				// 设置校验和有效属性 - 如果任何一种方法有效，则认为校验和有效
 				checksumValid := isValid1 || isValid2
-				conn.SetProperty(PROP_DNY_CHECKSUM_VALID, checksumValid)
+				conn.SetProperty(network.PropKeyDNYChecksumValid, checksumValid)
 
 				// 记录详细的校验和信息
 				if !checksumValid {

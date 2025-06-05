@@ -2,15 +2,16 @@ package handlers
 
 import (
 	"fmt"
+	"time"
 
 	"github.com/aceld/zinx/ziface"
 	"github.com/bujia-iot/iot-zinx/internal/app/dto"
 	"github.com/bujia-iot/iot-zinx/internal/app/service"
 	"github.com/bujia-iot/iot-zinx/internal/domain/dny_protocol"
 	"github.com/bujia-iot/iot-zinx/internal/infrastructure/logger"
-	"github.com/bujia-iot/iot-zinx/pkg"
 	"github.com/bujia-iot/iot-zinx/pkg/constants"
 	"github.com/bujia-iot/iot-zinx/pkg/monitor"
+	"github.com/bujia-iot/iot-zinx/pkg/network"
 	"github.com/sirupsen/logrus"
 )
 
@@ -22,10 +23,10 @@ type ChargeControlHandler struct {
 }
 
 // NewChargeControlHandler 创建充电控制处理器
-func NewChargeControlHandler(monitor monitor.IConnectionMonitor) *ChargeControlHandler {
+func NewChargeControlHandler(mon monitor.IConnectionMonitor) *ChargeControlHandler {
 	return &ChargeControlHandler{
-		monitor:       monitor,
-		chargeService: service.NewChargeControlService(monitor),
+		monitor:       mon,
+		chargeService: service.NewChargeControlService(mon),
 	}
 }
 
@@ -62,7 +63,7 @@ func (h *ChargeControlHandler) SendChargeControlCommandLegacy(conn ziface.IConne
 	return h.chargeService.SendChargeControlCommand(req)
 }
 
-// 预处理充电控制命令
+// PreHandle 预处理充电控制命令
 func (h *ChargeControlHandler) PreHandle(request ziface.IRequest) {
 	// 先调用基类的 PreHandle 方法
 	h.DNYHandlerBase.PreHandle(request)
@@ -70,66 +71,125 @@ func (h *ChargeControlHandler) PreHandle(request ziface.IRequest) {
 	logger.WithFields(logrus.Fields{
 		"connID":     request.GetConnection().GetConnID(),
 		"remoteAddr": request.GetConnection().RemoteAddr().String(),
+		"timestamp":  time.Now().Format(constants.TimeFormatDefault),
 	}).Debug("收到充电控制命令")
 }
 
 // Handle 处理充电控制命令的响应
 func (h *ChargeControlHandler) Handle(request ziface.IRequest) {
+	// 确保基类处理先执行（命令确认等）
+	h.DNYHandlerBase.PreHandle(request)
+
 	// 获取请求消息
 	msg := request.GetMessage()
 	conn := request.GetConnection()
+	data := msg.GetData()
 
-	// 转换为DNY消息
-	dnyMsg, ok := dny_protocol.IMessageToDnyMessage(msg)
-	if !ok {
+	logger.WithFields(logrus.Fields{
+		"connID":     conn.GetConnID(),
+		"remoteAddr": conn.RemoteAddr().String(),
+		"dataLen":    len(data),
+	}).Debug("收到充电控制请求")
+
+	// 从DNYMessage中获取真实的PhysicalID
+	var physicalId uint32
+	var messageID uint16
+	if dnyMsg, ok := h.GetDNYMessage(request); ok {
+		physicalId = dnyMsg.GetPhysicalId()
+		// 从连接属性获取MessageID
+		if prop, err := conn.GetProperty(network.PropKeyDNYMessageID); err == nil {
+			if mid, ok := prop.(uint16); ok {
+				messageID = mid
+			}
+		}
+	} else {
+		// 从连接属性中获取PhysicalID
+		if prop, err := conn.GetProperty(network.PropKeyDNYPhysicalID); err == nil {
+			if pid, ok := prop.(uint32); ok {
+				physicalId = pid
+			}
+		}
+		if physicalId == 0 {
+			logger.WithFields(logrus.Fields{
+				"connID": conn.GetConnID(),
+				"msgID":  msg.GetMsgID(),
+			}).Error("❌ 充电控制Handle：无法获取PhysicalID，拒绝处理")
+			return
+		}
+		// 从连接属性获取MessageID
+		if prop, err := conn.GetProperty(network.PropKeyDNYMessageID); err == nil {
+			if mid, ok := prop.(uint16); ok {
+				messageID = mid
+			}
+		}
+	}
+
+	// 获取设备ID
+	deviceId := h.GetDeviceID(conn)
+
+	// 记录充电控制请求
+	logger.WithFields(logrus.Fields{
+		"connID":     conn.GetConnID(),
+		"physicalId": fmt.Sprintf("0x%08X", physicalId),
+		"messageID":  fmt.Sprintf("0x%04X", messageID),
+		"deviceId":   deviceId,
+		"dataLen":    len(data),
+		"timestamp":  time.Now().Format(constants.TimeFormatDefault),
+	}).Info("收到充电控制请求")
+
+	// 解析控制参数
+	if len(data) < 4 {
 		logger.WithFields(logrus.Fields{
-			"connID": conn.GetConnID(),
-			"msgID":  msg.GetMsgID(),
-		}).Error("消息类型转换失败，无法处理充电控制响应")
+			"connID":     conn.GetConnID(),
+			"physicalId": fmt.Sprintf("0x%08X", physicalId),
+			"messageID":  fmt.Sprintf("0x%04X", messageID),
+			"dataLen":    len(data),
+		}).Error("充电控制数据长度不足")
+		// 发送错误响应
+		responseData := []byte{dny_protocol.ResponseFailed}
+		h.SendDNYResponse(conn, physicalId, messageID, uint8(dny_protocol.CmdChargeControl), responseData)
 		return
 	}
 
-	// 使用业务服务处理充电控制响应
-	response, err := h.chargeService.ProcessChargeControlResponse(conn, dnyMsg)
-	if err != nil {
-		logger.WithFields(logrus.Fields{
-			"connID": conn.GetConnID(),
-			"error":  err.Error(),
-		}).Error("处理充电控制响应失败")
-		return
-	}
+	// 提取充电控制参数
+	// 第一个字节为枪号，第二个字节为控制命令
+	gunNumber := data[0]
+	controlCommand := data[1]
 
-	// 获取设备ID和消息ID
-	var deviceID string
-	if deviceIDVal, err := conn.GetProperty(constants.PropKeyDeviceId); err == nil {
-		deviceID = deviceIDVal.(string)
-	}
-	messageID := dnyMsg.GetMsgID()
-
-	// 通知命令响应跟踪器
-	commandTracker := service.GetGlobalCommandTracker()
-	if commandTracker.NotifyResponse(deviceID, uint16(messageID), response) {
-		logger.WithFields(logrus.Fields{
-			"deviceId":  deviceID,
-			"messageId": fmt.Sprintf("0x%04X", messageID),
-		}).Debug("已通知命令响应跟踪器")
-	}
-
-	// 记录处理结果
 	logger.WithFields(logrus.Fields{
 		"connID":         conn.GetConnID(),
-		"deviceId":       response.DeviceID,
-		"responseStatus": response.ResponseStatus,
-		"statusDesc":     response.StatusDesc,
-		"orderNumber":    response.OrderNumber,
-		"portNumber":     response.PortNumber,
-		"waitPorts":      fmt.Sprintf("0x%04X", response.WaitPorts),
-		"timestamp":      response.Timestamp,
-		"messageId":      fmt.Sprintf("0x%04X", messageID),
-	}).Info("充电控制响应处理完成")
+		"physicalId":     fmt.Sprintf("0x%08X", physicalId),
+		"messageID":      fmt.Sprintf("0x%04X", messageID),
+		"deviceId":       deviceId,
+		"gunNumber":      gunNumber,
+		"controlCommand": fmt.Sprintf("0x%02X", controlCommand),
+		"timestamp":      time.Now().Format(constants.TimeFormatDefault),
+	}).Info("充电控制参数")
+
+	// 构建响应数据
+	responseData := []byte{dny_protocol.ResponseSuccess}
+
+	// 发送响应
+	if err := h.SendDNYResponse(conn, physicalId, messageID, uint8(dny_protocol.CmdChargeControl), responseData); err != nil {
+		logger.WithFields(logrus.Fields{
+			"connID":     conn.GetConnID(),
+			"physicalId": fmt.Sprintf("0x%08X", physicalId),
+			"messageID":  fmt.Sprintf("0x%04X", messageID),
+			"error":      err.Error(),
+		}).Error("发送充电控制响应失败")
+		return
+	}
 
 	// 更新心跳时间
-	pkg.Monitor.GetGlobalMonitor().UpdateLastHeartbeatTime(conn)
+	h.UpdateHeartbeat(conn)
+
+	logger.WithFields(logrus.Fields{
+		"connID":    conn.GetConnID(),
+		"deviceId":  deviceId,
+		"gunNumber": gunNumber,
+		"command":   fmt.Sprintf("0x%02X", controlCommand),
+		"timestamp": time.Now().Format(constants.TimeFormatDefault),
+	}).Info("充电控制处理完成")
 }
 
 // PostHandle 后处理充电控制命令
@@ -137,5 +197,6 @@ func (h *ChargeControlHandler) PostHandle(request ziface.IRequest) {
 	logger.WithFields(logrus.Fields{
 		"connID":     request.GetConnection().GetConnID(),
 		"remoteAddr": request.GetConnection().RemoteAddr().String(),
+		"timestamp":  time.Now().Format(constants.TimeFormatDefault),
 	}).Debug("充电控制命令处理完成")
 }

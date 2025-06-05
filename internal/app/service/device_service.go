@@ -11,6 +11,7 @@ import (
 	"github.com/bujia-iot/iot-zinx/internal/domain/dny_protocol"
 	"github.com/bujia-iot/iot-zinx/internal/infrastructure/logger"
 	"github.com/bujia-iot/iot-zinx/pkg"
+	"github.com/bujia-iot/iot-zinx/pkg/constants"
 	"github.com/bujia-iot/iot-zinx/pkg/monitor"
 	"github.com/sirupsen/logrus"
 )
@@ -194,7 +195,7 @@ func (s *DeviceService) GetDeviceConnectionInfo(deviceID string) (*DeviceConnect
 		info.HeartbeatTime = val.(string)
 	} else if val, err := conn.GetProperty(pkg.PropKeyLastHeartbeat); err == nil && val != nil {
 		info.LastHeartbeat = val.(int64)
-		info.HeartbeatTime = time.Unix(info.LastHeartbeat, 0).Format("2006-01-02 15:04:05")
+		info.HeartbeatTime = time.Unix(info.LastHeartbeat, 0).Format(constants.TimeFormatDefault)
 		info.TimeSinceHeart = time.Since(time.Unix(info.LastHeartbeat, 0)).Seconds()
 	}
 
@@ -320,7 +321,7 @@ func (s *DeviceService) GetEnhancedDeviceList() []map[string]interface{} {
 		// 添加最后更新时间
 		if device.LastSeen > 0 {
 			deviceInfo["lastUpdate"] = device.LastSeen
-			deviceInfo["lastUpdateTime"] = time.Unix(device.LastSeen, 0).Format("2006-01-02 15:04:05")
+			deviceInfo["lastUpdateTime"] = time.Unix(device.LastSeen, 0).Format(constants.TimeFormatDefault)
 		}
 
 		// 获取设备连接，补充更多信息

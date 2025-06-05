@@ -178,7 +178,7 @@ func (m *SessionManager) GetSessionByICCID(iccid string) (*DeviceSession, bool) 
 			"iccid":          iccid,
 			"selectedDevice": latestSession.DeviceID,
 			"totalDevices":   len(devices),
-			"lastHeartbeat":  latestSession.LastHeartbeatTime.Format("2006-01-02 15:04:05"),
+			"lastHeartbeat":  latestSession.LastHeartbeatTime.Format(constants.TimeFormatDefault),
 		}).Debug("从设备组中选择最近活跃的设备")
 		return latestSession, true
 	}
@@ -266,7 +266,6 @@ func (m *SessionManager) ResumeSession(deviceID string, conn ziface.IConnection)
 }
 
 // RemoveSession 移除设备会话
-// 🔧 新增：支持从设备组中移除设备
 func (m *SessionManager) RemoveSession(deviceID string) bool {
 	if session, ok := m.GetSession(deviceID); ok {
 		// 从会话存储中删除
@@ -312,7 +311,7 @@ func (m *SessionManager) CleanupExpiredSessions() int {
 				"sessionID": session.SessionID,
 				"deviceID":  deviceID,
 				"iccid":     session.ICCID,
-				"expiresAt": session.ExpiresAt.Format("2006-01-02 15:04:05"),
+				"expiresAt": session.ExpiresAt.Format(constants.TimeFormatDefault),
 			}).Info("清理过期设备会话")
 		}
 
@@ -324,28 +323,50 @@ func (m *SessionManager) CleanupExpiredSessions() int {
 
 // GetSessionStatistics 获取会话统计信息
 func (m *SessionManager) GetSessionStatistics() map[string]interface{} {
-	var totalCount, activeCount, suspendedCount int
+	var (
+		totalSessions        int
+		onlineSessions       int
+		offlineSessions      int
+		reconnectingSessions int
+		uniqueICCIDs         = make(map[string]bool)
+	)
 
-	m.sessions.Range(func(key, value interface{}) bool {
-		totalCount++
+	m.sessions.Range(func(_, value interface{}) bool {
+		totalSessions++
 		session := value.(*DeviceSession)
 
-		if session.Status == constants.DeviceStatusOnline {
-			activeCount++
-		} else if session.Status == constants.DeviceStatusReconnecting {
-			suspendedCount++
+		// 统计不同状态的会话
+		switch session.Status {
+		case constants.DeviceStatusOnline:
+			onlineSessions++
+		case constants.DeviceStatusOffline:
+			offlineSessions++
+		case constants.DeviceStatusReconnecting:
+			reconnectingSessions++
+		}
+
+		// 统计唯一ICCID数量
+		if session.ICCID != "" {
+			uniqueICCIDs[session.ICCID] = true
 		}
 
 		return true
 	})
 
-	// 🔧 新增：包含设备组统计信息
-	groupStats := m.deviceGroupManager.GetGroupStatistics()
-
 	return map[string]interface{}{
-		"totalSessions":     totalCount,
-		"activeSessions":    activeCount,
-		"suspendedSessions": suspendedCount,
-		"deviceGroups":      groupStats,
+		"totalSessions":        totalSessions,
+		"onlineSessions":       onlineSessions,
+		"offlineSessions":      offlineSessions,
+		"reconnectingSessions": reconnectingSessions,
+		"uniqueICCIDCount":     len(uniqueICCIDs),
 	}
+}
+
+// ForEachSession 遍历所有会话
+func (m *SessionManager) ForEachSession(callback func(deviceID string, session *DeviceSession) bool) {
+	m.sessions.Range(func(key, value interface{}) bool {
+		deviceID := key.(string)
+		session := value.(*DeviceSession)
+		return callback(deviceID, session)
+	})
 }

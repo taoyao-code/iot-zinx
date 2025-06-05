@@ -225,30 +225,74 @@ func (dm *DeviceMonitor) heartbeatCheckLoop() {
 // checkDeviceHeartbeats 检查所有设备心跳
 func (dm *DeviceMonitor) checkDeviceHeartbeats() {
 	now := time.Now()
-	timeoutDevices := make([]string, 0)
+	timeoutThreshold := now.Add(-dm.deviceTimeout)
 
-	// 检查所有在线设备的心跳
-	dm.connectionMonitor.ForEachConnection(func(deviceID string, conn ziface.IConnection) bool {
-		// 获取最后心跳时间
-		if prop, err := conn.GetProperty(constants.PropKeyLastHeartbeat); err == nil {
-			if lastHeartbeat, ok := prop.(int64); ok {
-				lastTime := time.Unix(lastHeartbeat, 0)
-				if now.Sub(lastTime) > dm.deviceTimeout {
-					timeoutDevices = append(timeoutDevices, deviceID)
+	// 使用批量处理策略，减少锁争用
+	var (
+		timeoutDevices    = make([]string, 0)
+		needStatusSync    = make([]string, 0)
+		suspiciousDevices = make([]string, 0)
+		warningThreshold  = dm.deviceTimeout / 2
+	)
+
+	// 第一阶段：收集需要处理的设备
+	dm.sessionManager.ForEachSession(func(deviceID string, session *DeviceSession) bool {
+		// 只检查在线或重连中的设备
+		if session.Status == constants.DeviceStatusOnline ||
+			session.Status == constants.DeviceStatusReconnecting {
+
+			lastHeartbeat := session.LastHeartbeatTime
+			timeSinceLastHeartbeat := now.Sub(lastHeartbeat)
+
+			// 已超时设备
+			if lastHeartbeat.Before(timeoutThreshold) {
+				timeoutDevices = append(timeoutDevices, deviceID)
+			} else if timeSinceLastHeartbeat > warningThreshold {
+				// 接近超时的设备（超过一半超时时间）
+				suspiciousDevices = append(suspiciousDevices, deviceID)
+			}
+
+			// 状态不一致的设备
+			if conn, exists := dm.connectionMonitor.GetConnectionByDeviceId(deviceID); exists {
+				if prop, err := conn.GetProperty(constants.PropKeyStatus); err == nil {
+					if status, ok := prop.(string); ok && status != session.Status {
+						needStatusSync = append(needStatusSync, deviceID)
+					}
 				}
 			}
 		}
 		return true
 	})
 
-	// 处理超时设备
+	// 记录可疑设备（接近超时但未超时）
+	if len(suspiciousDevices) > 0 {
+		logger.WithFields(logrus.Fields{
+			"count":     len(suspiciousDevices),
+			"devices":   suspiciousDevices,
+			"threshold": warningThreshold.String(),
+		}).Debug("发现接近超时的设备")
+	}
+
+	// 第二阶段：处理超时设备
 	for _, deviceID := range timeoutDevices {
 		dm.handleDeviceTimeout(deviceID)
+	}
+
+	// 第三阶段：同步状态不一致的设备
+	for _, deviceID := range needStatusSync {
+		if session, exists := dm.sessionManager.GetSession(deviceID); exists {
+			dm.connectionMonitor.UpdateDeviceStatus(deviceID, session.Status)
+			logger.WithFields(logrus.Fields{
+				"deviceID": deviceID,
+				"status":   session.Status,
+			}).Debug("同步设备状态")
+		}
 	}
 
 	if len(timeoutDevices) > 0 {
 		logger.WithFields(logrus.Fields{
 			"timeoutDevices": len(timeoutDevices),
+			"syncDevices":    len(needStatusSync),
 			"devices":        timeoutDevices,
 		}).Warn("发现超时设备")
 	}
@@ -256,29 +300,31 @@ func (dm *DeviceMonitor) checkDeviceHeartbeats() {
 
 // handleDeviceTimeout 处理设备超时
 func (dm *DeviceMonitor) handleDeviceTimeout(deviceID string) {
-	logger.WithFields(logrus.Fields{
-		"deviceID": deviceID,
-		"timeout":  dm.deviceTimeout,
-	}).Warn("设备心跳超时")
+	// 更新设备状态为离线
+	dm.sessionManager.UpdateSession(deviceID, func(session *DeviceSession) {
+		// 仅当设备当前为在线状态时才触发离线事件
+		if session.Status == constants.DeviceStatusOnline {
+			oldStatus := session.Status
+			session.Status = constants.DeviceStatusOffline
 
-	// 获取设备会话
-	session, exists := dm.sessionManager.GetSession(deviceID)
-	if !exists {
-		return
-	}
+			// 记录设备离线日志
+			logger.WithFields(logrus.Fields{
+				"deviceID":      deviceID,
+				"oldStatus":     oldStatus,
+				"newStatus":     constants.DeviceStatusOffline,
+				"lastHeartbeat": session.LastHeartbeatTime.Format(constants.TimeFormatDefault),
+				"timeSince":     time.Since(session.LastHeartbeatTime).Seconds(),
+			}).Info("设备因心跳超时被标记为离线")
 
-	// 触发超时回调
-	if dm.onDeviceTimeout != nil {
-		dm.onDeviceTimeout(deviceID, session.LastHeartbeatTime)
-	}
+			// 触发设备超时回调
+			if dm.onDeviceTimeout != nil {
+				dm.onDeviceTimeout(deviceID, session.LastHeartbeatTime)
+			}
+		}
+	})
 
-	// 挂起设备会话
-	dm.sessionManager.SuspendSession(deviceID)
-
-	// 更新设备状态
-	if UpdateDeviceStatusFunc != nil {
-		UpdateDeviceStatusFunc(deviceID, constants.DeviceStatusOffline)
-	}
+	// 同步更新连接监控器中的设备状态
+	dm.connectionMonitor.UpdateDeviceStatus(deviceID, constants.DeviceStatusOffline)
 }
 
 // groupStatusMonitorLoop 设备组状态监控循环
@@ -314,20 +360,68 @@ func (dm *DeviceMonitor) checkGroupStatus() {
 	// 这里可以添加更详细的设备组健康检查逻辑
 }
 
+// CheckDeviceStatus 检查并更新设备状态
+func (dm *DeviceMonitor) CheckDeviceStatus() {
+	// 检查心跳超时设备
+	dm.checkDeviceHeartbeats()
+
+	// 获取当前统计信息
+	deviceCount := 0
+	onlineCount := 0
+	offlineCount := 0
+
+	// 统计当前设备状态
+	dm.sessionManager.ForEachSession(func(deviceID string, session *DeviceSession) bool {
+		deviceCount++
+		if session.Status == constants.DeviceStatusOnline {
+			onlineCount++
+		} else if session.Status == constants.DeviceStatusOffline {
+			offlineCount++
+		}
+		return true
+	})
+
+	// 记录设备监控状态
+	logger.WithFields(logrus.Fields{
+		"totalDevices": deviceCount,
+		"onlineCount":  onlineCount,
+		"offlineCount": offlineCount,
+	}).Debug("设备监控状态")
+}
+
 // GetMonitorStatistics 获取监控统计信息
 func (dm *DeviceMonitor) GetMonitorStatistics() map[string]interface{} {
-	sessionStats := dm.sessionManager.GetSessionStatistics()
-	groupStats := dm.deviceGroupManager.GetGroupStatistics()
+	stats := make(map[string]interface{})
 
-	return map[string]interface{}{
-		"enabled":       dm.enabled,
-		"running":       dm.running,
-		"checkInterval": dm.heartbeatCheckInterval.String(),
-		"deviceTimeout": dm.deviceTimeout.String(),
-		"sessionStats":  sessionStats,
-		"groupStats":    groupStats,
-		"lastCheckTime": time.Now().Format("2006-01-02 15:04:05"),
-	}
+	// 设备统计
+	deviceCount := 0
+	onlineCount := 0
+	offlineCount := 0
+	reconnectingCount := 0
+
+	// 统计设备状态
+	dm.sessionManager.ForEachSession(func(deviceID string, session *DeviceSession) bool {
+		deviceCount++
+		switch session.Status {
+		case constants.DeviceStatusOnline:
+			onlineCount++
+		case constants.DeviceStatusOffline:
+			offlineCount++
+		case constants.DeviceStatusReconnecting:
+			reconnectingCount++
+		}
+		return true
+	})
+
+	stats["deviceCount"] = deviceCount
+	stats["onlineCount"] = onlineCount
+	stats["offlineCount"] = offlineCount
+	stats["reconnectingCount"] = reconnectingCount
+
+	// 设备组统计
+	stats["groups"] = dm.deviceGroupManager.GetGroupStatistics()
+
+	return stats
 }
 
 // StartGlobalDeviceMonitor 启动全局设备监控器
@@ -341,4 +435,89 @@ func StopGlobalDeviceMonitor() {
 	if globalDeviceMonitor != nil {
 		globalDeviceMonitor.Stop()
 	}
+}
+
+// CheckAndUpdateDeviceStatus 检查并更新设备状态
+// 如果设备当前状态与期望状态不一致，执行状态更新并触发相应事件
+func (dm *DeviceMonitor) CheckAndUpdateDeviceStatus(deviceID string, targetStatus string) bool {
+	if !dm.enabled || !dm.running {
+		return false
+	}
+
+	// 获取设备当前会话
+	session, exists := dm.sessionManager.GetSession(deviceID)
+	if !exists {
+		logger.WithFields(logrus.Fields{
+			"deviceID":     deviceID,
+			"targetStatus": targetStatus,
+		}).Debug("设备会话不存在，无法更新状态")
+		return false
+	}
+
+	// 如果状态已经一致，无需更新
+	if session.Status == targetStatus {
+		return true
+	}
+
+	// 状态不一致，需要更新
+	oldStatus := session.Status
+	dm.sessionManager.UpdateSession(deviceID, func(session *DeviceSession) {
+		session.Status = targetStatus
+		if targetStatus == constants.DeviceStatusOnline {
+			// 如果是更新为在线状态，更新心跳时间
+			session.LastHeartbeatTime = time.Now()
+		}
+	})
+
+	// 记录状态变更日志
+	logger.WithFields(logrus.Fields{
+		"deviceID":  deviceID,
+		"oldStatus": oldStatus,
+		"newStatus": targetStatus,
+	}).Info("设备状态变更通知: 设备ID=" + deviceID + ", 状态=" + targetStatus)
+
+	return true
+}
+
+// GetDeviceStatus 获取设备当前状态
+func (dm *DeviceMonitor) GetDeviceStatus(deviceID string) (string, bool) {
+	if !dm.enabled {
+		return constants.DeviceStatusUnknown, false
+	}
+
+	session, exists := dm.sessionManager.GetSession(deviceID)
+	if !exists {
+		return constants.DeviceStatusUnknown, false
+	}
+
+	return session.Status, true
+}
+
+// GetDeviceLastHeartbeat 获取设备最后心跳时间
+func (dm *DeviceMonitor) GetDeviceLastHeartbeat(deviceID string) (time.Time, bool) {
+	if !dm.enabled {
+		return time.Time{}, false
+	}
+
+	session, exists := dm.sessionManager.GetSession(deviceID)
+	if !exists {
+		return time.Time{}, false
+	}
+
+	return session.LastHeartbeatTime, true
+}
+
+// GetAllDeviceStatuses 获取所有设备状态
+func (dm *DeviceMonitor) GetAllDeviceStatuses() map[string]string {
+	if !dm.enabled {
+		return make(map[string]string)
+	}
+
+	statuses := make(map[string]string)
+	dm.sessionManager.ForEachSession(func(deviceID string, session *DeviceSession) bool {
+		statuses[deviceID] = session.Status
+		return true
+	})
+
+	return statuses
 }

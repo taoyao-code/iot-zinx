@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/bujia-iot/iot-zinx/internal/infrastructure/logger"
+	"github.com/bujia-iot/iot-zinx/pkg/constants"
 	"github.com/sirupsen/logrus"
 )
 
@@ -50,7 +51,7 @@ func (c *TestClient) initLogger() {
 	improvedLogger.GetLogger().SetLevel(logrus.InfoLevel)
 	improvedLogger.GetLogger().SetFormatter(&logrus.TextFormatter{
 		FullTimestamp:   true,
-		TimestampFormat: "2006-01-02 15:04:05.000",
+		TimestampFormat: constants.TimeFormatDefault,
 		ForceColors:     true,
 	})
 	c.logger = improvedLogger

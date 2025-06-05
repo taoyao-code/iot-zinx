@@ -9,6 +9,7 @@ import (
 
 	"github.com/bujia-iot/iot-zinx/internal/domain/dny_protocol"
 	"github.com/bujia-iot/iot-zinx/pkg"
+	"github.com/bujia-iot/iot-zinx/pkg/constants"
 	"github.com/bujia-iot/iot-zinx/pkg/protocol"
 	"github.com/sirupsen/logrus"
 )
@@ -370,9 +371,9 @@ func (c *TestClient) handleServerTimeResponse(result *protocol.DNYParseResult) {
 		serverTime := time.Unix(int64(timestamp), 0)
 
 		c.logger.GetLogger().WithFields(logrus.Fields{
-			"serverTime":      serverTime.Format("2006-01-02 15:04:05"),
+			"serverTime":      serverTime.Format(constants.TimeFormatDefault),
 			"serverTimestamp": timestamp,
-			"localTime":       time.Now().Format("2006-01-02 15:04:05"),
+			"localTime":       time.Now().Format(constants.TimeFormatDefault),
 		}).Info("🕐 服务器时间获取成功")
 
 		// 实现时间同步逻辑

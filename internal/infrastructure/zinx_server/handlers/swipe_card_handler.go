@@ -5,13 +5,14 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/bujia-iot/iot-zinx/pkg"
-	"github.com/bujia-iot/iot-zinx/pkg/network"
-
 	"github.com/aceld/zinx/ziface"
 	"github.com/bujia-iot/iot-zinx/internal/app"
 	"github.com/bujia-iot/iot-zinx/internal/domain/dny_protocol"
 	"github.com/bujia-iot/iot-zinx/internal/infrastructure/logger"
+	"github.com/bujia-iot/iot-zinx/pkg/constants"
+	"github.com/bujia-iot/iot-zinx/pkg/monitor"
+	"github.com/bujia-iot/iot-zinx/pkg/network"
+	"github.com/bujia-iot/iot-zinx/pkg/protocol"
 	"github.com/sirupsen/logrus"
 )
 
@@ -74,7 +75,7 @@ func (h *SwipeCardHandler) Handle(request ziface.IRequest) {
 	msg := request.GetMessage()
 	conn := request.GetConnection()
 
-	// 🔧 修复：处理标准Zinx消息，直接获取纯净的DNY数据
+	// 处理标准Zinx消息，直接获取纯净的DNY数据
 	data := msg.GetData()
 
 	logger.WithFields(logrus.Fields{
@@ -82,19 +83,19 @@ func (h *SwipeCardHandler) Handle(request ziface.IRequest) {
 		"msgID":       msg.GetMsgID(),
 		"messageType": fmt.Sprintf("%T", msg),
 		"dataLen":     len(data),
-	}).Info("✅ 刷卡处理器：开始处理标准Zinx消息")
+	}).Info("刷卡处理器：开始处理消息")
 
-	// 🔧 关键修复：从DNY协议消息中获取真实的PhysicalID
+	// 从DNY协议消息中获取真实的PhysicalID
 	var physicalId uint32
 	if dnyMsg, ok := msg.(*dny_protocol.Message); ok {
 		physicalId = dnyMsg.GetPhysicalId()
-		fmt.Printf("🔧 刷卡处理器从DNY协议消息获取真实PhysicalID: 0x%08X\n", physicalId)
+		fmt.Printf("刷卡处理器从DNY协议消息获取真实PhysicalID: 0x%08X\n", physicalId)
 	} else {
 		// 从连接属性中获取PhysicalID
 		if prop, err := conn.GetProperty(network.PropKeyDNYPhysicalID); err == nil {
 			if pid, ok := prop.(uint32); ok {
 				physicalId = pid
-				fmt.Printf("🔧 刷卡处理器从连接属性获取PhysicalID: 0x%08X\n", physicalId)
+				fmt.Printf("刷卡处理器从连接属性获取PhysicalID: 0x%08X\n", physicalId)
 			}
 		}
 		if physicalId == 0 {
@@ -111,7 +112,7 @@ func (h *SwipeCardHandler) Handle(request ziface.IRequest) {
 		"connID":     conn.GetConnID(),
 		"physicalID": fmt.Sprintf("0x%08X", physicalId),
 		"dataLen":    len(data),
-	}).Info("刷卡处理器：处理标准Zinx数据格式")
+	}).Info("刷卡处理器：处理数据")
 
 	// 解析刷卡请求数据
 	swipeData := &dny_protocol.SwipeCardRequestData{}
@@ -131,7 +132,7 @@ func (h *SwipeCardHandler) Handle(request ziface.IRequest) {
 		"cardNumber":   swipeData.CardNumber,
 		"cardType":     swipeData.CardType,
 		"gunNumber":    swipeData.GunNumber,
-		"swipeTime":    swipeData.SwipeTime.Format("2006-01-02 15:04:05"),
+		"swipeTime":    swipeData.SwipeTime.Format(constants.TimeFormatDefault),
 		"deviceStatus": swipeData.DeviceStatus,
 	}).Info("收到刷卡请求")
 
@@ -167,7 +168,7 @@ func (h *SwipeCardHandler) Handle(request ziface.IRequest) {
 	// 发送响应
 	// 生成消息ID
 	messageID := uint16(time.Now().Unix() & 0xFFFF)
-	if err := pkg.Protocol.SendDNYResponse(conn, physicalId, messageID, uint8(dny_protocol.CmdSwipeCard), responseData); err != nil {
+	if err := protocol.SendDNYResponse(conn, physicalId, messageID, uint8(dny_protocol.CmdSwipeCard), responseData); err != nil {
 		logger.WithFields(logrus.Fields{
 			"connID":     conn.GetConnID(),
 			"deviceId":   deviceId,
@@ -187,7 +188,7 @@ func (h *SwipeCardHandler) Handle(request ziface.IRequest) {
 	}).Debug("刷卡响应发送成功")
 
 	// 更新心跳时间
-	pkg.Monitor.GetGlobalMonitor().UpdateLastHeartbeatTime(conn)
+	monitor.GetGlobalMonitor().UpdateLastHeartbeatTime(conn)
 }
 
 // PostHandle 后处理刷卡请求

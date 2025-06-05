@@ -40,50 +40,45 @@ const (
 	PropKeyLastDisconnectTime = constants.PropKeyLastDisconnectTime
 )
 
-// Protocol 协议相关工具导出
-var Protocol = struct {
-	// 创建DNY协议数据包工厂
+// Protocol 协议相关功能导出
+type ProtocolExport struct {
+	// 数据包处理相关
 	NewDNYDataPackFactory func() protocol.IDataPackFactory
-	// 创建DNY协议解码器 - 集成了特殊消息处理功能
-	NewDNYDecoder func() ziface.IDecoder
-	// 手动解析十六进制数据
-	ParseManualData func(hexData, description string)
-	// 统一的协议解析接口，用于日志和监控
-	ParseDNYData func(data []byte) (*protocol.DNYParseResult, error)
-	// 解析十六进制字符串
-	ParseDNYHexString func(hexStr string) (*protocol.DNYParseResult, error)
-	// 解析DNY数据并返回消费的字节数
+	NewDNYDecoder         func() ziface.IDecoder
+
+	// 数据解析相关
+	ParseManualData          func(hexData string, description string)
+	ParseDNYData             func(data []byte) (*protocol.DNYParseResult, error)
+	ParseDNYHexString        func(hexStr string) (*protocol.DNYParseResult, error)
 	ParseDNYDataWithConsumed func(data []byte) (*protocol.DNYParseResult, int, error)
-	// 解析包含多个DNY帧的数据包
-	ParseMultipleDNYFrames func(data []byte) ([]*protocol.DNYParseResult, error)
-	// 计算包校验和
+	ParseMultipleDNYFrames   func(data []byte) ([]*protocol.DNYParseResult, error)
+
+	// 数据校验相关
 	CalculatePacketChecksum func(data []byte) uint16
-	// 检查是否为DNY协议数据
-	IsDNYProtocolData func(data []byte) bool
-	// 检查是否为十六进制字符串
-	IsHexString func(data []byte) bool
-	// 检查是否为全数字字符串
-	IsAllDigits func(data []byte) bool
-	// 处理特殊消息(SIM卡号和link心跳)
-	HandleSpecialMessage func(data []byte) bool
-	// 特殊消息常量
+	IsDNYProtocolData       func(data []byte) bool
+	IsHexString             func(data []byte) bool
+	IsAllDigits             func(data []byte) bool
+	HandleSpecialMessage    func(data []byte) bool
+
+	// 常量值
 	IOT_SIM_CARD_LENGTH int
 	IOT_LINK_HEARTBEAT  string
-	// 创建原始数据处理钩子
-	NewRawDataHook func(handleRawDataFunc func(conn ziface.IConnection, data []byte) bool) *protocol.RawDataHook
-	// 默认原始数据处理器
+
+	// 数据钩子
+	NewRawDataHook        func(handleRawDataFunc func(conn ziface.IConnection, data []byte) bool) *protocol.RawDataHook
 	DefaultRawDataHandler func(conn ziface.IConnection, data []byte) bool
-	// 打印原始数据
-	PrintRawData func(data []byte)
-	// 发送DNY协议响应
-	SendDNYResponse func(conn ziface.IConnection, physicalId uint32, messageId uint16, command uint8, data []byte) error
-	// 构建DNY协议响应数据包
+	PrintRawData          func(data []byte)
+
+	// 数据发送
+	SendDNYResponse        func(conn ziface.IConnection, physicalId uint32, messageId uint16, command uint8, data []byte) error
+	SendDNYRequest         func(conn ziface.IConnection, physicalId uint32, messageId uint16, command uint8, data []byte) error
 	BuildDNYResponsePacket func(physicalID uint32, messageID uint16, command uint8, data []byte) []byte
-	// 构建DNY协议请求数据包
-	BuildDNYRequestPacket func(physicalID uint32, messageID uint16, command uint8, data []byte) []byte
-	// 判断命令是否需要确认回复
-	NeedConfirmation func(command uint8) bool
-}{
+	BuildDNYRequestPacket  func(physicalID uint32, messageID uint16, command uint8, data []byte) []byte
+	NeedConfirmation       func(command uint8) bool
+}
+
+// Protocol 协议相关工具导出
+var Protocol = ProtocolExport{
 	NewDNYDataPackFactory:    protocol.NewDNYDataPackFactory,
 	NewDNYDecoder:            protocol.NewDNYDecoder,
 	ParseManualData:          protocol.ParseManualData,
@@ -102,6 +97,7 @@ var Protocol = struct {
 	DefaultRawDataHandler:    protocol.DefaultRawDataHandler,
 	PrintRawData:             protocol.PrintRawData,
 	SendDNYResponse:          protocol.SendDNYResponse,
+	SendDNYRequest:           protocol.SendDNYRequest,
 	BuildDNYResponsePacket:   protocol.BuildDNYResponsePacket,
 	BuildDNYRequestPacket:    protocol.BuildDNYRequestPacket,
 	NeedConfirmation:         protocol.NeedConfirmation,

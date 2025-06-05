@@ -2,11 +2,28 @@ package monitor
 
 import (
 	"sync"
+	"sync/atomic"
 	"time"
 
+	"github.com/aceld/zinx/ziface"
 	"github.com/bujia-iot/iot-zinx/internal/infrastructure/logger"
 	"github.com/sirupsen/logrus"
 )
+
+// DNYProtocolSender 定义DNY协议发送器接口
+// 这样可以避免循环导入问题
+type DNYProtocolSender interface {
+	SendDNYData(conn ziface.IConnection, data []byte) error
+}
+
+// 全局DNY发送器
+var globalDNYSender DNYProtocolSender
+
+// SetDNYProtocolSender 设置DNY协议发送器
+// 在主程序初始化时调用，避免循环依赖
+func SetDNYProtocolSender(sender DNYProtocolSender) {
+	globalDNYSender = sender
+}
 
 // DeviceGroup 设备组，管理同一ICCID下的多个设备
 type DeviceGroup struct {
@@ -172,14 +189,33 @@ func (dgm *DeviceGroupManager) GetAllDevicesInGroup(iccid string) map[string]*De
 // BroadcastToGroup 向设备组中的所有设备广播消息
 func (dgm *DeviceGroupManager) BroadcastToGroup(iccid string, data []byte) int {
 	devices := dgm.GetAllDevicesInGroup(iccid)
+	if len(devices) == 0 {
+		return 0
+	}
+
+	// 创建副本，避免并发问题
+	broadcastData := make([]byte, len(data))
+	copy(broadcastData, data)
+
+	// 对于小数量设备，直接同步发送
+	if len(devices) <= 3 {
+		return dgm.synchronousBroadcast(iccid, devices, broadcastData)
+	}
+
+	// 对于较多设备，使用协程并发发送
+	return dgm.concurrentBroadcast(iccid, devices, broadcastData)
+}
+
+// synchronousBroadcast 同步广播（适用于少量设备）
+func (dgm *DeviceGroupManager) synchronousBroadcast(iccid string, devices map[string]*DeviceSession, data []byte) int {
 	successCount := 0
 
 	for deviceID := range devices {
-		// 获取设备连接
 		if conn, exists := GetGlobalMonitor().GetConnectionByDeviceId(deviceID); exists {
-			// 🔧 修复：直接通过TCP连接发送DNY协议数据，避免添加Zinx框架头部
-			if tcpConn := conn.GetTCPConnection(); tcpConn != nil {
-				_, err := tcpConn.Write(data)
+			// 判断是否为DNY协议数据
+			if len(data) >= 3 && string(data[:3]) == "DNY" && globalDNYSender != nil {
+				// 使用统一的发送接口发送DNY协议数据
+				err := globalDNYSender.SendDNYData(conn, data)
 				if err == nil {
 					successCount++
 					logger.WithFields(logrus.Fields{
@@ -195,6 +231,26 @@ func (dgm *DeviceGroupManager) BroadcastToGroup(iccid string, data []byte) int {
 						"error":    err.Error(),
 					}).Warn("设备组广播消息发送失败")
 				}
+			} else {
+				// 非DNY协议数据，使用原始TCP连接发送
+				if tcpConn := conn.GetTCPConnection(); tcpConn != nil {
+					_, err := tcpConn.Write(data)
+					if err == nil {
+						successCount++
+						logger.WithFields(logrus.Fields{
+							"iccid":    iccid,
+							"deviceID": deviceID,
+							"connID":   conn.GetConnID(),
+							"dataLen":  len(data),
+						}).Debug("设备组广播消息发送成功(原始TCP)")
+					} else {
+						logger.WithFields(logrus.Fields{
+							"iccid":    iccid,
+							"deviceID": deviceID,
+							"error":    err.Error(),
+						}).Warn("设备组广播消息发送失败(原始TCP)")
+					}
+				}
 			}
 		}
 	}
@@ -203,9 +259,134 @@ func (dgm *DeviceGroupManager) BroadcastToGroup(iccid string, data []byte) int {
 		"iccid":        iccid,
 		"totalDevices": len(devices),
 		"successCount": successCount,
+		"mode":         "同步广播",
 	}).Info("设备组广播完成")
 
 	return successCount
+}
+
+// concurrentBroadcast 并发广播（适用于大量设备）
+func (dgm *DeviceGroupManager) concurrentBroadcast(iccid string, devices map[string]*DeviceSession, data []byte) int {
+	var (
+		wg           sync.WaitGroup
+		successCount int32
+		mutex        sync.Mutex
+		results      = make(chan bool, len(devices))
+	)
+
+	// 限制最大并发数
+	maxGoroutines := 10
+	if len(devices) < maxGoroutines {
+		maxGoroutines = len(devices)
+	}
+
+	// 使用信号量限制并发数
+	semaphore := make(chan struct{}, maxGoroutines)
+
+	startTime := time.Now()
+
+	// 创建设备ID列表
+	deviceIDs := make([]string, 0, len(devices))
+	for deviceID := range devices {
+		deviceIDs = append(deviceIDs, deviceID)
+	}
+
+	// 判断是否为DNY协议数据
+	isDNYProtocol := len(data) >= 3 && string(data[:3]) == "DNY"
+
+	// 启动广播协程
+	for _, deviceID := range deviceIDs {
+		wg.Add(1)
+		semaphore <- struct{}{} // 获取信号量
+
+		go func(deviceID string) {
+			defer func() {
+				<-semaphore // 释放信号量
+				wg.Done()
+			}()
+
+			// 获取设备连接
+			if conn, exists := GetGlobalMonitor().GetConnectionByDeviceId(deviceID); exists {
+				var success bool
+				var err error
+
+				if isDNYProtocol && globalDNYSender != nil {
+					// 使用统一的发送接口发送DNY协议数据
+					err = globalDNYSender.SendDNYData(conn, data)
+					success = (err == nil)
+				} else {
+					// 非DNY协议数据，使用原始TCP连接发送
+					if tcpConn := conn.GetTCPConnection(); tcpConn != nil {
+						_, err = tcpConn.Write(data)
+						success = (err == nil)
+					}
+				}
+
+				if success {
+					atomic.AddInt32(&successCount, 1)
+					results <- true
+
+					mutex.Lock()
+					logger.WithFields(logrus.Fields{
+						"iccid":    iccid,
+						"deviceID": deviceID,
+						"connID":   conn.GetConnID(),
+						"dataLen":  len(data),
+						"protocol": map[bool]string{true: "DNY", false: "原始TCP"}[isDNYProtocol],
+					}).Debug("设备组广播消息发送成功")
+					mutex.Unlock()
+				} else {
+					results <- false
+
+					mutex.Lock()
+					logger.WithFields(logrus.Fields{
+						"iccid":    iccid,
+						"deviceID": deviceID,
+						"error":    err.Error(),
+						"protocol": map[bool]string{true: "DNY", false: "原始TCP"}[isDNYProtocol],
+					}).Warn("设备组广播消息发送失败")
+					mutex.Unlock()
+				}
+			} else {
+				results <- false
+			}
+		}(deviceID)
+	}
+
+	// 等待所有广播完成
+	go func() {
+		wg.Wait()
+		close(results)
+	}()
+
+	// 统计结果
+	successResults := 0
+	for result := range results {
+		if result {
+			successResults++
+		}
+	}
+
+	// 最终一致性校验
+	finalSuccess := int(atomic.LoadInt32(&successCount))
+	if finalSuccess != successResults {
+		logger.WithFields(logrus.Fields{
+			"atomicCount":     finalSuccess,
+			"calculatedCount": successResults,
+		}).Warn("广播成功计数不一致")
+	}
+
+	elapsed := time.Since(startTime)
+	logger.WithFields(logrus.Fields{
+		"iccid":        iccid,
+		"totalDevices": len(devices),
+		"successCount": finalSuccess,
+		"elapsedMs":    elapsed.Milliseconds(),
+		"mode":         "并发广播",
+		"protocol":     map[bool]string{true: "DNY", false: "原始TCP"}[isDNYProtocol],
+	}).Info("设备组广播完成")
+
+	return finalSuccess
 }
 
 // GetGroupStatistics 获取设备组统计信息

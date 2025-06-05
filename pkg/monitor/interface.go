@@ -128,4 +128,7 @@ type ISessionManager interface {
 
 	// GetSessionStatistics 获取会话统计信息
 	GetSessionStatistics() map[string]interface{}
+
+	// ForEachSession 遍历所有会话
+	ForEachSession(callback func(deviceID string, session *DeviceSession) bool)
 }

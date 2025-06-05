@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/bujia-iot/iot-zinx/internal/infrastructure/config"
+	"github.com/bujia-iot/iot-zinx/pkg/constants"
 	"github.com/sirupsen/logrus"
 	"gopkg.in/natefinch/lumberjack.v2"
 )
@@ -41,7 +42,7 @@ func (il *ImprovedLogger) InitImproved(cfg *config.LoggerConfig) error {
 	// 2. 根据配置设置日志格式
 	if strings.ToLower(cfg.Format) == "json" {
 		il.logger.SetFormatter(&logrus.JSONFormatter{
-			TimestampFormat: "2006-01-02 15:04:05",
+			TimestampFormat: constants.TimeFormatDefault,
 			// 添加更多有用的字段
 			FieldMap: logrus.FieldMap{
 				logrus.FieldKeyTime:  "time",
@@ -53,7 +54,7 @@ func (il *ImprovedLogger) InitImproved(cfg *config.LoggerConfig) error {
 		})
 	} else {
 		il.logger.SetFormatter(&logrus.TextFormatter{
-			TimestampFormat: "2006-01-02 15:04:05",
+			TimestampFormat: constants.TimeFormatDefault,
 			FullTimestamp:   true,
 			ForceColors:     true,
 		})

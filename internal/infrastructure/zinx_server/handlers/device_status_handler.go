@@ -2,125 +2,104 @@ package handlers
 
 import (
 	"fmt"
-
-	"github.com/bujia-iot/iot-zinx/pkg"
-	"github.com/bujia-iot/iot-zinx/pkg/constants"
+	"time"
 
 	"github.com/aceld/zinx/ziface"
 	"github.com/bujia-iot/iot-zinx/internal/domain/dny_protocol"
 	"github.com/bujia-iot/iot-zinx/internal/infrastructure/logger"
+	"github.com/bujia-iot/iot-zinx/pkg/constants"
+	"github.com/bujia-iot/iot-zinx/pkg/network"
 	"github.com/sirupsen/logrus"
 )
 
-// DeviceStatusHandler 处理设备状态查询 (命令ID: 0x81)
+// DeviceStatusHandler 处理设备状态上报 (命令ID: 0x81)
 type DeviceStatusHandler struct {
 	DNYHandlerBase
 }
 
-func (h *DeviceStatusHandler) PreHandle(request ziface.IRequest) {
-	logger.WithFields(logrus.Fields{
-		"connID":     request.GetConnection().GetConnID(),
-		"remoteAddr": request.GetConnection().RemoteAddr().String(),
-	}).Debug("收到设备状态查询请求")
-}
-
-// Handle 处理设备状态查询请求
+// Handle 处理设备状态上报
 func (h *DeviceStatusHandler) Handle(request ziface.IRequest) {
-	// 基类预处理
-	h.PreHandle(request)
+	// 确保基类处理先执行（命令确认等）
+	h.DNYHandlerBase.PreHandle(request)
 
-	// 获取请求消息
 	msg := request.GetMessage()
 	conn := request.GetConnection()
+	data := msg.GetData()
 
-	// 转换为DNY消息
-	dnyMsg, ok := dny_protocol.IMessageToDnyMessage(msg)
-	if !ok {
-		logger.WithFields(logrus.Fields{
-			"connID": conn.GetConnID(),
-			"msgID":  msg.GetMsgID(),
-		}).Error("消息类型转换失败，无法处理设备状态查询")
-		return
+	// 从DNYMessage中获取真实的PhysicalID
+	var physicalId uint32
+	var messageID uint16
+	if dnyMsg, ok := h.GetDNYMessage(request); ok {
+		physicalId = dnyMsg.GetPhysicalId()
+		// 从连接属性获取MessageID
+		if prop, err := conn.GetProperty(network.PropKeyDNYMessageID); err == nil {
+			if mid, ok := prop.(uint16); ok {
+				messageID = mid
+			}
+		}
+	} else {
+		// 从连接属性中获取PhysicalID
+		if prop, err := conn.GetProperty(network.PropKeyDNYPhysicalID); err == nil {
+			if pid, ok := prop.(uint32); ok {
+				physicalId = pid
+			}
+		}
+		if physicalId == 0 {
+			logger.WithFields(logrus.Fields{
+				"connID": conn.GetConnID(),
+				"msgID":  msg.GetMsgID(),
+			}).Error("❌ 设备状态上报Handle：无法获取PhysicalID，拒绝处理")
+			return
+		}
+		// 从连接属性获取MessageID
+		if prop, err := conn.GetProperty(network.PropKeyDNYMessageID); err == nil {
+			if mid, ok := prop.(uint16); ok {
+				messageID = mid
+			}
+		}
 	}
 
-	// 提取关键信息
-	physicalId := dnyMsg.GetPhysicalId()
-	messageId := uint16(dnyMsg.GetMsgID()) // 转换为uint16类型
-
-	// 获取设备ID用于日志记录
-	var deviceID string
-	if val, err := conn.GetProperty(constants.PropKeyDeviceId); err == nil && val != nil {
-		deviceID = val.(string)
-	}
-
-	logger.WithFields(logrus.Fields{
-		"connID":     conn.GetConnID(),
-		"deviceID":   deviceID,
-		"physicalId": fmt.Sprintf("0x%08X", physicalId),
-		"messageId":  messageId,
-		"source":     "zinx_heartbeat_check",
-	}).Debug("收到设备状态查询请求")
-
-	// 更新心跳时间
-	pkg.Monitor.GetGlobalMonitor().UpdateLastHeartbeatTime(conn)
-
-	// 构建设备状态响应数据
-	responseData := h.buildDeviceStatusResponse(conn)
-
-	// 发送响应
-	if err := pkg.Protocol.SendDNYResponse(conn, physicalId, messageId, dny_protocol.CmdNetworkStatus, responseData); err != nil {
+	// 基本参数检查
+	if len(data) < 1 {
 		logger.WithFields(logrus.Fields{
 			"connID":     conn.GetConnID(),
 			"physicalId": fmt.Sprintf("0x%08X", physicalId),
-			"deviceID":   deviceID,
-			"error":      err.Error(),
-		}).Error("发送设备状态查询响应失败")
+			"messageID":  fmt.Sprintf("0x%04X", messageID),
+			"dataLen":    len(data),
+		}).Error("设备状态上报数据长度不足")
 		return
 	}
 
+	// 解析设备状态 - 第一个字节是状态代码
+	statusCode := data[0]
+
+	// 获取设备ID
+	deviceId := h.GetDeviceID(conn)
+
+	// 记录设备状态
 	logger.WithFields(logrus.Fields{
 		"connID":     conn.GetConnID(),
 		"physicalId": fmt.Sprintf("0x%08X", physicalId),
-		"deviceID":   deviceID,
-	}).Debug("设备状态查询响应发送成功")
-}
+		"deviceId":   deviceId,
+		"status":     fmt.Sprintf("0x%02X", statusCode),
+		"remoteAddr": conn.RemoteAddr().String(),
+		"timestamp":  time.Now().Format(constants.TimeFormatDefault),
+	}).Info("收到设备状态上报")
 
-// PostHandle 后处理设备状态查询请求
-func (h *DeviceStatusHandler) PostHandle(request ziface.IRequest) {
-	logger.WithFields(logrus.Fields{
-		"connID":     request.GetConnection().GetConnID(),
-		"remoteAddr": request.GetConnection().RemoteAddr().String(),
-	}).Debug("设备状态查询请求处理完成")
-}
+	// 构建响应数据
+	responseData := []byte{dny_protocol.ResponseSuccess}
 
-// buildDeviceStatusResponse 构建设备状态响应数据
-func (h *DeviceStatusHandler) buildDeviceStatusResponse(conn ziface.IConnection) []byte {
-	// 响应数据格式（按照协议文档）:
-	// 应答(1字节) + 信号强度(1字节) + 网络类型(1字节) + ICCID(20字节) + 预留(1字节)
-	responseData := make([]byte, 24)
-
-	// 设置应答码 - 0x00表示成功
-	responseData[0] = 0x00
-
-	// 设置信号强度（模拟值，1-5表示信号级别）
-	responseData[1] = 4
-
-	// 设置网络类型（1=2G, 2=3G, 3=4G, 4=5G, 5=WiFi）
-	responseData[2] = 3 // 假设为4G网络
-
-	// 设置ICCID
-	iccid := ""
-	if iccidVal, err := conn.GetProperty(constants.PropKeyICCID); err == nil && iccidVal != nil {
-		iccid = iccidVal.(string)
+	// 发送响应
+	if err := h.SendDNYResponse(conn, physicalId, messageID, uint8(dny_protocol.CmdNetworkStatus), responseData); err != nil {
+		logger.WithFields(logrus.Fields{
+			"connID":     conn.GetConnID(),
+			"physicalId": fmt.Sprintf("0x%08X", physicalId),
+			"messageID":  fmt.Sprintf("0x%04X", messageID),
+			"error":      err.Error(),
+		}).Error("发送设备状态上报响应失败")
+		return
 	}
 
-	// 复制ICCID到响应数据（如果有）
-	if len(iccid) > 0 {
-		copy(responseData[3:23], []byte(iccid))
-	}
-
-	// 预留位置0
-	responseData[23] = 0
-
-	return responseData
+	// 更新心跳时间
+	h.UpdateHeartbeat(conn)
 }

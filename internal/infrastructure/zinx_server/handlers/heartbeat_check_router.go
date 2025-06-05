@@ -1,113 +1,105 @@
 package handlers
 
 import (
-	"fmt"
 	"time"
 
-	"github.com/bujia-iot/iot-zinx/pkg"
-	"github.com/bujia-iot/iot-zinx/pkg/constants"
-
 	"github.com/aceld/zinx/ziface"
-	"github.com/aceld/zinx/znet"
-	"github.com/bujia-iot/iot-zinx/internal/domain/dny_protocol"
 	"github.com/bujia-iot/iot-zinx/internal/infrastructure/logger"
+	"github.com/bujia-iot/iot-zinx/pkg/constants"
+	"github.com/bujia-iot/iot-zinx/pkg/monitor"
 	"github.com/sirupsen/logrus"
 )
 
-// HeartbeatCheckRouter 处理Zinx框架发送的心跳检测消息的响应
-// 实现了Zinx的心跳检测Router接口，处理设备对心跳检测的回复
-// 注意：这个处理器处理的是自定义的心跳消息ID 0xF001 和 99999
+// HeartbeatCheckRouter 处理心跳检查，使设备能定时发送心跳以保持连接
 type HeartbeatCheckRouter struct {
-	znet.BaseRouter
+	DNYHandlerBase
+	// 心跳间隔 (秒)
+	heartbeatInterval int64
+	// 心跳超时 (秒)
+	heartbeatTimeout int64
 }
 
-// Handle 处理心跳检测消息的响应
+// NewHeartbeatCheckRouter 创建新的心跳检查路由器
+func NewHeartbeatCheckRouter(interval, timeout int64) *HeartbeatCheckRouter {
+	// 设置默认值
+	if interval <= 0 {
+		interval = 60 // 默认60秒
+	}
+	if timeout <= 0 {
+		timeout = 180 // 默认180秒
+	}
+
+	return &HeartbeatCheckRouter{
+		heartbeatInterval: interval,
+		heartbeatTimeout:  timeout,
+	}
+}
+
+// Handle 处理心跳检查
 func (r *HeartbeatCheckRouter) Handle(request ziface.IRequest) {
 	conn := request.GetConnection()
-	msg := request.GetMessage()
+	deviceId := r.GetDeviceID(conn)
 
-	// 记录心跳响应信息
-	logger.WithFields(logrus.Fields{
-		"connID":     conn.GetConnID(),
-		"remoteAddr": conn.RemoteAddr().String(),
-		"msgID":      msg.GetMsgID(),
-		"dataLen":    msg.GetDataLen(),
-	}).Debug("收到设备心跳检测响应")
+	// 获取上次心跳时间
+	var lastHeartbeat int64
+	if val, err := conn.GetProperty(constants.PropKeyLastHeartbeat); err == nil && val != nil {
+		if timestamp, ok := val.(int64); ok {
+			lastHeartbeat = timestamp
+		}
+	}
 
-	// 检查是否有原始DNY消息数据
-	data := msg.GetData()
-	// 如果消息中包含内部命令ID，则进一步处理
-	if len(data) > 0 {
-		// 第一个字节是内部命令ID
-		innerCmdID := data[0]
+	// 当前时间
+	now := time.Now().Unix()
+
+	// 检查心跳超时
+	if lastHeartbeat > 0 && now-lastHeartbeat > r.heartbeatTimeout {
+		// 心跳超时，记录日志
 		logger.WithFields(logrus.Fields{
-			"connID":     conn.GetConnID(),
-			"innerCmdID": fmt.Sprintf("0x%02X", innerCmdID),
-		}).Debug("心跳消息包含内部命令ID")
+			"connID":        conn.GetConnID(),
+			"deviceId":      deviceId,
+			"lastHeartbeat": time.Unix(lastHeartbeat, 0).Format(constants.TimeFormatDefault),
+			"currentTime":   time.Unix(now, 0).Format(constants.TimeFormatDefault),
+			"timeout":       r.heartbeatTimeout,
+			"elapsedTime":   now - lastHeartbeat,
+		}).Warn("心跳超时，断开连接")
 
-		// 如果是0x81，则按照设备状态查询处理
-		if innerCmdID == dny_protocol.CmdNetworkStatus {
-			// 尝试将消息转换为DNY消息
-			dnyMsg, ok := dny_protocol.IMessageToDnyMessage(msg)
-			if ok {
-				// 如果是DNY协议消息，提取物理ID
-				physicalId := dnyMsg.GetPhysicalId()
-				deviceID := fmt.Sprintf("%08X", physicalId)
+		// 设置连接状态为关闭
+		conn.SetProperty(constants.PropKeyConnStatus, constants.ConnStatusClosed)
 
-				logger.WithFields(logrus.Fields{
-					"connID":     conn.GetConnID(),
-					"deviceID":   deviceID,
-					"physicalId": fmt.Sprintf("0x%08X", physicalId),
-					"innerCmd":   "设备状态查询(0x81)",
-				}).Info("处理心跳响应中的设备状态查询")
+		// 关闭连接
+		conn.Stop()
+		return
+	}
 
-				// 如果设备ID与连接未关联，进行关联
-				if val, err := conn.GetProperty(constants.PropKeyDeviceId); err != nil || val == nil {
-					pkg.Monitor.GetGlobalMonitor().BindDeviceIdToConnection(deviceID, conn)
-				}
+	// 如果没有超时，并且需要检查心跳间隔
+	if lastHeartbeat > 0 && now-lastHeartbeat > r.heartbeatInterval {
+		// 检查是否已经标记为离线
+		var connStatus string
+		if val, err := conn.GetProperty(constants.PropKeyConnStatus); err == nil && val != nil {
+			if status, ok := val.(string); ok {
+				connStatus = status
 			}
 		}
-	} else {
-		// 非DNY协议消息，尝试获取设备ID用于日志记录
-		var deviceID string
-		if val, err := conn.GetProperty(constants.PropKeyDeviceId); err == nil && val != nil {
-			deviceID = val.(string)
-		}
 
+		// 只记录日志，但不断开连接
 		logger.WithFields(logrus.Fields{
-			"connID":     conn.GetConnID(),
-			"deviceID":   deviceID,
-			"remoteAddr": conn.RemoteAddr().String(),
-			"msgID":      msg.GetMsgID(),
-		}).Debug("收到简单心跳响应")
+			"connID":        conn.GetConnID(),
+			"deviceId":      deviceId,
+			"lastHeartbeat": time.Unix(lastHeartbeat, 0).Format(constants.TimeFormatDefault),
+			"currentTime":   time.Unix(now, 0).Format(constants.TimeFormatDefault),
+			"interval":      r.heartbeatInterval,
+			"elapsedTime":   now - lastHeartbeat,
+			"status":        connStatus,
+		}).Debug("心跳间隔检查")
+
+		// 如果连接为活跃状态，但心跳超过间隔时间，标记为不活跃
+		if connStatus == constants.ConnStatusActive && now-lastHeartbeat > r.heartbeatInterval {
+			conn.SetProperty(constants.PropKeyConnStatus, constants.ConnStatusInactive)
+
+			// 更新设备状态为离线
+			if deviceId != "" {
+				monitor.GetGlobalMonitor().UpdateDeviceStatus(deviceId, constants.DeviceStatusOffline)
+			}
+		}
 	}
-
-	// 无论是什么类型的响应，都更新心跳时间
-	// 注意：UpdateLastHeartbeatTime内部已经会更新设备状态，无需重复调用
-	pkg.Monitor.GetGlobalMonitor().UpdateLastHeartbeatTime(conn)
-
-	// 获取设备ID用于日志记录
-	var deviceID string
-	if val, err := conn.GetProperty(constants.PropKeyDeviceId); err == nil && val != nil {
-		deviceID = val.(string)
-	}
-
-	// 移除冗余的状态更新调用 - UpdateLastHeartbeatTime内部已处理
-	// pkg.Monitor.GetGlobalMonitor().UpdateDeviceStatus(deviceID, DeviceStatusOnline)
-
-	logger.WithFields(logrus.Fields{
-		"connID":     conn.GetConnID(),
-		"deviceID":   deviceID,
-		"remoteAddr": conn.RemoteAddr().String(),
-		"status":     constants.ConnStatusActive,
-	}).Debug("心跳检测响应处理完成，设备状态已更新")
-
-	// 记录心跳信息
-	logger.WithFields(logrus.Fields{
-		"connID":     conn.GetConnID(),
-		"deviceID":   deviceID,
-		"status":     constants.ConnStatusActive,
-		"remoteAddr": conn.RemoteAddr().String(),
-		"time":       time.Now().Format("2006-01-02 15:04:05"),
-	}).Info("设备心跳成功")
 }

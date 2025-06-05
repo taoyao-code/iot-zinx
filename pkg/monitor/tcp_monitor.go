@@ -51,7 +51,7 @@ func GetGlobalMonitor() *TCPMonitor {
 func (m *TCPMonitor) OnConnectionEstablished(conn ziface.IConnection) {
 	// 这里调用TCP监视器的连接建立方法
 	fmt.Printf("\n[%s] 连接已建立 - ConnID: %d, 远程地址: %s\n",
-		time.Now().Format("2006-01-02 15:04:05.000"),
+		time.Now().Format(constants.TimeFormatDefault),
 		conn.GetConnID(),
 		conn.RemoteAddr().String())
 }
@@ -64,7 +64,7 @@ func (m *TCPMonitor) OnConnectionClosed(conn ziface.IConnection) {
 
 	// 记录连接关闭
 	fmt.Printf("\n[%s] 连接已关闭 - ConnID: %d, 远程地址: %s\n",
-		time.Now().Format("2006-01-02 15:04:05.000"),
+		time.Now().Format(constants.TimeFormatDefault),
 		connID,
 		remoteAddr)
 
@@ -154,7 +154,7 @@ func (m *TCPMonitor) OnRawDataReceived(conn ziface.IConnection, data []byte) {
 		connID := conn.GetConnID()
 
 		// 强制打印到控制台和标准输出，确保可见性
-		timestamp := time.Now().Format("2006-01-02 15:04:05.000")
+		timestamp := time.Now().Format(constants.TimeFormatDefault)
 
 		// 使用logger记录接收的数据，确保INFO级别
 		logger.WithFields(logrus.Fields{
@@ -197,7 +197,7 @@ func (m *TCPMonitor) OnRawDataSent(conn ziface.IConnection, data []byte) {
 		connID := conn.GetConnID()
 
 		// 打印数据日志
-		timestamp := time.Now().Format("2006-01-02 15:04:05.000")
+		timestamp := time.Now().Format(constants.TimeFormatDefault)
 		fmt.Printf("\n[%s] 发送数据 - ConnID: %d, 远程地址: %s\n", timestamp, connID, remoteAddr)
 		fmt.Printf("数据(HEX): %s\n", hex.EncodeToString(data))
 
@@ -321,7 +321,7 @@ func (m *TCPMonitor) BindDeviceIdToConnection(deviceId string, conn ziface.IConn
 	// 设置绑定时间
 	now := time.Now()
 	conn.SetProperty(constants.PropKeyLastHeartbeat, now.Unix())
-	conn.SetProperty(constants.PropKeyLastHeartbeatStr, now.Format("2006-01-02 15:04:05.000"))
+	conn.SetProperty(constants.PropKeyLastHeartbeatStr, now.Format(constants.TimeFormatDefault))
 
 	// 记录设备上线日志
 	logger.WithFields(logrus.Fields{
@@ -382,7 +382,7 @@ func (m *TCPMonitor) UpdateLastHeartbeatTime(conn ziface.IConnection) {
 	// 获取当前时间
 	now := time.Now()
 	timestamp := now.Unix()
-	timeStr := now.Format("2006-01-02 15:04:05.000")
+	timeStr := now.Format(constants.TimeFormatDefault)
 
 	// 更新心跳时间属性
 	conn.SetProperty(constants.PropKeyLastHeartbeat, timestamp)
@@ -471,7 +471,7 @@ func (m *TCPMonitor) UpdateDeviceStatus(deviceId string, status string) {
 			// 优化：避免循环调用，直接更新心跳时间属性而不触发递归状态更新
 			now := time.Now()
 			conn.SetProperty(constants.PropKeyLastHeartbeat, now.Unix())
-			conn.SetProperty(constants.PropKeyLastHeartbeatStr, now.Format("2006-01-02 15:04:05.000"))
+			conn.SetProperty(constants.PropKeyLastHeartbeatStr, now.Format(constants.TimeFormatDefault))
 		}
 	} else {
 		// 设备不在线，只记录状态变更

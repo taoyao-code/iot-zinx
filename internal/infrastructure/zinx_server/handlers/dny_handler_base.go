@@ -9,8 +9,10 @@ import (
 	"github.com/aceld/zinx/znet"
 	"github.com/bujia-iot/iot-zinx/internal/domain/dny_protocol"
 	"github.com/bujia-iot/iot-zinx/internal/infrastructure/logger"
-	"github.com/bujia-iot/iot-zinx/pkg"
 	"github.com/bujia-iot/iot-zinx/pkg/constants"
+	"github.com/bujia-iot/iot-zinx/pkg/monitor"
+	"github.com/bujia-iot/iot-zinx/pkg/network"
+	"github.com/bujia-iot/iot-zinx/pkg/protocol"
 	"github.com/sirupsen/logrus"
 )
 
@@ -46,12 +48,12 @@ func (h *DNYHandlerBase) PreHandle(request ziface.IRequest) {
 
 	// 从连接属性获取真正的DNY MessageID
 	var messageID uint16
-	if val, err := conn.GetProperty("DNY_MessageID"); err == nil && val != nil {
+	if val, err := conn.GetProperty(network.PropKeyDNYMessageID); err == nil && val != nil {
 		messageID = val.(uint16)
 	}
 
 	// 尝试确认命令 - 修复参数顺序：physicalID, messageID, command
-	if pkg.Network.GetCommandManager().ConfirmCommand(physicalID, messageID, command) {
+	if network.GetCommandManager().ConfirmCommand(physicalID, messageID, command) {
 		logger.WithFields(logrus.Fields{
 			"connID":     conn.GetConnID(),
 			"physicalID": fmt.Sprintf("0x%08X", physicalID),
@@ -68,7 +70,7 @@ func (h *DNYHandlerBase) PreHandle(request ziface.IRequest) {
 	}
 
 	// 更新心跳时间
-	pkg.Monitor.GetGlobalMonitor().UpdateLastHeartbeatTime(conn)
+	monitor.GetGlobalMonitor().UpdateLastHeartbeatTime(conn)
 }
 
 // GetDNYMessage 从请求中获取DNY消息，如果转换失败则返回nil
@@ -98,7 +100,7 @@ func (h *DNYHandlerBase) GetICCID(conn ziface.IConnection) string {
 
 // UpdateDeviceStatus 更新设备状态
 func (h *DNYHandlerBase) UpdateDeviceStatus(deviceID string, status string) {
-	pkg.Monitor.GetGlobalMonitor().UpdateDeviceStatus(deviceID, status)
+	monitor.GetGlobalMonitor().UpdateDeviceStatus(deviceID, status)
 }
 
 // UpdateHeartbeat 更新设备心跳时间
@@ -106,12 +108,12 @@ func (h *DNYHandlerBase) UpdateDeviceStatus(deviceID string, status string) {
 func (h *DNYHandlerBase) UpdateHeartbeat(conn ziface.IConnection) {
 	// 只调用更新心跳时间，内部会自动处理设备状态更新
 	// 这样避免了重复调用UpdateDeviceStatus导致的性能问题
-	pkg.Monitor.GetGlobalMonitor().UpdateLastHeartbeatTime(conn)
+	monitor.GetGlobalMonitor().UpdateLastHeartbeatTime(conn)
 }
 
 // SendDNYResponse 发送DNY协议响应
 func (h *DNYHandlerBase) SendDNYResponse(conn ziface.IConnection, physicalID uint32, messageID uint16, commandID uint8, data []byte) error {
-	return pkg.Protocol.SendDNYResponse(conn, physicalID, messageID, commandID, data)
+	return protocol.SendDNYResponse(conn, physicalID, messageID, commandID, data)
 }
 
 // GetCurrentTimestamp 获取当前Unix时间戳

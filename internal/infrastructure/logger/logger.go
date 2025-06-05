@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/bujia-iot/iot-zinx/internal/infrastructure/config"
+	"github.com/bujia-iot/iot-zinx/pkg/constants"
 	"github.com/sirupsen/logrus"
 )
 
@@ -26,11 +27,11 @@ func Init(cfg *config.LoggerConfig) error {
 	// 设置日志格式
 	if strings.ToLower(cfg.Format) == "json" {
 		log.SetFormatter(&logrus.JSONFormatter{
-			TimestampFormat: "2006-01-02 15:04:05",
+			TimestampFormat: constants.TimeFormatDefault,
 		})
 	} else {
 		log.SetFormatter(&logrus.TextFormatter{
-			TimestampFormat: "2006-01-02 15:04:05",
+			TimestampFormat: constants.TimeFormatDefault,
 			FullTimestamp:   true,
 		})
 	}
@@ -71,11 +72,11 @@ func InitWithConsole(cfg *config.LoggerConfig) error {
 	// 设置日志格式
 	if strings.ToLower(cfg.Format) == "json" {
 		log.SetFormatter(&logrus.JSONFormatter{
-			TimestampFormat: "2006-01-02 15:04:05",
+			TimestampFormat: constants.TimeFormatDefault,
 		})
 	} else {
 		log.SetFormatter(&logrus.TextFormatter{
-			TimestampFormat: "2006-01-02 15:04:05",
+			TimestampFormat: constants.TimeFormatDefault,
 			FullTimestamp:   true,
 			ForceColors:     true, // 强制启用颜色
 		})

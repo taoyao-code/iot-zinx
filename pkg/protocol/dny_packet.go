@@ -9,9 +9,9 @@ import (
 	"time"
 
 	"github.com/aceld/zinx/ziface"
-	"github.com/aceld/zinx/zlog"
 	"github.com/bujia-iot/iot-zinx/internal/domain/dny_protocol"
 	"github.com/bujia-iot/iot-zinx/internal/infrastructure/logger"
+	"github.com/bujia-iot/iot-zinx/pkg/constants"
 	"github.com/sirupsen/logrus"
 )
 
@@ -68,11 +68,11 @@ func (dp *DNYPacket) GetHeadLen() uint32 {
 // Pack 封包方法
 // 将IMessage数据包封装成二进制数据
 func (dp *DNYPacket) Pack(msg ziface.IMessage) ([]byte, error) {
-	// 记录到日志（修正日志级别为Debug）
+	// 记录到日志
 	logger.WithFields(logrus.Fields{
 		"msgID":   msg.GetMsgID(),
 		"dataLen": msg.GetDataLen(),
-	}).Debug("DNYPacket.Pack被调用")
+	}).Debug("开始封包")
 
 	// 处理常规DNY消息
 	return dp.packDNYMessage(msg)
@@ -142,9 +142,12 @@ func (dp *DNYPacket) packDNYMessage(msg ziface.IMessage) ([]byte, error) {
 
 	// 记录十六进制日志
 	if dp.logHexDump {
-		zlog.Debugf("Pack消息 -> 命令: 0x%02X, 物理ID: 0x%08X, 数据长度: %d, 数据: %s",
-			dnyMsg.GetMsgID(), dnyMsg.GetPhysicalId(), dnyMsg.GetDataLen(),
-			hex.EncodeToString(packetData))
+		logger.WithFields(logrus.Fields{
+			"command":    fmt.Sprintf("0x%02X", dnyMsg.GetMsgID()),
+			"physicalID": fmt.Sprintf("0x%08X", dnyMsg.GetPhysicalId()),
+			"dataLen":    dnyMsg.GetDataLen(),
+			"dataHex":    hex.EncodeToString(packetData),
+		}).Debug("封包完成")
 	}
 
 	return packetData, nil
@@ -153,14 +156,16 @@ func (dp *DNYPacket) packDNYMessage(msg ziface.IMessage) ([]byte, error) {
 // Unpack 拆包方法
 // 🔧 重构：只负责基础的数据包识别和分包，协议解析交给拦截器处理
 func (dp *DNYPacket) Unpack(binaryData []byte) (ziface.IMessage, error) {
-	// 🔧 强制控制台输出确保Unpack被调用
-	fmt.Printf("\n🔧 DNYPacket.Unpack() 被调用! 时间: %s, 数据长度: %d\n",
-		time.Now().Format("2006-01-02 15:04:05"), len(binaryData))
-	fmt.Printf("📦 原始数据(HEX): %s\n", hex.EncodeToString(binaryData))
+	// 记录接收到的原始数据
+	logger.WithFields(logrus.Fields{
+		"dataLen": len(binaryData),
+		"dataHex": hex.EncodeToString(binaryData[:min(len(binaryData), 100)]), // 仅记录前100个字节，避免日志过大
+		"time":    time.Now().Format(constants.TimeFormatDefault),
+	}).Debug("收到数据包")
 
 	// 检查数据长度是否足够
 	if len(binaryData) == 0 {
-		fmt.Printf("❌ 数据长度为0\n")
+		logger.Debug("数据长度为0，无法解析")
 		return nil, ErrNotEnoughData
 	}
 
@@ -174,26 +179,32 @@ func (dp *DNYPacket) Unpack(binaryData []byte) (ziface.IMessage, error) {
 
 	// 🔧 关键重构：优先检查是否为十六进制编码的数据
 	if IsHexString(binaryData) {
-		fmt.Printf("🔍 检测到十六进制数据，尝试解码\n")
+		logger.Debug("检测到十六进制数据，尝试解码")
 
 		// 解码十六进制数据
 		decoded, err := hex.DecodeString(string(binaryData))
 		if err != nil {
-			fmt.Printf("❌ 十六进制解码失败: %v\n", err)
+			logger.WithFields(logrus.Fields{
+				"error": err.Error(),
+			}).Warn("十六进制解码失败")
 			// 如果解码失败，继续使用原始数据
 		} else {
-			fmt.Printf("✅ 十六进制解码成功: %d -> %d 字节\n", len(binaryData), len(decoded))
-			fmt.Printf("📦 解码后数据(HEX): %s\n", hex.EncodeToString(decoded))
+			logger.WithFields(logrus.Fields{
+				"beforeLen": len(binaryData),
+				"afterLen":  len(decoded),
+			}).Debug("十六进制解码成功")
 
 			// 检查解码后的数据是否为DNY协议
 			if len(decoded) >= 3 && bytes.HasPrefix(decoded, []byte("DNY")) {
-				fmt.Printf("🎯 解码后发现DNY协议数据\n")
+				logger.Debug("解码后发现DNY协议数据")
 				return dp.handleDNYProtocolBasic(decoded)
 			}
 
 			// 检查是否为ICCID（解码后为纯数字字符串）
 			if IsAllDigits(decoded) {
-				fmt.Printf("📱 解码后发现ICCID: %s\n", string(decoded))
+				logger.WithFields(logrus.Fields{
+					"iccid": string(decoded),
+				}).Debug("解码后发现ICCID")
 				msg := dny_protocol.NewMessage(0, 0, decoded, 0)
 				msg.SetRawData(binaryData) // 保存原始十六进制数据
 				return msg, nil
@@ -215,12 +226,7 @@ func (dp *DNYPacket) Unpack(binaryData []byte) (ziface.IMessage, error) {
 	msg := dny_protocol.NewMessage(0, 0, binaryData, 0)
 	msg.SetRawData(binaryData)
 
-	fmt.Printf("📦 创建非DNY协议消息，MsgID=0，交给拦截器处理\n")
-
-	logger.WithFields(logrus.Fields{
-		"msgID":   msg.GetMsgID(),
-		"dataLen": len(binaryData),
-	}).Debug("DNYPacket.Unpack 创建非DNY协议消息对象，等待拦截器处理")
+	logger.Debug("创建非DNY协议消息，交给拦截器处理")
 
 	return msg, nil
 }
@@ -261,21 +267,33 @@ func (dp *DNYPacket) handleDNYProtocolBasic(data []byte) (ziface.IMessage, error
 		return nil, ErrNotEnoughData
 	}
 
-	// 🔧 关键改变：只创建基础消息对象，不进行完整的协议解析
+	// 创建基础消息对象，不进行完整的协议解析
 	// 设置MsgID为0，表示需要拦截器进一步处理
 	msg := dny_protocol.NewMessage(0, 0, data[:totalLen], 0)
 	msg.SetRawData(data[:totalLen])
 
-	// 📦 强制控制台输出
-	fmt.Printf("📦 DNY协议基础检查完成 - 数据长度: %d, 交给拦截器进行完整解析\n", totalLen)
+	logger.WithFields(logrus.Fields{
+		"totalLen": totalLen,
+		"protocol": "DNY",
+	}).Debug("DNY协议基础检查完成，交给拦截器进行完整解析")
 
 	// 记录十六进制日志
 	if dp.logHexDump {
-		zlog.Debugf("DNYPacket基础处理完成，数据长度: %d, 数据: %s",
-			totalLen, hex.EncodeToString(data[:totalLen]))
+		logger.WithFields(logrus.Fields{
+			"totalLen": totalLen,
+			"dataHex":  hex.EncodeToString(data[:totalLen]),
+		}).Debug("DNY协议数据包详情")
 	}
 
 	return msg, nil
+}
+
+// 辅助函数，返回两个数的较小值
+func min(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
 }
 
 // 🔧 已删除重复的isAllDigits函数，请使用special_handler.go中的IsAllDigits函数
