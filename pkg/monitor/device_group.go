@@ -151,8 +151,21 @@ func (dgm *DeviceGroupManager) GetGroup(iccid string) (*DeviceGroup, bool) {
 
 // AddDeviceToGroup 将设备添加到设备组
 func (dgm *DeviceGroupManager) AddDeviceToGroup(iccid, deviceID string, session *DeviceSession) {
+	// 判断ICCID是否有效
+	if iccid == "" {
+		logger.WithFields(logrus.Fields{
+			"deviceID": deviceID,
+		}).Warn("添加设备到组失败：ICCID为空")
+		return
+	}
+
 	group := dgm.GetOrCreateGroup(iccid)
 	group.AddDevice(deviceID, session)
+
+	// 设置设备的ICCID属性
+	if session != nil {
+		session.ICCID = iccid
+	}
 }
 
 // RemoveDeviceFromGroup 从设备组移除设备
@@ -187,6 +200,7 @@ func (dgm *DeviceGroupManager) GetAllDevicesInGroup(iccid string) map[string]*De
 }
 
 // BroadcastToGroup 向设备组中的所有设备广播消息
+// 修改为支持独立通信模式，确保消息正确发送到每个设备
 func (dgm *DeviceGroupManager) BroadcastToGroup(iccid string, data []byte) int {
 	devices := dgm.GetAllDevicesInGroup(iccid)
 	if len(devices) == 0 {
@@ -198,12 +212,11 @@ func (dgm *DeviceGroupManager) BroadcastToGroup(iccid string, data []byte) int {
 	copy(broadcastData, data)
 
 	// 对于小数量设备，直接同步发送
-	if len(devices) <= 3 {
+	if len(devices) <= 5 {
 		return dgm.synchronousBroadcast(iccid, devices, broadcastData)
+	} else {
+		return dgm.concurrentBroadcast(iccid, devices, broadcastData)
 	}
-
-	// 对于较多设备，使用协程并发发送
-	return dgm.concurrentBroadcast(iccid, devices, broadcastData)
 }
 
 // synchronousBroadcast 同步广播（适用于少量设备）

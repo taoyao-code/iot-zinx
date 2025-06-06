@@ -179,9 +179,72 @@ func (o *StatusUpdateOptimizer) executeBatchUpdate() {
 		atomic.StoreInt64(&o.stats.AvgBatchSize, totalExecuted/totalBatches)
 	}
 
+	// 按设备组分组更新，优化相关设备的更新
+	deviceGroups := make(map[string][]*StatusUpdate) // ICCID -> 更新列表
+	noGroupDevices := make([]*StatusUpdate, 0)       // 无组设备的更新列表
+
+	// 分组设备
+	sessionManager := GetSessionManager()
+	for _, update := range updatesCopy {
+		if session, exists := sessionManager.GetSession(update.DeviceID); exists && session.ICCID != "" {
+			// 有ICCID的设备，按ICCID分组
+			iccid := session.ICCID
+			if _, ok := deviceGroups[iccid]; !ok {
+				deviceGroups[iccid] = make([]*StatusUpdate, 0)
+			}
+			deviceGroups[iccid] = append(deviceGroups[iccid], update)
+		} else {
+			// 无ICCID的设备，放入无组列表
+			noGroupDevices = append(noGroupDevices, update)
+		}
+	}
+
 	// 执行批量更新
 	sources := make(map[string]int) // 统计更新来源
-	for _, update := range updatesCopy {
+
+	// 1. 先处理有组设备
+	for iccid, updates := range deviceGroups {
+		// 记录组状态变化
+		var activeCount int
+		var offlineCount int
+
+		// 按设备组处理
+		for _, update := range updates {
+			// 更新去重记录
+			o.mutex.Lock()
+			o.lastUpdateStatus[update.DeviceID] = update.Status
+			o.lastUpdateTime[update.DeviceID] = update.Timestamp
+			o.mutex.Unlock()
+
+			// 执行实际更新
+			if o.updateFunc != nil {
+				o.updateFunc(update.DeviceID, update.Status)
+			}
+
+			// 统计状态
+			if update.Status == constants.DeviceStatusOnline {
+				activeCount++
+			} else if update.Status == constants.DeviceStatusOffline {
+				offlineCount++
+			}
+
+			// 统计更新来源
+			sources[update.Source]++
+		}
+
+		// 记录组状态日志
+		if len(updates) > 1 {
+			logger.WithFields(logrus.Fields{
+				"iccid":        iccid,
+				"totalDevices": len(updates),
+				"active":       activeCount,
+				"offline":      offlineCount,
+			}).Debug("设备组状态批量更新")
+		}
+	}
+
+	// 2. 处理无组设备
+	for _, update := range noGroupDevices {
 		// 更新去重记录
 		o.mutex.Lock()
 		o.lastUpdateStatus[update.DeviceID] = update.Status

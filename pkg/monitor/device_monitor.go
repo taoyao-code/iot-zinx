@@ -195,8 +195,53 @@ func (dm *DeviceMonitor) OnDeviceDisconnect(deviceID string, conn ziface.IConnec
 		"reason":   reason,
 	}).Info("设备监控器：设备已断开")
 
+	// 获取设备ICCID
+	iccid := ""
+	if val, err := conn.GetProperty(constants.PropKeyICCID); err == nil && val != nil {
+		iccid = val.(string)
+	}
+
 	// 挂起设备会话
 	dm.sessionManager.SuspendSession(deviceID)
+
+	// 获取设备会话
+	session, exists := dm.sessionManager.GetSession(deviceID)
+	if !exists {
+		logger.WithFields(logrus.Fields{
+			"deviceID": deviceID,
+		}).Warn("设备断开连接，但未找到对应会话")
+		return
+	}
+
+	// 增加断开计数
+	session.DisconnectCount++
+	session.LastDisconnectTime = time.Now()
+
+	// 检查是否有其他设备使用相同ICCID（同一组）
+	if iccid != "" {
+		allDevices := dm.deviceGroupManager.GetAllDevicesInGroup(iccid)
+		activeDevices := 0
+
+		// 统计活跃设备数量
+		for otherDeviceID, otherSession := range allDevices {
+			if otherDeviceID != deviceID && otherSession.Status == constants.DeviceStatusOnline {
+				activeDevices++
+			}
+		}
+
+		// 记录设备组状态变化
+		logger.WithFields(logrus.Fields{
+			"deviceID":      deviceID,
+			"iccid":         iccid,
+			"activeDevices": activeDevices,
+			"totalDevices":  len(allDevices),
+		}).Info("设备断开连接，更新设备组状态")
+
+		// 触发设备组状态变化回调
+		if dm.onGroupStatusChange != nil {
+			dm.onGroupStatusChange(iccid, activeDevices, len(allDevices))
+		}
+	}
 }
 
 // heartbeatCheckLoop 心跳检查循环
@@ -300,6 +345,18 @@ func (dm *DeviceMonitor) checkDeviceHeartbeats() {
 
 // handleDeviceTimeout 处理设备超时
 func (dm *DeviceMonitor) handleDeviceTimeout(deviceID string) {
+	// 获取设备会话
+	session, exists := dm.sessionManager.GetSession(deviceID)
+	if !exists {
+		logger.WithFields(logrus.Fields{
+			"deviceID": deviceID,
+		}).Warn("处理设备超时，但未找到对应会话")
+		return
+	}
+
+	// 获取ICCID，用于组关系检查
+	iccid := session.ICCID
+
 	// 更新设备状态为离线
 	dm.sessionManager.UpdateSession(deviceID, func(session *DeviceSession) {
 		// 仅当设备当前为在线状态时才触发离线事件
@@ -314,6 +371,7 @@ func (dm *DeviceMonitor) handleDeviceTimeout(deviceID string) {
 				"newStatus":     constants.DeviceStatusOffline,
 				"lastHeartbeat": session.LastHeartbeatTime.Format(constants.TimeFormatDefault),
 				"timeSince":     time.Since(session.LastHeartbeatTime).Seconds(),
+				"iccid":         iccid,
 			}).Info("设备因心跳超时被标记为离线")
 
 			// 触发设备超时回调
@@ -325,6 +383,32 @@ func (dm *DeviceMonitor) handleDeviceTimeout(deviceID string) {
 
 	// 同步更新连接监控器中的设备状态
 	dm.connectionMonitor.UpdateDeviceStatus(deviceID, constants.DeviceStatusOffline)
+
+	// 如果设备属于设备组，检查组内其他设备状态
+	if iccid != "" {
+		allDevices := dm.deviceGroupManager.GetAllDevicesInGroup(iccid)
+		activeDevices := 0
+
+		// 统计活跃设备数量
+		for otherDeviceID, otherSession := range allDevices {
+			if otherDeviceID != deviceID && otherSession.Status == constants.DeviceStatusOnline {
+				activeDevices++
+			}
+		}
+
+		// 记录设备组状态变化
+		logger.WithFields(logrus.Fields{
+			"deviceID":      deviceID,
+			"iccid":         iccid,
+			"activeDevices": activeDevices,
+			"totalDevices":  len(allDevices),
+		}).Info("设备超时离线，更新设备组状态")
+
+		// 触发设备组状态变化回调
+		if dm.onGroupStatusChange != nil {
+			dm.onGroupStatusChange(iccid, activeDevices, len(allDevices))
+		}
+	}
 }
 
 // groupStatusMonitorLoop 设备组状态监控循环

@@ -412,34 +412,51 @@ func (m *TCPMonitor) handleSlaveDeviceBinding(deviceId string, conn ziface.IConn
 		"type":     "slave",
 	}).Info("绑定分机设备")
 
-	// 🔧 分机设备数据通过主机连接传输，需要确认当前连接是主机连接
-	// 方案1：检查当前连接是否为主机连接
-	if masterDeviceId, isMasterConn := m.masterConnectionMap.Load(connID); isMasterConn {
-		// 当前连接是主机连接，分机数据通过此连接转发
-		m.addSlaveToMasterConnection(deviceId, conn, connID, masterDeviceId.(string))
-		return
-	}
+	// 获取ICCID信息，用于记录日志
+	iccid := m.getICCIDFromConnection(conn)
 
-	// 方案2：根据ICCID查找已有的主机连接
-	if iccid := m.getICCIDFromConnection(conn); iccid != "" {
-		if masterConnID := m.findMasterConnectionByICCID(iccid); masterConnID != 0 {
-			if masterConn, exists := m.getMasterConnection(masterConnID); exists {
-				// 找到了主机连接，将分机绑定到主机连接
-				m.addSlaveToMasterConnection(deviceId, masterConn, masterConnID, "")
-				return
-			}
-		}
-	}
+	// 修改：优先支持分机设备独立通信模式
+	// 直接建立分机到连接的映射，不要求必须通过主机连接
+	m.deviceIdToConnMap.Store(deviceId, conn)
+	m.connIdToDeviceIdMap.Store(connID, deviceId)
 
-	// 🔧 错误处理：分机设备必须有对应的主机连接
+	// 创建新的设备集合
+	deviceSet := make(map[string]bool)
+	deviceSet[deviceId] = true
+	m.connIdToDeviceIdsMap.Store(connID, deviceSet)
+
+	// 设置连接属性
+	m.setConnectionProperties(deviceId, conn)
+
 	logger.WithFields(logrus.Fields{
 		"deviceId": deviceId,
 		"connID":   connID,
-		"iccid":    m.getICCIDFromConnection(conn),
-	}).Error("❌ 分机设备绑定失败：未找到对应的主机连接")
+		"iccid":    iccid,
+	}).Info("分机设备已成功绑定到独立连接")
 
-	// 不创建独立绑定，分机设备必须通过主机连接通信
-	// 这是主从架构的核心约束
+	// 尝试关联主机连接（仅用于优化通信，非必须）
+	// 方案1：检查当前连接是否为主机连接
+	if _, isMasterConn := m.masterConnectionMap.Load(connID); isMasterConn {
+		logger.WithFields(logrus.Fields{
+			"deviceId": deviceId,
+			"connID":   connID,
+		}).Debug("分机设备使用主机连接，无需关联")
+		return
+	}
+
+	// 方案2：可选地尝试关联主机连接（用于组网场景），但不要求必须关联
+	if iccid != "" {
+		if masterConnID := m.findMasterConnectionByICCID(iccid); masterConnID != 0 {
+			if _, exists := m.getMasterConnection(masterConnID); exists {
+				// 记录设备组关联关系，但不改变设备的独立通信能力
+				logger.WithFields(logrus.Fields{
+					"slaveDeviceId": deviceId,
+					"masterConnID":  masterConnID,
+					"iccid":         iccid,
+				}).Info("分机设备已关联到主机连接（仅组网关系）")
+			}
+		}
+	}
 }
 
 // addSlaveToMasterConnection 将分机添加到主机连接
