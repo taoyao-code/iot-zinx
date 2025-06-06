@@ -6,6 +6,7 @@ import (
 	"github.com/aceld/zinx/ziface"
 	"github.com/bujia-iot/iot-zinx/internal/infrastructure/logger"
 	"github.com/bujia-iot/iot-zinx/pkg/constants"
+	"github.com/bujia-iot/iot-zinx/pkg/heartbeat"
 	"github.com/bujia-iot/iot-zinx/pkg/monitor"
 	"github.com/bujia-iot/iot-zinx/pkg/network"
 	"github.com/bujia-iot/iot-zinx/pkg/protocol"
@@ -121,6 +122,19 @@ var Network = struct {
 	SetGlobalHeartbeatManager func(manager network.HeartbeatManagerInterface)
 	// 更新连接活动时间
 	UpdateConnectionActivity func(conn ziface.IConnection)
+
+	// 新增心跳服务适配器注册函数
+	RegisterHeartbeatAdapter func(
+		getHeartbeatService func() interface{},
+		newHeartbeatListener func(connMonitor interface {
+			GetConnectionByConnID(connID uint64) (ziface.IConnection, bool)
+		}) interface{},
+	)
+
+	// 初始化心跳服务
+	InitHeartbeatService func(monitorAdapter interface {
+		GetConnectionByConnID(connID uint64) (ziface.IConnection, bool)
+	}) error
 }{
 	GetCommandManager: func() network.ICommandManager {
 		return network.GetCommandManager()
@@ -134,6 +148,20 @@ var Network = struct {
 	SetUpdateDeviceStatusFunc: network.SetUpdateDeviceStatusFunc,
 	SetGlobalHeartbeatManager: network.SetGlobalHeartbeatManager,
 	UpdateConnectionActivity:  network.UpdateConnectionActivity,
+
+	// 新增心跳服务适配器注册函数
+	RegisterHeartbeatAdapter: func(
+		getHeartbeatService func() interface{},
+		newHeartbeatListener func(connMonitor interface {
+			GetConnectionByConnID(connID uint64) (ziface.IConnection, bool)
+		}) interface{},
+	) {
+		network.GetGlobalHeartbeatService = getHeartbeatService
+		network.NewHeartbeatListener = newHeartbeatListener
+	},
+
+	// 初始化心跳服务
+	InitHeartbeatService: network.InitHeartbeatService,
 }
 
 // Monitor 监控器相关接口
@@ -246,4 +274,32 @@ var Utils = struct {
 	SetupZinxLogger:         utils.SetupZinxLogger,
 	SetupImprovedZinxLogger: utils.SetupImprovedZinxLogger,
 	GetGlobalImprovedLogger: utils.GetGlobalImprovedLogger,
+}
+
+// Heartbeat 心跳服务相关功能导出
+type HeartbeatExport struct {
+	// 心跳服务实例管理
+	GetHeartbeatService       func() heartbeat.HeartbeatService
+	NewHeartbeatService       func(config *heartbeat.HeartbeatServiceConfig) heartbeat.HeartbeatService
+	SetGlobalHeartbeatService func(service heartbeat.HeartbeatService)
+
+	// 心跳监听器
+	NewConnectionDisconnector func(connMonitor interface {
+		GetConnectionByConnID(connID uint64) (ziface.IConnection, bool)
+	}) *heartbeat.ConnectionDisconnector
+
+	// 心跳事件类型
+	HeartbeatEvent        heartbeat.HeartbeatEvent
+	HeartbeatTimeoutEvent heartbeat.HeartbeatTimeoutEvent
+
+	// 心跳服务配置
+	HeartbeatServiceConfig heartbeat.HeartbeatServiceConfig
+}
+
+// Heartbeat 心跳服务相关工具导出
+var Heartbeat = HeartbeatExport{
+	GetHeartbeatService:       heartbeat.GetGlobalHeartbeatService,
+	NewHeartbeatService:       heartbeat.NewHeartbeatService,
+	SetGlobalHeartbeatService: heartbeat.SetGlobalHeartbeatService,
+	NewConnectionDisconnector: heartbeat.NewConnectionDisconnector,
 }

@@ -7,15 +7,75 @@ import (
 	"github.com/sirupsen/logrus"
 )
 
-// HeartbeatManagerInterface 定义心跳管理器接口
+// HeartbeatServiceAdapter 心跳服务适配器接口
+// 该接口用于在不同服务实现之间进行适配
+type HeartbeatServiceAdapter interface {
+	// 更新连接活动时间
+	UpdateActivity(conn ziface.IConnection)
+
+	// 注册事件监听器
+	RegisterListener(listener interface{})
+
+	// 启动服务
+	Start() error
+
+	// 停止服务
+	Stop()
+}
+
+// HeartbeatListenerAdapter 心跳监听器适配器接口
+type HeartbeatListenerAdapter interface {
+	// 心跳事件处理
+	OnHeartbeat(conn ziface.IConnection, timestamp int64)
+
+	// 心跳超时事件处理
+	OnHeartbeatTimeout(conn ziface.IConnection, lastActivity int64)
+}
+
+// 全局心跳服务和适配器
+var (
+	// GlobalHeartbeatService 全局心跳服务
+	GlobalHeartbeatService HeartbeatServiceAdapter
+
+	// HeartbeatServiceFactory 心跳服务工厂函数
+	HeartbeatServiceFactory func() HeartbeatServiceAdapter
+
+	// HeartbeatListenerFactory 心跳监听器工厂函数
+	HeartbeatListenerFactory func(connMonitor interface {
+		GetConnectionByConnID(connID uint64) (ziface.IConnection, bool)
+	}) interface{}
+
+	// GetGlobalHeartbeatService 获取全局心跳服务实例函数
+	GetGlobalHeartbeatService func() interface{}
+
+	// NewHeartbeatListener 创建心跳监听器函数
+	NewHeartbeatListener func(connMonitor interface {
+		GetConnectionByConnID(connID uint64) (ziface.IConnection, bool)
+	}) interface{}
+)
+
+// RegisterHeartbeatAdapter 注册心跳服务适配器
+// 该函数用于注册外部心跳服务实现
+func RegisterHeartbeatAdapter(
+	serviceFactory func() HeartbeatServiceAdapter,
+	listenerFactory func(connMonitor interface {
+		GetConnectionByConnID(connID uint64) (ziface.IConnection, bool)
+	}) interface{},
+) {
+	HeartbeatServiceFactory = serviceFactory
+	HeartbeatListenerFactory = listenerFactory
+	logger.Info("心跳服务适配器已注册")
+}
+
+// HeartbeatManagerInterface 定义心跳管理器接口（旧版接口，保留兼容性）
 type HeartbeatManagerInterface interface {
 	UpdateConnectionActivity(conn ziface.IConnection)
 }
 
-// GlobalHeartbeatManager 全局心跳管理器实例
+// GlobalHeartbeatManager 全局心跳管理器实例（旧版，保留兼容性）
 var GlobalHeartbeatManager HeartbeatManagerInterface
 
-// SetGlobalHeartbeatManager 设置全局心跳管理器
+// SetGlobalHeartbeatManager 设置全局心跳管理器（旧版，保留兼容性）
 func SetGlobalHeartbeatManager(manager HeartbeatManagerInterface) {
 	GlobalHeartbeatManager = manager
 }
@@ -23,6 +83,18 @@ func SetGlobalHeartbeatManager(manager HeartbeatManagerInterface) {
 // UpdateConnectionActivity 更新连接活动时间的全局方法
 // 该方法需要在接收到客户端任何有效数据包时调用
 func UpdateConnectionActivity(conn ziface.IConnection) {
+	// 优先使用新版心跳服务
+	if GlobalHeartbeatService != nil {
+		GlobalHeartbeatService.UpdateActivity(conn)
+	} else if HeartbeatServiceFactory != nil {
+		// 延迟初始化
+		GlobalHeartbeatService = HeartbeatServiceFactory()
+		if GlobalHeartbeatService != nil {
+			GlobalHeartbeatService.UpdateActivity(conn)
+		}
+	}
+
+	// 同时保持对旧系统的兼容
 	if GlobalHeartbeatManager != nil {
 		GlobalHeartbeatManager.UpdateConnectionActivity(conn)
 	}
@@ -134,4 +206,42 @@ var UpdateDeviceStatusFunc UpdateDeviceStatusFuncType
 // SetUpdateDeviceStatusFunc 设置更新设备状态的函数
 func SetUpdateDeviceStatusFunc(fn UpdateDeviceStatusFuncType) {
 	UpdateDeviceStatusFunc = fn
+}
+
+// InitHeartbeatService 初始化并启动心跳服务
+// 由外部组件调用，通常在服务器启动过程中
+func InitHeartbeatService(monitorAdapter interface {
+	GetConnectionByConnID(connID uint64) (ziface.IConnection, bool)
+},
+) error {
+	// 检查心跳服务工厂
+	if HeartbeatServiceFactory == nil || HeartbeatListenerFactory == nil {
+		logger.Warn("心跳服务工厂未注册，使用内置心跳管理器")
+		return nil
+	}
+
+	// 创建心跳服务实例
+	heartbeatService := HeartbeatServiceFactory()
+	if heartbeatService == nil {
+		logger.Error("无法创建心跳服务实例")
+		return nil
+	}
+
+	// 保存到全局变量
+	GlobalHeartbeatService = heartbeatService
+
+	// 创建并注册连接断开监听器
+	listener := HeartbeatListenerFactory(monitorAdapter)
+	heartbeatService.RegisterListener(listener)
+
+	// 启动心跳服务
+	if err := heartbeatService.Start(); err != nil {
+		logger.WithFields(logrus.Fields{
+			"error": err.Error(),
+		}).Error("启动心跳服务失败")
+		return err
+	}
+
+	logger.Info("心跳服务已成功初始化和启动")
+	return nil
 }

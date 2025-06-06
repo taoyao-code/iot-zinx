@@ -5,6 +5,7 @@ import (
 
 	"github.com/aceld/zinx/ziface"
 	"github.com/bujia-iot/iot-zinx/internal/infrastructure/logger"
+	"github.com/bujia-iot/iot-zinx/pkg/heartbeat"
 	"github.com/bujia-iot/iot-zinx/pkg/monitor"
 	"github.com/bujia-iot/iot-zinx/pkg/network"
 	"github.com/bujia-iot/iot-zinx/pkg/protocol"
@@ -34,6 +35,10 @@ func InitPackages() {
 
 	// 🔧 设置心跳管理的主从监控适配器
 	network.SetMasterSlaveMonitorAdapter(monitor.GetGlobalMonitor())
+
+	// 注册心跳服务适配器
+	// 这将允许心跳包和网络包之间协同工作，而不产生循环依赖
+	heartbeat.RegisterHeartbeatToNetwork()
 
 	// 设置monitor包的DNY协议发送器
 	// 这里通过适配器模式解决循环依赖问题
