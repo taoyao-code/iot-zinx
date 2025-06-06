@@ -89,13 +89,6 @@ func (h *DeviceVersionHandler) Handle(request ziface.IRequest) {
 		return
 	}
 
-	// 构建响应数据 - 简单回显
-	responseData := make([]byte, 8)
-	copy(responseData, data[:8])
-
-	// 发送响应
-	h.SendDNYResponse(conn, physicalId, messageID, 0x35, responseData)
-
 	// 解析设备类型、版本号和分机编号
 	deviceType := binary.LittleEndian.Uint32(data[0:4])
 	version := binary.LittleEndian.Uint32(data[4:8])
@@ -112,24 +105,12 @@ func (h *DeviceVersionHandler) Handle(request ziface.IRequest) {
 		"timestamp":  time.Now().Format(constants.TimeFormatDefault),
 	}).Info("收到设备版本上传")
 
-	// 发送响应确认
-	if err := h.SendDNYResponse(conn, physicalId, messageID, 0x35, responseData); err != nil {
-		logger.WithFields(logrus.Fields{
-			"connID":     conn.GetConnID(),
-			"physicalId": fmt.Sprintf("0x%08X", physicalId),
-			"messageID":  fmt.Sprintf("0x%04X", messageID),
-			"error":      err.Error(),
-		}).Error("发送设备版本上传响应失败")
-		return
-	}
+	// 更新心跳时间
+	h.UpdateHeartbeat(conn)
 
-	// 记录成功发送
 	logger.WithFields(logrus.Fields{
 		"connID":     conn.GetConnID(),
 		"physicalId": fmt.Sprintf("0x%08X", physicalId),
 		"messageID":  fmt.Sprintf("0x%04X", messageID),
-	}).Debug("设备版本上传响应发送成功")
-
-	// 更新心跳时间
-	h.UpdateHeartbeat(conn)
+	}).Debug("设备版本上传处理成功，根据协议规范无需应答")
 }

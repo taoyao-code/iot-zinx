@@ -5,7 +5,6 @@ import (
 	"time"
 
 	"github.com/aceld/zinx/ziface"
-	"github.com/bujia-iot/iot-zinx/internal/domain/dny_protocol"
 	"github.com/bujia-iot/iot-zinx/internal/infrastructure/logger"
 	"github.com/bujia-iot/iot-zinx/pkg/constants"
 	"github.com/bujia-iot/iot-zinx/pkg/network"
@@ -86,20 +85,13 @@ func (h *DeviceStatusHandler) Handle(request ziface.IRequest) {
 		"timestamp":  time.Now().Format(constants.TimeFormatDefault),
 	}).Info("收到设备状态上报")
 
-	// 构建响应数据
-	responseData := []byte{dny_protocol.ResponseSuccess}
-
-	// 发送响应
-	if err := h.SendDNYResponse(conn, physicalId, messageID, uint8(dny_protocol.CmdNetworkStatus), responseData); err != nil {
-		logger.WithFields(logrus.Fields{
-			"connID":     conn.GetConnID(),
-			"physicalId": fmt.Sprintf("0x%08X", physicalId),
-			"messageID":  fmt.Sprintf("0x%04X", messageID),
-			"error":      err.Error(),
-		}).Error("发送设备状态上报响应失败")
-		return
-	}
-
 	// 更新心跳时间
 	h.UpdateHeartbeat(conn)
+
+	logger.WithFields(logrus.Fields{
+		"connID":     conn.GetConnID(),
+		"physicalId": fmt.Sprintf("0x%08X", physicalId),
+		"messageID":  fmt.Sprintf("0x%04X", messageID),
+		"status":     fmt.Sprintf("0x%02X", statusCode),
+	}).Debug("设备状态上报处理成功，根据协议规范无需应答")
 }

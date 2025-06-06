@@ -134,6 +134,25 @@ func (h *HeartbeatHandler) Handle(request ziface.IRequest) {
 	// 获取ICCID
 	iccid := h.GetICCID(conn)
 
+	// 检测是否为旧格式心跳包（命令字为0x01，数据长度为20字节）
+	if msg.GetMsgID() == uint32(dny_protocol.CmdHeartbeat) && len(data) == 20 {
+		// 检查特定物理ID的旧心跳包 (0x04A228CD 或 0x04A26CF3)
+		if physicalId == 0x04A228CD || physicalId == 0x04A26CF3 || len(data) == 20 {
+			logger.WithFields(logrus.Fields{
+				"connID":     conn.GetConnID(),
+				"physicalId": fmt.Sprintf("0x%08X", physicalId),
+				"deviceId":   deviceId,
+				"dataLen":    len(data),
+				"msgID":      msg.GetMsgID(),
+				"remoteAddr": conn.RemoteAddr().String(),
+			}).Warn("检测到旧格式心跳包，不做响应")
+
+			// 更新心跳时间，但不发送响应
+			h.UpdateHeartbeat(conn)
+			return
+		}
+	}
+
 	// 构建心跳响应数据
 	responseData := make([]byte, 8)
 

@@ -8,7 +8,6 @@ import (
 	"github.com/bujia-iot/iot-zinx/internal/infrastructure/logger"
 	"github.com/bujia-iot/iot-zinx/pkg/monitor"
 	"github.com/bujia-iot/iot-zinx/pkg/network"
-	"github.com/bujia-iot/iot-zinx/pkg/protocol"
 	"github.com/sirupsen/logrus"
 )
 
@@ -115,29 +114,14 @@ func (h *MainHeartbeatHandler) Handle(request ziface.IRequest) {
 	// 绑定设备ID到连接
 	monitor.GetGlobalMonitor().BindDeviceIdToConnection(deviceId, conn)
 
-	// 构建响应数据
-	responseData := make([]byte, 1)
-	responseData[0] = dny_protocol.ResponseSuccess // 成功
-
-	// 发送响应
-	if err := protocol.SendDNYResponse(conn, physicalId, messageId, uint8(dny_protocol.CmdMainHeartbeat), responseData); err != nil {
-		logger.WithFields(logrus.Fields{
-			"connID":     conn.GetConnID(),
-			"physicalId": fmt.Sprintf("0x%08X", physicalId),
-			"messageId":  fmt.Sprintf("0x%04X", messageId),
-			"error":      err.Error(),
-		}).Error("发送主机心跳响应失败")
-		return
-	}
+	// 更新心跳时间
+	monitor.GetGlobalMonitor().UpdateLastHeartbeatTime(conn)
 
 	logger.WithFields(logrus.Fields{
 		"connID":     conn.GetConnID(),
 		"physicalId": fmt.Sprintf("0x%08X", physicalId),
 		"deviceId":   deviceId,
-	}).Debug("主机心跳响应发送成功")
-
-	// 更新心跳时间
-	monitor.GetGlobalMonitor().UpdateLastHeartbeatTime(conn)
+	}).Debug("主机心跳处理成功，根据协议规范无需应答")
 }
 
 // PostHandle 后处理主机心跳请求
