@@ -27,15 +27,8 @@ func (h *DeviceStatusHandler) Handle(request ziface.IRequest) {
 
 	// 从DNYMessage中获取真实的PhysicalID
 	var physicalId uint32
-	var messageID uint16
 	if dnyMsg, ok := h.GetDNYMessage(request); ok {
 		physicalId = dnyMsg.GetPhysicalId()
-		// 从连接属性获取MessageID
-		if prop, err := conn.GetProperty(network.PropKeyDNYMessageID); err == nil {
-			if mid, ok := prop.(uint16); ok {
-				messageID = mid
-			}
-		}
 	} else {
 		// 从连接属性中获取PhysicalID
 		if prop, err := conn.GetProperty(network.PropKeyDNYPhysicalID); err == nil {
@@ -47,51 +40,31 @@ func (h *DeviceStatusHandler) Handle(request ziface.IRequest) {
 			logger.WithFields(logrus.Fields{
 				"connID": conn.GetConnID(),
 				"msgID":  msg.GetMsgID(),
-			}).Error("❌ 设备状态上报Handle：无法获取PhysicalID，拒绝处理")
+			}).Error("❌ 设备状态处理器：无法获取PhysicalID，拒绝处理")
 			return
 		}
-		// 从连接属性获取MessageID
-		if prop, err := conn.GetProperty(network.PropKeyDNYMessageID); err == nil {
-			if mid, ok := prop.(uint16); ok {
-				messageID = mid
-			}
-		}
 	}
-
-	// 基本参数检查
-	if len(data) < 1 {
-		logger.WithFields(logrus.Fields{
-			"connID":     conn.GetConnID(),
-			"physicalId": fmt.Sprintf("0x%08X", physicalId),
-			"messageID":  fmt.Sprintf("0x%04X", messageID),
-			"dataLen":    len(data),
-		}).Error("设备状态上报数据长度不足")
-		return
-	}
-
-	// 解析设备状态 - 第一个字节是状态代码
-	statusCode := data[0]
 
 	// 获取设备ID
-	deviceId := h.GetDeviceID(conn)
-
-	// 记录设备状态
-	logger.WithFields(logrus.Fields{
-		"connID":     conn.GetConnID(),
-		"physicalId": fmt.Sprintf("0x%08X", physicalId),
-		"deviceId":   deviceId,
-		"status":     fmt.Sprintf("0x%02X", statusCode),
-		"remoteAddr": conn.RemoteAddr().String(),
-		"timestamp":  time.Now().Format(constants.TimeFormatDefault),
-	}).Info("收到设备状态上报")
+	deviceId := h.FormatPhysicalID(physicalId)
 
 	// 更新心跳时间
 	h.UpdateHeartbeat(conn)
 
+	// 处理设备状态
+	statusInfo := "设备状态查询"
+	if len(data) > 0 {
+		statusInfo = fmt.Sprintf("设备状态: 0x%02X", data[0])
+	}
+
+	// 按照协议规范，服务器不需要对 0x81 查询设备联网状态 进行应答
+	// 记录设备状态查询日志
 	logger.WithFields(logrus.Fields{
 		"connID":     conn.GetConnID(),
 		"physicalId": fmt.Sprintf("0x%08X", physicalId),
-		"messageID":  fmt.Sprintf("0x%04X", messageID),
-		"status":     fmt.Sprintf("0x%02X", statusCode),
-	}).Debug("设备状态上报处理成功，根据协议规范无需应答")
+		"deviceId":   deviceId,
+		"statusInfo": statusInfo,
+		"remoteAddr": conn.RemoteAddr().String(),
+		"timestamp":  time.Now().Format(constants.TimeFormatDefault),
+	}).Info("✅ 设备状态查询处理完成")
 }

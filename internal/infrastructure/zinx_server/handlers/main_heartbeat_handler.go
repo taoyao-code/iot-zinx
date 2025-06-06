@@ -1,12 +1,14 @@
 package handlers
 
 import (
+	"encoding/binary"
 	"fmt"
+	"time"
 
 	"github.com/aceld/zinx/ziface"
 	"github.com/bujia-iot/iot-zinx/internal/domain/dny_protocol"
 	"github.com/bujia-iot/iot-zinx/internal/infrastructure/logger"
-	"github.com/bujia-iot/iot-zinx/pkg/monitor"
+	"github.com/bujia-iot/iot-zinx/pkg/constants"
 	"github.com/bujia-iot/iot-zinx/pkg/network"
 	"github.com/sirupsen/logrus"
 )
@@ -42,86 +44,59 @@ func (h *MainHeartbeatHandler) Handle(request ziface.IRequest) {
 
 	// 获取物理ID和消息ID
 	var physicalId uint32
-	var messageId uint16
 
 	// 优先从DNY消息对象中获取信息
 	if dnyMsg, ok := msg.(*dny_protocol.Message); ok {
 		physicalId = dnyMsg.GetPhysicalId()
-		messageId = dnyMsg.MessageId
 		logger.WithFields(logrus.Fields{
 			"physicalID": fmt.Sprintf("0x%08X", physicalId),
-			"messageID":  fmt.Sprintf("0x%04X", messageId),
-		}).Debug("从DNY消息对象获取ID信息")
+		}).Debug("从DNY消息获取物理ID成功")
 	} else {
-		// 从连接属性中获取PhysicalID（备选方案）
+		// 从连接属性中获取
 		if prop, err := conn.GetProperty(network.PropKeyDNYPhysicalID); err == nil {
 			if pid, ok := prop.(uint32); ok {
 				physicalId = pid
 				logger.WithFields(logrus.Fields{
 					"physicalID": fmt.Sprintf("0x%08X", physicalId),
-				}).Debug("从连接属性获取PhysicalID")
+				}).Debug("从连接属性获取物理ID成功")
 			}
 		}
-		// 从连接属性获取MessageID（备选方案）
-		if prop, err := conn.GetProperty(network.PropKeyDNYMessageID); err == nil {
-			if mid, ok := prop.(uint16); ok {
-				messageId = mid
-			}
+
+		if physicalId == 0 {
+			logger.WithFields(logrus.Fields{
+				"connID": conn.GetConnID(),
+				"msgID":  msg.GetMsgID(),
+			}).Error("无法获取有效的物理ID，拒绝处理主机心跳")
+			return
 		}
 	}
 
-	// 验证物理ID是否有效
-	if physicalId == 0 {
-		logger.WithFields(logrus.Fields{
-			"connID": conn.GetConnID(),
-			"msgID":  msg.GetMsgID(),
-		}).Error("无法获取PhysicalID，拒绝处理")
-		return
-	}
-
-	deviceId := fmt.Sprintf("%08X", physicalId)
-
-	logger.WithFields(logrus.Fields{
-		"connID":     conn.GetConnID(),
-		"physicalID": fmt.Sprintf("0x%08X", physicalId),
-		"messageID":  fmt.Sprintf("0x%04X", messageId),
-		"deviceId":   deviceId,
-		"dataLen":    len(data),
-	}).Info("处理主机心跳数据")
-
-	// 解析主机心跳数据
-	heartbeatData := &dny_protocol.MainHeartbeatData{}
-	if err := heartbeatData.UnmarshalBinary(data); err != nil {
-		logger.WithFields(logrus.Fields{
-			"connID":     conn.GetConnID(),
-			"physicalId": fmt.Sprintf("0x%08X", physicalId),
-			"dataLen":    len(data),
-			"error":      err.Error(),
-		}).Error("主机心跳数据解析失败")
-		return
-	}
-
-	logger.WithFields(logrus.Fields{
-		"connID":         conn.GetConnID(),
-		"physicalId":     fmt.Sprintf("0x%08X", physicalId),
-		"deviceId":       deviceId,
-		"deviceStatus":   heartbeatData.DeviceStatus,
-		"gunCount":       heartbeatData.GunCount,
-		"temperature":    heartbeatData.Temperature,
-		"signalStrength": heartbeatData.SignalStrength,
-	}).Info("收到主机心跳数据")
-
-	// 绑定设备ID到连接
-	monitor.GetGlobalMonitor().BindDeviceIdToConnection(deviceId, conn)
+	// 获取设备ID
+	deviceId := h.FormatPhysicalID(physicalId)
 
 	// 更新心跳时间
-	monitor.GetGlobalMonitor().UpdateLastHeartbeatTime(conn)
+	h.UpdateHeartbeat(conn)
 
+	// 解析心跳数据 (如果有)
+	var heartbeatInfo string
+	if len(data) >= 4 {
+		// 解析状态字
+		status := binary.LittleEndian.Uint32(data[0:4])
+		heartbeatInfo = fmt.Sprintf("主机状态: 0x%08X", status)
+	} else {
+		heartbeatInfo = "主机心跳 (无数据)"
+	}
+
+	// 按照协议规范，服务器不需要对 0x11 主机状态心跳包进行应答
+	// 记录主机心跳日志
 	logger.WithFields(logrus.Fields{
-		"connID":     conn.GetConnID(),
-		"physicalId": fmt.Sprintf("0x%08X", physicalId),
-		"deviceId":   deviceId,
-	}).Debug("主机心跳处理成功，根据协议规范无需应答")
+		"connID":        conn.GetConnID(),
+		"deviceId":      deviceId,
+		"physicalId":    fmt.Sprintf("0x%08X", physicalId),
+		"heartbeatInfo": heartbeatInfo,
+		"remoteAddr":    conn.RemoteAddr().String(),
+		"timestamp":     time.Now().Format(constants.TimeFormatDefault),
+	}).Info("✅ 主机心跳处理完成")
 }
 
 // PostHandle 后处理主机心跳请求

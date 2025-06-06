@@ -1,8 +1,6 @@
 package handlers
 
 import (
-	"encoding/binary"
-	"encoding/hex"
 	"fmt"
 	"time"
 
@@ -40,77 +38,56 @@ func (h *DeviceVersionHandler) Handle(request ziface.IRequest) {
 
 	// 🔧 修复：从DNYMessage中获取真实的PhysicalID
 	var physicalId uint32
-	var messageID uint16
 	if dnyMsg, ok := h.GetDNYMessage(request); ok {
 		physicalId = dnyMsg.GetPhysicalId()
-		// 从连接属性获取MessageID
-		if prop, err := conn.GetProperty(network.PropKeyDNYMessageID); err == nil {
-			if mid, ok := prop.(uint16); ok {
-				messageID = mid
-			}
-		}
-		logger.WithFields(logrus.Fields{
-			"physicalID": fmt.Sprintf("0x%08X", physicalId),
-			"messageID":  fmt.Sprintf("0x%04X", messageID),
-		}).Debug("设备版本上传处理器：从DNYMessage获取真实PhysicalID")
 	} else {
 		// 从连接属性中获取PhysicalID
 		if prop, err := conn.GetProperty(network.PropKeyDNYPhysicalID); err == nil {
 			if pid, ok := prop.(uint32); ok {
 				physicalId = pid
-				logger.WithFields(logrus.Fields{
-					"physicalID": fmt.Sprintf("0x%08X", physicalId),
-				}).Debug("设备版本上传处理器：从连接属性获取PhysicalID")
 			}
 		}
 		if physicalId == 0 {
 			logger.WithFields(logrus.Fields{
 				"connID": conn.GetConnID(),
 				"msgID":  msg.GetMsgID(),
-			}).Error("❌ 设备版本上传Handle：无法获取PhysicalID，拒绝处理")
+			}).Error("❌ 设备版本上传处理器：无法获取PhysicalID，拒绝处理")
 			return
-		}
-		// 从连接属性获取MessageID
-		if prop, err := conn.GetProperty(network.PropKeyDNYMessageID); err == nil {
-			if mid, ok := prop.(uint16); ok {
-				messageID = mid
-			}
 		}
 	}
 
-	// 检查数据长度，DNY协议版本上传至少需要8字节
-	if len(data) < 8 {
+	// 获取设备ID
+	deviceID := h.FormatPhysicalID(physicalId)
+
+	// 解析设备版本数据
+	if len(data) < 3 {
 		logger.WithFields(logrus.Fields{
 			"connID":     conn.GetConnID(),
-			"dataLen":    len(data),
 			"physicalId": fmt.Sprintf("0x%08X", physicalId),
-			"messageID":  fmt.Sprintf("0x%04X", messageID),
-		}).Error("设备版本上传数据长度不足")
+			"dataLen":    len(data),
+		}).Error("❌ 设备版本数据不完整，无法解析")
 		return
 	}
 
-	// 解析设备类型、版本号和分机编号
-	deviceType := binary.LittleEndian.Uint32(data[0:4])
-	version := binary.LittleEndian.Uint32(data[4:8])
+	// 解析设备类型和版本号
+	deviceType := data[0]
+	versionHigh := data[1]
+	versionLow := data[2]
+	versionStr := fmt.Sprintf("%d.%d", versionHigh, versionLow)
 
-	// 打印设备版本信息
+	// 更新设备类型和版本号属性
+	conn.SetProperty(constants.PropKeyDeviceType, deviceType)
+	conn.SetProperty(constants.PropKeyDeviceVersion, versionStr)
+
+	// 按照协议规范，服务器不需要对 0x35 上传分机版本号与设备类型 进行应答
+	// 记录设备版本信息
 	logger.WithFields(logrus.Fields{
 		"connID":     conn.GetConnID(),
 		"physicalId": fmt.Sprintf("0x%08X", physicalId),
-		"messageID":  fmt.Sprintf("0x%04X", messageID),
-		"deviceType": fmt.Sprintf("0x%08X", deviceType),
-		"version":    fmt.Sprintf("0x%08X", version),
-		"dataHex":    hex.EncodeToString(data),
+		"deviceId":   deviceID,
+		"deviceType": fmt.Sprintf("0x%02X", deviceType),
+		"versionStr": versionStr,
 		"remoteAddr": conn.RemoteAddr().String(),
 		"timestamp":  time.Now().Format(constants.TimeFormatDefault),
-	}).Info("收到设备版本上传")
-
-	// 更新心跳时间
-	h.UpdateHeartbeat(conn)
-
-	logger.WithFields(logrus.Fields{
-		"connID":     conn.GetConnID(),
-		"physicalId": fmt.Sprintf("0x%08X", physicalId),
-		"messageID":  fmt.Sprintf("0x%04X", messageID),
-	}).Debug("设备版本上传处理成功，根据协议规范无需应答")
+	}).Info("✅ 设备版本上传处理完成")
 }

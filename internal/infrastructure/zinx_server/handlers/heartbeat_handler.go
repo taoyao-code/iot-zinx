@@ -1,7 +1,6 @@
 package handlers
 
 import (
-	"encoding/binary"
 	"fmt"
 	"strings"
 	"time"
@@ -97,15 +96,8 @@ func (h *HeartbeatHandler) Handle(request ziface.IRequest) {
 
 	// 从DNYMessage中获取真实的PhysicalID
 	var physicalId uint32
-	var messageID uint16
 	if dnyMsg, ok := h.GetDNYMessage(request); ok {
 		physicalId = dnyMsg.GetPhysicalId()
-		// 从连接属性获取MessageID
-		if prop, err := conn.GetProperty(network.PropKeyDNYMessageID); err == nil {
-			if mid, ok := prop.(uint16); ok {
-				messageID = mid
-			}
-		}
 	} else {
 		// 从连接属性中获取PhysicalID
 		if prop, err := conn.GetProperty(network.PropKeyDNYPhysicalID); err == nil {
@@ -119,12 +111,6 @@ func (h *HeartbeatHandler) Handle(request ziface.IRequest) {
 				"msgID":  msg.GetMsgID(),
 			}).Error("❌ 心跳Handle：无法获取PhysicalID，拒绝处理")
 			return
-		}
-		// 从连接属性获取MessageID
-		if prop, err := conn.GetProperty(network.PropKeyDNYMessageID); err == nil {
-			if mid, ok := prop.(uint16); ok {
-				messageID = mid
-			}
 		}
 	}
 
@@ -153,23 +139,11 @@ func (h *HeartbeatHandler) Handle(request ziface.IRequest) {
 		}
 	}
 
-	// 构建心跳响应数据
-	responseData := make([]byte, 8)
-
-	// 前4字节为Unix时间戳，小端序
-	now := time.Now()
-	binary.LittleEndian.PutUint32(responseData[0:4], uint32(now.Unix()))
-
-	// 后4字节为保留字节，全0
-	binary.LittleEndian.PutUint32(responseData[4:8], 0)
-
-	// 发送心跳响应
-	h.SendDNYResponse(conn, physicalId, messageID, uint8(dny_protocol.CmdHeartbeat), responseData)
-
-	// 更新心跳时间
+	// 根据协议规范，心跳包不需要服务器应答，只需更新心跳时间
 	h.UpdateHeartbeat(conn)
 
 	// 记录设备心跳
+	now := time.Now()
 	nowStr := now.Format(constants.TimeFormatDefault)
 	logger.WithFields(logrus.Fields{
 		"connID":     conn.GetConnID(),

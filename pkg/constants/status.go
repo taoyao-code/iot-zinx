@@ -51,6 +51,10 @@ const (
 	PropKeyStatus = "status"
 	// PropKeyDirectMode 直连模式属性键
 	PropKeyDirectMode = "direct_mode"
+	// PropKeyDeviceType 设备类型属性键
+	PropKeyDeviceType = "device_type"
+	// PropKeyDeviceVersion 设备版本属性键
+	PropKeyDeviceVersion = "device_version"
 )
 
 // 时间格式常量

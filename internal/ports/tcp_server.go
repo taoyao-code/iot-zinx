@@ -7,7 +7,6 @@ import (
 	"github.com/aceld/zinx/zconf"
 	"github.com/aceld/zinx/ziface"
 	"github.com/aceld/zinx/znet"
-	"github.com/bujia-iot/iot-zinx/internal/domain/dny_protocol"
 	"github.com/bujia-iot/iot-zinx/internal/infrastructure/config"
 	"github.com/bujia-iot/iot-zinx/internal/infrastructure/logger"
 	"github.com/bujia-iot/iot-zinx/internal/infrastructure/zinx_server/handlers"
@@ -135,9 +134,9 @@ func (s *TCPServer) setupConnectionHooks() {
 	s.server.SetOnConnStart(connectionHooks.OnConnectionStart)
 	s.server.SetOnConnStop(connectionHooks.OnConnectionStop)
 
-	// 不使用Zinx内部心跳检测，改为自定义心跳机制
-	// s.server.StartHeartBeat(3 * time.Second)
-	logger.Info("已禁用Zinx内部心跳检测，使用自定义心跳机制")
+	// 使用Zinx内部心跳检测
+	s.server.StartHeartBeat(3 * time.Second)
+	logger.Info("已启用Zinx内部心跳检测机制")
 }
 
 // startDeviceMonitor 启动设备监控器
@@ -309,8 +308,13 @@ func (h *HeartbeatManager) Start() {
 	// 注册到全局网络包
 	pkg.Network.SetGlobalHeartbeatManager(h)
 
-	go h.heartbeatLoop()
+	// 不再主动发送心跳，因为已使用Zinx内置心跳机制
+	// go h.heartbeatLoop()
+
+	// 仍然保留连接活动监控
 	go h.monitorConnectionActivity()
+
+	logger.Info("使用Zinx内置心跳机制，自定义心跳管理器仅保留连接活动监控功能")
 }
 
 // UpdateConnectionActivity 更新连接活动时间
@@ -342,23 +346,6 @@ func (h *HeartbeatManager) UpdateConnectionActivity(conn ziface.IConnection) {
 		"remoteAddr": conn.RemoteAddr().String(),
 		"time":       now.Format(constants.TimeFormatDefault),
 	}).Debug("更新连接活动时间")
-}
-
-// heartbeatLoop 心跳循环
-func (h *HeartbeatManager) heartbeatLoop() {
-	ticker := time.NewTicker(h.interval)
-	defer ticker.Stop()
-
-	logger.WithFields(logrus.Fields{
-		"interval": h.interval.String(),
-		"purpose":  "发送纯DNY协议心跳(0x81)",
-	}).Info("🚀 心跳管理器已启动")
-
-	heartbeatCounter := 0
-	for range ticker.C {
-		heartbeatCounter++
-		h.sendHeartbeats(heartbeatCounter)
-	}
 }
 
 // monitorConnectionActivity 监控连接活动
@@ -457,61 +444,6 @@ func (h *HeartbeatManager) checkConnectionActivity(timeoutDuration time.Duration
 			"count": disconnectCount,
 		}).Info("已断开不活跃连接")
 	}
-}
-
-// sendHeartbeats 向所有设备发送心跳
-func (h *HeartbeatManager) sendHeartbeats(counter int) {
-	// 获取全局监控器
-	monitor := pkg.Monitor.GetGlobalMonitor()
-	if monitor == nil {
-		logger.Error("❌ 无法获取全局监控器，无法发送心跳消息")
-		return
-	}
-
-	logger.WithFields(logrus.Fields{
-		"heartbeatNo": counter,
-		"time":        time.Now().Format(constants.TimeFormatDefault),
-	}).Info("💓 开始发送心跳轮询")
-
-	connectionCount := 0
-	successCount := 0
-	failCount := 0
-
-	// 遍历所有连接发送心跳
-	monitor.ForEachConnection(func(deviceId string, conn ziface.IConnection) bool {
-		connectionCount++
-
-		// 使用pkg.Protocol.SendDNYRequest发送心跳请求
-		messageID := uint16(1) // 简单的消息ID
-		err := pkg.Protocol.SendDNYRequest(conn, 0, messageID, dny_protocol.CmdNetworkStatus, []byte{})
-
-		if err != nil {
-			failCount++
-			logger.WithFields(logrus.Fields{
-				"connID":   conn.GetConnID(),
-				"deviceId": deviceId,
-				"error":    err.Error(),
-			}).Error("❌ 发送心跳失败")
-			// 心跳发送失败表示连接可能已经断开，但不立即关闭连接
-			// 让连接活动监控来处理
-		} else {
-			successCount++
-			logger.WithFields(logrus.Fields{
-				"connID":   conn.GetConnID(),
-				"deviceId": deviceId,
-			}).Debug("✅ 心跳发送成功")
-		}
-
-		return true // 继续遍历下一个连接
-	})
-
-	// 心跳轮询统计
-	logger.WithFields(logrus.Fields{
-		"heartbeatNo":     counter,
-		"connectionCount": connectionCount,
-		"successCount":    successCount,
-		"failCount":       failCount,
-	}).Info("💓 心跳轮询完成")
 }
 
 // onRemoteNotAlive 处理设备心跳超时
