@@ -352,6 +352,25 @@ func getActualConnectionForDevice(conn ziface.IConnection, physicalID uint32) (z
 		return conn, deviceId, nil
 	}
 
+	// 检查连接属性，判断是否为直连模式
+	directMode := false
+	if directModeVal, err := conn.GetProperty(constants.PropKeyDirectMode); err == nil && directModeVal != nil {
+		if mode, ok := directModeVal.(bool); ok && mode {
+			directMode = true
+		}
+	}
+
+	// 如果已知是直连模式，直接使用当前连接，无需查找主机连接
+	if directMode {
+		logger.WithFields(logrus.Fields{
+			"deviceId":   deviceId,
+			"physicalID": fmt.Sprintf("0x%08X", physicalID),
+			"connID":     conn.GetConnID(),
+			"directMode": true,
+		}).Debug("分机设备使用直连模式，直接使用当前连接")
+		return conn, deviceId, nil
+	}
+
 	// 分机设备，需要通过TCP监控器找到主机连接
 	if GetTCPMonitor != nil {
 		if tcpMonitor := GetTCPMonitor(); tcpMonitor != nil {
@@ -370,12 +389,15 @@ func getActualConnectionForDevice(conn ziface.IConnection, physicalID uint32) (z
 		}
 	}
 
-	// 如果无法找到主机连接，使用原连接（兼容模式）
+	// 如果无法找到主机连接，使用原连接（直连模式）
 	logger.WithFields(logrus.Fields{
+		"connID":     conn.GetConnID(),
 		"deviceId":   deviceId,
 		"physicalID": fmt.Sprintf("0x%08X", physicalID),
-		"connID":     conn.GetConnID(),
-	}).Warn("分机设备未找到主机连接，使用原连接发送")
+	}).Debug("分机设备未找到主机连接，使用原连接发送")
+
+	// 设置直连模式标记，避免重复查找和警告
+	conn.SetProperty(constants.PropKeyDirectMode, true)
 
 	return conn, deviceId, nil
 }

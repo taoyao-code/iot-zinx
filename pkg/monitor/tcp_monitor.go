@@ -406,6 +406,23 @@ func (m *TCPMonitor) handleMasterDeviceBinding(deviceId string, conn ziface.ICon
 
 // handleSlaveDeviceBinding 处理分机设备绑定
 func (m *TCPMonitor) handleSlaveDeviceBinding(deviceId string, conn ziface.IConnection, connID uint64) {
+	// 检查设备是否已绑定到当前连接，避免重复注册
+	if currentConnVal, exists := m.deviceIdToConnMap.Load(deviceId); exists {
+		if currentConn, ok := currentConnVal.(ziface.IConnection); ok && currentConn.GetConnID() == connID {
+			// 设备已经绑定到当前连接，仅记录调试日志并更新最后心跳时间
+			logger.WithFields(logrus.Fields{
+				"deviceId":   deviceId,
+				"connID":     connID,
+				"remoteAddr": conn.RemoteAddr().String(),
+				"type":       "slave",
+			}).Debug("分机设备已绑定到当前连接，跳过重复注册")
+
+			// 仅更新心跳时间
+			m.UpdateLastHeartbeatTime(conn)
+			return
+		}
+	}
+
 	logger.WithFields(logrus.Fields{
 		"deviceId": deviceId,
 		"connID":   connID,
@@ -428,12 +445,19 @@ func (m *TCPMonitor) handleSlaveDeviceBinding(deviceId string, conn ziface.IConn
 	// 设置连接属性
 	m.setConnectionProperties(deviceId, conn)
 
+	// 判断是否是直连模式（通过检查是否为独立连接）
+	directMode := true
+	if _, isMasterConn := m.masterConnectionMap.Load(connID); isMasterConn {
+		directMode = false
+	}
+
 	logger.WithFields(logrus.Fields{
 		"deviceId":   deviceId,
 		"connID":     connID,
 		"iccid":      iccid,
 		"remoteAddr": conn.RemoteAddr().String(),
-		"directMode": true,
+		"directMode": directMode,
+		"deviceType": "slave",
 	}).Info("分机设备已成功绑定到独立连接")
 
 	// 尝试关联主机连接（仅用于优化通信，非必须）
@@ -455,8 +479,8 @@ func (m *TCPMonitor) handleSlaveDeviceBinding(deviceId string, conn ziface.IConn
 					"slaveDeviceId": deviceId,
 					"masterConnID":  masterConnID,
 					"iccid":         iccid,
-					"directMode":    true,
-				}).Info("分机设备已关联到主机连接（仅组网关系）")
+					"directMode":    directMode,
+				}).Debug("分机设备已关联到主机连接（仅组网关系）")
 			}
 		}
 	}

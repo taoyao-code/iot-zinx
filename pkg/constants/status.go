@@ -49,6 +49,8 @@ const (
 	PropKeyLastDisconnectTime = "last_disconnect_time"
 	// PropKeyStatus 设备状态属性键
 	PropKeyStatus = "status"
+	// PropKeyDirectMode 直连模式属性键
+	PropKeyDirectMode = "direct_mode"
 )
 
 // 时间格式常量

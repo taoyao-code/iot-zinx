@@ -2,6 +2,7 @@ package monitor
 
 import (
 	"context"
+	"strings"
 	"sync"
 	"time"
 
@@ -201,17 +202,28 @@ func (dm *DeviceMonitor) OnDeviceDisconnect(deviceID string, conn ziface.IConnec
 		iccid = val.(string)
 	}
 
-	// 挂起设备会话
-	dm.sessionManager.SuspendSession(deviceID)
-
 	// 获取设备会话
 	session, exists := dm.sessionManager.GetSession(deviceID)
 	if !exists {
-		logger.WithFields(logrus.Fields{
-			"deviceID": deviceID,
-		}).Warn("设备断开连接，但未找到对应会话")
+		// 在直连模式下可能会出现的情况，仅记录调试日志
+		if strings.Contains(reason, "connection_closed") {
+			logger.WithFields(logrus.Fields{
+				"deviceID": deviceID,
+				"connID":   conn.GetConnID(),
+				"reason":   reason,
+			}).Debug("设备断开连接，但未找到对应会话，可能是直连模式下的预期行为")
+		} else {
+			logger.WithFields(logrus.Fields{
+				"deviceID": deviceID,
+				"connID":   conn.GetConnID(),
+				"reason":   reason,
+			}).Debug("设备断开连接，但未找到对应会话")
+		}
 		return
 	}
+
+	// 挂起设备会话
+	dm.sessionManager.SuspendSession(deviceID)
 
 	// 增加断开计数
 	session.DisconnectCount++

@@ -8,6 +8,7 @@ import (
 
 	"github.com/aceld/zinx/ziface"
 	"github.com/bujia-iot/iot-zinx/internal/infrastructure/logger"
+	"github.com/bujia-iot/iot-zinx/pkg/constants"
 	"github.com/sirupsen/logrus"
 )
 
@@ -43,12 +44,20 @@ type CommandEntry struct {
 
 // CommandManager 命令管理器
 type CommandManager struct {
-	commands         map[string]*CommandEntry // 命令映射表（主键）
-	connCommands     map[uint64][]string      // 连接ID到命令键的映射
-	physicalCommands map[uint32][]string      // 物理ID到命令键的映射
-	lock             sync.RWMutex
-	stopChan         chan struct{}
-	isRunning        bool
+	// 命令映射
+	commands map[string]*CommandEntry // map[cmdKey]*CommandEntry
+	// 物理ID到命令的映射
+	physicalCommands map[uint32][]string // map[physicalID][]cmdKey
+
+	// 锁保护
+	lock sync.Mutex
+
+	// 批量处理命令配置
+	batchProcessInterval time.Duration
+	processingTicker     *time.Ticker
+	stopChan             chan struct{}
+	isRunning            bool
+	maxRetry             int
 }
 
 // 确保CommandManager实现了ICommandManager接口
@@ -65,9 +74,9 @@ func GetCommandManager() *CommandManager {
 	cmdMgrOnce.Do(func() {
 		globalCommandManager = &CommandManager{
 			commands:         make(map[string]*CommandEntry),
-			connCommands:     make(map[uint64][]string),
 			physicalCommands: make(map[uint32][]string),
 			stopChan:         make(chan struct{}),
+			maxRetry:         CommandRetryCount,
 		}
 	})
 	return globalCommandManager
@@ -167,9 +176,6 @@ func (cm *CommandManager) RegisterCommand(conn ziface.IConnection, physicalID ui
 	// 存储命令
 	cm.commands[cmdKey] = entry
 
-	// 更新连接ID到命令的映射
-	cm.connCommands[connID] = append(cm.connCommands[connID], cmdKey)
-
 	// 更新物理ID到命令的映射
 	cm.physicalCommands[physicalID] = append(cm.physicalCommands[physicalID], cmdKey)
 
@@ -247,23 +253,22 @@ func (cm *CommandManager) ClearConnectionCommands(connID uint64) {
 	cm.lock.Lock()
 	defer cm.lock.Unlock()
 
-	// 获取连接关联的所有命令键
-	cmdKeys, exists := cm.connCommands[connID]
-	if !exists {
-		return
+	// 找到该连接的所有命令
+	var cmdKeysToDelete []string
+	for key, cmd := range cm.commands {
+		if cmd.ConnID == connID {
+			cmdKeysToDelete = append(cmdKeysToDelete, key)
+		}
 	}
 
-	// 删除所有关联的命令
-	for _, cmdKey := range cmdKeys {
+	// 删除这些命令
+	for _, cmdKey := range cmdKeysToDelete {
 		cm.deleteCommand(cmdKey)
 	}
 
-	// 删除连接映射
-	delete(cm.connCommands, connID)
-
 	logger.WithFields(logrus.Fields{
 		"connID":       connID,
-		"commandCount": len(cmdKeys),
+		"commandCount": len(cmdKeysToDelete),
 	}).Info("已清理连接的所有命令")
 }
 
@@ -305,21 +310,6 @@ func (cm *CommandManager) deleteCommand(cmdKey string) {
 	// 从主映射表删除
 	delete(cm.commands, cmdKey)
 
-	// 从连接映射表删除
-	connID := cmd.ConnID
-	cmdKeys := cm.connCommands[connID]
-	for i, key := range cmdKeys {
-		if key == cmdKey {
-			// 删除元素（保持顺序）
-			if i < len(cmdKeys)-1 {
-				copy(cmdKeys[i:], cmdKeys[i+1:])
-			}
-			cmdKeys = cmdKeys[:len(cmdKeys)-1]
-			cm.connCommands[connID] = cmdKeys
-			break
-		}
-	}
-
 	// 从物理ID映射表删除
 	physicalID := cmd.PhysicalID
 	pCmdKeys := cm.physicalCommands[physicalID]
@@ -337,7 +327,7 @@ func (cm *CommandManager) deleteCommand(cmdKey string) {
 
 	logger.WithFields(logrus.Fields{
 		"cmdKey":     cmdKey,
-		"connID":     connID,
+		"connID":     cmd.ConnID,
 		"physicalID": fmt.Sprintf("0x%08X", cmd.PhysicalID),
 	}).Debug("已删除命令")
 }
@@ -364,7 +354,7 @@ func (cm *CommandManager) checkTimeoutCommands() {
 	var expiredCommandKeys []string
 
 	// 批量收集超时和过期命令，减少锁持有时间
-	cm.lock.RLock()
+	cm.lock.Lock()
 	for key, cmd := range cm.commands {
 		// 检查命令是否已确认
 		if cmd.Confirmed {
@@ -392,7 +382,7 @@ func (cm *CommandManager) checkTimeoutCommands() {
 			timeoutCommands = append(timeoutCommands, &cmdCopy)
 		}
 	}
-	cm.lock.RUnlock()
+	cm.lock.Unlock()
 
 	// 批量删除过期命令
 	if len(expiredCommandKeys) > 0 {
@@ -466,16 +456,29 @@ func (cm *CommandManager) processBatchTimeoutCommands(commands []*CommandEntry) 
 		}).Info("发现超时命令")
 
 		// 如果重试次数已达上限，删除命令
-		if existingCmd.RetryCount >= CommandRetryCount {
+		if existingCmd.RetryCount >= cm.maxRetry {
 			logger.WithFields(logrus.Fields{
 				"cmdKey":     cmdKey,
 				"physicalID": fmt.Sprintf("0x%08X", existingCmd.PhysicalID),
 				"messageID":  existingCmd.MessageID,
 				"command":    fmt.Sprintf("0x%02X", existingCmd.Command),
 				"retryCount": existingCmd.RetryCount,
-			}).Warn("命令超过重试次数上限，已放弃")
+			}).Warn("命令重试次数已达上限，放弃重试")
+			delete(cm.commands, cmdKey)
+			cm.lock.Unlock()
+			continue
+		}
 
-			cm.deleteCommand(cmdKey)
+		// 检查连接是否仍然有效
+		if !isConnectionActive(existingCmd.Connection) {
+			logger.WithFields(logrus.Fields{
+				"cmdKey":     cmdKey,
+				"physicalID": fmt.Sprintf("0x%08X", existingCmd.PhysicalID),
+				"messageID":  existingCmd.MessageID,
+				"command":    fmt.Sprintf("0x%02X", existingCmd.Command),
+				"connID":     existingCmd.Connection.GetConnID(),
+			}).Warn("连接已关闭，放弃重试")
+			delete(cm.commands, cmdKey)
 			cm.lock.Unlock()
 			continue
 		}
@@ -485,7 +488,7 @@ func (cm *CommandManager) processBatchTimeoutCommands(commands []*CommandEntry) 
 		existingCmd.LastSentTime = time.Now()
 		cm.lock.Unlock()
 
-		// 重发命令
+		// 记录日志
 		logger.WithFields(logrus.Fields{
 			"cmdKey":     cmdKey,
 			"physicalID": fmt.Sprintf("0x%08X", existingCmd.PhysicalID),
@@ -494,23 +497,7 @@ func (cm *CommandManager) processBatchTimeoutCommands(commands []*CommandEntry) 
 			"retryCount": existingCmd.RetryCount,
 		}).Info("重发超时命令")
 
-		// 检查连接是否有效
-		if existingCmd.Connection == nil || existingCmd.Connection.GetConnID() != existingCmd.ConnID {
-			logger.WithFields(logrus.Fields{
-				"cmdKey":     cmdKey,
-				"physicalID": fmt.Sprintf("0x%08X", existingCmd.PhysicalID),
-				"messageID":  existingCmd.MessageID,
-				"command":    fmt.Sprintf("0x%02X", existingCmd.Command),
-			}).Error("连接已变更，无法重发命令")
-
-			// 删除无效连接的命令
-			cm.lock.Lock()
-			cm.deleteCommand(cmdKey)
-			cm.lock.Unlock()
-			continue
-		}
-
-		// 构建响应数据包并发送
+		// 重发命令
 		if SendCommandFunc != nil {
 			err := SendCommandFunc(existingCmd.Connection, existingCmd.PhysicalID, existingCmd.MessageID, existingCmd.Command, existingCmd.Data)
 			if err != nil {
@@ -519,18 +506,31 @@ func (cm *CommandManager) processBatchTimeoutCommands(commands []*CommandEntry) 
 					"physicalID": fmt.Sprintf("0x%08X", existingCmd.PhysicalID),
 					"messageID":  existingCmd.MessageID,
 					"command":    fmt.Sprintf("0x%02X", existingCmd.Command),
+					"retryCount": existingCmd.RetryCount,
 					"error":      err.Error(),
-				}).Error("重发命令失败")
-
-				// 删除失败的命令
-				cm.lock.Lock()
-				cm.deleteCommand(cmdKey)
-				cm.lock.Unlock()
+				}).Error("重发超时命令失败")
 			}
 		} else {
 			logger.Error("未设置命令发送函数，无法重发命令")
 		}
 	}
+}
+
+// isConnectionActive 检查连接是否仍然活跃
+func isConnectionActive(conn ziface.IConnection) bool {
+	// 检查连接是否为nil
+	if conn == nil || conn.GetTCPConnection() == nil {
+		return false
+	}
+
+	// 检查连接状态
+	if val, err := conn.GetProperty(constants.PropKeyConnStatus); err == nil && val != nil {
+		status := val.(string)
+		return status != constants.ConnStatusClosed && status != constants.ConnStatusInactive
+	}
+
+	// 无法确定状态时保守处理，认为连接有效
+	return true
 }
 
 // 命令发送函数类型定义
