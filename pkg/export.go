@@ -117,6 +117,10 @@ var Network = struct {
 	OnDeviceNotAlive func(conn ziface.IConnection)
 	// 设置更新设备状态函数
 	SetUpdateDeviceStatusFunc func(fn network.UpdateDeviceStatusFuncType)
+	// 设置全局心跳管理器
+	SetGlobalHeartbeatManager func(manager network.HeartbeatManagerInterface)
+	// 更新连接活动时间
+	UpdateConnectionActivity func(conn ziface.IConnection)
 }{
 	GetCommandManager: func() network.ICommandManager {
 		return network.GetCommandManager()
@@ -128,6 +132,8 @@ var Network = struct {
 	NewRawDataHandler:         network.NewRawDataHandler,
 	OnDeviceNotAlive:          network.OnDeviceNotAlive,
 	SetUpdateDeviceStatusFunc: network.SetUpdateDeviceStatusFunc,
+	SetGlobalHeartbeatManager: network.SetGlobalHeartbeatManager,
+	UpdateConnectionActivity:  network.UpdateConnectionActivity,
 }
 
 // Monitor 监控器相关接口

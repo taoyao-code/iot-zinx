@@ -66,10 +66,6 @@ func (s *TCPServer) initialize() error {
 
 	// 记录启动信息
 	zinxCfg := s.cfg.TCPServer.Zinx
-	fmt.Printf("\n🔧 TCP服务器启动调试信息:\n")
-	fmt.Printf("   Host: %s\n", s.cfg.TCPServer.Host)
-	fmt.Printf("   Port: %d\n", zinxCfg.TCPPort)
-	fmt.Printf("   Name: %s\n", zinxCfg.Name)
 
 	// 设置Zinx服务器配置
 	zconf.GlobalObject.Name = zinxCfg.Name
@@ -136,8 +132,9 @@ func (s *TCPServer) setupConnectionHooks() {
 	s.server.SetOnConnStart(connectionHooks.OnConnectionStart)
 	s.server.SetOnConnStop(connectionHooks.OnConnectionStop)
 
-	// 设置Zinx框架心跳（作为底层保障）
-	s.server.StartHeartBeat(3 * time.Second)
+	// 不使用Zinx内部心跳检测，改为自定义心跳机制
+	// s.server.StartHeartBeat(3 * time.Second)
+	logger.Info("已禁用Zinx内部心跳检测，使用自定义心跳机制")
 }
 
 // startDeviceMonitor 启动设备监控器
@@ -182,7 +179,9 @@ func (s *TCPServer) startDeviceMonitor() {
 
 // startHeartbeatManager 启动心跳管理器
 func (s *TCPServer) startHeartbeatManager() {
-	s.heartbeatManager = NewHeartbeatManager(60 * time.Second)
+	// 从配置中获取心跳间隔时间
+	heartbeatInterval := time.Duration(s.cfg.DeviceConnection.HeartbeatIntervalSeconds) * time.Second
+	s.heartbeatManager = NewHeartbeatManager(heartbeatInterval)
 	s.heartbeatManager.Start()
 }
 
@@ -228,18 +227,56 @@ func (s *TCPServer) startServer() error {
 // HeartbeatManager 心跳管理器组件
 type HeartbeatManager struct {
 	interval time.Duration
+	// 最后活动时间记录 (connID -> 时间戳)
+	lastActivityTime map[uint64]time.Time
 }
 
 // NewHeartbeatManager 创建新的心跳管理器
 func NewHeartbeatManager(interval time.Duration) *HeartbeatManager {
 	return &HeartbeatManager{
-		interval: interval,
+		interval:         interval,
+		lastActivityTime: make(map[uint64]time.Time),
 	}
 }
 
 // Start 启动心跳管理器
 func (h *HeartbeatManager) Start() {
+	// 注册到全局网络包
+	pkg.Network.SetGlobalHeartbeatManager(h)
+
 	go h.heartbeatLoop()
+	go h.monitorConnectionActivity()
+}
+
+// UpdateConnectionActivity 更新连接活动时间
+// 该方法实现HeartbeatManagerInterface接口
+// 在接收到客户端任何有效数据包时调用
+func (h *HeartbeatManager) UpdateConnectionActivity(conn ziface.IConnection) {
+	now := time.Now()
+	connID := conn.GetConnID()
+
+	// 更新连接属性中的活动时间
+	conn.SetProperty(constants.PropKeyLastHeartbeat, now.Unix())
+	conn.SetProperty(constants.PropKeyLastHeartbeatStr, now.Format(constants.TimeFormatDefault))
+
+	// 同时更新本地缓存
+	h.lastActivityTime[connID] = now
+
+	// 获取设备ID，用于日志记录
+	var deviceID string
+	if val, err := conn.GetProperty(constants.PropKeyDeviceId); err == nil && val != nil {
+		deviceID = val.(string)
+	} else {
+		deviceID = "未注册"
+	}
+
+	// 使用Debug级别记录日志，避免日志过多
+	logger.WithFields(logrus.Fields{
+		"connID":     connID,
+		"deviceID":   deviceID,
+		"remoteAddr": conn.RemoteAddr().String(),
+		"time":       now.Format(constants.TimeFormatDefault),
+	}).Debug("更新连接活动时间")
 }
 
 // heartbeatLoop 心跳循环
@@ -256,6 +293,104 @@ func (h *HeartbeatManager) heartbeatLoop() {
 	for range ticker.C {
 		heartbeatCounter++
 		h.sendHeartbeats(heartbeatCounter)
+	}
+}
+
+// monitorConnectionActivity 监控连接活动
+// 定期检查连接是否有活动，如果长时间无活动则关闭连接
+func (h *HeartbeatManager) monitorConnectionActivity() {
+	// 启动时给一个延迟，避免服务刚启动就开始检查心跳
+	startupDelay := 2 * time.Minute
+	time.Sleep(startupDelay)
+
+	// 使用心跳间隔的3倍作为检查频率
+	checkInterval := h.interval
+	// 超时时间为配置的心跳超时时间
+	timeoutDuration := time.Duration(config.GetConfig().DeviceConnection.HeartbeatTimeoutSeconds) * time.Second
+
+	ticker := time.NewTicker(checkInterval)
+	defer ticker.Stop()
+
+	logger.WithFields(logrus.Fields{
+		"checkInterval": checkInterval.String(),
+		"timeout":       timeoutDuration.String(),
+		"startupDelay":  startupDelay.String(),
+	}).Info("🔍 连接活动监控已启动")
+
+	for range ticker.C {
+		h.checkConnectionActivity(timeoutDuration)
+	}
+}
+
+// checkConnectionActivity 检查连接活动状态
+func (h *HeartbeatManager) checkConnectionActivity(timeoutDuration time.Duration) {
+	now := time.Now()
+	monitor := pkg.Monitor.GetGlobalMonitor()
+	if monitor == nil {
+		return
+	}
+
+	disconnectCount := 0
+	monitor.ForEachConnection(func(deviceId string, conn ziface.IConnection) bool {
+		connID := conn.GetConnID()
+
+		// 检查连接状态，如果已经不是活跃状态则跳过
+		var connStatus string
+		if status, err := conn.GetProperty(constants.PropKeyConnStatus); err == nil && status != nil {
+			connStatus = status.(string)
+			if connStatus != constants.ConnStatusActive {
+				// 跳过非活跃的连接
+				return true
+			}
+		}
+
+		// 获取最后活动时间
+		var lastActivity time.Time
+		if lastHeartbeat, err := conn.GetProperty(constants.PropKeyLastHeartbeat); err == nil && lastHeartbeat != nil {
+			if timestamp, ok := lastHeartbeat.(int64); ok {
+				lastActivity = time.Unix(timestamp, 0)
+			}
+		}
+
+		// 如果没有记录活动时间，使用连接建立时间
+		if lastActivity.IsZero() {
+			lastActivity = now
+			conn.SetProperty(constants.PropKeyLastHeartbeat, now.Unix())
+			conn.SetProperty(constants.PropKeyLastHeartbeatStr, now.Format(constants.TimeFormatDefault))
+		}
+
+		// 计算连接已经建立的时间
+		connectionAge := now.Sub(lastActivity)
+
+		// 给新连接一个宽限期，避免刚建立的连接就被断开
+		// 只有连接建立超过1分钟的才检查心跳超时
+		if connectionAge < 1*time.Minute {
+			return true
+		}
+
+		// 检查是否超时
+		if now.Sub(lastActivity) > timeoutDuration {
+			logger.WithFields(logrus.Fields{
+				"connID":       connID,
+				"deviceId":     deviceId,
+				"remoteAddr":   conn.RemoteAddr().String(),
+				"lastActivity": lastActivity.Format(constants.TimeFormatDefault),
+				"idleTime":     now.Sub(lastActivity).String(),
+				"timeout":      timeoutDuration.String(),
+			}).Warn("连接长时间无活动，判定为断开")
+
+			// 断开连接
+			h.onRemoteNotAlive(conn)
+			disconnectCount++
+		}
+
+		return true
+	})
+
+	if disconnectCount > 0 {
+		logger.WithFields(logrus.Fields{
+			"count": disconnectCount,
+		}).Info("已断开不活跃连接")
 	}
 }
 
@@ -292,8 +427,8 @@ func (h *HeartbeatManager) sendHeartbeats(counter int) {
 				"deviceId": deviceId,
 				"error":    err.Error(),
 			}).Error("❌ 发送心跳失败")
-			// 心跳发送失败，断开连接
-			h.onRemoteNotAlive(conn)
+			// 心跳发送失败表示连接可能已经断开，但不立即关闭连接
+			// 让连接活动监控来处理
 		} else {
 			successCount++
 			logger.WithFields(logrus.Fields{
@@ -326,4 +461,7 @@ func (h *HeartbeatManager) onRemoteNotAlive(conn ziface.IConnection) {
 
 	// 关闭连接
 	conn.Stop()
+
+	// 清理记录
+	delete(h.lastActivityTime, conn.GetConnID())
 }

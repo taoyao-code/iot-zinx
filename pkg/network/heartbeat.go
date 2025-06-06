@@ -7,6 +7,27 @@ import (
 	"github.com/sirupsen/logrus"
 )
 
+// HeartbeatManagerInterface 定义心跳管理器接口
+type HeartbeatManagerInterface interface {
+	UpdateConnectionActivity(conn ziface.IConnection)
+}
+
+// GlobalHeartbeatManager 全局心跳管理器实例
+var GlobalHeartbeatManager HeartbeatManagerInterface
+
+// SetGlobalHeartbeatManager 设置全局心跳管理器
+func SetGlobalHeartbeatManager(manager HeartbeatManagerInterface) {
+	GlobalHeartbeatManager = manager
+}
+
+// UpdateConnectionActivity 更新连接活动时间的全局方法
+// 该方法需要在接收到客户端任何有效数据包时调用
+func UpdateConnectionActivity(conn ziface.IConnection) {
+	if GlobalHeartbeatManager != nil {
+		GlobalHeartbeatManager.UpdateConnectionActivity(conn)
+	}
+}
+
 // MasterSlaveMonitorInterface 主从设备监控接口
 // 用于心跳处理中访问主从设备绑定信息，避免循环依赖
 type MasterSlaveMonitorInterface interface {

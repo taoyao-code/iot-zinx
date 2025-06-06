@@ -4,37 +4,37 @@ globs:
 alwaysApply: true
 ---
 ---
-description: Base Guidelines for Sonnet-3.7 + Cursor Agent
+说明：Sonnet-3.7 + 游标代理的基本准则
 globs: *,**/*
 alwaysApply: true
 ---
 # ---------------------------------------------------------------
-# DESCRIPTION:
-# this rule helps to better control sonnet-3.7 + cursor. (like doing to much, creating unnecessary new files e.g.).
-# especially the first two rules give the cursor agent already the most important instructions that worked for me.
-# 
-# ❗ ATTENTION:  
-# 1. this does not work so easily for large codebases
-# 2. remove everything from these rules that you do not need
-# 3. also remove this comments
+# 说明：
+# 此规则有助于更好地控制 sonnet-3.7 + 游标。（例如，执行过多操作，创建不必要的新文件）。
+# 尤其是前两条规则已经为游标代理提供了对我而言最重要的指令。
+#
+# ❗ 注意：
+# 1. 对于大型代码库，此方法不太奏效
+# 2. 从这些规则中删除所有不需要的内容
+# 3. 也删除此注释
 # ---------------------------------------------------------------
 
-# Instructions
+# 说明
 
-1. Always use codebase_search with target_directories="{{INSERT YOUR DIRECTORY}}" first to find existing core files
-2. Always check existing system files purposes before creating new ones with similar functionality
-3. Always list the cursor rules youre using
+1. 始终先使用 codebase_search 并设置 target_directories="{{INSERT YOUR DIRECTORY}}" 来查找现有的核心文件
+2. 在创建具有类似功能的新文件之前，务必检查现有系统文件的目的
+3. 始终列出您正在使用的游标规则
 
-# Optional
+# 可选
 
-- If a prompt or request specifies certain behaviors, languages, or output formats, you must obey them without deviation.
-- Do not include explanations, reasoning, or filler text unless explicitly instructed. Stick strictly to the requested output.
-- If multiple steps or sub-requests are given, address them in the specified order. Provide answers in the exact format or sequence requested.
-- Pay close attention to all stated constraints (e.g., language choice, performance goals, coding style). Do not ignore any requirement or best practice stated.
-- Only produce output relevant to the question or instructions. Do not add features, code, or details beyond what is explicitly asked.
-- Deliver the response in a minimal yet complete form. Avoid unnecessary verbosity and tangential remarks.
-- If the prompt requests a specific output format (e.g., a fenced code block, bullet points, JSON), follow that format exactly.
-- If a prompt includes a pre-seeded answer structure (e.g., starts a code block), continue within that structure without introducing extra text outside it.
-- If the request is ambiguous, you may ask clarifying questions (if instructions allow). Otherwise, state briefly that more information is needed.
-- When generating or modifying code, adhere to best practices for clarity, maintainability, and efficiency, as appropriate to the specified language or framework.
-- Do not generate or include private data (API keys, secrets) unless explicitly provided in context. If the user requests something unsafe or disallowed, refuse or provide a safe alternative per policy.
+- 如果提示或请求指定了某些行为、语言或输出格式，则必须严格遵守。
+- 除非明确指示，否则请勿添加解释、推理或填充文本。严格遵循所要求的输出。
+- 如果给出了多个步骤或子请求，请按指定的顺序处理。请按照要求的确切格式或顺序提供答案。
+- 密切关注所有声明的限制（例如，语言选择、​​性能目标、编码风格）。请勿忽略任何已声明的要求或最佳实践。
+- 仅生成与问题或说明相关的输出。请勿添加明确要求以外的功能、代码或细节。
+- 以简洁完整的形式提供答案。避免不必要的冗长和离题的言论。
+- 如果提示要求特定的输出格式（例如，带围栏的代码块、项目符号、JSON），请严格遵循该格式。
+- 如果提示包含预先设定的答案结构（例如，开始一个代码块），请继续在该结构内进行，不要在其外部添加额外的文本。
+- 如果请求含糊不清，您可以提出澄清问题（如果说明允许）。否则，请简要说明需要更多信息。
+- 生成或修改代码时，请遵循适用于指定语言或框架的清晰度、可维护性和效率的最佳实践。
+- 除非上下文中明确提供，否则请勿生成或包含私有数据（API 密钥、机密）。如果用户请求不安全或不允许的内容，请根据政策拒绝或提供安全的替代方案。

@@ -32,6 +32,8 @@ func (h *DNYHandlerBase) PreHandle(request ziface.IRequest) {
 	if msgID == 0xFF01 || msgID == 0xFF02 || msgID == 0xFFFF {
 		// 特殊消息不进行DNY消息转换，直接更新心跳时间
 		monitor.GetGlobalMonitor().UpdateLastHeartbeatTime(conn)
+		// 同时更新自定义心跳管理器的连接活动时间
+		network.UpdateConnectionActivity(conn)
 		return
 	}
 
@@ -91,6 +93,8 @@ func (h *DNYHandlerBase) PreHandle(request ziface.IRequest) {
 
 		// 更新心跳时间并继续处理
 		monitor.GetGlobalMonitor().UpdateLastHeartbeatTime(conn)
+		// 同时更新自定义心跳管理器的连接活动时间
+		network.UpdateConnectionActivity(conn)
 		return
 	}
 
@@ -123,6 +127,8 @@ func (h *DNYHandlerBase) PreHandle(request ziface.IRequest) {
 
 	// 更新心跳时间
 	monitor.GetGlobalMonitor().UpdateLastHeartbeatTime(conn)
+	// 同时更新自定义心跳管理器的连接活动时间
+	network.UpdateConnectionActivity(conn)
 }
 
 // GetDNYMessage 从请求中获取DNY消息，如果转换失败则返回nil
@@ -161,6 +167,8 @@ func (h *DNYHandlerBase) UpdateHeartbeat(conn ziface.IConnection) {
 	// 只调用更新心跳时间，内部会自动处理设备状态更新
 	// 这样避免了重复调用UpdateDeviceStatus导致的性能问题
 	monitor.GetGlobalMonitor().UpdateLastHeartbeatTime(conn)
+	// 同时更新自定义心跳管理器的连接活动时间
+	network.UpdateConnectionActivity(conn)
 }
 
 // SendDNYResponse 发送DNY协议响应
