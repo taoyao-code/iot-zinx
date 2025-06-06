@@ -304,3 +304,29 @@ func (om *OperationManager) HealthCheck() (interface{}, error) {
 
 	return healthResp, nil
 }
+
+// GetDeviceGroupInfo 获取设备组信息
+func (om *OperationManager) GetDeviceGroupInfo(deviceID string) (interface{}, error) {
+	// 构建URL
+	path := fmt.Sprintf("/api/v1/device/%s/group", deviceID)
+
+	// 发送请求
+	body, err := om.client.Get(path)
+	if err != nil {
+		return nil, err
+	}
+
+	// 解析标准响应格式
+	var apiResp client.APIResponse
+	if err := json.Unmarshal(body, &apiResp); err != nil {
+		return nil, fmt.Errorf("解析响应失败: %w", err)
+	}
+
+	// 检查API响应码
+	if apiResp.Code != 0 {
+		return nil, fmt.Errorf("API错误: %s", apiResp.Message)
+	}
+
+	// 返回原始数据
+	return apiResp.Data, nil
+}

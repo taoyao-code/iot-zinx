@@ -429,9 +429,11 @@ func (m *TCPMonitor) handleSlaveDeviceBinding(deviceId string, conn ziface.IConn
 	m.setConnectionProperties(deviceId, conn)
 
 	logger.WithFields(logrus.Fields{
-		"deviceId": deviceId,
-		"connID":   connID,
-		"iccid":    iccid,
+		"deviceId":   deviceId,
+		"connID":     connID,
+		"iccid":      iccid,
+		"remoteAddr": conn.RemoteAddr().String(),
+		"directMode": true,
 	}).Info("分机设备已成功绑定到独立连接")
 
 	// 尝试关联主机连接（仅用于优化通信，非必须）
@@ -453,6 +455,7 @@ func (m *TCPMonitor) handleSlaveDeviceBinding(deviceId string, conn ziface.IConn
 					"slaveDeviceId": deviceId,
 					"masterConnID":  masterConnID,
 					"iccid":         iccid,
+					"directMode":    true,
 				}).Info("分机设备已关联到主机连接（仅组网关系）")
 			}
 		}

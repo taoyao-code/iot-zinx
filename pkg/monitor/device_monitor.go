@@ -262,129 +262,115 @@ func (dm *DeviceMonitor) heartbeatCheckLoop() {
 			logger.Debug("设备心跳检查循环已停止")
 			return
 		case <-ticker.C:
-			dm.checkDeviceHeartbeats()
+			dm.checkAllDevicesHeartbeat()
 		}
 	}
 }
 
-// checkDeviceHeartbeats 检查所有设备心跳
-func (dm *DeviceMonitor) checkDeviceHeartbeats() {
+// checkAllDevicesHeartbeat 检查所有设备心跳
+func (dm *DeviceMonitor) checkAllDevicesHeartbeat() {
+	// 获取当前时间
 	now := time.Now()
+	// 计算超时阈值
 	timeoutThreshold := now.Add(-dm.deviceTimeout)
 
-	// 使用批量处理策略，减少锁争用
-	var (
-		timeoutDevices    = make([]string, 0)
-		needStatusSync    = make([]string, 0)
-		suspiciousDevices = make([]string, 0)
-		warningThreshold  = dm.deviceTimeout / 2
-	)
+	// 超时设备列表
+	var timeoutDevices []string
 
-	// 第一阶段：收集需要处理的设备
-	dm.sessionManager.ForEachSession(func(deviceID string, session *DeviceSession) bool {
-		// 只检查在线或重连中的设备
-		if session.Status == constants.DeviceStatusOnline ||
-			session.Status == constants.DeviceStatusReconnecting {
+	// 使用GetAllSessions获取所有设备会话
+	sessions := dm.sessionManager.GetAllSessions()
 
-			lastHeartbeat := session.LastHeartbeatTime
-			timeSinceLastHeartbeat := now.Sub(lastHeartbeat)
-
-			// 已超时设备
-			if lastHeartbeat.Before(timeoutThreshold) {
-				timeoutDevices = append(timeoutDevices, deviceID)
-			} else if timeSinceLastHeartbeat > warningThreshold {
-				// 接近超时的设备（超过一半超时时间）
-				suspiciousDevices = append(suspiciousDevices, deviceID)
-			}
-
-			// 状态不一致的设备
-			if conn, exists := dm.connectionMonitor.GetConnectionByDeviceId(deviceID); exists {
-				if prop, err := conn.GetProperty(constants.PropKeyStatus); err == nil {
-					if status, ok := prop.(string); ok && status != session.Status {
-						needStatusSync = append(needStatusSync, deviceID)
-					}
-				}
-			}
+	// 遍历所有设备会话，找出超时设备
+	for deviceID, session := range sessions {
+		// 跳过已离线设备
+		if session.Status == constants.DeviceStatusOffline {
+			continue
 		}
-		return true
-	})
 
-	// 记录可疑设备（接近超时但未超时）
-	if len(suspiciousDevices) > 0 {
-		logger.WithFields(logrus.Fields{
-			"count":     len(suspiciousDevices),
-			"devices":   suspiciousDevices,
-			"threshold": warningThreshold.String(),
-		}).Debug("发现接近超时的设备")
-	}
-
-	// 第二阶段：处理超时设备
-	for _, deviceID := range timeoutDevices {
-		dm.handleDeviceTimeout(deviceID)
-	}
-
-	// 第三阶段：同步状态不一致的设备
-	for _, deviceID := range needStatusSync {
-		if session, exists := dm.sessionManager.GetSession(deviceID); exists {
-			dm.connectionMonitor.UpdateDeviceStatus(deviceID, session.Status)
-			logger.WithFields(logrus.Fields{
-				"deviceID": deviceID,
-				"status":   session.Status,
-			}).Debug("同步设备状态")
+		// 检查心跳是否超时
+		if session.LastHeartbeatTime.Before(timeoutThreshold) {
+			// 添加到超时设备列表
+			timeoutDevices = append(timeoutDevices, deviceID)
 		}
 	}
 
+	// 处理超时设备
 	if len(timeoutDevices) > 0 {
+		// 记录超时设备数量
 		logger.WithFields(logrus.Fields{
-			"timeoutDevices": len(timeoutDevices),
-			"syncDevices":    len(needStatusSync),
-			"devices":        timeoutDevices,
-		}).Warn("发现超时设备")
+			"count":          len(timeoutDevices),
+			"timeoutDevices": timeoutDevices,
+		}).Info("发现心跳超时的设备")
+
+		// 分批处理超时设备，避免一次性处理太多
+		batchSize := 10
+		for i := 0; i < len(timeoutDevices); i += batchSize {
+			end := i + batchSize
+			if end > len(timeoutDevices) {
+				end = len(timeoutDevices)
+			}
+
+			// 处理当前批次的设备
+			batch := timeoutDevices[i:end]
+			for _, deviceID := range batch {
+				dm.handleDeviceTimeout(deviceID)
+			}
+
+			// 批次间暂停，避免系统负载过高
+			if i+batchSize < len(timeoutDevices) {
+				time.Sleep(100 * time.Millisecond)
+			}
+		}
 	}
 }
 
 // handleDeviceTimeout 处理设备超时
 func (dm *DeviceMonitor) handleDeviceTimeout(deviceID string) {
-	// 获取设备会话
+	// 检查设备是否存在
 	session, exists := dm.sessionManager.GetSession(deviceID)
 	if !exists {
 		logger.WithFields(logrus.Fields{
 			"deviceID": deviceID,
-		}).Warn("处理设备超时，但未找到对应会话")
+		}).Error("设备会话不存在，无法处理超时")
 		return
 	}
 
-	// 获取ICCID，用于组关系检查
-	iccid := session.ICCID
+	// 获取上次心跳时间
+	lastHeartbeat := session.LastHeartbeatTime
+	now := time.Now()
+	timeSinceLastHeartbeat := now.Sub(lastHeartbeat)
 
-	// 更新设备状态为离线
+	// 检查是否确实超时
+	if timeSinceLastHeartbeat < dm.deviceTimeout {
+		logger.WithFields(logrus.Fields{
+			"deviceID":       deviceID,
+			"lastHeartbeat":  lastHeartbeat.Format(constants.TimeFormatDefault),
+			"timeoutSeconds": timeSinceLastHeartbeat.Seconds(),
+			"maxTimeout":     dm.deviceTimeout.Seconds(),
+		}).Debug("设备未超时，不处理")
+		return
+	}
+
+	// 设置设备状态为离线
 	dm.sessionManager.UpdateSession(deviceID, func(session *DeviceSession) {
-		// 仅当设备当前为在线状态时才触发离线事件
-		if session.Status == constants.DeviceStatusOnline {
-			oldStatus := session.Status
-			session.Status = constants.DeviceStatusOffline
-
-			// 记录设备离线日志
-			logger.WithFields(logrus.Fields{
-				"deviceID":      deviceID,
-				"oldStatus":     oldStatus,
-				"newStatus":     constants.DeviceStatusOffline,
-				"lastHeartbeat": session.LastHeartbeatTime.Format(constants.TimeFormatDefault),
-				"timeSince":     time.Since(session.LastHeartbeatTime).Seconds(),
-				"iccid":         iccid,
-			}).Info("设备因心跳超时被标记为离线")
-
-			// 触发设备超时回调
-			if dm.onDeviceTimeout != nil {
-				dm.onDeviceTimeout(deviceID, session.LastHeartbeatTime)
-			}
-		}
+		session.Status = constants.DeviceStatusOffline
+		session.LastDisconnectTime = now
 	})
 
-	// 同步更新连接监控器中的设备状态
-	dm.connectionMonitor.UpdateDeviceStatus(deviceID, constants.DeviceStatusOffline)
+	// 记录设备超时信息
+	logger.WithFields(logrus.Fields{
+		"deviceID":       deviceID,
+		"lastHeartbeat":  lastHeartbeat.Format(constants.TimeFormatDefault),
+		"timeoutSeconds": timeSinceLastHeartbeat.Seconds(),
+	}).Info("设备心跳超时，标记为离线")
 
-	// 如果设备属于设备组，检查组内其他设备状态
+	// 触发超时回调
+	if dm.onDeviceTimeout != nil {
+		dm.onDeviceTimeout(deviceID, lastHeartbeat)
+	}
+
+	// 获取设备组信息并更新状态
+	iccid := session.ICCID
 	if iccid != "" {
 		allDevices := dm.deviceGroupManager.GetAllDevicesInGroup(iccid)
 		activeDevices := 0
@@ -447,7 +433,7 @@ func (dm *DeviceMonitor) checkGroupStatus() {
 // CheckDeviceStatus 检查并更新设备状态
 func (dm *DeviceMonitor) CheckDeviceStatus() {
 	// 检查心跳超时设备
-	dm.checkDeviceHeartbeats()
+	dm.checkAllDevicesHeartbeat()
 
 	// 获取当前统计信息
 	deviceCount := 0

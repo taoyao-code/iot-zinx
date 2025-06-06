@@ -10,6 +10,9 @@ type DeviceInfo struct {
 	HeartbeatTime  string  `json:"heartbeatTime"`
 	TimeSinceHeart float64 `json:"timeSinceHeart"`
 	RemoteAddr     string  `json:"remoteAddr"`
+	IsMaster       bool    `json:"isMaster"`      // 是否为主机设备
+	GroupDevices   int     `json:"groupDevices"`  // 设备组内设备数量
+	DirectConnect  bool    `json:"directConnect"` // 是否为直连模式
 }
 
 // DeviceListResponse 设备列表响应

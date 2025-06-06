@@ -21,8 +21,9 @@ type ClientParams struct {
 	startID      uint32 // 起始物理ID
 	runTests     bool   // 是否运行测试序列
 	verbose      bool   // 是否输出详细日志
-	mode         string // 启动模式："sim"=SIM卡模式，"device"=设备模式
+	mode         string // 启动模式："sim"=SIM卡模式，"device"=设备模式，"real"=真实设备模拟
 	simMode      string // SIM卡模式："shared"=共享SIM卡，"individual"=独立SIM卡
+	directConn   bool   // 是否启用直连模式（分机直接连接服务器）
 }
 
 func main() {
@@ -47,6 +48,7 @@ func main() {
 	if params.mode == "real" {
 		// 真实设备模拟模式
 		fmt.Printf("🎯 使用真实设备模拟模式：基于线上日志数据\n")
+		fmt.Printf("🔌 直连模式: %v\n", params.directConn)
 
 		// 创建多个真实设备配置
 		deviceConfigs := CreateMultipleDevicesConfig()
@@ -87,6 +89,7 @@ func main() {
 	} else if params.mode == "sim" {
 		// SIM卡模式
 		fmt.Printf("📱 使用SIM卡模式：%d张SIM卡，每卡%d个设备\n", params.simCount, params.devicePerSim)
+		fmt.Printf("🔌 直连模式: %v\n", params.directConn)
 
 		if params.simMode == "shared" {
 			// 共享SIM卡模式（多个设备共用一个ICCID）
@@ -97,8 +100,9 @@ func main() {
 				// 为每张SIM卡生成ICCID
 				iccid := fmt.Sprintf("8986%08d%08d", rand.Intn(100000000), i+1)
 
-				// 创建SIM卡管理器
+				// 创建SIM卡管理器并设置直连模式
 				simCard := NewSimCard(iccid, params.serverAddr)
+				simCard.SetDirectConnMode(params.directConn)
 
 				// 为SIM卡添加多个设备
 				for j := 0; j < params.devicePerSim; j++ {
@@ -289,6 +293,7 @@ func parseFlags() *ClientParams {
 	flag.BoolVar(&params.verbose, "verbose", false, "是否输出详细日志")
 	flag.StringVar(&params.mode, "mode", "real", "启动模式: sim=SIM卡模式, device=设备模式, real=真实设备模拟模式")
 	flag.StringVar(&params.simMode, "sim-mode", "shared", "SIM卡模式: shared=共享SIM卡, individual=独立SIM卡")
+	flag.BoolVar(&params.directConn, "direct", true, "是否启用直连模式（所有设备直接连接服务器）")
 
 	flag.Usage = func() {
 		fmt.Fprintf(os.Stderr, "用法: %s [选项]\n\n", os.Args[0])
@@ -297,12 +302,12 @@ func parseFlags() *ClientParams {
 		fmt.Fprintf(os.Stderr, "\n示例:\n")
 		fmt.Fprintf(os.Stderr, "  【真实设备模拟模式】基于线上日志数据:\n")
 		fmt.Fprintf(os.Stderr, "  %s -mode real -server localhost:7054 -test\n\n", os.Args[0])
-		fmt.Fprintf(os.Stderr, "  【共享SIM卡模式】一个SIM卡管理多个设备:\n")
-		fmt.Fprintf(os.Stderr, "  %s -mode sim -sim-mode shared -sim-count 2 -dev-per-sim 3\n\n", os.Args[0])
+		fmt.Fprintf(os.Stderr, "  【共享SIM卡模式 - 直连】每个设备都直接连接服务器:\n")
+		fmt.Fprintf(os.Stderr, "  %s -mode sim -sim-mode shared -sim-count 2 -dev-per-sim 3 -direct=true\n\n", os.Args[0])
+		fmt.Fprintf(os.Stderr, "  【共享SIM卡模式 - 传统】只有主设备连接服务器:\n")
+		fmt.Fprintf(os.Stderr, "  %s -mode sim -sim-mode shared -sim-count 2 -dev-per-sim 3 -direct=false\n\n", os.Args[0])
 		fmt.Fprintf(os.Stderr, "  【独立SIM卡模式】每个设备有独立SIM卡:\n")
 		fmt.Fprintf(os.Stderr, "  %s -mode sim -sim-mode individual -sim-count 1 -dev-per-sim 5\n\n", os.Args[0])
-		fmt.Fprintf(os.Stderr, "  【设备模式】每个设备独立运行(向后兼容):\n")
-		fmt.Fprintf(os.Stderr, "  %s -mode device -sim-count 1 -dev-per-sim 5 -verbose -test\n", os.Args[0])
 	}
 
 	flag.Parse()

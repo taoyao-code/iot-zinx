@@ -128,6 +128,19 @@ func (c *TestClient) ConnectOnly() error {
 		return err
 	}
 
+	// 在优化后的直连模式下，分机也需要发送ICCID以便识别
+	if !c.isMaster && c.config.ICCID != "" {
+		if err := c.SendICCID(); err != nil {
+			c.logger.GetLogger().WithError(err).Warn("⚠️ 分机发送ICCID失败，但将继续")
+		} else {
+			c.logger.GetLogger().WithFields(logrus.Fields{
+				"iccid":    c.config.ICCID,
+				"deviceId": fmt.Sprintf("0x%08X", c.config.PhysicalID),
+			}).Info("✅ 分机发送ICCID成功（直连模式）")
+		}
+		time.Sleep(1 * time.Second)
+	}
+
 	c.logger.GetLogger().WithFields(logrus.Fields{
 		"iccid":    c.config.ICCID,
 		"deviceId": fmt.Sprintf("0x%08X", c.config.PhysicalID),
@@ -295,69 +308,56 @@ func (c *TestClient) startMainHeartbeat() {
 	}
 }
 
-// Start 启动真实设备模拟客户端
+// Start 启动测试客户端
 func (c *TestClient) Start() error {
-	// 连接服务器
-	if err := c.Connect(); err != nil {
-		return err
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	if c.isRunning {
+		c.logger.GetLogger().Warn("⚠️ 客户端已经在运行")
+		return nil
 	}
 
-	// 设置运行状态
+	// 检查设备类型，确定是否为主机
+	if IsMasterDevice(c.config.PhysicalID) {
+		c.config.IsMaster = true
+		c.isMaster = true
+	} else {
+		c.config.IsMaster = false
+		c.isMaster = false
+	}
+
+	// 连接服务器
+	var err error
+	if c.isMaster {
+		// 主机模式：连接并发送ICCID
+		err = c.ConnectAndSendICCID()
+	} else {
+		// 分机模式：直接连接，根据直连优化也发送ICCID
+		err = c.ConnectOnly()
+	}
+
+	if err != nil {
+		return fmt.Errorf("连接失败: %w", err)
+	}
+
+	// 发送注册包
+	if err := c.SendRegister(); err != nil {
+		return fmt.Errorf("注册失败: %w", err)
+	}
+
+	// 标记为运行中
 	c.isRunning = true
 
-	// 启动消息处理协程
-	go c.HandleServerMessages()
-
-	// 模拟真实设备的通信序列
-	c.logger.GetLogger().Info("🚀 开始真实设备通信序列模拟...")
-
-	// 1. 发送ICCID（真实设备的第一步）
-	if err := c.SendICCID(); err != nil {
-		return err
-	}
-	c.logger.GetLogger().Info("✅ 步骤1: ICCID发送完成")
-	time.Sleep(2 * time.Second)
-
-	// 2. 发送设备注册包（0x20指令）
-	if err := c.SendRegister(); err != nil {
-		return err
-	}
-	c.logger.GetLogger().Info("✅ 步骤2: 设备注册完成")
-	time.Sleep(3 * time.Second)
-
-	// 3. 请求服务器时间（0x22指令）
-	if err := c.SendServerTimeRequest(); err != nil {
-		c.logger.GetLogger().WithError(err).Warn("⚠️ 步骤3: 服务器时间请求失败，继续执行...")
-	} else {
-		c.logger.GetLogger().Info("✅ 步骤3: 服务器时间请求完成")
-	}
-	time.Sleep(2 * time.Second)
-
-	// 4. 发送初始心跳（0x01指令）
-	if err := c.SendDeviceHeartbeat01(); err != nil {
-		c.logger.GetLogger().WithError(err).Warn("⚠️ 步骤4: 初始心跳0x01发送失败")
-	} else {
-		c.logger.GetLogger().Info("✅ 步骤4: 初始心跳0x01发送完成")
-	}
-	time.Sleep(1 * time.Second)
-
-	// 5. 发送初始心跳（0x21指令）
-	if err := c.SendDeviceHeartbeat21(); err != nil {
-		c.logger.GetLogger().WithError(err).Warn("⚠️ 步骤5: 初始心跳0x21发送失败")
-	} else {
-		c.logger.GetLogger().Info("✅ 步骤5: 初始心跳0x21发送完成")
-	}
-	time.Sleep(2 * time.Second)
-
-	// 6. 启动所有心跳协程
-	c.StartHeartbeat()
-	c.logger.GetLogger().Info("✅ 步骤6: 心跳协程启动完成")
+	// 启动服务
+	c.StartServices()
 
 	c.logger.GetLogger().WithFields(logrus.Fields{
-		"physicalID": fmt.Sprintf("0x%08X", c.config.PhysicalID),
-		"iccid":      c.config.ICCID,
-		"deviceType": fmt.Sprintf("0x%02X", c.config.DeviceType),
-	}).Info("🎉 真实设备模拟客户端启动完成")
+		"deviceID": fmt.Sprintf("0x%08X", c.config.PhysicalID),
+		"iccid":    c.config.ICCID,
+		"type":     fmt.Sprintf("0x%02X", c.config.DeviceType),
+		"isMaster": c.isMaster,
+	}).Info("✅ 设备启动完成")
 
 	return nil
 }

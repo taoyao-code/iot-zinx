@@ -370,3 +370,17 @@ func (m *SessionManager) ForEachSession(callback func(deviceID string, session *
 		return callback(deviceID, session)
 	})
 }
+
+// GetAllSessions 获取所有设备会话
+func (sm *SessionManager) GetAllSessions() map[string]*DeviceSession {
+	result := make(map[string]*DeviceSession)
+
+	sm.sessions.Range(func(key, value interface{}) bool {
+		deviceID := key.(string)
+		session := value.(DeviceSession)
+		result[deviceID] = &session
+		return true
+	})
+
+	return result
+}

@@ -131,4 +131,7 @@ type ISessionManager interface {
 
 	// ForEachSession 遍历所有会话
 	ForEachSession(callback func(deviceID string, session *DeviceSession) bool)
+
+	// GetAllSessions 获取所有设备会话
+	GetAllSessions() map[string]*DeviceSession
 }

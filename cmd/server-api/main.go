@@ -86,6 +86,7 @@ func showMainMenu() {
 	fmt.Println("6. 停止充电")
 	fmt.Println("7. 查询设备状态(0x81命令)")
 	fmt.Println("8. 健康检查")
+	fmt.Println("9. 查看设备组信息")
 	fmt.Println("0. 退出程序")
 	fmt.Print("请输入选项: ")
 }
@@ -206,12 +207,13 @@ func handleUserChoice(choice string, opManager *operations.OperationManager, rea
 		if deviceID == "" {
 			return false
 		}
-		port := promptForPortNumber(reader, true) // 允许端口0
-		if port == -1 {
+		port := promptForPortNumber(reader, true)
+		if port == -2 {
 			return false
 		}
-		orderNumber := promptForInputWithDefault(reader, "请输入订单号", "", "对应开始充电时的订单号")
-		reason := promptForInputWithDefault(reader, "请输入停止原因", "用户手动停止", "可选，停止充电的原因")
+		orderNumber := promptForInput(reader, "请输入订单号: ")
+		reason := promptForInputWithDefault(reader, "请输入停止原因", "用户主动停止", "停止充电的原因")
+
 		result, err := opManager.StopCharging(deviceID, port, orderNumber, reason)
 		handleOperationResult(result, err)
 	case "7":
@@ -226,8 +228,16 @@ func handleUserChoice(choice string, opManager *operations.OperationManager, rea
 		// 健康检查
 		result, err := opManager.HealthCheck()
 		handleOperationResult(result, err)
+	case "9":
+		// 查看设备组信息
+		deviceID := promptForDeviceID(reader, opManager)
+		if deviceID == "" {
+			return false
+		}
+		result, err := opManager.GetDeviceGroupInfo(deviceID)
+		handleOperationResult(result, err)
 	default:
-		fmt.Println("无效的选项，请重新选择。")
+		fmt.Println("❌ 无效选项，请重新选择")
 	}
 	return false
 }

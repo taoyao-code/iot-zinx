@@ -1,8 +1,9 @@
 # Go Pkg
 GO_PKG_MOD=iot-platform
-# Go 项目的二进制文件名称
-BINARY_NAME=iot_gateway
-# DNY解析器工具名称
+# Go 项目各组件名称
+GATEWAY_NAME=iot_gateway
+CLIENT_NAME=client
+SERVER_API_NAME=server-api
 DNY_PARSER_NAME=dny-parser
 # Go 编译器
 GO=go
@@ -22,8 +23,8 @@ GOMODTIDY=$(GO) mod tidy
 SWAG=swag
 
 # 默认编译的操作系统和架构
-DEFAULT_GOOS=linux
-DEFAULT_GOARCH=amd64
+DEFAULT_GOOS=$(shell go env GOOS)
+DEFAULT_GOARCH=$(shell go env GOARCH)
 
 # 可选的编译平台，格式为 GOOS/GOARCH
 PLATFORMS ?= "linux/amd64 linux/arm64 darwin/amd64 darwin/arm64 windows/amd64"
@@ -31,46 +32,109 @@ PLATFORMS ?= "linux/amd64 linux/arm64 darwin/amd64 darwin/arm64 windows/amd64"
 # make build TARGET_PLATFORM=linux/amd64
 TARGET_PLATFORM ?=
 
-# 主程序入口
-MAIN_GO_FILE=./cmd/gateway/main.go
-# DNY解析器入口
-DNY_PARSER_GO_FILE=./cmd/dny-parser/main.go
+# 程序入口文件
+GATEWAY_DIR=./cmd/gateway
+CLIENT_DIR=./cmd/client
+SERVER_API_DIR=./cmd/server-api
+DNY_PARSER_DIR=./cmd/dny-parser
 # 输出目录
 OUTPUT_DIR=./bin
 
-.PHONY: all build clean test help swagger dny-parser
+.PHONY: all build clean test help swagger build-all build-gateway build-client build-server-api build-dny-parser run-gateway run-client run-server-api run-dny-parser
 
-all: build
+all: build-all
 
-# 构建项目
-# 如果 TARGET_PLATFORM 被设置，则只编译该平台
-# 否则，编译 PLATFORMS 中定义的所有平台
-build:
-	@echo "==> Building..."
+# 构建所有组件
+build-all: build-gateway build-client build-server-api build-dny-parser
+
+# 构建网关组件
+build-gateway: $(OUTPUT_DIR)
+	@echo "==> Building Gateway..."
 	@if [ -n "$(TARGET_PLATFORM)" ]; then \
-		echo "  Building for $(TARGET_PLATFORM)"; \
-		env CGO_ENABLED=0 $(GOBUILD) -o $(OUTPUT_DIR)/$(BINARY_NAME)_$(subst /,_,$(TARGET_PLATFORM)) -ldflags="-s -w" -trimpath $(MAIN_GO_FILE); \
+		echo "  Building Gateway for $(TARGET_PLATFORM)"; \
+		GOOS_VAL=$$(echo $(TARGET_PLATFORM) | cut -d'/' -f1); \
+		GOARCH_VAL=$$(echo $(TARGET_PLATFORM) | cut -d'/' -f2); \
+		env CGO_ENABLED=0 GOOS=$$GOOS_VAL GOARCH=$$GOARCH_VAL $(GOBUILD) -o $(OUTPUT_DIR)/$(GATEWAY_NAME)_$$GOOS_VAL_$$GOARCH_VAL -ldflags="-s -w" -trimpath $(GATEWAY_DIR); \
 	else \
-		for PLATFORM in $(PLATFORMS); do \
+		env CGO_ENABLED=0 GOOS=$(DEFAULT_GOOS) GOARCH=$(DEFAULT_GOARCH) $(GOBUILD) -o $(OUTPUT_DIR)/$(GATEWAY_NAME) -ldflags="-s -w" -trimpath $(GATEWAY_DIR); \
+	fi
+	@echo "==> Gateway build complete."
+
+# 构建客户端组件
+build-client: $(OUTPUT_DIR)
+	@echo "==> Building Client..."
+	@if [ -n "$(TARGET_PLATFORM)" ]; then \
+		echo "  Building Client for $(TARGET_PLATFORM)"; \
+		GOOS_VAL=$$(echo $(TARGET_PLATFORM) | cut -d'/' -f1); \
+		GOARCH_VAL=$$(echo $(TARGET_PLATFORM) | cut -d'/' -f2); \
+		env CGO_ENABLED=0 GOOS=$$GOOS_VAL GOARCH=$$GOARCH_VAL $(GOBUILD) -o $(OUTPUT_DIR)/$(CLIENT_NAME)_$$GOOS_VAL_$$GOARCH_VAL -ldflags="-s -w" -trimpath $(CLIENT_DIR); \
+	else \
+		env CGO_ENABLED=0 GOOS=$(DEFAULT_GOOS) GOARCH=$(DEFAULT_GOARCH) $(GOBUILD) -o $(OUTPUT_DIR)/$(CLIENT_NAME) -ldflags="-s -w" -trimpath $(CLIENT_DIR); \
+	fi
+	@echo "==> Client build complete."
+
+# 构建服务端API组件
+build-server-api: $(OUTPUT_DIR)
+	@echo "==> Building Server API..."
+	@if [ -n "$(TARGET_PLATFORM)" ]; then \
+		echo "  Building Server API for $(TARGET_PLATFORM)"; \
+		GOOS_VAL=$$(echo $(TARGET_PLATFORM) | cut -d'/' -f1); \
+		GOARCH_VAL=$$(echo $(TARGET_PLATFORM) | cut -d'/' -f2); \
+		env CGO_ENABLED=0 GOOS=$$GOOS_VAL GOARCH=$$GOARCH_VAL $(GOBUILD) -o $(OUTPUT_DIR)/$(SERVER_API_NAME)_$$GOOS_VAL_$$GOARCH_VAL -ldflags="-s -w" -trimpath $(SERVER_API_DIR); \
+	else \
+		env CGO_ENABLED=0 GOOS=$(DEFAULT_GOOS) GOARCH=$(DEFAULT_GOARCH) $(GOBUILD) -o $(OUTPUT_DIR)/$(SERVER_API_NAME) -ldflags="-s -w" -trimpath $(SERVER_API_DIR); \
+	fi
+	@echo "==> Server API build complete."
+
+# 构建DNY解析器工具
+build-dny-parser: $(OUTPUT_DIR)
+	@echo "==> Building DNY parser tool..."
+	@if [ -n "$(TARGET_PLATFORM)" ]; then \
+		echo "  Building DNY parser for $(TARGET_PLATFORM)"; \
+		GOOS_VAL=$$(echo $(TARGET_PLATFORM) | cut -d'/' -f1); \
+		GOARCH_VAL=$$(echo $(TARGET_PLATFORM) | cut -d'/' -f2); \
+		env CGO_ENABLED=0 GOOS=$$GOOS_VAL GOARCH=$$GOARCH_VAL $(GOBUILD) -o $(OUTPUT_DIR)/$(DNY_PARSER_NAME)_$$GOOS_VAL_$$GOARCH_VAL -ldflags="-s -w" -trimpath $(DNY_PARSER_DIR); \
+	else \
+		env CGO_ENABLED=0 GOOS=$(DEFAULT_GOOS) GOARCH=$(DEFAULT_GOARCH) $(GOBUILD) -o $(OUTPUT_DIR)/$(DNY_PARSER_NAME) -ldflags="-s -w" -trimpath $(DNY_PARSER_DIR); \
+	fi
+	@echo "==> DNY parser tool built."
+
+# 构建所有组件的多平台版本
+build-multi-platform: $(OUTPUT_DIR)
+	@echo "==> Building all components for multiple platforms..."
+	@for PLATFORM in $(PLATFORMS); do \
 		GOOS_VAL=$$(echo $$PLATFORM | cut -d'/' -f1); \
 		GOARCH_VAL=$$(echo $$PLATFORM | cut -d'/' -f2); \
 		echo "  Building for $$GOOS_VAL/$$GOARCH_VAL"; \
-		env CGO_ENABLED=0 GOOS=$$GOOS_VAL GOARCH=$$GOARCH_VAL $(GOBUILD) -o $(OUTPUT_DIR)/$(BINARY_NAME)_$$GOOS_VAL_$$GOARCH_VAL -ldflags="-s -w" -trimpath $(MAIN_GO_FILE); \
-		done; \
-	fi
-	@echo "==> Build complete."
+		env CGO_ENABLED=0 GOOS=$$GOOS_VAL GOARCH=$$GOARCH_VAL $(GOBUILD) -o $(OUTPUT_DIR)/$(GATEWAY_NAME)_$$GOOS_VAL_$$GOARCH_VAL -ldflags="-s -w" -trimpath $(GATEWAY_DIR) || echo "❌ Gateway build failed for $$GOOS_VAL/$$GOARCH_VAL"; \
+		env CGO_ENABLED=0 GOOS=$$GOOS_VAL GOARCH=$$GOARCH_VAL $(GOBUILD) -o $(OUTPUT_DIR)/$(CLIENT_NAME)_$$GOOS_VAL_$$GOARCH_VAL -ldflags="-s -w" -trimpath $(CLIENT_DIR) || echo "❌ Client build failed for $$GOOS_VAL/$$GOARCH_VAL"; \
+		env CGO_ENABLED=0 GOOS=$$GOOS_VAL GOARCH=$$GOARCH_VAL $(GOBUILD) -o $(OUTPUT_DIR)/$(SERVER_API_NAME)_$$GOOS_VAL_$$GOARCH_VAL -ldflags="-s -w" -trimpath $(SERVER_API_DIR) || echo "❌ Server-API build failed for $$GOOS_VAL/$$GOARCH_VAL"; \
+		env CGO_ENABLED=0 GOOS=$$GOOS_VAL GOARCH=$$GOARCH_VAL $(GOBUILD) -o $(OUTPUT_DIR)/$(DNY_PARSER_NAME)_$$GOOS_VAL_$$GOARCH_VAL -ldflags="-s -w" -trimpath $(DNY_PARSER_DIR) || echo "❌ DNY-Parser build failed for $$GOOS_VAL/$$GOARCH_VAL"; \
+	done; \
+	echo "==> Multi-platform build complete."
 
-# 编译默认平台 (linux/amd64)
-build-default:
-	@echo "==> Building for default platform ($(DEFAULT_GOOS)/$(DEFAULT_GOARCH))..."
-	@env CGO_ENABLED=0 GOOS=$(DEFAULT_GOOS) GOARCH=$(DEFAULT_GOARCH) $(GOBUILD) -o $(OUTPUT_DIR)/$(BINARY_NAME)_$(DEFAULT_GOOS)_$(DEFAULT_GOARCH) -ldflags="-s -w" -trimpath $(MAIN_GO_FILE)
-	@echo "==> Build complete."
+# 运行网关组件
+run-gateway:
+	@echo "==> Running Gateway..."
+	@$(GO) run $(GATEWAY_DIR)
 
-# 构建DNY解析器工具
-dny-parser: $(OUTPUT_DIR)
-	@echo "==> Building DNY parser tool..."
-	@$(GOBUILD) -o $(OUTPUT_DIR)/$(DNY_PARSER_NAME) $(DNY_PARSER_GO_FILE)
-	@echo "==> DNY parser tool built: $(OUTPUT_DIR)/$(DNY_PARSER_NAME)"
+# 运行客户端组件
+run-client:
+	@echo "==> Running Client..."
+	@$(GO) run $(CLIENT_DIR)
+
+# 运行服务端API组件
+run-server-api:
+	@echo "==> Running Server API..."
+	@$(GO) run $(SERVER_API_DIR)
+
+# 运行DNY解析器工具
+run-dny-parser:
+	@echo "==> Running DNY parser tool..."
+	@$(GO) run $(DNY_PARSER_DIR)
+
+# 为兼容旧版本，保留原有构建命令
+build: build-gateway
 
 # 清理构建产物
 clean:
@@ -103,23 +167,34 @@ help:
 	@echo "Usage: make [target]"
 	@echo ""
 	@echo "Targets:"
-	@echo "  all                Builds the application for specified platforms (default)"
-	@echo "  build              Builds the application. Set TARGET_PLATFORM=os/arch to build for a single platform."
-	@echo "                     Example: make build TARGET_PLATFORM=linux/arm64"
+	@echo "  all                Builds all components (default)"
+	@echo "  build-all          Builds all components (gateway, client, server-api, dny-parser)"
+	@echo "  build-gateway      Builds only the gateway component"
+	@echo "  build-client       Builds only the client component"
+	@echo "  build-server-api   Builds only the server-api component"
+	@echo "  build-dny-parser   Builds only the dny-parser component"
+	@echo "  build-multi-platform  Builds all components for multiple platforms"
 	@echo "                     Default platforms: $(PLATFORMS)"
-	@echo "  build-default      Builds the application for the default platform ($(DEFAULT_GOOS)/$(DEFAULT_GOARCH))"
-	@echo "  dny-parser         Builds the DNY protocol parser tool"
+	@echo "  run-gateway        Runs the gateway component"
+	@echo "  run-client         Runs the client component"
+	@echo "  run-server-api     Runs the server-api component"
+	@echo "  run-dny-parser     Runs the dny-parser component"
 	@echo "  clean              Cleans build artifacts"
 	@echo "  test               Runs tests"
 	@echo "  tidy               Tidies go.mod file"
 	@echo "  swagger            Generates Swagger API documentation"
 	@echo "  help               Shows this help message"
 	@echo ""
+	@echo "Options:"
+	@echo "  TARGET_PLATFORM    Build for a specific platform (format: os/arch)"
+	@echo "                     Example: make build-gateway TARGET_PLATFORM=linux/arm64"
+	@echo ""
+	@echo "Current Settings:"
+	@echo "  Default OS:        $(DEFAULT_GOOS)"
+	@echo "  Default Arch:      $(DEFAULT_GOARCH)"
+	@echo "  Output Directory:  $(OUTPUT_DIR)"
+	@echo ""
 
 # 确保输出目录存在
 $(OUTPUT_DIR):
 	mkdir -p $(OUTPUT_DIR)
-
-# 将 build 依赖于输出目录的创建
-build: $(OUTPUT_DIR)
-build-default: $(OUTPUT_DIR)

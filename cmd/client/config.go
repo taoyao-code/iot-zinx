@@ -24,7 +24,14 @@ type DeviceConfig struct {
 	IMEI           string // 模块的IMEI号
 	ModuleVersion  string // 通讯模块的固件版本号
 	HasRTC         bool   // 是否有RTC模块
+	IsMaster       bool   // 是否是主机设备
 }
+
+// 设备类型判断常量
+const (
+	DeviceTypeMaster = 0x09 // 主机设备类型前缀（09开头）
+	DeviceTypeSlave  = 0x04 // 分机设备类型前缀（04开头）
+)
 
 // generateUniqueDeviceID 生成唯一的设备ID
 // 使用时间戳和随机数确保每次启动都有不同的设备ID基础值
@@ -34,6 +41,21 @@ func generateUniqueDeviceID() uint32 {
 	// 取时间戳的低24位，并与设备识别码04组合
 	deviceNumber := timestamp & 0x00FFFFFF
 	return 0x04000000 | deviceNumber
+}
+
+// generateUniqueMasterID 生成唯一的主机ID
+func generateUniqueMasterID() uint32 {
+	// 获取当前时间戳的后3字节作为设备编号
+	timestamp := uint32(time.Now().Unix())
+	// 取时间戳的低24位，并与主机识别码09组合
+	deviceNumber := timestamp & 0x00FFFFFF
+	return 0x09000000 | deviceNumber
+}
+
+// IsMasterDevice 判断设备ID是否为主机
+func IsMasterDevice(deviceID uint32) bool {
+	// 获取设备ID的高字节，判断是否为主机类型
+	return (deviceID >> 24) == DeviceTypeMaster
 }
 
 // NewDeviceConfig 创建默认主机设备配置 - 基于线上真实数据
@@ -55,7 +77,16 @@ func NewDeviceConfig() *DeviceConfig {
 		IMEI:           "860123456789012",           // 模拟IMEI号
 		ModuleVersion:  "4G_MODULE_V1.0.0_20240601", // 模块版本号（24字节）
 		HasRTC:         true,                        // 有RTC模块
+		IsMaster:       false,                       // 默认为分机设备
 	}
+}
+
+// NewMasterDeviceConfig 创建默认主机设备配置
+func NewMasterDeviceConfig() *DeviceConfig {
+	config := NewDeviceConfig()
+	config.PhysicalID = generateUniqueMasterID()
+	config.IsMaster = true
+	return config
 }
 
 // NewDeviceConfigWithPhysicalID 创建指定物理ID的设备配置
@@ -68,11 +99,15 @@ func NewDeviceConfigWithPhysicalID(physicalID uint32, virtualID uint8) *DeviceCo
 
 // CreateMultipleDevicesConfig 创建多个设备配置（模拟线上多设备场景）
 func CreateMultipleDevicesConfig() []*DeviceConfig {
-	// 基于线上数据的两个设备ID
+	// 创建一个主机和一个分机，共享同一个ICCID
 	devices := []*DeviceConfig{
-		NewDeviceConfigWithPhysicalID(0x04A228CD, 0x1e), // 第一个设备
-		NewDeviceConfigWithPhysicalID(0x04A26CF3, 0x1f), // 第二个设备
+		NewDeviceConfigWithPhysicalID(0x09A228CD, 0x1e), // 主机设备 (09开头)
+		NewDeviceConfigWithPhysicalID(0x04A26CF3, 0x1f), // 分机设备 (04开头)
 	}
+
+	// 标记设备类型
+	devices[0].IsMaster = true
+	devices[1].IsMaster = false
 
 	// 设置相同的ICCID
 	iccid := "898604D9162390488297"

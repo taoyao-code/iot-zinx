@@ -9,22 +9,30 @@ import (
 
 // SimCard 模拟SIM卡管理结构
 type SimCard struct {
-	ICCID      string        // SIM卡ICCID号
-	DeviceIDs  []uint32      // 管理的设备物理ID列表
-	clients    []*TestClient // 关联的设备客户端
-	mu         sync.Mutex    // 互斥锁
-	serverAddr string        // 服务器地址
-	isRunning  bool          // 运行状态
+	ICCID          string        // SIM卡ICCID号
+	DeviceIDs      []uint32      // 管理的设备物理ID列表
+	clients        []*TestClient // 关联的设备客户端
+	mu             sync.Mutex    // 互斥锁
+	serverAddr     string        // 服务器地址
+	isRunning      bool          // 运行状态
+	directConnMode bool          // 直连模式
 }
 
 // NewSimCard 创建新的SIM卡管理器
 func NewSimCard(iccid string, serverAddr string) *SimCard {
 	return &SimCard{
-		ICCID:      iccid,
-		DeviceIDs:  make([]uint32, 0),
-		clients:    make([]*TestClient, 0),
-		serverAddr: serverAddr,
+		ICCID:          iccid,
+		DeviceIDs:      make([]uint32, 0),
+		clients:        make([]*TestClient, 0),
+		serverAddr:     serverAddr,
+		directConnMode: true, // 默认启用直连模式，符合我们的优化
 	}
+}
+
+// SetDirectConnMode 设置是否启用直连模式
+func (s *SimCard) SetDirectConnMode(enabled bool) *SimCard {
+	s.directConnMode = enabled
+	return s
 }
 
 // AddDevice 添加设备物理ID
@@ -83,29 +91,37 @@ func (s *SimCard) Start(verbose bool) error {
 		// 打印设备信息
 		client.LogInfo()
 
-		// 只有第一个设备发送ICCID (因为SIM卡只有一个)
-		if i == 0 {
-			// 启动这个设备，并发送ICCID
-			if err := client.ConnectAndSendICCID(); err != nil {
-				fmt.Printf("❌ SIM卡 %s 的主设备 %08X 连接失败: %s\n", s.ICCID, deviceID, err)
+		// 直连模式下，每个设备都独立连接并发送ICCID
+		if s.directConnMode {
+			if err := client.Start(); err != nil {
+				fmt.Printf("❌ SIM卡 %s 的设备 %08X 启动失败: %s\n", s.ICCID, deviceID, err)
 				continue
 			}
 		} else {
-			// 其他设备只需要连接，不发送ICCID
-			if err := client.ConnectOnly(); err != nil {
-				fmt.Printf("❌ SIM卡 %s 的从设备 %08X 连接失败: %s\n", s.ICCID, deviceID, err)
+			// 传统模式：只有第一个设备发送ICCID
+			if i == 0 {
+				// 启动这个设备，并发送ICCID
+				if err := client.ConnectAndSendICCID(); err != nil {
+					fmt.Printf("❌ SIM卡 %s 的主设备 %08X 连接失败: %s\n", s.ICCID, deviceID, err)
+					continue
+				}
+			} else {
+				// 其他设备只需要连接，不发送ICCID
+				if err := client.ConnectOnly(); err != nil {
+					fmt.Printf("❌ SIM卡 %s 的从设备 %08X 连接失败: %s\n", s.ICCID, deviceID, err)
+					continue
+				}
+			}
+
+			// 发送设备注册包
+			if err := client.SendRegister(); err != nil {
+				fmt.Printf("❌ 设备 %08X 注册失败: %s\n", deviceID, err)
 				continue
 			}
-		}
 
-		// 发送设备注册包
-		if err := client.SendRegister(); err != nil {
-			fmt.Printf("❌ 设备 %08X 注册失败: %s\n", deviceID, err)
-			continue
+			// 启动客户端的心跳和消息处理
+			client.StartServices()
 		}
-
-		// 启动客户端的心跳和消息处理
-		client.StartServices()
 
 		fmt.Printf("✅ 设备 %08X (SIM卡: %s) 启动成功\n", deviceID, s.ICCID)
 	}
