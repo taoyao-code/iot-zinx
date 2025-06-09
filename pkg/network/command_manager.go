@@ -1,6 +1,7 @@
 package network
 
 import (
+	"encoding/hex"
 	"fmt"
 	"sort"
 	"sync"
@@ -27,6 +28,19 @@ const (
 	CommandBatchSize = 100
 )
 
+// CommandStatus 命令状态类型
+type CommandStatus string
+
+// 命令状态常量
+const (
+	CmdStatusPending   CommandStatus = "pending"   // 待处理
+	CmdStatusSent      CommandStatus = "sent"      // 已发送
+	CmdStatusRetrying  CommandStatus = "retrying"  // 重试中
+	CmdStatusConfirmed CommandStatus = "confirmed" // 已确认
+	CmdStatusFailed    CommandStatus = "failed"    // 失败
+	CmdStatusExpired   CommandStatus = "expired"   // 过期
+)
+
 // CommandEntry 命令条目
 type CommandEntry struct {
 	Connection   ziface.IConnection
@@ -38,8 +52,10 @@ type CommandEntry struct {
 	CreateTime   time.Time
 	RetryCount   int
 	LastSentTime time.Time
-	Confirmed    bool // 是否已确认
-	Priority     int  // 命令优先级，值越小优先级越高
+	Confirmed    bool          // 是否已确认
+	Priority     int           // 命令优先级，值越小优先级越高
+	Status       CommandStatus // 命令状态
+	LastError    string        // 最后一次错误信息
 }
 
 // CommandManager 命令管理器
@@ -145,19 +161,29 @@ func (cm *CommandManager) RegisterCommand(conn ziface.IConnection, physicalID ui
 				existingCmd.LastSentTime = time.Now()
 				existingCmd.RetryCount = 0
 				existingCmd.Confirmed = false
+				existingCmd.Status = CmdStatusSent
+				existingCmd.LastError = ""
 
 				logger.WithFields(logrus.Fields{
-					"connID":     connID,
-					"physicalID": fmt.Sprintf("0x%08X", physicalID),
-					"messageID":  messageID,
-					"command":    fmt.Sprintf("0x%02X", command),
-					"cmdKey":     cmdKey,
+					"connID":      connID,
+					"physicalID":  fmt.Sprintf("0x%08X", physicalID),
+					"messageID":   fmt.Sprintf("0x%04X (%d)", messageID, messageID),
+					"command":     fmt.Sprintf("0x%02X", command),
+					"commandDesc": GetCommandDescription(command),
+					"cmdKey":      cmdKey,
+					"dataLen":     len(data),
+					"dataHex":     hex.EncodeToString(data),
+					"priority":    existingCmd.Priority,
+					"status":      existingCmd.Status,
 				}).Debug("更新已存在的命令")
 
 				return
 			}
 		}
 	}
+
+	// 根据命令类型设置优先级
+	priority := getCommandPriority(command)
 
 	// 创建命令条目
 	entry := &CommandEntry{
@@ -171,6 +197,9 @@ func (cm *CommandManager) RegisterCommand(conn ziface.IConnection, physicalID ui
 		RetryCount:   0,
 		LastSentTime: time.Now(),
 		Confirmed:    false,
+		Priority:     priority,
+		Status:       CmdStatusSent,
+		LastError:    "",
 	}
 
 	// 存储命令
@@ -179,13 +208,56 @@ func (cm *CommandManager) RegisterCommand(conn ziface.IConnection, physicalID ui
 	// 更新物理ID到命令的映射
 	cm.physicalCommands[physicalID] = append(cm.physicalCommands[physicalID], cmdKey)
 
+	// 获取设备ICCID信息（如果有）
+	var iccid string
+	if iccidVal, err := conn.GetProperty(constants.PropKeyICCID); err == nil && iccidVal != nil {
+		if val, ok := iccidVal.(string); ok {
+			iccid = val
+		}
+	}
+
+	// 获取远程地址信息
+	remoteAddr := conn.RemoteAddr().String()
+
 	logger.WithFields(logrus.Fields{
-		"connID":     connID,
-		"physicalID": fmt.Sprintf("0x%08X", physicalID),
-		"messageID":  messageID,
-		"command":    fmt.Sprintf("0x%02X", command),
-		"cmdKey":     cmdKey,
-	}).Debug("注册新命令")
+		"connID":      connID,
+		"physicalID":  fmt.Sprintf("0x%08X", physicalID),
+		"messageID":   fmt.Sprintf("0x%04X (%d)", messageID, messageID),
+		"command":     fmt.Sprintf("0x%02X", command),
+		"commandDesc": GetCommandDescription(command),
+		"cmdKey":      cmdKey,
+		"dataLen":     len(data),
+		"dataHex":     hex.EncodeToString(data),
+		"priority":    priority,
+		"status":      entry.Status,
+		"iccid":       iccid,
+		"remoteAddr":  remoteAddr,
+	}).Info("注册新命令")
+}
+
+// getCommandPriority 根据命令类型获取优先级
+// 优先级值越小优先级越高，0为最高优先级
+func getCommandPriority(command uint8) int {
+	switch command {
+	case 0x20: // 设备注册 - 最高优先级
+		return 0
+	case 0x25: // 充电控制 - 高优先级
+		return 1
+	case 0x21: // 刷卡 - 高优先级
+		return 1
+	case 0x23: // 结算 - 中高优先级
+		return 2
+	case 0x22: // 参数设置 - 中等优先级
+		return 3
+	case 0x26: // 获取服务器时间 - 中等优先级
+		return 3
+	case 0x01: // 心跳 - 低优先级
+		return 5
+	case 0x24: // 功率心跳 - 低优先级
+		return 5
+	default: // 未知命令 - 中等优先级
+		return 3
+	}
 }
 
 // ConfirmCommand 确认命令已完成
@@ -196,10 +268,16 @@ func (cm *CommandManager) ConfirmCommand(physicalID uint32, messageID uint16, co
 	// 查找所有关联到该物理ID的命令
 	cmdKeys, exists := cm.physicalCommands[physicalID]
 	if !exists {
+		logger.WithFields(logrus.Fields{
+			"physicalID": fmt.Sprintf("0x%08X", physicalID),
+			"messageID":  fmt.Sprintf("0x%04X (%d)", messageID, messageID),
+			"command":    fmt.Sprintf("0x%02X", command),
+		}).Debug("确认命令失败：未找到该物理ID的命令")
 		return false
 	}
 
 	confirmed := false
+	exactMatch := false
 
 	// 检查每个命令是否匹配
 	for _, cmdKey := range cmdKeys {
@@ -208,18 +286,62 @@ func (cm *CommandManager) ConfirmCommand(physicalID uint32, messageID uint16, co
 			continue
 		}
 
-		// 检查命令是否匹配 - 更宽松的匹配条件
-		if cmd.Command == command {
-			// 标记为已确认
+		// 优先进行完全匹配（物理ID + messageID + command）
+		if cmd.Command == command && cmd.MessageID == messageID {
+			// 标记为已确认并更新状态
 			cmd.Confirmed = true
+			cmd.Status = CmdStatusConfirmed
+
 			confirmed = true
+			exactMatch = true
 
 			logger.WithFields(logrus.Fields{
-				"physicalID": fmt.Sprintf("0x%08X", physicalID),
-				"messageID":  messageID,
-				"command":    fmt.Sprintf("0x%02X", command),
-				"cmdKey":     cmdKey,
-			}).Debug("确认命令已完成")
+				"physicalID":       fmt.Sprintf("0x%08X", physicalID),
+				"messageID":        fmt.Sprintf("0x%04X (%d)", messageID, messageID),
+				"command":          fmt.Sprintf("0x%02X", command),
+				"cmdKey":           cmdKey,
+				"matchType":        "完全匹配",
+				"originalMsgID":    fmt.Sprintf("0x%04X (%d)", cmd.MessageID, cmd.MessageID),
+				"timeSinceCreated": time.Since(cmd.CreateTime).Seconds(),
+				"retryCount":       cmd.RetryCount,
+				"status":           cmd.Status,
+				"dataHex":          hex.EncodeToString(cmd.Data),
+			}).Info("确认命令已完成 - 完全匹配")
+
+			// 已找到完全匹配，不再继续查找宽松匹配
+			break
+		}
+	}
+
+	// 如果没有找到完全匹配，尝试宽松匹配（兼容旧版本）
+	if !exactMatch {
+		for _, cmdKey := range cmdKeys {
+			cmd, exists := cm.commands[cmdKey]
+			if !exists {
+				continue
+			}
+
+			// 宽松匹配（只匹配物理ID和command）
+			if cmd.Command == command && !cmd.Confirmed {
+				// 标记为已确认并更新状态
+				cmd.Confirmed = true
+				cmd.Status = CmdStatusConfirmed
+				confirmed = true
+
+				logger.WithFields(logrus.Fields{
+					"physicalID":       fmt.Sprintf("0x%08X", physicalID),
+					"messageID":        fmt.Sprintf("0x%04X (%d)", messageID, messageID),
+					"command":          fmt.Sprintf("0x%02X", command),
+					"cmdKey":           cmdKey,
+					"matchType":        "宽松匹配",
+					"originalMsgID":    fmt.Sprintf("0x%04X (%d)", cmd.MessageID, cmd.MessageID),
+					"timeSinceCreated": time.Since(cmd.CreateTime).Seconds(),
+					"retryCount":       cmd.RetryCount,
+					"status":           cmd.Status,
+					"dataHex":          hex.EncodeToString(cmd.Data),
+					"warning":          "消息ID不匹配，但仍然确认命令 - 考虑升级为严格匹配",
+				}).Warn("确认命令已完成 - 宽松匹配（兼容模式）")
+			}
 		}
 	}
 
@@ -352,6 +474,7 @@ func (cm *CommandManager) checkTimeoutCommands() {
 	now := time.Now()
 	var timeoutCommands []*CommandEntry
 	var expiredCommandKeys []string
+	var expiredCommands []*CommandEntry // 保存过期命令的引用
 
 	// 批量收集超时和过期命令，减少锁持有时间
 	cm.lock.Lock()
@@ -364,13 +487,25 @@ func (cm *CommandManager) checkTimeoutCommands() {
 		// 检查命令是否超过最大生命周期
 		if now.Sub(cmd.CreateTime) > CommandMaxAge {
 			expiredCommandKeys = append(expiredCommandKeys, key)
+
+			// 更新命令状态为过期
+			cmd.Status = CmdStatusExpired
+			cmd.LastError = fmt.Sprintf("命令超过最大生命周期 (%.2f秒)", now.Sub(cmd.CreateTime).Seconds())
+
+			// 保存命令引用用于日志记录
+			cmdCopy := *cmd
+			expiredCommands = append(expiredCommands, &cmdCopy)
+
 			logger.WithFields(logrus.Fields{
-				"cmdKey":     key,
-				"physicalID": fmt.Sprintf("0x%08X", cmd.PhysicalID),
-				"messageID":  cmd.MessageID,
-				"command":    fmt.Sprintf("0x%02X", cmd.Command),
-				"createTime": cmd.CreateTime.Format("15:04:05"),
-				"age":        now.Sub(cmd.CreateTime).Seconds(),
+				"cmdKey":      key,
+				"physicalID":  fmt.Sprintf("0x%08X", cmd.PhysicalID),
+				"messageID":   fmt.Sprintf("0x%04X (%d)", cmd.MessageID, cmd.MessageID),
+				"command":     fmt.Sprintf("0x%02X", cmd.Command),
+				"commandDesc": GetCommandDescription(cmd.Command),
+				"createTime":  cmd.CreateTime.Format("15:04:05.000"),
+				"age":         now.Sub(cmd.CreateTime).Seconds(),
+				"status":      cmd.Status,
+				"lastError":   cmd.LastError,
 			}).Info("命令超过最大生命周期，将被删除")
 			continue
 		}
@@ -392,8 +527,26 @@ func (cm *CommandManager) checkTimeoutCommands() {
 		}
 		cm.lock.Unlock()
 
+		// 记录详细的过期命令信息
+		for _, cmd := range expiredCommands {
+			logger.WithFields(logrus.Fields{
+				"physicalID":  fmt.Sprintf("0x%08X", cmd.PhysicalID),
+				"messageID":   fmt.Sprintf("0x%04X (%d)", cmd.MessageID, cmd.MessageID),
+				"command":     fmt.Sprintf("0x%02X", cmd.Command),
+				"commandDesc": GetCommandDescription(cmd.Command),
+				"connID":      cmd.ConnID,
+				"createTime":  cmd.CreateTime.Format("15:04:05.000"),
+				"age":         now.Sub(cmd.CreateTime).Seconds(),
+				"retryCount":  cmd.RetryCount,
+				"status":      cmd.Status,
+				"lastError":   cmd.LastError,
+				"dataHex":     hex.EncodeToString(cmd.Data),
+			}).Debug("已删除过期命令详情")
+		}
+
 		logger.WithFields(logrus.Fields{
-			"count": len(expiredCommandKeys),
+			"count":      len(expiredCommandKeys),
+			"expireTime": CommandMaxAge.Seconds(),
 		}).Info("已批量清理过期命令")
 	}
 
@@ -427,7 +580,8 @@ func (cm *CommandManager) checkTimeoutCommands() {
 		}
 
 		logger.WithFields(logrus.Fields{
-			"count": len(timeoutCommands),
+			"count":       len(timeoutCommands),
+			"timeoutTime": CommandTimeout.Seconds(),
 		}).Info("已批量处理超时命令")
 	}
 }
@@ -447,22 +601,36 @@ func (cm *CommandManager) processBatchTimeoutCommands(commands []*CommandEntry) 
 
 		// 日志记录超时情况
 		logger.WithFields(logrus.Fields{
-			"cmdKey":     cmdKey,
-			"physicalID": fmt.Sprintf("0x%08X", existingCmd.PhysicalID),
-			"messageID":  existingCmd.MessageID,
-			"command":    fmt.Sprintf("0x%02X", existingCmd.Command),
-			"retryCount": existingCmd.RetryCount,
-			"timeSince":  time.Since(existingCmd.LastSentTime).Seconds(),
+			"cmdKey":      cmdKey,
+			"physicalID":  fmt.Sprintf("0x%08X", existingCmd.PhysicalID),
+			"messageID":   fmt.Sprintf("0x%04X (%d)", existingCmd.MessageID, existingCmd.MessageID),
+			"command":     fmt.Sprintf("0x%02X", existingCmd.Command),
+			"commandDesc": GetCommandDescription(existingCmd.Command),
+			"retryCount":  existingCmd.RetryCount,
+			"timeSince":   time.Since(existingCmd.LastSentTime).Seconds(),
+			"createTime":  existingCmd.CreateTime.Format("15:04:05.000"),
+			"connID":      existingCmd.ConnID,
+			"dataHex":     hex.EncodeToString(existingCmd.Data),
+			"status":      existingCmd.Status,
 		}).Info("发现超时命令")
 
 		// 如果重试次数已达上限，删除命令
 		if existingCmd.RetryCount >= cm.maxRetry {
+			// 更新状态为失败
+			existingCmd.Status = CmdStatusFailed
+			existingCmd.LastError = fmt.Sprintf("重试次数已达上限 (%d/%d)", existingCmd.RetryCount, cm.maxRetry)
+
 			logger.WithFields(logrus.Fields{
-				"cmdKey":     cmdKey,
-				"physicalID": fmt.Sprintf("0x%08X", existingCmd.PhysicalID),
-				"messageID":  existingCmd.MessageID,
-				"command":    fmt.Sprintf("0x%02X", existingCmd.Command),
-				"retryCount": existingCmd.RetryCount,
+				"cmdKey":      cmdKey,
+				"physicalID":  fmt.Sprintf("0x%08X", existingCmd.PhysicalID),
+				"messageID":   fmt.Sprintf("0x%04X (%d)", existingCmd.MessageID, existingCmd.MessageID),
+				"command":     fmt.Sprintf("0x%02X", existingCmd.Command),
+				"commandDesc": GetCommandDescription(existingCmd.Command),
+				"retryCount":  existingCmd.RetryCount,
+				"maxRetry":    cm.maxRetry,
+				"age":         time.Since(existingCmd.CreateTime).Seconds(),
+				"status":      existingCmd.Status,
+				"lastError":   existingCmd.LastError,
 			}).Warn("命令重试次数已达上限，放弃重试")
 			delete(cm.commands, cmdKey)
 			cm.lock.Unlock()
@@ -471,45 +639,95 @@ func (cm *CommandManager) processBatchTimeoutCommands(commands []*CommandEntry) 
 
 		// 检查连接是否仍然有效
 		if !isConnectionActive(existingCmd.Connection) {
+			// 更新状态为失败
+			existingCmd.Status = CmdStatusFailed
+			existingCmd.LastError = "连接已关闭"
+
 			logger.WithFields(logrus.Fields{
-				"cmdKey":     cmdKey,
-				"physicalID": fmt.Sprintf("0x%08X", existingCmd.PhysicalID),
-				"messageID":  existingCmd.MessageID,
-				"command":    fmt.Sprintf("0x%02X", existingCmd.Command),
-				"connID":     existingCmd.Connection.GetConnID(),
-			}).Warn("连接已关闭，放弃重试")
+				"cmdKey":      cmdKey,
+				"physicalID":  fmt.Sprintf("0x%08X", existingCmd.PhysicalID),
+				"messageID":   fmt.Sprintf("0x%04X (%d)", existingCmd.MessageID, existingCmd.MessageID),
+				"command":     fmt.Sprintf("0x%02X", existingCmd.Command),
+				"commandDesc": GetCommandDescription(existingCmd.Command),
+				"connID":      existingCmd.Connection.GetConnID(),
+				"reason":      existingCmd.LastError,
+				"status":      existingCmd.Status,
+			}).Warn("命令重试失败，放弃重试")
 			delete(cm.commands, cmdKey)
 			cm.lock.Unlock()
 			continue
 		}
 
-		// 增加重试次数并更新最后发送时间
+		// 增加重试次数并更新状态和最后发送时间
 		existingCmd.RetryCount++
+		existingCmd.Status = CmdStatusRetrying
+		lastSentTime := existingCmd.LastSentTime // 保存上次发送时间
 		existingCmd.LastSentTime = time.Now()
+
+		// 为了避免在发送过程中锁定，先解锁
 		cm.lock.Unlock()
 
-		// 记录日志
+		// 记录重发日志
 		logger.WithFields(logrus.Fields{
-			"cmdKey":     cmdKey,
-			"physicalID": fmt.Sprintf("0x%08X", existingCmd.PhysicalID),
-			"messageID":  existingCmd.MessageID,
-			"command":    fmt.Sprintf("0x%02X", existingCmd.Command),
-			"retryCount": existingCmd.RetryCount,
+			"cmdKey":      cmdKey,
+			"physicalID":  fmt.Sprintf("0x%08X", existingCmd.PhysicalID),
+			"messageID":   fmt.Sprintf("0x%04X (%d)", existingCmd.MessageID, existingCmd.MessageID),
+			"command":     fmt.Sprintf("0x%02X", existingCmd.Command),
+			"commandDesc": GetCommandDescription(existingCmd.Command),
+			"retryCount":  existingCmd.RetryCount,
+			"timeSince":   time.Since(lastSentTime).Seconds(),
+			"connID":      existingCmd.ConnID,
+			"dataHex":     hex.EncodeToString(existingCmd.Data),
+			"status":      existingCmd.Status,
 		}).Info("重发超时命令")
 
-		// 重发命令
+		// 重发命令 - 确保使用原始的messageID
 		if SendCommandFunc != nil {
-			err := SendCommandFunc(existingCmd.Connection, existingCmd.PhysicalID, existingCmd.MessageID, existingCmd.Command, existingCmd.Data)
-			if err != nil {
-				logger.WithFields(logrus.Fields{
-					"cmdKey":     cmdKey,
-					"physicalID": fmt.Sprintf("0x%08X", existingCmd.PhysicalID),
-					"messageID":  existingCmd.MessageID,
-					"command":    fmt.Sprintf("0x%02X", existingCmd.Command),
-					"retryCount": existingCmd.RetryCount,
-					"error":      err.Error(),
-				}).Error("重发超时命令失败")
+			// 记录发送前的时间
+			sendStartTime := time.Now()
+
+			// 发送命令，使用原始参数
+			err := SendCommandFunc(
+				existingCmd.Connection,
+				existingCmd.PhysicalID,
+				existingCmd.MessageID, // 确保使用原始messageID
+				existingCmd.Command,
+				existingCmd.Data)
+
+			// 计算发送耗时
+			sendTime := time.Since(sendStartTime).Milliseconds()
+
+			// 更新命令状态
+			cm.lock.Lock()
+			if cmd, exists := cm.commands[cmdKey]; exists {
+				if err != nil {
+					cmd.LastError = err.Error()
+					logger.WithFields(logrus.Fields{
+						"cmdKey":      cmdKey,
+						"physicalID":  fmt.Sprintf("0x%08X", existingCmd.PhysicalID),
+						"messageID":   fmt.Sprintf("0x%04X (%d)", existingCmd.MessageID, existingCmd.MessageID),
+						"command":     fmt.Sprintf("0x%02X", existingCmd.Command),
+						"commandDesc": GetCommandDescription(existingCmd.Command),
+						"retryCount":  existingCmd.RetryCount,
+						"error":       err.Error(),
+						"sendTime":    sendTime,
+						"status":      cmd.Status,
+					}).Error("重发超时命令失败")
+				} else {
+					cmd.Status = CmdStatusSent
+					logger.WithFields(logrus.Fields{
+						"cmdKey":      cmdKey,
+						"physicalID":  fmt.Sprintf("0x%08X", existingCmd.PhysicalID),
+						"messageID":   fmt.Sprintf("0x%04X (%d)", existingCmd.MessageID, existingCmd.MessageID),
+						"command":     fmt.Sprintf("0x%02X", existingCmd.Command),
+						"commandDesc": GetCommandDescription(existingCmd.Command),
+						"retryCount":  existingCmd.RetryCount,
+						"sendTime":    sendTime,
+						"status":      cmd.Status,
+					}).Debug("重发超时命令成功")
+				}
 			}
+			cm.lock.Unlock()
 		} else {
 			logger.Error("未设置命令发送函数，无法重发命令")
 		}
@@ -542,4 +760,29 @@ var SendCommandFunc SendCommandFuncType
 // SetSendCommandFunc 设置命令发送函数
 func SetSendCommandFunc(fn SendCommandFuncType) {
 	SendCommandFunc = fn
+}
+
+// GetCommandDescription 获取命令描述
+func GetCommandDescription(command uint8) string {
+	// 根据命令码返回对应的描述信息
+	switch command {
+	case 0x01:
+		return "心跳"
+	case 0x20:
+		return "设备注册"
+	case 0x21:
+		return "刷卡"
+	case 0x22:
+		return "参数设置"
+	case 0x23:
+		return "结算"
+	case 0x24:
+		return "功率心跳"
+	case 0x25:
+		return "充电控制"
+	case 0x26:
+		return "获取服务器时间"
+	default:
+		return fmt.Sprintf("未知命令(0x%02X)", command)
+	}
 }

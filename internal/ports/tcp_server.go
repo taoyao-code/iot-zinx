@@ -12,9 +12,6 @@ import (
 	"github.com/bujia-iot/iot-zinx/internal/infrastructure/zinx_server/handlers"
 	"github.com/bujia-iot/iot-zinx/pkg"
 	"github.com/bujia-iot/iot-zinx/pkg/constants"
-	"github.com/bujia-iot/iot-zinx/pkg/heartbeat"
-	"github.com/bujia-iot/iot-zinx/pkg/monitor"
-	"github.com/bujia-iot/iot-zinx/pkg/network"
 	"github.com/sirupsen/logrus"
 )
 
@@ -45,16 +42,16 @@ func (s *TCPServer) Start() error {
 		return err
 	}
 
-	// 注册路由
+	// 注册路由 - 核心指令流程
 	s.registerRoutes()
 
-	// 设置连接钩子
+	// 设置连接钩子 - 核心连接管理
 	s.setupConnectionHooks()
 
-	// 启动设备监控
-	s.startDeviceMonitor()
+	// 启动设备监控 - 暂时注释，保留核心功能
+	// s.startDeviceMonitor()
 
-	// 启动心跳管理器
+	// 启动心跳管理器 - 简化版本
 	s.startHeartbeatManager()
 
 	// 启动服务器
@@ -139,7 +136,8 @@ func (s *TCPServer) setupConnectionHooks() {
 	logger.Info("已启用Zinx内部心跳检测机制")
 }
 
-// startDeviceMonitor 启动设备监控器
+// startDeviceMonitor 启动设备监控器 - 暂时注释，保留核心功能
+/*
 func (s *TCPServer) startDeviceMonitor() {
 	deviceMonitor := pkg.Monitor.GetGlobalDeviceMonitor()
 	if deviceMonitor == nil {
@@ -178,55 +176,64 @@ func (s *TCPServer) startDeviceMonitor() {
 		logger.Info("设备监控器已启动")
 	}
 }
+*/
 
-// startHeartbeatManager 启动心跳管理器
+// startHeartbeatManager 启动心跳管理器 - 简化版本
 func (s *TCPServer) startHeartbeatManager() {
 	// 从配置中获取心跳间隔时间
 	heartbeatInterval := time.Duration(s.cfg.DeviceConnection.HeartbeatIntervalSeconds) * time.Second
-	heartbeatTimeout := time.Duration(s.cfg.DeviceConnection.HeartbeatTimeoutSeconds) * time.Second
+	// heartbeatTimeout := time.Duration(s.cfg.DeviceConnection.HeartbeatTimeoutSeconds) * time.Second
 
-	// 1. 初始化旧版心跳管理器（保持兼容）
+	// 1. 初始化简化版心跳管理器
 	s.heartbeatManager = NewHeartbeatManager(heartbeatInterval)
 	s.heartbeatManager.Start()
 
-	// 2. 初始化并启动新版心跳服务
-	logger.Info("初始化并启动新版心跳服务...")
+	logger.WithFields(logrus.Fields{
+		"heartbeatInterval": heartbeatInterval.String(),
+	}).Info("简化版心跳管理器已启动，使用Zinx内置心跳机制")
 
-	// 创建心跳服务配置
-	heartbeatConfig := &heartbeat.HeartbeatServiceConfig{
-		CheckInterval:   heartbeatInterval, // 心跳检查间隔
-		TimeoutDuration: heartbeatTimeout,  // 心跳超时时间
-		GraceInterval:   60 * time.Second,  // 新连接宽限期
-	}
+	// 注释掉复杂的新版心跳服务，保留核心功能
+	/*
+		// 2. 初始化并启动新版心跳服务
+		logger.Info("初始化并启动新版心跳服务...")
 
-	// 创建心跳服务实例
-	heartbeatService := heartbeat.NewHeartbeatService(heartbeatConfig)
+		// 创建心跳服务配置
+		heartbeatConfig := &heartbeat.HeartbeatServiceConfig{
+			CheckInterval:   heartbeatInterval, // 心跳检查间隔
+			TimeoutDuration: heartbeatTimeout,  // 心跳超时时间
+			GraceInterval:   60 * time.Second,  // 新连接宽限期
+		}
 
-	// 设置为全局服务实例
-	heartbeat.SetGlobalHeartbeatService(heartbeatService)
+		// 创建心跳服务实例
+		heartbeatService := heartbeat.NewHeartbeatService(heartbeatConfig)
 
-	// 初始化心跳服务与连接监控集成
-	// 创建适配器，满足接口需求
-	connectionMonitorAdapter := &connectionMonitorAdapter{
-		monitor: pkg.Monitor.GetGlobalMonitor(),
-	}
+		// 设置为全局服务实例
+		heartbeat.SetGlobalHeartbeatService(heartbeatService)
 
-	// 初始化心跳服务
-	err := network.InitHeartbeatService(connectionMonitorAdapter)
-	if err != nil {
-		logger.WithFields(logrus.Fields{
-			"error": err.Error(),
-		}).Error("启动心跳服务失败")
-	} else {
-		logger.WithFields(logrus.Fields{
-			"checkInterval": heartbeatInterval.String(),
-			"timeout":       heartbeatTimeout.String(),
-		}).Info("心跳服务已成功启动")
-	}
+		// 初始化心跳服务与连接监控集成
+		// 创建适配器，满足接口需求
+		connectionMonitorAdapter := &connectionMonitorAdapter{
+			monitor: pkg.Monitor.GetGlobalMonitor(),
+		}
+
+		// 初始化心跳服务
+		err := network.InitHeartbeatService(connectionMonitorAdapter)
+		if err != nil {
+			logger.WithFields(logrus.Fields{
+				"error": err.Error(),
+			}).Error("启动心跳服务失败")
+		} else {
+			logger.WithFields(logrus.Fields{
+				"checkInterval": heartbeatInterval.String(),
+				"timeout":       heartbeatTimeout.String(),
+			}).Info("心跳服务已成功启动")
+		}
+	*/
 }
 
-// connectionMonitorAdapter 连接监控适配器
+// connectionMonitorAdapter 连接监控适配器 - 暂时注释，保留核心功能
 // 用于适配IConnectionMonitor接口到心跳服务所需的接口
+/*
 type connectionMonitorAdapter struct {
 	monitor monitor.IConnectionMonitor
 }
@@ -248,6 +255,7 @@ func (a *connectionMonitorAdapter) GetConnectionByConnID(connID uint64) (ziface.
 
 	return conn, found
 }
+*/
 
 // startServer 启动服务器并等待
 func (s *TCPServer) startServer() error {
@@ -348,7 +356,7 @@ func (h *HeartbeatManager) UpdateConnectionActivity(conn ziface.IConnection) {
 	}).Debug("更新连接活动时间")
 }
 
-// monitorConnectionActivity 监控连接活动
+// monitorConnectionActivity 监控连接活动 - 简化版本
 // 定期检查连接是否有活动，如果长时间无活动则关闭连接
 func (h *HeartbeatManager) monitorConnectionActivity() {
 	// 启动时给一个延迟，避免服务刚启动就开始检查心跳
