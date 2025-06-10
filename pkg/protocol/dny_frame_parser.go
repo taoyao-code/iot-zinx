@@ -6,9 +6,13 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"os"
 	"strconv"
+	"time"
 
 	"github.com/aceld/zinx/ziface"
+	"github.com/bujia-iot/iot-zinx/internal/infrastructure/logger"
+	"github.com/sirupsen/logrus"
 )
 
 // parseFrame 解析DNY协议帧的核心函数
@@ -33,6 +37,15 @@ func parseFrame(conn ziface.IConnection, data []byte) (*DecodedDNYFrame, error) 
 	if iccid, ok := extractICCID(data); ok {
 		decodedFrame.FrameType = FrameTypeICCID
 		decodedFrame.ICCIDValue = iccid
+		
+		// 强制性调试：输出到stderr
+		fmt.Printf("🔍 DEBUG: ICCID识别成功! iccid=%s, dataHex=%x\n", iccid, data)
+		logger.WithFields(logrus.Fields{
+			"dataHex":   fmt.Sprintf("%x", data),
+			"dataStr":   string(data),
+			"iccid":     iccid,
+			"frameType": "FrameTypeICCID",
+		}).Info("解码器：识别到ICCID帧")
 		return decodedFrame, nil
 	}
 
@@ -163,6 +176,8 @@ func extractICCID(data []byte) (string, bool) {
 		return dataStr, true
 	}
 
+	// 修复：只有当数据确实匹配ICCID格式时才返回true
+	// 之前的逻辑缺陷：总是在最后返回true，导致所有数据都被识别为ICCID
 	return "", false
 }
 

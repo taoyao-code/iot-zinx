@@ -88,6 +88,18 @@ func (d *DNY_Decoder) Intercept(chain ziface.IChain) ziface.IcResp {
 	msgID := decodedFrame.GetMsgID()
 	iMessage.SetMsgID(msgID)
 
+	// 添加调试日志
+	dataPreview := fmt.Sprintf("%x", data)
+	if len(dataPreview) > 40 {
+		dataPreview = dataPreview[:40] + "..."
+	}
+	logger.WithFields(logrus.Fields{
+		"frameType": decodedFrame.FrameType.String(),
+		"msgID":     fmt.Sprintf("0x%04X", msgID),
+		"dataLen":   len(data),
+		"dataHex":   dataPreview,
+	}).Info("DNY解码器：设置消息路由")
+
 	// 6. 根据帧类型设置适当的数据
 	switch decodedFrame.FrameType {
 	case FrameTypeStandard:
