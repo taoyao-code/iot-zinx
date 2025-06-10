@@ -30,7 +30,7 @@ func (h *DNYHandlerBase) PreHandle(request ziface.IRequest) {
 
 	// 检查是否为特殊消息ID，特殊消息不需要DNY消息转换
 	msgID := msg.GetMsgID()
-	if msgID == 0xFF01 || msgID == 0xFF02 || msgID == 0xFFFF {
+	if msgID == protocol.MSG_ID_HEARTBEAT || msgID == protocol.MSG_ID_HEARTBEAT || msgID == protocol.MSG_ID_UNKNOWN {
 		// 特殊消息不进行DNY消息转换，直接更新心跳时间
 		monitor.GetGlobalMonitor().UpdateLastHeartbeatTime(conn)
 		// 同时更新自定义心跳管理器的连接活动时间

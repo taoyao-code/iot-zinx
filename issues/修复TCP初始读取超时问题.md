@@ -17,6 +17,15 @@
     - 发现 `internal/infrastructure/zinx_server/handlers/sim_card_handler.go` 和 `internal/infrastructure/zinx_server/handlers/device_register_handler.go` *已包含*在处理 ICCID 或设备注册后将 TCP 读取截止时间更新为 `defaultReadDeadlineSeconds` 的逻辑。这意味着问题可能是这些处理器未被调用于超时的连接，或者存在其他问题。
 3.  **日志增强:**
     - 为了检查 `SimCardHandler` 是否被调用，在其 `Handle` 方法中添加了入口日志。
+4.  **根本原因定位与修复:**
+    - 通过分析用户提供的日志，确认 `SimCardHandler` 未被调用。
+    - 进一步分析代码路径：
+      - `pkg/protocol/dny_decoder.go` 中的 `DNY_Decoder.Intercept` 方法调用 `decodedFrame.GetMsgID()` 来设置 Zinx `iMessage` 的 `MsgID`。
+      - `pkg/protocol/dny_types.go` 中的 `DecodedDNYFrame.GetMsgID()` 方法先前为 `FrameTypeICCID` 类型的帧返回 `0x1001`。
+      - `internal/infrastructure/zinx_server/handlers/router.go` 中 `SimCardHandler` 注册的 `MsgID` 是 `0xFF01`。
+      - `pkg/protocol/dny_protocol_parser.go` 文件中定义了常量 `MSG_ID_ICCID = 0xFF01`，表明项目内部期望 ICCID 使用 `0xFF01` 作为消息 ID。
+    - **结论**: `MsgID` 不匹配 (`0x1001` 在 `dny_types.go` vs `0xFF01` 在 `router.go` 和 `dny_protocol_parser.go`) 导致 `SimCardHandler` 未被调用。
+    - **修复**: 修改 `pkg/protocol/dny_types.go` 中 `DecodedDNYFrame.GetMsgID()` 方法，当 `FrameType` 为 `FrameTypeICCID` 时，返回 `0xFF01`，与项目中其他定义保持一致。
 
 ## 待处理
 
@@ -61,6 +70,19 @@
         }).Info("SimCardHandler: Handle method called")
 
         // 确保数据是有效的SIM卡号 (支持标准ICCID长度范围: 19-25字节)
+    // ...
+    ```
+
+  - 修改 `DecodedDNYFrame.GetMsgID()` 方法以修复 `MsgID` 不匹配问题:
+
+    ```go
+    // ...
+    func (f *DecodedDNYFrame) GetMsgID() uint32 {
+        if f.FrameType == FrameTypeICCID {
+            return 0xFF01
+        }
+        return f.MsgID
+    }
     // ...
     ```
 

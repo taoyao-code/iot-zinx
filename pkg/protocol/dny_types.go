@@ -112,9 +112,9 @@ func (df *DecodedDNYFrame) GetMsgID() uint32 {
 	case FrameTypeStandard:
 		return uint32(df.Command)
 	case FrameTypeICCID:
-		return 0x1001 // 预定义的ICCID消息ID
+		return MSG_ID_ICCID // 预定义的ICCID消息ID
 	case FrameTypeLinkHeartbeat:
-		return 0x1002 // 预定义的心跳消息ID
+		return MSG_ID_HEARTBEAT // 预定义的心跳消息ID
 	case FrameTypeParseError:
 		return 0xFFFF // 错误帧消息ID
 	default:
