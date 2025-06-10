@@ -100,9 +100,9 @@ func (h *DeviceRegisterHandler) handleMasterDeviceRegister(deviceId string, phys
 	// 主机设备建立主连接绑定
 	monitor.GetGlobalMonitor().BindDeviceIdToConnection(deviceId, conn) // deviceId 在这里是 PhysicalID 格式化后的字符串
 
-	// 计划 3.c.1: 获取 ICCID (之前在 SimCardHandler 中已存入 PropKeyDeviceId)
+	// 计划 3.c.1: 获取 ICCID (之前在 SimCardHandler 中已存入 PropKeyICCID)
 	var iccid string
-	if propVal, err := conn.GetProperty(constants.PropKeyDeviceId); err == nil {
+	if propVal, err := conn.GetProperty(constants.PropKeyICCID); err == nil {
 		iccid, _ = propVal.(string)
 	}
 	if iccid == "" {
@@ -110,7 +110,7 @@ func (h *DeviceRegisterHandler) handleMasterDeviceRegister(deviceId string, phys
 			"connID":     conn.GetConnID(),
 			"physicalId": fmt.Sprintf("0x%08X", physicalId),
 			"deviceId":   deviceId, // 这是 PhysicalID
-		}).Warn("DeviceRegisterHandler: 主设备注册时未找到有效的ICCID (PropKeyDeviceId)")
+		}).Warn("DeviceRegisterHandler: 主设备注册时未找到有效的ICCID (PropKeyICCID)")
 		// 根据业务需求，这里可能需要决定是否继续。暂时继续，但日志已记录。
 	}
 
@@ -165,9 +165,9 @@ func (h *DeviceRegisterHandler) handleSlaveDeviceRegister(deviceId string, physi
 	// 分机设备通过主机连接进行绑定
 	monitor.GetGlobalMonitor().BindDeviceIdToConnection(deviceId, conn) // deviceId 在这里是 PhysicalID 格式化后的字符串
 
-	// 计划 3.c.1: 获取 ICCID (之前在 SimCardHandler 中已存入 PropKeyDeviceId)
+	// 计划 3.c.1: 获取 ICCID (之前在 SimCardHandler 中已存入 PropKeyICCID)
 	var iccid string
-	if propVal, err := conn.GetProperty(constants.PropKeyDeviceId); err == nil {
+	if propVal, err := conn.GetProperty(constants.PropKeyICCID); err == nil {
 		iccid, _ = propVal.(string)
 	}
 	if iccid == "" {
@@ -175,7 +175,7 @@ func (h *DeviceRegisterHandler) handleSlaveDeviceRegister(deviceId string, physi
 			"connID":     conn.GetConnID(),
 			"physicalId": fmt.Sprintf("0x%08X", physicalId),
 			"deviceId":   deviceId, // 这是 PhysicalID
-		}).Warn("DeviceRegisterHandler: 从设备注册时未找到有效的ICCID (PropKeyDeviceId)")
+		}).Warn("DeviceRegisterHandler: 从设备注册时未找到有效的ICCID (PropKeyICCID)")
 	}
 
 	// 计划 3.c.2: 通过DeviceSession管理设备属性和连接状态
