@@ -3,6 +3,7 @@ package protocol
 import (
 	"bytes"
 	"encoding/binary"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"strconv"
@@ -28,14 +29,11 @@ func parseFrame(conn ziface.IConnection, data []byte) (*DecodedDNYFrame, error) 
 		return decodedFrame, nil
 	}
 
-	// 检查是否为ICCID消息 - ICCID通常是纯数字字符串，长度在15-20之间
-	if len(data) >= 15 && len(data) <= 20 && isAllDigits(data) {
-		iccid, ok := extractICCID(data)
-		if ok {
-			decodedFrame.FrameType = FrameTypeICCID
-			decodedFrame.ICCIDValue = iccid
-			return decodedFrame, nil
-		}
+	// 检查是否为ICCID消息 - 支持十六进制编码的ICCID
+	if iccid, ok := extractICCID(data); ok {
+		decodedFrame.FrameType = FrameTypeICCID
+		decodedFrame.ICCIDValue = iccid
+		return decodedFrame, nil
 	}
 
 	// 2. 按标准DNY帧结构解析
@@ -140,28 +138,19 @@ func calculateDNYCrc(data []byte) []byte {
 }
 
 // extractICCID 从数据中提取ICCID
+// 根据协议文档：通讯模块连接上服务器后会发送SIM卡号（ICCID），以字符串方式发送
 func extractICCID(data []byte) (string, bool) {
-	// ICCID应该是纯数字字符串，长度通常在15-20之间
-	if len(data) < 15 || len(data) > 20 {
-		return "", false
-	}
+	dataStr := string(data)
 
-	// 检查是否全为数字字符
-	if !isAllDigits(data) {
-		return "", false
-	}
-
-	return string(data), true
-}
-
-// isAllDigits 检查字节数组是否全为数字字符
-func isAllDigits(data []byte) bool {
-	for _, b := range data {
-		if b < '0' || b > '9' {
-			return false
+	// 尝试作为十六进制字符串解码（如：3839383630344439313632333930343838323937）
+	if len(dataStr)%2 == 0 && len(dataStr) >= 30 {
+		if decoded, err := hex.DecodeString(dataStr); err == nil {
+			return string(decoded), true
 		}
 	}
-	return true
+
+	// 直接作为字符串返回（如：898604D9162390488297）
+	return dataStr, true
 }
 
 // validatePhysicalID 验证物理ID格式
