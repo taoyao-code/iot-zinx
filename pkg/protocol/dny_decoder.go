@@ -37,17 +37,12 @@ func NewDNYDecoder() ziface.IDecoder {
 
 // GetLengthField 返回长度字段配置
 // 根据AP3000协议文档，精确处理粘包与分包
-// 🔧 重要修复：使用宽松的配置支持ICCID等特殊消息
+// 🔧 重要修复：返回nil禁用Zinx的长度字段解析
 func (d *DNY_Decoder) GetLengthField() *ziface.LengthField {
-	// 🔧 使用宽松配置：不依赖长度字段，让所有数据都能到达解码器
-	// 通过设置MaxFrameLength为足够大，LengthFieldLength为0来实现
-	return &ziface.LengthField{
-		MaxFrameLength:      8192, // 最大帧长度 8KB
-		LengthFieldOffset:   0,    // 不使用长度字段
-		LengthFieldLength:   0,    // 长度字段长度为0，表示不解析长度字段
-		LengthAdjustment:    0,    // 无需调整
-		InitialBytesToStrip: 0,    // 保留完整数据
-	}
+	// 🔧 修复panic错误：Zinx的LengthFieldLength=0不被支持
+	// 返回nil来完全禁用长度字段解析，让原始数据直接到达我们的解码器
+	// 这样ICCID等变长数据就能正常处理
+	return nil
 }
 
 // Intercept 拦截器方法，实现IDecoder接口
