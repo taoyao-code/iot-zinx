@@ -6,9 +6,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
-	"os"
 	"strconv"
-	"time"
 
 	"github.com/aceld/zinx/ziface"
 	"github.com/bujia-iot/iot-zinx/internal/infrastructure/logger"
@@ -37,7 +35,7 @@ func parseFrame(conn ziface.IConnection, data []byte) (*DecodedDNYFrame, error) 
 	if iccid, ok := extractICCID(data); ok {
 		decodedFrame.FrameType = FrameTypeICCID
 		decodedFrame.ICCIDValue = iccid
-		
+
 		// 强制性调试：输出到stderr
 		fmt.Printf("🔍 DEBUG: ICCID识别成功! iccid=%s, dataHex=%x\n", iccid, data)
 		logger.WithFields(logrus.Fields{

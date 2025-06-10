@@ -88,6 +88,10 @@ func (d *DNY_Decoder) Intercept(chain ziface.IChain) ziface.IcResp {
 	msgID := decodedFrame.GetMsgID()
 	iMessage.SetMsgID(msgID)
 
+	// 强制性调试：输出到stderr
+	fmt.Printf("📡 DEBUG: 解码器设置路由 frameType=%s, msgID=0x%04X, dataLen=%d\n",
+		decodedFrame.FrameType.String(), msgID, len(data))
+
 	// 添加调试日志
 	dataPreview := fmt.Sprintf("%x", data)
 	if len(dataPreview) > 40 {
