@@ -76,6 +76,9 @@ type ProtocolExport struct {
 	BuildDNYResponsePacket func(physicalID uint32, messageID uint16, command uint8, data []byte) []byte
 	BuildDNYRequestPacket  func(physicalID uint32, messageID uint16, command uint8, data []byte) []byte
 	NeedConfirmation       func(command uint8) bool
+
+	// 消息ID管理
+	GetNextMessageID func() uint16
 }
 
 // Protocol 协议相关工具导出
@@ -102,6 +105,7 @@ var Protocol = ProtocolExport{
 	BuildDNYResponsePacket:   protocol.BuildDNYResponsePacket,
 	BuildDNYRequestPacket:    protocol.BuildDNYRequestPacket,
 	NeedConfirmation:         protocol.NeedConfirmation,
+	GetNextMessageID:         protocol.GetNextMessageID,
 }
 
 // Network 网络相关工具导出

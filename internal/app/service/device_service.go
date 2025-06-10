@@ -239,8 +239,8 @@ func (s *DeviceService) SendCommandToDevice(deviceID string, command byte, data 
 		return fmt.Errorf("设备ID格式错误: %v", err)
 	}
 
-	// 生成消息ID
-	messageID := uint16(time.Now().Unix() & 0xFFFF)
+	// 生成消息ID - 使用全局消息ID管理器
+	messageID := pkg.Protocol.GetNextMessageID()
 
 	// 发送命令到设备（使用正确的DNY协议）
 	err = pkg.Protocol.SendDNYResponse(conn, uint32(physicalID), messageID, command, data)

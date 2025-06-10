@@ -86,6 +86,20 @@ func (h *DeviceRegisterHandler) processDeviceRegistration(decodedFrame *protocol
 		return
 	}
 
+	// 🔧 添加重复注册保护：检查设备是否已经处于Active状态
+	if deviceSession != nil && deviceSession.State == constants.ConnStateActive {
+		logger.WithFields(logrus.Fields{
+			"connID":       conn.GetConnID(),
+			"physicalId":   fmt.Sprintf("0x%08X", physicalId),
+			"deviceId":     deviceId,
+			"currentState": deviceSession.State,
+		}).Info("设备已处于Active状态，跳过重复注册处理")
+
+		// 仍然发送注册响应，保证协议完整性
+		h.sendRegisterResponse(deviceId, physicalId, messageID, conn)
+		return
+	}
+
 	// 🔧 统一设备注册处理
 	h.handleDeviceRegister(deviceId, uint32(physicalId), messageID, conn, data)
 }

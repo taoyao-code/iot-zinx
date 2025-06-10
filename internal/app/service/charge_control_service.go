@@ -9,6 +9,7 @@ import (
 	"github.com/bujia-iot/iot-zinx/internal/app/dto"
 	"github.com/bujia-iot/iot-zinx/internal/domain/dny_protocol"
 	"github.com/bujia-iot/iot-zinx/internal/infrastructure/logger"
+	"github.com/bujia-iot/iot-zinx/pkg"
 	"github.com/bujia-iot/iot-zinx/pkg/constants"
 	"github.com/bujia-iot/iot-zinx/pkg/monitor"
 	"github.com/sirupsen/logrus"
@@ -47,8 +48,8 @@ func (s *ChargeControlService) SendChargeControlCommand(req *dto.ChargeControlRe
 		return fmt.Errorf("设备ID格式错误: %w", err)
 	}
 
-	// 生成消息ID
-	messageID := uint16(time.Now().Unix() & 0xFFFF)
+	// 生成消息ID - 使用全局消息ID管理器
+	messageID := pkg.Protocol.GetNextMessageID()
 
 	// 构建充电控制协议包
 	packet := dny_protocol.BuildChargeControlPacket(
@@ -239,8 +240,8 @@ func (s *ChargeControlService) GetChargeStatus(deviceID string, portNumber byte)
 
 // GetChargeStatusWithTimeout 获取充电状态（带超时）
 func (s *ChargeControlService) GetChargeStatusWithTimeout(deviceID string, portNumber byte, timeout time.Duration) (*dto.ChargeControlResponse, error) {
-	// 生成消息ID
-	messageID := uint16(time.Now().Unix() & 0xFFFF)
+	// 生成消息ID - 使用全局消息ID管理器
+	messageID := pkg.Protocol.GetNextMessageID()
 
 	// 构建查询请求
 	req := &dto.ChargeControlRequest{
@@ -283,8 +284,8 @@ func (s *ChargeControlService) GetChargeStatusAsync(
 	timeout time.Duration,
 	callback func(*dto.ChargeControlResponse, error),
 ) error {
-	// 生成消息ID
-	messageID := uint16(time.Now().Unix() & 0xFFFF)
+	// 生成消息ID - 使用全局消息ID管理器
+	messageID := pkg.Protocol.GetNextMessageID()
 
 	// 构建查询请求
 	req := &dto.ChargeControlRequest{

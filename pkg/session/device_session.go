@@ -264,7 +264,7 @@ func GetDeviceSession(conn ziface.IConnection) *DeviceSession {
 	}
 
 	// 尝试从连接中获取已存在的设备会话
-	sessionKey := fmt.Sprintf("device_session_%d", conn.GetConnID())
+	sessionKey := fmt.Sprintf("%s%d", constants.PropKeyDeviceSessionPrefix, conn.GetConnID())
 	if existingSession, err := conn.GetProperty(sessionKey); err == nil && existingSession != nil {
 		if session, ok := existingSession.(*DeviceSession); ok {
 			return session

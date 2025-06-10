@@ -69,6 +69,8 @@ const (
 	PropKeyDeviceType = "device_type"
 	// PropKeyDeviceVersion 设备版本属性键
 	PropKeyDeviceVersion = "device_version"
+	// PropKeyDeviceSessionPrefix 设备会话存储键前缀
+	PropKeyDeviceSessionPrefix = "device_session_"
 )
 
 // 连接详细状态常量

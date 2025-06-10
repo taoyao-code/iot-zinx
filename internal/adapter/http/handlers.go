@@ -337,7 +337,7 @@ func HandleQueryDeviceStatus(c *gin.Context) {
 		DeviceID:  deviceID,
 		Command:   0x81, // 查询设备联网状态命令
 		Data:      "",   // 无数据
-		MessageID: uint16(time.Now().Unix() & 0xFFFF),
+		MessageID: pkg.Protocol.GetNextMessageID(),
 	}
 
 	// 复用发送DNY命令的逻辑
