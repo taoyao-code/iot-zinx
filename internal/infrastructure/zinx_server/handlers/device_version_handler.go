@@ -7,63 +7,50 @@ import (
 	"github.com/aceld/zinx/ziface"
 	"github.com/bujia-iot/iot-zinx/internal/infrastructure/logger"
 	"github.com/bujia-iot/iot-zinx/pkg/constants"
-	"github.com/bujia-iot/iot-zinx/pkg/network"
+	"github.com/bujia-iot/iot-zinx/pkg/protocol"
+	"github.com/bujia-iot/iot-zinx/pkg/session"
 	"github.com/sirupsen/logrus"
 )
 
 // DeviceVersionHandler 处理设备版本上传请求 (命令ID: 0x35)
+// 使用新的统一帧处理基类
 type DeviceVersionHandler struct {
-	DNYHandlerBase
+	protocol.DNYFrameHandlerBase
 }
 
 // Handle 处理设备版本上传请求
 func (h *DeviceVersionHandler) Handle(request ziface.IRequest) {
-	// 获取请求消息
-	msg := request.GetMessage()
-	conn := request.GetConnection()
+	// 执行基类预处理（命令确认等）
+	h.DNYFrameHandlerBase.PreHandle(request)
 
-	// 🔧 修复：处理标准Zinx消息，直接获取纯净的DNY数据
-	data := msg.GetData()
-
-	// 确保基类处理先执行（命令确认等）
-	h.DNYHandlerBase.PreHandle(request)
-
-	logger.WithFields(logrus.Fields{
-		"connID":      conn.GetConnID(),
-		"msgID":       msg.GetMsgID(),
-		"messageType": fmt.Sprintf("%T", msg),
-		"dataLen":     len(data),
-		"remoteAddr":  conn.RemoteAddr().String(),
-	}).Info("✅ 设备版本上传处理器：开始处理标准Zinx消息")
-
-	// 🔧 修复：从DNYMessage中获取真实的PhysicalID
-	var physicalId uint32
-	if dnyMsg, ok := h.GetDNYMessage(request); ok {
-		physicalId = dnyMsg.GetPhysicalId()
-	} else {
-		// 从连接属性中获取PhysicalID
-		if prop, err := conn.GetProperty(network.PropKeyDNYPhysicalID); err == nil {
-			if pid, ok := prop.(uint32); ok {
-				physicalId = pid
-			}
-		}
-		if physicalId == 0 {
-			logger.WithFields(logrus.Fields{
-				"connID": conn.GetConnID(),
-				"msgID":  msg.GetMsgID(),
-			}).Error("❌ 设备版本上传处理器：无法获取PhysicalID，拒绝处理")
-			return
-		}
+	// 获取解析后的帧数据
+	decodedFrame, err := h.ExtractDecodedFrame(request)
+	if err != nil {
+		logger.WithFields(logrus.Fields{
+			"connID": request.GetConnection().GetConnID(),
+			"error":  err.Error(),
+		}).Error("❌ 设备版本上传处理器：提取解析帧失败")
+		return
 	}
 
-	// 获取设备ID
-	deviceID := h.FormatPhysicalID(physicalId)
+	// 验证帧类型
+	if decodedFrame.FrameType != protocol.DNYFrameTypeDeviceVersion {
+		logger.WithFields(logrus.Fields{
+			"connID":       request.GetConnection().GetConnID(),
+			"expectedType": protocol.DNYFrameTypeDeviceVersion,
+			"actualType":   decodedFrame.FrameType,
+		}).Error("❌ 设备版本上传处理器：帧类型不匹配")
+		return
+	}
+
+	conn := request.GetConnection()
+	data := decodedFrame.Payload
 
 	// 解析设备版本数据
 	if len(data) < 3 {
 		logger.WithFields(logrus.Fields{
 			"connID":     conn.GetConnID(),
-			"physicalId": fmt.Sprintf("0x%08X", physicalId),
+			"physicalID": decodedFrame.PhysicalID,
 			"dataLen":    len(data),
 		}).Error("❌ 设备版本数据不完整，无法解析")
 		return
@@ -75,16 +62,31 @@ func (h *DeviceVersionHandler) Handle(request ziface.IRequest) {
 	versionLow := data[2]
 	versionStr := fmt.Sprintf("%d.%d", versionHigh, versionLow)
 
+	// 获取设备会话并更新属性
+	deviceSession := session.GetDeviceSession(conn)
+	if deviceSession == nil {
+		logger.WithFields(logrus.Fields{
+			"connID": conn.GetConnID(),
+		}).Error("❌ 设备版本上传处理器：获取设备会话失败")
+		return
+	}
+
 	// 更新设备类型和版本号属性
-	conn.SetProperty(constants.PropKeyDeviceType, deviceType)
-	conn.SetProperty(constants.PropKeyDeviceVersion, versionStr)
+	deviceSession.SetProperty(constants.PropKeyDeviceType, deviceType)
+	deviceSession.SetProperty(constants.PropKeyDeviceVersion, versionStr)
+
+	// 获取设备ID（从会话中获取已设置的物理ID作为设备ID）
+	deviceID := deviceSession.PhysicalID
+	if deviceID == "" {
+		deviceID = decodedFrame.PhysicalID
+	}
 
 	// 按照协议规范，服务器不需要对 0x35 上传分机版本号与设备类型 进行应答
 	// 记录设备版本信息
 	logger.WithFields(logrus.Fields{
 		"connID":     conn.GetConnID(),
-		"physicalId": fmt.Sprintf("0x%08X", physicalId),
-		"deviceId":   deviceID,
+		"physicalID": decodedFrame.PhysicalID,
+		"deviceID":   deviceID,
 		"deviceType": fmt.Sprintf("0x%02X", deviceType),
 		"versionStr": versionStr,
 		"remoteAddr": conn.RemoteAddr().String(),

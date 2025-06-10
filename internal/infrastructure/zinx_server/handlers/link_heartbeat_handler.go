@@ -1,56 +1,129 @@
 package handlers
 
 import (
+	"fmt"
 	"time"
 
 	"github.com/aceld/zinx/ziface"
-	"github.com/aceld/zinx/znet"
+	"github.com/bujia-iot/iot-zinx/internal/infrastructure/config"
 	"github.com/bujia-iot/iot-zinx/internal/infrastructure/logger"
 	"github.com/bujia-iot/iot-zinx/pkg/constants"
-	"github.com/bujia-iot/iot-zinx/pkg/monitor"
+	"github.com/bujia-iot/iot-zinx/pkg/network"
 	"github.com/bujia-iot/iot-zinx/pkg/protocol"
 	"github.com/sirupsen/logrus"
 )
 
 // LinkHeartbeatHandler 处理"link"心跳 (命令ID: 0xFF02)
 // 注意：不继承DNYHandlerBase，因为这是特殊消息，不是标准DNY格式
+// 使用新的DNYFrameHandlerBase来实现统一的帧处理
 type LinkHeartbeatHandler struct {
-	znet.BaseRouter
+	protocol.DNYFrameHandlerBase
+	// znet.BaseRouter
+}
+
+// NewLinkHeartbeatHandler 创建一个新的 LinkHeartbeatHandler
+// func NewLinkHeartbeatHandler(appConfig *config.AppConfig) *LinkHeartbeatHandler { // 暂时移除
+//  return &LinkHeartbeatHandler{AppConfig: appConfig}
+// }
+
+// PreHandle 预处理link心跳
+func (h *LinkHeartbeatHandler) PreHandle(request ziface.IRequest) {
+	logger.WithFields(logrus.Fields{
+		"connID":     request.GetConnection().GetConnID(),
+		"remoteAddr": request.GetConnection().RemoteAddr().String(),
+	}).Debug("收到link心跳请求")
 }
 
 // Handle 处理"link"心跳
 func (h *LinkHeartbeatHandler) Handle(request ziface.IRequest) {
 	conn := request.GetConnection()
-	data := request.GetData()
 
-	// 确保数据是link心跳
-	if len(data) == 4 && string(data) == protocol.IOT_LINK_HEARTBEAT {
-		// 更新最后一次"link"心跳时间
-		now := time.Now()
-		conn.SetProperty(constants.PropKeyLastLink, now.Unix())
+	// 使用新的统一帧处理基类
+	decodedFrame, err := h.ExtractDecodedFrame(request)
+	if err != nil {
+		h.HandleError("LinkHeartbeatHandler", err, conn)
+		return
+	}
 
-		// 获取设备ID信息用于日志记录
-		var deviceID string
+	// 记录帧处理日志
+	h.LogFrameProcessing("LinkHeartbeatHandler", decodedFrame, uint32(conn.GetConnID()))
+
+	// 验证是否为link心跳帧
+	if decodedFrame.FrameType != protocol.FrameTypeLinkHeartbeat {
+		h.HandleError("LinkHeartbeatHandler",
+			fmt.Errorf("期望link心跳帧，但获得类型: %s", decodedFrame.FrameType.String()), conn)
+		return
+	}
+
+	// 获取或创建设备会话
+	deviceSession, err := h.GetOrCreateDeviceSession(conn)
+	if err != nil {
+		h.HandleError("LinkHeartbeatHandler", err, conn)
+		return
+	}
+
+	// 更新设备会话信息
+	if err := h.UpdateDeviceSessionFromFrame(deviceSession, decodedFrame); err != nil {
+		h.HandleError("LinkHeartbeatHandler", err, conn)
+		return
+	}
+
+	// 设置连接属性 (向后兼容)
+	now := time.Now()
+	if err := h.SetConnectionAttribute(conn, constants.PropKeyLastLink, now.Unix()); err != nil {
+		logger.WithFields(logrus.Fields{
+			"connID": conn.GetConnID(),
+			"error":  err,
+		}).Warn("设置LastLink属性失败")
+	}
+
+	// 1. 调用 HeartbeatManager.UpdateConnectionActivity(conn)
+	network.UpdateConnectionActivity(conn)
+
+	// 2. 重置TCP ReadDeadline
+	defaultReadDeadlineSeconds := config.GetConfig().TCPServer.DefaultReadDeadlineSeconds
+	if defaultReadDeadlineSeconds <= 0 {
+		defaultReadDeadlineSeconds = 90 // 默认值，以防配置错误
+		logger.Warnf("LinkHeartbeatHandler: DefaultReadDeadlineSeconds 配置错误或未配置，使用默认值: %ds", defaultReadDeadlineSeconds)
+	}
+	heartbeatReadDeadline := time.Duration(defaultReadDeadlineSeconds) * time.Second
+
+	tcpConn := conn.GetTCPConnection()
+	if tcpConn != nil {
+		if err := tcpConn.SetReadDeadline(time.Now().Add(heartbeatReadDeadline)); err != nil {
+			logger.WithFields(logrus.Fields{
+				"connID": conn.GetConnID(),
+				"error":  err,
+			}).Error("LinkHeartbeatHandler: 设置ReadDeadline失败")
+		}
+	} else {
+		logger.WithField("connID", conn.GetConnID()).Warn("LinkHeartbeatHandler: 无法获取TCP连接以设置ReadDeadline")
+	}
+
+	// 获取设备ID信息用于日志记录
+	deviceID := deviceSession.DeviceID
+	if deviceID == "" {
+		// 向后兼容：从连接属性获取
 		if val, err := conn.GetProperty(constants.PropKeyDeviceId); err == nil && val != nil {
 			deviceID = val.(string)
 		}
-
-		// 同时更新通用心跳时间，确保读取超时正确重置
-		monitor.GetGlobalMonitor().UpdateLastHeartbeatTime(conn)
-
-		logger.WithFields(logrus.Fields{
-			"connID":     conn.GetConnID(),
-			"remoteAddr": conn.RemoteAddr().String(),
-			"heartbeat":  string(data),
-			"deviceID":   deviceID,
-			"timestamp":  now.Unix(),
-		}).Debug("收到link心跳")
-	} else {
-		logger.WithFields(logrus.Fields{
-			"connID":     conn.GetConnID(),
-			"remoteAddr": conn.RemoteAddr().String(),
-			"dataLen":    len(data),
-			"data":       string(data),
-		}).Warn("收到无效的链接心跳数据")
 	}
+
+	logger.WithFields(logrus.Fields{
+		"connID":            conn.GetConnID(),
+		"remoteAddr":        conn.RemoteAddr().String(),
+		"heartbeat":         "link",
+		"deviceID":          deviceID,
+		"readDeadlineReset": fmt.Sprintf("%ds", defaultReadDeadlineSeconds),
+		"timestamp":         now.Format(constants.TimeFormatDefault),
+	}).Debug("link心跳处理完成")
+}
+
+// PostHandle 后处理link心跳
+func (h *LinkHeartbeatHandler) PostHandle(request ziface.IRequest) {
+	logger.WithFields(logrus.Fields{
+		"connID":     request.GetConnection().GetConnID(),
+		"remoteAddr": request.GetConnection().RemoteAddr().String(),
+		"timestamp":  time.Now().Format(constants.TimeFormatDefault),
+	}).Debug("link心跳请求处理完成")
 }

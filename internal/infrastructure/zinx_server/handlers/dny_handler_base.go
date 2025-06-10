@@ -13,6 +13,7 @@ import (
 	"github.com/bujia-iot/iot-zinx/pkg/monitor"
 	"github.com/bujia-iot/iot-zinx/pkg/network"
 	"github.com/bujia-iot/iot-zinx/pkg/protocol"
+	"github.com/bujia-iot/iot-zinx/pkg/utils"
 	"github.com/sirupsen/logrus"
 )
 
@@ -55,29 +56,21 @@ func (h *DNYHandlerBase) PreHandle(request ziface.IRequest) {
 		var messageID uint16
 		var command uint8
 
-		// 从连接属性获取物理ID
-		if prop, err := conn.GetProperty(network.PropKeyDNYPhysicalID); err == nil {
-			if pid, ok := prop.(uint32); ok {
-				physicalID = pid
-			}
+		// 从连接属性获取物理ID - 使用统一工具函数
+		physicalID, _, err := utils.GetPhysicalIDFromConnection(conn)
+		if err != nil {
+			logger.WithField("error", err.Error()).Warn("无法获取PhysicalID")
 		}
 
 		// 从连接属性获取消息ID
-		if prop, err := conn.GetProperty(network.PropKeyDNYMessageID); err == nil {
+		if prop, err := conn.GetProperty(constants.PropKeyDNYMessageID); err == nil {
 			if mid, ok := prop.(uint16); ok {
 				messageID = mid
 			}
 		}
 
 		// 从连接属性获取命令
-		if prop, err := conn.GetProperty(network.PropKeyDNYCommand); err == nil {
-			if cmd, ok := prop.(uint8); ok {
-				command = cmd
-			}
-		} else {
-			// 如果没有从属性获取到命令，使用消息ID作为命令
-			command = uint8(msg.GetMsgID())
-		}
+		command = uint8(msg.GetMsgID())
 
 		// 如果有有效的物理ID，尝试确认命令
 		if physicalID != 0 {
@@ -104,7 +97,7 @@ func (h *DNYHandlerBase) PreHandle(request ziface.IRequest) {
 
 	// 从连接属性获取真正的DNY MessageID
 	var messageID uint16
-	if val, err := conn.GetProperty(network.PropKeyDNYMessageID); err == nil && val != nil {
+	if val, err := conn.GetProperty(constants.PropKeyDNYMessageID); err == nil && val != nil {
 		messageID = val.(uint16)
 	}
 

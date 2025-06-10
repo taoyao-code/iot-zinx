@@ -5,6 +5,7 @@ import (
 	"github.com/bujia-iot/iot-zinx/internal/infrastructure/logger"
 	"github.com/bujia-iot/iot-zinx/pkg/constants"
 	"github.com/bujia-iot/iot-zinx/pkg/network"
+	"github.com/bujia-iot/iot-zinx/pkg/session"
 	"github.com/sirupsen/logrus"
 )
 
@@ -65,8 +66,12 @@ func (d *ConnectionDisconnector) OnHeartbeatTimeout(event HeartbeatTimeoutEvent)
 		"reason":       event.TimeoutReason,
 	}).Warn("设备心跳超时，断开连接")
 
-	// 更新连接状态为非活跃
-	conn.SetProperty(constants.PropKeyConnStatus, constants.ConnStatusInactive)
+	// 通过DeviceSession管理连接状态
+	deviceSession := session.GetDeviceSession(conn)
+	if deviceSession != nil {
+		deviceSession.UpdateStatus(constants.ConnStatusInactive)
+		deviceSession.SyncToConnection(conn)
+	}
 
 	// 通知设备不活跃
 	network.OnDeviceNotAlive(conn)

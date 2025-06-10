@@ -8,6 +8,7 @@ import (
 	"github.com/aceld/zinx/ziface"
 	"github.com/bujia-iot/iot-zinx/internal/infrastructure/logger"
 	"github.com/bujia-iot/iot-zinx/pkg/constants"
+	"github.com/bujia-iot/iot-zinx/pkg/session"
 	"github.com/sirupsen/logrus"
 )
 
@@ -77,15 +78,23 @@ func (s *StandardHeartbeatService) UpdateActivity(conn ziface.IConnection) {
 	// 更新内部活动时间记录
 	s.activityTimes.Store(connID, now)
 
-	// 更新连接属性
-	conn.SetProperty(constants.PropKeyLastHeartbeat, now.Unix())
-	conn.SetProperty(constants.PropKeyLastHeartbeatStr, now.Format(constants.TimeFormatDefault))
-	conn.SetProperty(constants.PropKeyConnStatus, constants.ConnStatusActive)
+	// 通过DeviceSession管理心跳状态
+	deviceSession := session.GetDeviceSession(conn)
+	if deviceSession != nil {
+		deviceSession.UpdateHeartbeat()
+		deviceSession.UpdateStatus(constants.ConnStatusActive)
+		deviceSession.SyncToConnection(conn)
+	}
 
 	// 获取设备ID用于事件通知
 	var deviceID string
-	if val, err := conn.GetProperty(constants.PropKeyDeviceId); err == nil && val != nil {
-		deviceID = val.(string)
+	if deviceSession != nil && deviceSession.DeviceID != "" {
+		deviceID = deviceSession.DeviceID
+	} else {
+		// 兼容性：从连接属性获取
+		if val, err := conn.GetProperty(constants.PropKeyDeviceId); err == nil && val != nil {
+			deviceID = val.(string)
+		}
 	}
 
 	// 创建心跳事件

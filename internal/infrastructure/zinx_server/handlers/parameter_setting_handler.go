@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"encoding/binary"
 	"fmt"
 	"time"
 
@@ -10,64 +11,58 @@ import (
 	"github.com/bujia-iot/iot-zinx/internal/infrastructure/logger"
 	"github.com/bujia-iot/iot-zinx/pkg/constants"
 	"github.com/bujia-iot/iot-zinx/pkg/monitor"
-	"github.com/bujia-iot/iot-zinx/pkg/network"
 	"github.com/bujia-iot/iot-zinx/pkg/protocol"
+	"github.com/bujia-iot/iot-zinx/pkg/session"
 	"github.com/sirupsen/logrus"
 )
 
 // ParameterSettingHandler 处理参数设置 (命令ID: 0x83, 0x84)
 type ParameterSettingHandler struct {
-	DNYHandlerBase
+	protocol.DNYFrameHandlerBase
 }
 
 // Handle 处理参数设置
 func (h *ParameterSettingHandler) Handle(request ziface.IRequest) {
-	// 确保基类处理先执行（命令确认等）
-	h.DNYHandlerBase.PreHandle(request)
-
-	// 获取请求消息
-	msg := request.GetMessage()
 	conn := request.GetConnection()
-	data := msg.GetData()
 
 	logger.WithFields(logrus.Fields{
 		"connID":     conn.GetConnID(),
 		"remoteAddr": conn.RemoteAddr().String(),
-		"dataLen":    len(data),
 	}).Debug("收到参数设置请求")
 
-	// 从DNYMessage中获取真实的PhysicalID
-	var physicalId uint32
-	var messageID uint16
-	if dnyMsg, ok := msg.(*dny_protocol.Message); ok {
-		physicalId = dnyMsg.GetPhysicalId()
-		// 从连接属性获取MessageID
-		if prop, err := conn.GetProperty(network.PropKeyDNYMessageID); err == nil {
-			if mid, ok := prop.(uint16); ok {
-				messageID = mid
-			}
-		}
-	} else {
-		// 从连接属性中获取PhysicalID
-		if prop, err := conn.GetProperty(network.PropKeyDNYPhysicalID); err == nil {
-			if pid, ok := prop.(uint32); ok {
-				physicalId = pid
-			}
-		}
-		if physicalId == 0 {
-			logger.WithFields(logrus.Fields{
-				"connID": conn.GetConnID(),
-				"msgID":  msg.GetMsgID(),
-			}).Error("❌ 参数设置Handle：无法获取PhysicalID，拒绝处理")
-			return
-		}
-		// 从连接属性获取MessageID
-		if prop, err := conn.GetProperty(network.PropKeyDNYMessageID); err == nil {
-			if mid, ok := prop.(uint16); ok {
-				messageID = mid
-			}
-		}
+	// 1. 提取解码后的DNY帧数据
+	decodedFrame, err := h.ExtractDecodedFrame(request)
+	if err != nil {
+		logger.WithFields(logrus.Fields{
+			"connID": conn.GetConnID(),
+			"error":  err.Error(),
+		}).Error("❌ 参数设置Handle：提取DNY帧数据失败")
+		return
 	}
+
+	// 2. 获取或创建设备会话
+	deviceSession, err := h.GetOrCreateDeviceSession(conn)
+	if err != nil {
+		logger.WithFields(logrus.Fields{
+			"connID": conn.GetConnID(),
+			"error":  err.Error(),
+		}).Error("❌ 参数设置Handle：获取设备会话失败")
+		return
+	}
+
+	// 3. 从帧数据更新设备会话
+	h.UpdateDeviceSessionFromFrame(deviceSession, decodedFrame)
+
+	// 4. 处理参数设置业务逻辑
+	h.processParameterSetting(decodedFrame, conn, deviceSession)
+}
+
+// processParameterSetting 处理参数设置业务逻辑
+func (h *ParameterSettingHandler) processParameterSetting(decodedFrame *protocol.DecodedDNYFrame, conn ziface.IConnection, deviceSession *session.DeviceSession) {
+	// 从RawPhysicalID提取uint32值
+	physicalId := binary.LittleEndian.Uint32(decodedFrame.RawPhysicalID)
+	messageID := decodedFrame.MessageID
+	data := decodedFrame.Payload
 
 	// 生成设备ID
 	deviceId := fmt.Sprintf("%08X", physicalId)
@@ -77,7 +72,7 @@ func (h *ParameterSettingHandler) Handle(request ziface.IRequest) {
 	if err := paramData.UnmarshalBinary(data); err != nil {
 		logger.WithFields(logrus.Fields{
 			"connID":     conn.GetConnID(),
-			"physicalId": fmt.Sprintf("0x%08X", physicalId),
+			"physicalId": physicalId,
 			"messageID":  fmt.Sprintf("0x%04X", messageID),
 			"dataLen":    len(data),
 			"error":      err.Error(),
@@ -92,7 +87,7 @@ func (h *ParameterSettingHandler) Handle(request ziface.IRequest) {
 	// 记录参数设置信息
 	logger.WithFields(logrus.Fields{
 		"connID":     conn.GetConnID(),
-		"physicalId": fmt.Sprintf("0x%08X", physicalId),
+		"physicalId": physicalId,
 		"messageID":  fmt.Sprintf("0x%04X", messageID),
 		"deviceId":   deviceId,
 		"timestamp":  time.Now().Format(constants.TimeFormatDefault),
@@ -103,7 +98,7 @@ func (h *ParameterSettingHandler) Handle(request ziface.IRequest) {
 	if err := protocol.SendDNYResponse(conn, physicalId, messageID, uint8(dny_protocol.CmdParamSetting), responseData); err != nil {
 		logger.WithFields(logrus.Fields{
 			"connID":     conn.GetConnID(),
-			"physicalId": fmt.Sprintf("0x%08X", physicalId),
+			"physicalId": physicalId,
 			"messageID":  fmt.Sprintf("0x%04X", messageID),
 			"error":      err.Error(),
 		}).Error("发送参数设置响应失败")
@@ -112,7 +107,7 @@ func (h *ParameterSettingHandler) Handle(request ziface.IRequest) {
 
 	logger.WithFields(logrus.Fields{
 		"connID":     conn.GetConnID(),
-		"physicalId": fmt.Sprintf("0x%08X", physicalId),
+		"physicalId": physicalId,
 		"messageID":  fmt.Sprintf("0x%04X", messageID),
 		"success":    success,
 	}).Debug("参数设置响应发送成功")

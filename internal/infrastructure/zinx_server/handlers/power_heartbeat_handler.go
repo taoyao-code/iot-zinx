@@ -8,65 +8,59 @@ import (
 	"github.com/aceld/zinx/ziface"
 	"github.com/bujia-iot/iot-zinx/internal/infrastructure/logger"
 	"github.com/bujia-iot/iot-zinx/pkg/constants"
-	"github.com/bujia-iot/iot-zinx/pkg/network"
+	"github.com/bujia-iot/iot-zinx/pkg/monitor"
+	"github.com/bujia-iot/iot-zinx/pkg/protocol"
+	"github.com/bujia-iot/iot-zinx/pkg/session"
 	"github.com/sirupsen/logrus"
 )
 
 // PowerHeartbeatHandler 处理功率心跳 (命令ID: 0x06)
 type PowerHeartbeatHandler struct {
-	DNYHandlerBase
-}
-
-// PreHandle 预处理功率心跳数据
-func (h *PowerHeartbeatHandler) PreHandle(request ziface.IRequest) {
-	logger.WithFields(logrus.Fields{
-		"connID":     request.GetConnection().GetConnID(),
-		"remoteAddr": request.GetConnection().RemoteAddr().String(),
-	}).Debug("收到功率心跳数据")
+	protocol.DNYFrameHandlerBase
 }
 
 // Handle 处理功率心跳包
 func (h *PowerHeartbeatHandler) Handle(request ziface.IRequest) {
-	// 确保基类处理先执行（命令确认等）
-	h.DNYHandlerBase.PreHandle(request)
-
-	// 获取请求消息
-	msg := request.GetMessage()
 	conn := request.GetConnection()
-	data := msg.GetData()
 
-	// 从DNYMessage中获取真实的PhysicalID
-	var physicalId uint32
-	var messageID uint16
-	if dnyMsg, ok := h.GetDNYMessage(request); ok {
-		physicalId = dnyMsg.GetPhysicalId()
-		// 从连接属性获取MessageID
-		if prop, err := conn.GetProperty(network.PropKeyDNYMessageID); err == nil {
-			if mid, ok := prop.(uint16); ok {
-				messageID = mid
-			}
-		}
-	} else {
-		// 从连接属性中获取PhysicalID
-		if prop, err := conn.GetProperty(network.PropKeyDNYPhysicalID); err == nil {
-			if pid, ok := prop.(uint32); ok {
-				physicalId = pid
-			}
-		}
-		if physicalId == 0 {
-			logger.WithFields(logrus.Fields{
-				"connID": conn.GetConnID(),
-				"msgID":  msg.GetMsgID(),
-			}).Error("❌ 功率心跳Handle：无法获取PhysicalID，拒绝处理")
-			return
-		}
-		// 从连接属性获取MessageID
-		if prop, err := conn.GetProperty(network.PropKeyDNYMessageID); err == nil {
-			if mid, ok := prop.(uint16); ok {
-				messageID = mid
-			}
-		}
+	logger.WithFields(logrus.Fields{
+		"connID":     conn.GetConnID(),
+		"remoteAddr": conn.RemoteAddr().String(),
+	}).Debug("收到功率心跳数据")
+
+	// 1. 提取解码后的DNY帧数据
+	decodedFrame, err := h.ExtractDecodedFrame(request)
+	if err != nil {
+		logger.WithFields(logrus.Fields{
+			"connID": conn.GetConnID(),
+			"error":  err.Error(),
+		}).Error("❌ 功率心跳Handle：提取DNY帧数据失败")
+		return
 	}
+
+	// 2. 获取或创建设备会话
+	deviceSession, err := h.GetOrCreateDeviceSession(conn)
+	if err != nil {
+		logger.WithFields(logrus.Fields{
+			"connID": conn.GetConnID(),
+			"error":  err.Error(),
+		}).Error("❌ 功率心跳Handle：获取设备会话失败")
+		return
+	}
+
+	// 3. 从帧数据更新设备会话
+	h.UpdateDeviceSessionFromFrame(deviceSession, decodedFrame)
+
+	// 4. 处理功率心跳业务逻辑
+	h.processPowerHeartbeat(decodedFrame, conn, deviceSession)
+}
+
+// processPowerHeartbeat 处理功率心跳业务逻辑
+func (h *PowerHeartbeatHandler) processPowerHeartbeat(decodedFrame *protocol.DecodedDNYFrame, conn ziface.IConnection, deviceSession *session.DeviceSession) {
+	// 从RawPhysicalID提取uint32值
+	physicalId := binary.LittleEndian.Uint32(decodedFrame.RawPhysicalID)
+	messageID := decodedFrame.MessageID
+	data := decodedFrame.Payload
 
 	// 基本参数检查
 	if len(data) < 8 {
@@ -79,8 +73,8 @@ func (h *PowerHeartbeatHandler) Handle(request ziface.IRequest) {
 		return
 	}
 
-	// 获取设备ID
-	deviceId := h.GetDeviceID(conn)
+	// 生成设备ID
+	deviceId := fmt.Sprintf("%08X", physicalId)
 
 	// 解析功率心跳数据，支持多种数据格式
 	var logFields logrus.Fields
@@ -107,13 +101,5 @@ func (h *PowerHeartbeatHandler) Handle(request ziface.IRequest) {
 	}
 
 	// 更新心跳时间
-	h.UpdateHeartbeat(conn)
-}
-
-// PostHandle 后处理功率心跳数据
-func (h *PowerHeartbeatHandler) PostHandle(request ziface.IRequest) {
-	logger.WithFields(logrus.Fields{
-		"connID":     request.GetConnection().GetConnID(),
-		"remoteAddr": request.GetConnection().RemoteAddr().String(),
-	}).Debug("功率心跳数据处理完成")
+	monitor.GetGlobalMonitor().UpdateLastHeartbeatTime(conn)
 }

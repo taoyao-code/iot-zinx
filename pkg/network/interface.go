@@ -49,15 +49,3 @@ type IConnectionHooks interface {
 	// SetOnConnectionClosedFunc 设置连接关闭回调函数
 	SetOnConnectionClosedFunc(fn func(conn ziface.IConnection))
 }
-
-// 连接属性键常量
-const (
-	// DNY协议相关属性
-	PropKeyDNYPhysicalID    = "DNY_PhysicalID"    // 物理ID属性键
-	PropKeyDNYMessageID     = "DNY_MessageID"     // 消息ID属性键
-	PropKeyDNYCommand       = "DNY_Command"       // 命令属性键
-	PropKeyDNYChecksumValid = "DNY_ChecksumValid" // 校验和有效性属性键
-	PropKeyDNYRawData       = "DNY_RawData"       // 原始数据属性键
-	PropKeyDNYParseError    = "DNY_ParseError"    // DNY解析错误信息
-	PropKeyNotDNYMessage    = "NOT_DNY_MESSAGE"   // 非DNY消息标识
-)

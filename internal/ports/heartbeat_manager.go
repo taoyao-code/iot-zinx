@@ -8,15 +8,16 @@ import (
 	"github.com/bujia-iot/iot-zinx/internal/infrastructure/logger"
 	"github.com/bujia-iot/iot-zinx/pkg"
 	"github.com/bujia-iot/iot-zinx/pkg/constants"
+	"github.com/bujia-iot/iot-zinx/pkg/session"
 	"github.com/sirupsen/logrus"
 )
 
 // HeartbeatManager 心跳管理器组件
 type HeartbeatManager struct {
-	interval         time.Duration
-	timeout          time.Duration
-	lastActivityTime map[uint64]time.Time
-	mu               sync.Mutex
+	interval         time.Duration        // 心跳间隔
+	timeout          time.Duration        // 心跳超时时间
+	lastActivityTime map[uint64]time.Time // 记录每个连接的最后活动时间
+	mu               sync.Mutex           // 互斥锁，保护对 lastActivityTime 的并发访问
 }
 
 // NewHeartbeatManager 创建新的心跳管理器
@@ -41,8 +42,13 @@ func (h *HeartbeatManager) UpdateConnectionActivity(conn ziface.IConnection) {
 	now := time.Now()
 	connID := conn.GetConnID()
 
-	conn.SetProperty(constants.PropKeyLastHeartbeat, now.Unix())
-	conn.SetProperty(constants.PropKeyLastHeartbeatStr, now.Format(constants.TimeFormatDefault))
+	// 使用DeviceSession统一管理连接状态
+	deviceSession := session.GetDeviceSession(conn)
+	if deviceSession != nil {
+		deviceSession.UpdateHeartbeat()
+		deviceSession.SyncToConnection(conn)
+	}
+
 	h.lastActivityTime[connID] = now
 
 	var deviceID string
@@ -62,17 +68,19 @@ func (h *HeartbeatManager) UpdateConnectionActivity(conn ziface.IConnection) {
 
 // monitorConnectionActivity 监控连接活动
 func (h *HeartbeatManager) monitorConnectionActivity() {
-	startupDelay := 30 * time.Second
+	startupDelay := 30 * time.Second // 启动延迟，避免在服务器启动时立即检查连接活动
+
 	time.Sleep(startupDelay)
 
-	checkInterval := h.interval
+	// 获取设置中的配置
+	checkInterval := h.interval // 心跳检查间隔
 	ticker := time.NewTicker(checkInterval)
 	defer ticker.Stop()
 
 	logger.WithFields(logrus.Fields{
-		"checkInterval": checkInterval.String(),
-		"timeout":       h.timeout.String(),
-		"startupDelay":  startupDelay.String(),
+		"心跳间隔": checkInterval.String(),
+		"心跳超时": h.timeout.String(),
+		"启动延迟": startupDelay.String(),
 	}).Info("🔍 自定义连接活动监控已启动")
 
 	for range ticker.C {
@@ -114,14 +122,22 @@ func (h *HeartbeatManager) checkConnectionActivity() {
 				} else {
 					lastActivity = now
 					h.lastActivityTime[connID] = now
-					conn.SetProperty(constants.PropKeyLastHeartbeat, now.Unix())
-					conn.SetProperty(constants.PropKeyLastHeartbeatStr, now.Format(constants.TimeFormatDefault))
+					// 使用DeviceSession统一管理连接状态
+					deviceSession := session.GetDeviceSession(conn)
+					if deviceSession != nil {
+						deviceSession.UpdateHeartbeat()
+						deviceSession.SyncToConnection(conn)
+					}
 				}
 			} else {
 				lastActivity = now
 				h.lastActivityTime[connID] = now
-				conn.SetProperty(constants.PropKeyLastHeartbeat, now.Unix())
-				conn.SetProperty(constants.PropKeyLastHeartbeatStr, now.Format(constants.TimeFormatDefault))
+				// 使用DeviceSession统一管理连接状态
+				deviceSession := session.GetDeviceSession(conn)
+				if deviceSession != nil {
+					deviceSession.UpdateHeartbeat()
+					deviceSession.SyncToConnection(conn)
+				}
 			}
 		}
 

@@ -11,6 +11,7 @@ import (
 	"github.com/bujia-iot/iot-zinx/internal/infrastructure/logger"
 	"github.com/bujia-iot/iot-zinx/pkg/constants"
 	"github.com/bujia-iot/iot-zinx/pkg/network"
+	"github.com/bujia-iot/iot-zinx/pkg/session"
 	"github.com/sirupsen/logrus"
 )
 
@@ -167,21 +168,27 @@ func sendDNYPacket(conn ziface.IConnection, packet []byte, physicalID uint32, me
 // 如果提供的物理ID为0，则尝试从连接属性或其他来源获取有效的物理ID
 func ensureValidPhysicalID(conn ziface.IConnection, physicalID uint32) (uint32, error) {
 	if physicalID != 0 {
-		// 将获取到的物理ID保存到连接属性，确保一致性
-		conn.SetProperty(network.PropKeyDNYPhysicalID, physicalID)
+		// 使用DeviceSession统一管理连接属性
+		physicalIDStr := fmt.Sprintf("0x%08X", physicalID)
+		deviceSession := session.GetDeviceSession(conn)
+		if deviceSession != nil {
+			deviceSession.SetPhysicalID(physicalIDStr)
+			deviceSession.SyncToConnection(conn)
+		}
 		return physicalID, nil
 	}
 
-	// 尝试从连接属性获取物理ID
-	if propPhysicalID, err := conn.GetProperty(network.PropKeyDNYPhysicalID); err == nil && propPhysicalID != nil {
-		if id, ok := propPhysicalID.(uint32); ok && id != 0 {
-			physicalID = id
-			logger.WithFields(logrus.Fields{
-				"connID":     conn.GetConnID(),
-				"physicalID": fmt.Sprintf("0x%08X", physicalID),
-			}).Debug("已从连接属性获取物理ID")
-			conn.SetProperty(network.PropKeyDNYPhysicalID, physicalID)
-			return physicalID, nil
+	// 尝试从连接属性获取物理ID (现在存储为格式化字符串)
+	if propPhysicalID, err := conn.GetProperty(constants.PropKeyPhysicalId); err == nil && propPhysicalID != nil {
+		if pidStr, ok := propPhysicalID.(string); ok {
+			// 解析十六进制字符串格式的PhysicalID
+			if _, err := fmt.Sscanf(pidStr, "0x%08X", &physicalID); err == nil && physicalID != 0 {
+				logger.WithFields(logrus.Fields{
+					"connID":     conn.GetConnID(),
+					"physicalID": fmt.Sprintf("0x%08X", physicalID),
+				}).Debug("已从连接属性获取物理ID")
+				return physicalID, nil
+			}
 		}
 	}
 
@@ -197,7 +204,14 @@ func ensureValidPhysicalID(conn ziface.IConnection, physicalID uint32) (uint32, 
 					"deviceID":   deviceID,
 					"physicalID": fmt.Sprintf("0x%08X", physicalID),
 				}).Debug("已从设备ID获取物理ID")
-				conn.SetProperty(network.PropKeyDNYPhysicalID, physicalID)
+
+				// 使用DeviceSession统一管理连接属性
+				physicalIDStr := fmt.Sprintf("0x%08X", physicalID)
+				deviceSession := session.GetDeviceSession(conn)
+				if deviceSession != nil {
+					deviceSession.SetPhysicalID(physicalIDStr)
+					deviceSession.SyncToConnection(conn)
+				}
 				return physicalID, nil
 			}
 		}
@@ -217,7 +231,14 @@ func ensureValidPhysicalID(conn ziface.IConnection, physicalID uint32) (uint32, 
 						"iccid":      iccid,
 						"physicalID": fmt.Sprintf("0x%08X", physicalID),
 					}).Debug("已从ICCID生成物理ID")
-					conn.SetProperty(network.PropKeyDNYPhysicalID, physicalID)
+
+					// 使用DeviceSession统一管理连接属性
+					physicalIDStr := fmt.Sprintf("0x%08X", physicalID)
+					deviceSession := session.GetDeviceSession(conn)
+					if deviceSession != nil {
+						deviceSession.SetPhysicalID(physicalIDStr)
+						deviceSession.SyncToConnection(conn)
+					}
 					return physicalID, nil
 				}
 			}
@@ -398,8 +419,12 @@ func getActualConnectionForDevice(conn ziface.IConnection, physicalID uint32) (z
 		"physicalID": fmt.Sprintf("0x%08X", physicalID),
 	}).Debug("分机设备未找到主机连接，使用原连接发送")
 
-	// 设置直连模式标记，避免重复查找和警告
-	conn.SetProperty(constants.PropKeyDirectMode, true)
+	// 使用DeviceSession统一管理连接属性
+	deviceSession := session.GetDeviceSession(conn)
+	if deviceSession != nil {
+		deviceSession.SetProperty(constants.PropKeyDirectMode, true)
+		deviceSession.SyncToConnection(conn)
+	}
 
 	return conn, deviceId, nil
 }

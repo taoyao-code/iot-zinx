@@ -10,38 +10,62 @@ import (
 	"github.com/bujia-iot/iot-zinx/internal/infrastructure/logger"
 	"github.com/bujia-iot/iot-zinx/pkg/constants"
 	"github.com/bujia-iot/iot-zinx/pkg/monitor"
-	"github.com/bujia-iot/iot-zinx/pkg/network"
 	"github.com/bujia-iot/iot-zinx/pkg/protocol"
+	"github.com/bujia-iot/iot-zinx/pkg/session"
 	"github.com/sirupsen/logrus"
 )
 
 // GetServerTimeHandler 处理设备获取服务器时间请求 (命令ID: 0x22)
 type GetServerTimeHandler struct {
-	DNYHandlerBase
+	protocol.DNYFrameHandlerBase
 }
 
 // Handle 处理获取服务器时间请求
 func (h *GetServerTimeHandler) Handle(request ziface.IRequest) {
-	// 获取请求消息和连接
-	msg := request.GetMessage()
 	conn := request.GetConnection()
-	data := msg.GetData()
 
-	// 提取设备信息
-	physicalId, messageId := h.extractDeviceInfo(msg, conn)
-	if physicalId == 0 {
+	logger.WithFields(logrus.Fields{
+		"connID":     conn.GetConnID(),
+		"remoteAddr": conn.RemoteAddr().String(),
+	}).Debug("收到获取服务器时间请求")
+
+	// 1. 提取解码后的DNY帧数据
+	decodedFrame, err := h.ExtractDecodedFrame(request)
+	if err != nil {
 		logger.WithFields(logrus.Fields{
 			"connID": conn.GetConnID(),
-			"msgID":  msg.GetMsgID(),
-		}).Error("❌ 获取服务器时间Handle：无法获取PhysicalID，拒绝处理")
+			"error":  err.Error(),
+		}).Error("❌ 获取服务器时间Handle：提取DNY帧数据失败")
 		return
 	}
+
+	// 2. 获取或创建设备会话
+	deviceSession, err := h.GetOrCreateDeviceSession(conn)
+	if err != nil {
+		logger.WithFields(logrus.Fields{
+			"connID": conn.GetConnID(),
+			"error":  err.Error(),
+		}).Error("❌ 获取服务器时间Handle：获取设备会话失败")
+		return
+	}
+
+	// 3. 从帧数据更新设备会话
+	h.UpdateDeviceSessionFromFrame(deviceSession, decodedFrame)
+
+	// 4. 处理获取服务器时间业务逻辑
+	h.processGetServerTime(decodedFrame, conn, deviceSession)
+}
+
+// processGetServerTime 处理获取服务器时间业务逻辑
+func (h *GetServerTimeHandler) processGetServerTime(decodedFrame *protocol.DecodedDNYFrame, conn ziface.IConnection, deviceSession *session.DeviceSession) {
+	// 从RawPhysicalID提取uint32值
+	physicalId := binary.LittleEndian.Uint32(decodedFrame.RawPhysicalID)
+	messageId := decodedFrame.MessageID
 
 	logger.WithFields(logrus.Fields{
 		"connID":     conn.GetConnID(),
 		"physicalID": fmt.Sprintf("0x%08X", physicalId),
 		"messageID":  fmt.Sprintf("0x%04X", messageId),
-		"dataLen":    len(data),
 	}).Info("获取服务器时间处理器：处理请求")
 
 	// 获取当前时间戳
@@ -72,34 +96,4 @@ func (h *GetServerTimeHandler) Handle(request ziface.IRequest) {
 
 	// 更新心跳时间
 	monitor.GetGlobalMonitor().UpdateLastHeartbeatTime(conn)
-}
-
-// extractDeviceInfo 从消息中提取设备信息
-func (h *GetServerTimeHandler) extractDeviceInfo(msg ziface.IMessage, conn ziface.IConnection) (physicalId uint32, messageId uint16) {
-	// 尝试从DNYMessage中获取信息
-	if dnyMsg, ok := msg.(*dny_protocol.Message); ok {
-		physicalId = dnyMsg.GetPhysicalId()
-		// 从连接属性获取MessageID
-		if prop, err := conn.GetProperty(network.PropKeyDNYMessageID); err == nil {
-			if mid, ok := prop.(uint16); ok {
-				messageId = mid
-			}
-		}
-		return
-	}
-
-	// 从连接属性中获取信息
-	if prop, err := conn.GetProperty(network.PropKeyDNYPhysicalID); err == nil {
-		if pid, ok := prop.(uint32); ok {
-			physicalId = pid
-		}
-	}
-
-	if prop, err := conn.GetProperty(network.PropKeyDNYMessageID); err == nil {
-		if mid, ok := prop.(uint16); ok {
-			messageId = mid
-		}
-	}
-
-	return
 }

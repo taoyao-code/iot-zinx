@@ -39,6 +39,20 @@ const (
 	PropKeyLastHeartbeatStr = "last_heartbeat_str"
 	// PropKeyConnStatus 连接状态属性键
 	PropKeyConnStatus = "conn_status"
+	// PropKeyConnectionState 连接的详细状态，用于更精细的控制
+	PropKeyConnectionState = "connection_state"
+	// PropKeyPhysicalId 设备物理ID属性键（例如DNY协议中的设备ID）
+	PropKeyPhysicalId = "physical_id"
+	// PropKeyDNYMessageID DNY消息ID属性键
+	PropKeyDNYMessageID = "dny_message_id"
+	// PropKeyDNYChecksumValid DNY校验和有效性属性键
+	PropKeyDNYChecksumValid = "dny_checksum_valid"
+	// PropKeyDNYRawData DNY原始数据属性键
+	PropKeyDNYRawData = "dny_raw_data"
+	// PropKeyDNYParseError DNY解析错误信息属性键
+	PropKeyDNYParseError = "dny_parse_error"
+	// PropKeyNotDNYMessage 非DNY消息标识属性键
+	PropKeyNotDNYMessage = "not_dny_message"
 	// PropKeyLastLink 最后链接时间属性键
 	PropKeyLastLink = "last_link"
 	// PropKeySessionID 会话ID属性键
@@ -55,6 +69,16 @@ const (
 	PropKeyDeviceType = "device_type"
 	// PropKeyDeviceVersion 设备版本属性键
 	PropKeyDeviceVersion = "device_version"
+)
+
+// 连接详细状态常量
+const (
+	// ConnStateAwaitingICCID 连接已建立，等待设备发送ICCID
+	ConnStateAwaitingICCID = "awaiting_iccid"
+	// ConnStateICCIDReceived 已收到ICCID，等待设备发送DNY注册包或其他业务包
+	ConnStateICCIDReceived = "iccid_received"
+	// ConnStateActive 连接活跃，设备已完成ICCID识别和DNY注册（如果适用）
+	ConnStateActive = "active_registered"
 )
 
 // 时间格式常量

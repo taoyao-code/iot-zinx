@@ -10,6 +10,7 @@ import (
 	"github.com/bujia-iot/iot-zinx/internal/infrastructure/logger"
 	"github.com/bujia-iot/iot-zinx/pkg/constants"
 	"github.com/bujia-iot/iot-zinx/pkg/protocol"
+	"github.com/bujia-iot/iot-zinx/pkg/session"
 	"github.com/sirupsen/logrus"
 )
 
@@ -518,16 +519,17 @@ func (m *TCPMonitor) addSlaveToMasterConnection(deviceId string, masterConn zifa
 
 // setConnectionProperties 设置连接属性（用于主机）
 func (m *TCPMonitor) setConnectionProperties(deviceId string, conn ziface.IConnection) {
-	// 设置设备ID属性到连接
-	conn.SetProperty(constants.PropKeyDeviceId, deviceId)
+	// 通过DeviceSession管理设备连接信息
+	deviceSession := session.GetDeviceSession(conn)
+	if deviceSession != nil {
+		// 设置设备ID和连接状态
+		deviceSession.DeviceID = deviceId
+		deviceSession.UpdateStatus(constants.ConnStatusActive)
+		deviceSession.UpdateHeartbeat()
 
-	// 设置连接状态为活跃
-	conn.SetProperty(constants.PropKeyConnStatus, constants.ConnStatusActive)
-
-	// 设置绑定时间
-	now := time.Now()
-	conn.SetProperty(constants.PropKeyLastHeartbeat, now.Unix())
-	conn.SetProperty(constants.PropKeyLastHeartbeatStr, now.Format(constants.TimeFormatDefault))
+		// 同步到连接属性（为了兼容性）
+		deviceSession.SyncToConnection(conn)
+	}
 
 	// 记录设备上线日志
 	logger.WithFields(logrus.Fields{
@@ -739,16 +741,15 @@ func (m *TCPMonitor) GetSlaveDevicesForConnection(connID uint64) []string {
 
 // UpdateLastHeartbeatTime 更新最后一次心跳时间、连接状态并更新设备状态
 func (m *TCPMonitor) UpdateLastHeartbeatTime(conn ziface.IConnection) {
-	// 获取当前时间
 	now := time.Now()
-	timestamp := now.Unix()
 	timeStr := now.Format(constants.TimeFormatDefault)
-
-	// 更新心跳时间属性
-	conn.SetProperty(constants.PropKeyLastHeartbeat, timestamp)
-	conn.SetProperty(constants.PropKeyLastHeartbeatStr, timeStr)
-	conn.SetProperty(constants.PropKeyConnStatus, constants.ConnStatusActive)
-
+	// 通过DeviceSession管理心跳时间
+	deviceSession := session.GetDeviceSession(conn)
+	if deviceSession != nil {
+		deviceSession.UpdateHeartbeat()
+		deviceSession.UpdateStatus(constants.ConnStatusActive)
+		deviceSession.SyncToConnection(conn)
+	}
 	// 安全获取设备ID
 	var deviceId string
 	if val, err := conn.GetProperty(constants.PropKeyDeviceId); err == nil && val != nil {
@@ -823,15 +824,19 @@ func (m *TCPMonitor) UpdateDeviceStatus(deviceId string, status string) {
 			"status":     status,
 		}).Info("设备状态更新")
 
-		// 如果设备离线，更新连接状态
-		if status == constants.DeviceStatusOffline {
-			conn.SetProperty(constants.PropKeyConnStatus, constants.ConnStatusInactive)
-		} else if status == constants.DeviceStatusOnline {
-			conn.SetProperty(constants.PropKeyConnStatus, constants.ConnStatusActive)
-			// 优化：避免循环调用，直接更新心跳时间属性而不触发递归状态更新
-			now := time.Now()
-			conn.SetProperty(constants.PropKeyLastHeartbeat, now.Unix())
-			conn.SetProperty(constants.PropKeyLastHeartbeatStr, now.Format(constants.TimeFormatDefault))
+		// 通过DeviceSession管理设备状态
+		deviceSession := session.GetDeviceSession(conn)
+		if deviceSession != nil {
+			// 更新设备状态
+			if status == constants.DeviceStatusOffline {
+				deviceSession.UpdateStatus(constants.ConnStatusInactive)
+			} else if status == constants.DeviceStatusOnline {
+				deviceSession.UpdateStatus(constants.ConnStatusActive)
+				deviceSession.UpdateHeartbeat()
+			}
+
+			// 同步到连接属性
+			deviceSession.SyncToConnection(conn)
 		}
 	} else {
 		// 设备不在线，只记录状态变更

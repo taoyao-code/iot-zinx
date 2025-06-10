@@ -7,6 +7,7 @@ import (
 
 	"github.com/aceld/zinx/ziface"
 	"github.com/bujia-iot/iot-zinx/internal/infrastructure/logger"
+	"github.com/bujia-iot/iot-zinx/pkg/session"
 	"github.com/sirupsen/logrus"
 )
 
@@ -108,8 +109,12 @@ func handleICCIDResponse(conn ziface.IConnection, data string) bool {
 			"ICCID":      iccid,
 		}).Info("已识别设备ICCID")
 
-		// 保存ICCID到连接属性
-		conn.SetProperty("ICCID", iccid)
+		// 使用DeviceSession统一管理连接属性
+		deviceSession := session.GetDeviceSession(conn)
+		if deviceSession != nil {
+			deviceSession.ICCID = iccid
+			deviceSession.SyncToConnection(conn)
+		}
 
 		// 响应设备
 		response := "ICCID识别成功\r\n"

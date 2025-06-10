@@ -20,9 +20,11 @@ type Config struct {
 
 // TCPServerConfig TCP服务器配置
 type TCPServerConfig struct {
-	Host string     `mapstructure:"host"`
-	Port int        `mapstructure:"port"`
-	Zinx ZinxConfig `mapstructure:"zinx"`
+	Host                       string     `mapstructure:"host" yaml:"host"`
+	Port                       int        `mapstructure:"port" yaml:"port"`
+	Zinx                       ZinxConfig `mapstructure:"zinx" yaml:"zinx"`
+	InitialReadDeadlineSeconds int        `mapstructure:"initialReadDeadlineSeconds" yaml:"initialReadDeadlineSeconds"` // 新增：初始读取超时
+	DefaultReadDeadlineSeconds int        `mapstructure:"defaultReadDeadlineSeconds" yaml:"defaultReadDeadlineSeconds"` // 新增：默认读取超时
 }
 
 // ZinxConfig Zinx框架配置
@@ -94,10 +96,10 @@ type TimeoutsConfig struct {
 
 // DeviceConnectionConfig 设备连接配置
 type DeviceConnectionConfig struct {
-	HeartbeatTimeoutSeconds   int `mapstructure:"heartbeatTimeoutSeconds"`
-	HeartbeatIntervalSeconds  int `mapstructure:"heartbeatIntervalSeconds"`
-	HeartbeatWarningThreshold int `mapstructure:"heartbeatWarningThreshold"`
-	SessionTimeoutMinutes     int `mapstructure:"sessionTimeoutMinutes"`
+	HeartbeatTimeoutSeconds   int `mapstructure:"heartbeatTimeoutSeconds" yaml:"heartbeatTimeoutSeconds"` // HeartbeatManager 的超时时间
+	HeartbeatIntervalSeconds  int `mapstructure:"heartbeatIntervalSeconds" yaml:"heartbeatIntervalSeconds"`
+	HeartbeatWarningThreshold int `mapstructure:"heartbeatWarningThreshold" yaml:"heartbeatWarningThreshold"`
+	SessionTimeoutMinutes     int `mapstructure:"sessionTimeoutMinutes" yaml:"sessionTimeoutMinutes"`
 }
 
 // 全局配置实例

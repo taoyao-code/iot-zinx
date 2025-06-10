@@ -8,6 +8,7 @@ import (
 	"github.com/bujia-iot/iot-zinx/internal/infrastructure/config"
 	"github.com/bujia-iot/iot-zinx/internal/infrastructure/logger"
 	"github.com/bujia-iot/iot-zinx/pkg/constants"
+	"github.com/bujia-iot/iot-zinx/pkg/session"
 	"github.com/google/uuid"
 	"github.com/sirupsen/logrus"
 )
@@ -98,7 +99,7 @@ func (m *SessionManager) CreateSession(deviceID string, conn ziface.IConnection)
 	}
 
 	// 创建会话
-	session := &DeviceSession{
+	sessionData := &DeviceSession{
 		SessionID:         sessionID,
 		DeviceID:          deviceID,
 		ICCID:             iccid,
@@ -112,11 +113,11 @@ func (m *SessionManager) CreateSession(deviceID string, conn ziface.IConnection)
 	}
 
 	// 保存会话
-	m.sessions.Store(deviceID, session)
+	m.sessions.Store(deviceID, sessionData)
 
 	// 🔧 新增：将设备添加到设备组
 	if iccid != "" {
-		m.deviceGroupManager.AddDeviceToGroup(iccid, deviceID, session)
+		m.deviceGroupManager.AddDeviceToGroup(iccid, deviceID, sessionData)
 		logger.WithFields(logrus.Fields{
 			"sessionID": sessionID,
 			"deviceID":  deviceID,
@@ -125,9 +126,13 @@ func (m *SessionManager) CreateSession(deviceID string, conn ziface.IConnection)
 		}).Info("设备已添加到设备组")
 	}
 
-	// 设置连接属性
-	conn.SetProperty(constants.PropKeySessionID, sessionID)
-	conn.SetProperty(constants.PropKeyReconnectCount, 0)
+	// 设置连接属性 - 使用DeviceSession统一管理
+	deviceSession := session.GetDeviceSession(conn)
+	if deviceSession != nil {
+		deviceSession.SessionID = sessionID
+		deviceSession.ReconnectCount = 0
+		deviceSession.SyncToConnection(conn)
+	}
 
 	logger.WithFields(logrus.Fields{
 		"sessionID": sessionID,
@@ -136,7 +141,7 @@ func (m *SessionManager) CreateSession(deviceID string, conn ziface.IConnection)
 		"connID":    conn.GetConnID(),
 	}).Info("创建设备会话")
 
-	return session
+	return sessionData
 }
 
 // GetSession 获取设备会话
@@ -249,11 +254,15 @@ func (m *SessionManager) ResumeSession(deviceID string, conn ziface.IConnection)
 	})
 
 	if success {
-		// 设置连接属性
-		conn.SetProperty(constants.PropKeySessionID, "")
-		if session, ok := m.GetSession(deviceID); ok {
-			conn.SetProperty(constants.PropKeySessionID, session.SessionID)
-			conn.SetProperty(constants.PropKeyReconnectCount, session.ReconnectCount)
+		// 设置连接属性 - 使用DeviceSession统一管理
+		deviceSession := session.GetDeviceSession(conn)
+		if deviceSession != nil {
+			deviceSession.SessionID = ""
+			if session, ok := m.GetSession(deviceID); ok {
+				deviceSession.SessionID = session.SessionID
+				deviceSession.ReconnectCount = session.ReconnectCount
+			}
+			deviceSession.SyncToConnection(conn)
 		}
 
 		logger.WithFields(logrus.Fields{

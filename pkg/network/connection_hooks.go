@@ -7,8 +7,10 @@ import (
 	"time"
 
 	"github.com/aceld/zinx/ziface"
+	"github.com/bujia-iot/iot-zinx/internal/infrastructure/config" // 新增导入
 	"github.com/bujia-iot/iot-zinx/internal/infrastructure/logger"
 	"github.com/bujia-iot/iot-zinx/pkg/constants"
+	"github.com/bujia-iot/iot-zinx/pkg/session"
 	"github.com/sirupsen/logrus"
 )
 
@@ -76,18 +78,48 @@ func (ch *ConnectionHooks) OnConnectionStart(conn ziface.IConnection) {
 
 	// 设置连接属性
 	now := time.Now()
-	ch.setConnectionInitialProperties(conn, now, remoteAddr)
+	ch.setConnectionInitialProperties(conn, now, remoteAddr) // 保留现有属性设置
+
+	// 初始化设备会话，统一管理连接状态
+	deviceSession := session.GetDeviceSession(conn)
+	if deviceSession != nil {
+		// 设置初始连接状态
+		deviceSession.UpdateState(constants.ConnStateAwaitingICCID)
+		deviceSession.UpdateStatus(constants.ConnStatusActive)
+		deviceSession.UpdateHeartbeat()
+
+		// 直接设置会话字段（需要加锁访问）
+		deviceSession.SessionID = fmt.Sprintf("%d_%s", connID, remoteAddr)
+		deviceSession.ReconnectCount = 0
+
+		// 同步到连接属性（为了兼容性）
+		deviceSession.SyncToConnection(conn)
+	} else {
+		logger.WithFields(logrus.Fields{
+			"connID":     connID,
+			"remoteAddr": remoteAddr,
+		}).Error("创建设备会话失败，但继续连接建立流程")
+	}
 
 	// 获取TCP连接并设置TCP参数
-	ch.setupTCPParameters(conn, now)
+	// 计划3.a & 5: 此处将修改 readDeadLine 的初始值，从配置加载
+	initialReadDeadlineSeconds := config.GetConfig().TCPServer.InitialReadDeadlineSeconds
+	if initialReadDeadlineSeconds <= 0 {
+		initialReadDeadlineSeconds = 30 // 默认值，以防配置错误
+		logger.Warnf("OnConnectionStart: InitialReadDeadlineSeconds 配置错误或未配置，使用默认值: %ds", initialReadDeadlineSeconds)
+	}
+	initialReadDeadline := time.Duration(initialReadDeadlineSeconds) * time.Second
+	ch.setupTCPParametersWithInitialDeadline(conn, now, initialReadDeadline)
 
 	// 记录连接信息
 	logger.WithFields(logrus.Fields{
-		"connID":     connID,
-		"remoteAddr": remoteAddr,
-		"timestamp":  now.Format(constants.TimeFormatDefault),
-		"connStatus": constants.ConnStatusActive,
-	}).Info("新连接已建立")
+		"connID":             connID,
+		"remoteAddr":         remoteAddr,
+		"timestamp":          now.Format(constants.TimeFormatDefault),
+		"connStatus":         constants.ConnStatusActive, // Zinx 连接层面是 active
+		"connState":          constants.ConnStateAwaitingICCID,
+		"initialReadTimeout": initialReadDeadline.String(),
+	}).Info("新连接已建立，设置初始读取超时，等待ICCID")
 
 	// 调用自定义连接建立回调
 	if ch.onConnectionEstablished != nil {
@@ -95,17 +127,97 @@ func (ch *ConnectionHooks) OnConnectionStart(conn ziface.IConnection) {
 	}
 }
 
-// 设置连接初始属性
+// setConnectionInitialProperties 设置连接的初始属性
+// 注意：此方法现在被上面的DeviceSession初始化取代，保留仅为兼容性
 func (ch *ConnectionHooks) setConnectionInitialProperties(conn ziface.IConnection, now time.Time, remoteAddr string) {
-	// 设置最后心跳时间
-	conn.SetProperty(constants.PropKeyLastHeartbeat, now.Unix())
-	conn.SetProperty(constants.PropKeyLastHeartbeatStr, now.Format(constants.TimeFormatDefault))
-	// 设置连接状态为活跃
-	conn.SetProperty(constants.PropKeyConnStatus, constants.ConnStatusActive)
-	conn.SetProperty("RemoteAddr", remoteAddr)
+	// 通过DeviceSession进行统一管理，不再直接操作
+	deviceSession := session.GetDeviceSession(conn)
+	if deviceSession == nil {
+		logger.WithFields(logrus.Fields{
+			"connID":     conn.GetConnID(),
+			"remoteAddr": remoteAddr,
+		}).Error("获取设备会话失败，回退到直接属性设置")
+
+		return
+	}
+
+	// 使用DeviceSession统一管理
+	deviceSession.UpdateStatus(constants.ConnStatusActive)
+	deviceSession.SessionID = fmt.Sprintf("%d_%s", conn.GetConnID(), remoteAddr)
+	deviceSession.ReconnectCount = 0
+	deviceSession.SyncToConnection(conn)
 }
 
-// 设置TCP连接参数
+// setupTCPParametersWithInitialDeadline 设置TCP参数，允许指定初始的ReadDeadline
+func (ch *ConnectionHooks) setupTCPParametersWithInitialDeadline(conn ziface.IConnection, now time.Time, initialReadDeadline time.Duration) {
+	tcpConn, ok := conn.GetTCPConnection().(*net.TCPConn)
+	if !ok {
+		logger.WithFields(logrus.Fields{
+			"connID": conn.GetConnID(),
+		}).Error("获取TCP连接失败")
+		return
+	}
+
+	// 设置初始读取超时
+	if initialReadDeadline > 0 {
+		if err := tcpConn.SetReadDeadline(now.Add(initialReadDeadline)); err != nil {
+			logger.WithFields(logrus.Fields{
+				"connID":  conn.GetConnID(),
+				"timeout": initialReadDeadline.String(),
+				"error":   err,
+			}).Error("设置初始读取超时失败")
+		} else {
+			logger.WithFields(logrus.Fields{
+				"connID":  conn.GetConnID(),
+				"timeout": initialReadDeadline.String(),
+			}).Info("成功设置初始读取超时")
+		}
+	} else if ch.readDeadLine > 0 { // 如果初始超时未设置或无效，则使用默认的 ch.readDeadLine
+		if err := tcpConn.SetReadDeadline(now.Add(ch.readDeadLine)); err != nil {
+			logger.WithFields(logrus.Fields{
+				"connID":  conn.GetConnID(),
+				"timeout": ch.readDeadLine.String(),
+				"error":   err,
+			}).Error("设置读取超时失败 (使用默认值)")
+		}
+	}
+
+	if ch.writeDeadLine > 0 {
+		if err := tcpConn.SetWriteDeadline(now.Add(ch.writeDeadLine)); err != nil {
+			logger.WithFields(logrus.Fields{
+				"connID":  conn.GetConnID(),
+				"timeout": ch.writeDeadLine.String(),
+				"error":   err,
+			}).Error("设置写入超时失败")
+		}
+	}
+
+	if ch.keepAlivePeriod > 0 {
+		if err := tcpConn.SetKeepAlive(true); err != nil {
+			logger.WithFields(logrus.Fields{
+				"connID": conn.GetConnID(),
+				"error":  err,
+			}).Error("启用KeepAlive失败")
+			return // 如果启用失败，则不设置周期
+		}
+		if err := tcpConn.SetKeepAlivePeriod(ch.keepAlivePeriod); err != nil {
+			logger.WithFields(logrus.Fields{
+				"connID": conn.GetConnID(),
+				"period": ch.keepAlivePeriod.String(),
+				"error":  err,
+			}).Error("设置KeepAlive周期失败")
+		}
+	} else {
+		if err := tcpConn.SetKeepAlive(false); err != nil {
+			logger.WithFields(logrus.Fields{
+				"connID": conn.GetConnID(),
+				"error":  err,
+			}).Error("禁用KeepAlive失败")
+		}
+	}
+}
+
+// setupTCPParameters 设置TCP连接参数 (保留原始函数，以防其他地方调用)
 func (ch *ConnectionHooks) setupTCPParameters(conn ziface.IConnection, now time.Time) {
 	if tcpConn, ok := conn.GetTCPConnection().(*net.TCPConn); ok {
 		// 设置TCP KeepAlive参数，适应移动网络的弱连接特性
@@ -186,20 +298,31 @@ func (ch *ConnectionHooks) OnConnectionStop(conn ziface.IConnection) {
 	connID := conn.GetConnID()
 	remoteAddr := conn.RemoteAddr().String()
 
-	// 更新连接状态
-	conn.SetProperty(constants.PropKeyConnStatus, constants.ConnStatusClosed)
+	// 通过DeviceSession管理连接状态
+	deviceSession := session.GetDeviceSession(conn)
+	if deviceSession != nil {
+		// 更新会话状态
+		deviceSession.UpdateStatus(constants.ConnStatusClosed)
+		deviceSession.LastDisconnect = time.Now()
+
+		// 同步到连接属性（为了兼容性）
+		deviceSession.SyncToConnection(conn)
+	}
 
 	// 获取心跳信息
 	lastHeartbeatStr, timeSinceHeart := ch.getHeartbeatInfo(conn)
 
 	// 尝试获取设备信息，优化连接断开日志记录
-	deviceId, hasDeviceId := conn.GetProperty(constants.PropKeyDeviceId)
 	var deviceIdStr string
-
-	if hasDeviceId == nil && deviceId != nil {
-		deviceIdStr = deviceId.(string)
+	if deviceSession != nil && deviceSession.DeviceID != "" {
+		deviceIdStr = deviceSession.DeviceID
 	} else {
-		deviceIdStr = "unregistered"
+		// 兼容性：从连接属性获取
+		if deviceId, err := conn.GetProperty(constants.PropKeyDeviceId); err == nil && deviceId != nil {
+			deviceIdStr = deviceId.(string)
+		} else {
+			deviceIdStr = "unregistered"
+		}
 	}
 
 	// 🔧 重要：清理该连接的所有命令队列
@@ -215,10 +338,10 @@ func (ch *ConnectionHooks) OnConnectionStop(conn ziface.IConnection) {
 
 	// 尝试获取物理ID
 	var physicalIDStr string
-	physicalID, hasPhysicalID := conn.GetProperty(PropKeyDNYPhysicalID)
+	physicalID, hasPhysicalID := conn.GetProperty(constants.PropKeyPhysicalId)
 	if hasPhysicalID == nil && physicalID != nil {
-		if id, ok := physicalID.(uint32); ok {
-			physicalIDStr = fmt.Sprintf("0x%08X", id)
+		if id, ok := physicalID.(string); ok {
+			physicalIDStr = id
 
 			// 如果设备有物理ID，通知其他系统组件该设备已断开连接
 			// 这可以帮助其他组件及时清理与该设备相关的资源

@@ -11,6 +11,7 @@ import (
 	"github.com/bujia-iot/iot-zinx/pkg/constants"
 	"github.com/bujia-iot/iot-zinx/pkg/monitor"
 	"github.com/bujia-iot/iot-zinx/pkg/protocol"
+	"github.com/bujia-iot/iot-zinx/pkg/session"
 	"github.com/sirupsen/logrus"
 )
 
@@ -102,11 +103,13 @@ func (m *ConnectionMonitor) OnConnectionEstablished(conn ziface.IConnection) {
 		"timestamp":  time.Now().Format(constants.TimeFormatDefault),
 	}).Info("连接已建立")
 
-	// 设置连接属性
-	now := time.Now()
-	conn.SetProperty(constants.PropKeyLastHeartbeat, now)
-	conn.SetProperty(constants.PropKeyLastHeartbeatStr, now.Format(constants.TimeFormatDefault))
-	conn.SetProperty(constants.PropKeyConnStatus, constants.DeviceStatusOnline)
+	// 通过DeviceSession管理连接属性
+	deviceSession := session.GetDeviceSession(conn)
+	if deviceSession != nil {
+		deviceSession.UpdateHeartbeat()
+		deviceSession.UpdateStatus(constants.DeviceStatusOnline)
+		deviceSession.SyncToConnection(conn)
+	}
 }
 
 // OnConnectionClosed 当连接关闭时的回调
@@ -142,9 +145,13 @@ func (m *ConnectionMonitor) OnConnectionClosed(conn ziface.IConnection) {
 
 	logger.WithFields(logFields).Info("连接已关闭")
 
-	// 设置连接状态为离线
-	conn.SetProperty(constants.PropKeyConnStatus, constants.DeviceStatusOffline)
-	conn.SetProperty(constants.PropKeyLastDisconnectTime, time.Now())
+	// 通过DeviceSession管理连接状态
+	deviceSession := session.GetDeviceSession(conn)
+	if deviceSession != nil {
+		deviceSession.UpdateStatus(constants.DeviceStatusOffline)
+		deviceSession.LastDisconnect = time.Now()
+		deviceSession.SyncToConnection(conn)
+	}
 }
 
 // OnRawDataReceived 当收到原始数据时的回调

@@ -4,6 +4,7 @@ import (
 	"github.com/aceld/zinx/ziface"
 	"github.com/bujia-iot/iot-zinx/internal/infrastructure/logger"
 	"github.com/bujia-iot/iot-zinx/pkg/constants"
+	"github.com/bujia-iot/iot-zinx/pkg/session"
 	"github.com/sirupsen/logrus"
 )
 
@@ -142,8 +143,12 @@ func OnDeviceNotAlive(conn ziface.IConnection) {
 			"reason":     "unregistered_device_timeout",
 		}).Debug("未注册设备连接心跳超时，关闭连接")
 
-		// 未注册设备超时，直接关闭连接
-		conn.SetProperty(constants.PropKeyConnStatus, constants.ConnStatusInactive)
+		// 未注册设备超时，通过DeviceSession管理状态
+		deviceSession := session.GetDeviceSession(conn)
+		if deviceSession != nil {
+			deviceSession.UpdateStatus(constants.ConnStatusInactive)
+			deviceSession.SyncToConnection(conn)
+		}
 		conn.Stop()
 		return
 	}
@@ -184,8 +189,12 @@ func OnDeviceNotAlive(conn ziface.IConnection) {
 		UpdateDeviceStatusFunc(deviceID, constants.DeviceStatusOffline)
 	}
 
-	// 更新连接状态
-	conn.SetProperty(constants.PropKeyConnStatus, constants.ConnStatusInactive)
+	// 通过DeviceSession管理连接状态
+	deviceSession := session.GetDeviceSession(conn)
+	if deviceSession != nil {
+		deviceSession.UpdateStatus(constants.ConnStatusInactive)
+		deviceSession.SyncToConnection(conn)
+	}
 
 	// 关闭连接
 	conn.Stop()

@@ -6,76 +6,70 @@ import (
 	"time"
 
 	"github.com/aceld/zinx/ziface"
-	"github.com/bujia-iot/iot-zinx/internal/domain/dny_protocol"
 	"github.com/bujia-iot/iot-zinx/internal/infrastructure/logger"
 	"github.com/bujia-iot/iot-zinx/pkg/constants"
-	"github.com/bujia-iot/iot-zinx/pkg/network"
+	"github.com/bujia-iot/iot-zinx/pkg/protocol"
+	"github.com/bujia-iot/iot-zinx/pkg/session"
 	"github.com/sirupsen/logrus"
 )
 
 // MainHeartbeatHandler 处理主机心跳包 (命令ID: 0x11)
 type MainHeartbeatHandler struct {
-	DNYHandlerBase
-}
-
-// PreHandle 预处理主机心跳请求
-func (h *MainHeartbeatHandler) PreHandle(request ziface.IRequest) {
-	logger.WithFields(logrus.Fields{
-		"connID":     request.GetConnection().GetConnID(),
-		"remoteAddr": request.GetConnection().RemoteAddr().String(),
-	}).Debug("收到主机心跳请求")
+	protocol.DNYFrameHandlerBase
 }
 
 // Handle 处理主机心跳请求
 func (h *MainHeartbeatHandler) Handle(request ziface.IRequest) {
-	// 获取请求消息
-	msg := request.GetMessage()
 	conn := request.GetConnection()
 
-	// 处理标准Zinx消息，直接获取纯净的DNY数据
-	data := msg.GetData()
-
-	logger.WithFields(logrus.Fields{
-		"connID":      conn.GetConnID(),
-		"msgID":       msg.GetMsgID(),
-		"messageType": fmt.Sprintf("%T", msg),
-		"dataLen":     len(data),
-	}).Info("主机心跳处理器：开始处理消息")
-
-	// 获取物理ID和消息ID
-	var physicalId uint32
-
-	// 优先从DNY消息对象中获取信息
-	if dnyMsg, ok := msg.(*dny_protocol.Message); ok {
-		physicalId = dnyMsg.GetPhysicalId()
-		logger.WithFields(logrus.Fields{
-			"physicalID": fmt.Sprintf("0x%08X", physicalId),
-		}).Debug("从DNY消息获取物理ID成功")
-	} else {
-		// 从连接属性中获取
-		if prop, err := conn.GetProperty(network.PropKeyDNYPhysicalID); err == nil {
-			if pid, ok := prop.(uint32); ok {
-				physicalId = pid
-				logger.WithFields(logrus.Fields{
-					"physicalID": fmt.Sprintf("0x%08X", physicalId),
-				}).Debug("从连接属性获取物理ID成功")
-			}
-		}
-
-		if physicalId == 0 {
-			logger.WithFields(logrus.Fields{
-				"connID": conn.GetConnID(),
-				"msgID":  msg.GetMsgID(),
-			}).Error("无法获取有效的物理ID，拒绝处理主机心跳")
-			return
-		}
+	// 1. 提取解码后的DNY帧
+	decodedFrame, err := h.ExtractDecodedFrame(request)
+	if err != nil {
+		h.HandleError("MainHeartbeatHandler", err, conn)
+		return
 	}
 
-	// 获取设备ID
-	deviceId := h.FormatPhysicalID(physicalId)
+	// 2. 验证帧类型和有效性
+	if err := h.ValidateFrame(decodedFrame); err != nil {
+		h.HandleError("MainHeartbeatHandler", err, conn)
+		return
+	}
+
+	// 3. 获取或创建设备会话
+	deviceSession, err := h.GetOrCreateDeviceSession(conn)
+	if err != nil {
+		h.HandleError("MainHeartbeatHandler", err, conn)
+		return
+	}
+
+	// 4. 更新设备会话信息
+	if err := h.UpdateDeviceSessionFromFrame(deviceSession, decodedFrame); err != nil {
+		h.HandleError("MainHeartbeatHandler", err, conn)
+		return
+	}
+
+	// 5. 记录处理日志
+	h.LogFrameProcessing("MainHeartbeatHandler", decodedFrame, uint32(conn.GetConnID()))
+
+	// 6. 执行主机心跳业务逻辑
+	h.processMainHeartbeat(decodedFrame, conn, deviceSession)
+}
+
+// processMainHeartbeat 处理主机心跳业务逻辑
+func (h *MainHeartbeatHandler) processMainHeartbeat(decodedFrame *protocol.DecodedDNYFrame, conn ziface.IConnection, deviceSession *session.DeviceSession) {
+	// 从解码帧获取设备信息
+	physicalId := decodedFrame.PhysicalID
+	data := decodedFrame.Payload
+
+	logger.WithFields(logrus.Fields{
+		"connID":     conn.GetConnID(),
+		"remoteAddr": conn.RemoteAddr().String(),
+		"physicalID": physicalId,
+		"dataLen":    len(data),
+	}).Debug("收到主机心跳请求")
 
 	// 更新心跳时间
-	h.UpdateHeartbeat(conn)
+	h.updateMainHeartbeatTime(conn, deviceSession)
 
 	// 解析心跳数据 (如果有)
 	var heartbeatInfo string
@@ -91,18 +85,23 @@ func (h *MainHeartbeatHandler) Handle(request ziface.IRequest) {
 	// 记录主机心跳日志
 	logger.WithFields(logrus.Fields{
 		"connID":        conn.GetConnID(),
-		"deviceId":      deviceId,
-		"physicalId":    fmt.Sprintf("0x%08X", physicalId),
+		"deviceId":      deviceSession.DeviceID,
+		"physicalId":    physicalId,
 		"heartbeatInfo": heartbeatInfo,
 		"remoteAddr":    conn.RemoteAddr().String(),
 		"timestamp":     time.Now().Format(constants.TimeFormatDefault),
 	}).Info("✅ 主机心跳处理完成")
 }
 
-// PostHandle 后处理主机心跳请求
-func (h *MainHeartbeatHandler) PostHandle(request ziface.IRequest) {
-	logger.WithFields(logrus.Fields{
-		"connID":     request.GetConnection().GetConnID(),
-		"remoteAddr": request.GetConnection().RemoteAddr().String(),
-	}).Debug("主机心跳请求处理完成")
+// updateMainHeartbeatTime 更新主机心跳时间
+func (h *MainHeartbeatHandler) updateMainHeartbeatTime(conn ziface.IConnection, deviceSession *session.DeviceSession) {
+	now := time.Now()
+
+	// 通过DeviceSession管理心跳时间
+	if deviceSession != nil {
+		deviceSession.UpdateHeartbeat()
+		deviceSession.UpdateStatus(constants.ConnStatusActive)
+		deviceSession.SetProperty("main_heartbeat_time", now.Unix())
+		deviceSession.SyncToConnection(conn)
+	}
 }
