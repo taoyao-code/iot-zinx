@@ -89,8 +89,11 @@ func (h *SettlementHandler) processSettlement(decodedFrame *protocol.DecodedDNYF
 
 		// 即使解析失败，也应该发送响应表明服务器已接收到数据
 		// 构建失败响应 - 简单的状态码
+
+		command := decodedFrame.Command
+
 		responseData := []byte{dny_protocol.ResponseFailed}
-		if err := protocol.SendDNYResponse(conn, physicalId, messageID, uint8(dny_protocol.CmdSettlement), responseData); err != nil {
+		if err := protocol.SendDNYResponse(conn, physicalId, messageID, uint8(command), responseData); err != nil {
 			logger.WithFields(logrus.Fields{
 				"connID":     conn.GetConnID(),
 				"physicalId": fmt.Sprintf("0x%08X", physicalId),
@@ -129,8 +132,10 @@ func (h *SettlementHandler) processSettlement(decodedFrame *protocol.DecodedDNYF
 		responseData = []byte{dny_protocol.ResponseFailed}
 	}
 
+	command := decodedFrame.Command
+
 	// 发送响应
-	if err := protocol.SendDNYResponse(conn, physicalId, messageID, uint8(dny_protocol.CmdSettlement), responseData); err != nil {
+	if err := protocol.SendDNYResponse(conn, physicalId, messageID, uint8(command), responseData); err != nil {
 		logger.WithFields(logrus.Fields{
 			"connID":     conn.GetConnID(),
 			"physicalId": fmt.Sprintf("0x%08X", physicalId),

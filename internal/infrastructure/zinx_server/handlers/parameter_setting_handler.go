@@ -94,8 +94,10 @@ func (h *ParameterSettingHandler) processParameterSetting(decodedFrame *protocol
 		"success":    success,
 	}).Info("参数设置处理完成")
 
+	command := decodedFrame.Command
+
 	// 发送响应
-	if err := protocol.SendDNYResponse(conn, physicalId, messageID, uint8(dny_protocol.CmdParamSetting), responseData); err != nil {
+	if err := protocol.SendDNYResponse(conn, physicalId, messageID, uint8(command), responseData); err != nil {
 		logger.WithFields(logrus.Fields{
 			"connID":     conn.GetConnID(),
 			"physicalId": physicalId,

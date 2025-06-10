@@ -6,7 +6,6 @@ import (
 	"time"
 
 	"github.com/aceld/zinx/ziface"
-	"github.com/bujia-iot/iot-zinx/internal/domain/dny_protocol"
 	"github.com/bujia-iot/iot-zinx/internal/infrastructure/logger"
 	"github.com/bujia-iot/iot-zinx/pkg/constants"
 	"github.com/bujia-iot/iot-zinx/pkg/monitor"
@@ -75,8 +74,10 @@ func (h *GetServerTimeHandler) processGetServerTime(decodedFrame *protocol.Decod
 	responseData := make([]byte, 4)
 	binary.LittleEndian.PutUint32(responseData, uint32(currentTime))
 
+	command := decodedFrame.Command
+
 	// 发送响应
-	if err := protocol.SendDNYResponse(conn, physicalId, messageId, uint8(dny_protocol.CmdGetServerTime), responseData); err != nil {
+	if err := protocol.SendDNYResponse(conn, physicalId, messageId, uint8(command), responseData); err != nil {
 		logger.WithFields(logrus.Fields{
 			"connID":     conn.GetConnID(),
 			"physicalId": fmt.Sprintf("0x%08X", physicalId),
