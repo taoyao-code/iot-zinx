@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"fmt"
 	"net"
 	"time"
 
@@ -25,6 +26,13 @@ type SimCardHandler struct {
 func (h *SimCardHandler) Handle(request ziface.IRequest) {
 	conn := request.GetConnection()
 	data := request.GetData()
+
+	logger.WithFields(logrus.Fields{ // 添加入口日志
+		"connID":     conn.GetConnID(),
+		"remoteAddr": conn.RemoteAddr().String(),
+		"dataLen":    len(data),
+		"dataHex":    fmt.Sprintf("%x", data),
+	}).Info("SimCardHandler: Handle method called")
 
 	// 确保数据是有效的SIM卡号 (支持标准ICCID长度范围: 19-25字节)
 	if len(data) >= 19 && len(data) <= 25 && protocol.IsAllDigits(data) {
