@@ -768,6 +768,8 @@ func GetCommandDescription(command uint8) string {
 	switch command {
 	case 0x01:
 		return "心跳"
+	case 0x12:
+		return "主机获取服务器时间"
 	case 0x20:
 		return "设备注册"
 	case 0x21:

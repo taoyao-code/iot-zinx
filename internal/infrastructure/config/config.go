@@ -96,8 +96,9 @@ type TimeoutsConfig struct {
 
 // DeviceConnectionConfig 设备连接配置
 type DeviceConnectionConfig struct {
-	HeartbeatTimeoutSeconds   int `mapstructure:"heartbeatTimeoutSeconds" yaml:"heartbeatTimeoutSeconds"` // HeartbeatManager 的超时时间
-	HeartbeatIntervalSeconds  int `mapstructure:"heartbeatIntervalSeconds" yaml:"heartbeatIntervalSeconds"`
+	HeartbeatTimeoutSeconds  int `mapstructure:"heartbeatTimeoutSeconds" yaml:"heartbeatTimeoutSeconds"` // HeartbeatManager 的超时时间
+	HeartbeatIntervalSeconds int `mapstructure:"heartbeatIntervalSeconds" yaml:"heartbeatIntervalSeconds"`
+	// 生产环境建议设置为 7 分钟 (420 秒)
 	HeartbeatWarningThreshold int `mapstructure:"heartbeatWarningThreshold" yaml:"heartbeatWarningThreshold"`
 	SessionTimeoutMinutes     int `mapstructure:"sessionTimeoutMinutes" yaml:"sessionTimeoutMinutes"`
 }
