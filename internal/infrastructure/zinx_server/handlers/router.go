@@ -19,11 +19,11 @@ func RegisterRouters(server ziface.IServer) {
 
 	// 一、特殊消息处理器（非DNY协议数据，没有标准DNY包头）
 	// ----------------------------------------------------------------------------
-	server.AddRouter(protocol.MSG_ID_HEARTBEAT, &SimCardHandler{}) // SIM卡号/ICCID处理 - 处理20位纯数字ICCID上报
-	server.AddRouter(0xFF02, &LinkHeartbeatHandler{})              // link心跳处理 - 处理"link"字符串心跳
+	server.AddRouter(protocol.MSG_ID_ICCID, &SimCardHandler{})           // SIM卡号/ICCID处理 - 处理20位纯数字ICCID上报 (修正: MSG_ID_HEARTBEAT -> MSG_ID_ICCID)
+	server.AddRouter(protocol.MSG_ID_HEARTBEAT, &LinkHeartbeatHandler{}) // link心跳处理 - 处理"link"字符串心跳
 
 	// 用于处理无法识别的数据类型（解析错误或格式不符合预期）
-	server.AddRouter(0xFFFF, &NonDNYDataHandler{}) // 处理解析失败或未知类型的数据
+	server.AddRouter(protocol.MSG_ID_UNKNOWN, &NonDNYDataHandler{}) // 处理解析失败或未知类型的数据
 
 	// 二、心跳类消息处理器
 	// ----------------------------------------------------------------------------

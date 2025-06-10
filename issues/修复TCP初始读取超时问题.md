@@ -26,6 +26,23 @@
       - `pkg/protocol/dny_protocol_parser.go` 文件中定义了常量 `MSG_ID_ICCID = 0xFF01`，表明项目内部期望 ICCID 使用 `0xFF01` 作为消息 ID。
     - **结论**: `MsgID` 不匹配 (`0x1001` 在 `dny_types.go` vs `0xFF01` 在 `router.go` 和 `dny_protocol_parser.go`) 导致 `SimCardHandler` 未被调用。
     - **修复**: 修改 `pkg/protocol/dny_types.go` 中 `DecodedDNYFrame.GetMsgID()` 方法，当 `FrameType` 为 `FrameTypeICCID` 时，返回 `0xFF01`，与项目中其他定义保持一致。
+5.  **修复 `repeated api` Panic:**
+    - **问题**: 服务启动时出现 `panic: repeated api , msgID = 65282` (0xFF02)。
+    - **原因**:
+      - 在 `internal/infrastructure/zinx_server/handlers/router.go` 中，`SimCardHandler` 被错误地注册到了 `protocol.MSG_ID_HEARTBEAT` (值为 `0xFF02`)。
+      - 同时，`LinkHeartbeatHandler` 也被注册到了硬编码的 `0xFF02`。
+      - 这导致了 `MsgID 0xFF02` 的重复注册。
+    - **分析**:
+      - `SimCardHandler` 应该处理 ICCID 上报，对应的 `MsgID` 是 `protocol.MSG_ID_ICCID` (`0xFF01`)。
+      - `LinkHeartbeatHandler` 应该处理 `link` 心跳，对应的 `MsgID` 是 `protocol.MSG_ID_HEARTBEAT` (`0xFF02`)。
+      - 在 `pkg/protocol/dny_types.go` 的 `GetMsgID()` 中，`FrameTypeLinkHeartbeat` 返回的是 `0x1002`，而不是 `0xFF02`。
+    - **修复步骤**:
+      - **步骤 1 (已由用户手动完成)**: 修改 `internal/infrastructure/zinx_server/handlers/router.go`，将 `SimCardHandler` 的注册从 `protocol.MSG_ID_HEARTBEAT` 改为 `protocol.MSG_ID_ICCID`。
+        ```go
+        // server.AddRouter(protocol.MSG_ID_HEARTBEAT, &SimCardHandler{}) // 旧的错误注册
+        server.AddRouter(protocol.MSG_ID_ICCID, &SimCardHandler{}) // 正确的注册
+        ```
+      - **步骤 2**: 修改 `pkg/protocol/dny_types.go` 中的 `GetMsgID()` 方法，使 `FrameTypeLinkHeartbeat` 返回 `0xFF02` (即 `protocol.MSG_ID_HEARTBEAT`)，以确保解码器生成的心跳 `MsgID` 与路由注册一致。
 
 ## 待处理
 
@@ -80,6 +97,24 @@
     func (f *DecodedDNYFrame) GetMsgID() uint32 {
         if f.FrameType == FrameTypeICCID {
             return 0xFF01
+        }
+        return f.MsgID
+    }
+    // ...
+    ```
+
+- 在 `pkg/protocol/dny_types.go` 中:
+
+  - 修改 `GetMsgID()` 方法，使 `FrameTypeLinkHeartbeat` 返回 `0xFF02` (即 `protocol.MSG_ID_HEARTBEAT`):
+
+    ```go
+    // ...
+    func (f *DecodedDNYFrame) GetMsgID() uint32 {
+        switch f.FrameType {
+        case FrameTypeICCID:
+            return 0xFF01
+        case FrameTypeLinkHeartbeat:
+            return 0xFF02 // 修复心跳帧MsgID
         }
         return f.MsgID
     }
