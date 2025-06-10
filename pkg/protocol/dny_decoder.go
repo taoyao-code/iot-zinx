@@ -1,6 +1,7 @@
 package protocol
 
 import (
+	"encoding/binary"
 	"fmt"
 
 	"github.com/aceld/zinx/ziface"
@@ -40,11 +41,12 @@ func NewDNYDecoder() ziface.IDecoder {
 func (d *DNY_Decoder) GetLengthField() *ziface.LengthField {
 	// 根据DNY协议规范配置长度字段解析参数
 	return &ziface.LengthField{
-		MaxFrameLength:      256, // 每包最多256字节
-		LengthFieldOffset:   3,   // 长度字段位于3字节包头"DNY"之后
-		LengthFieldLength:   2,   // 长度字段本身占用2字节
-		LengthAdjustment:    0,   // 长度字段值直接表示剩余帧长度
-		InitialBytesToStrip: 0,   // 保留完整协议帧，不剥离任何字节
+		MaxFrameLength:      8192,                // 最大帧长度 8KB
+		LengthFieldOffset:   3,                   // 长度字段位于3字节包头"DNY"之后
+		LengthFieldLength:   2,                   // 长度字段本身占用2字节
+		LengthAdjustment:    0,                   // 长度字段值直接表示剩余帧长度
+		InitialBytesToStrip: 0,                   // 保留完整协议帧，不剥离任何字节
+		Order:               binary.LittleEndian, // 使用小端字节序
 	}
 }
 
