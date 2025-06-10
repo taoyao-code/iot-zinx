@@ -16,6 +16,9 @@ import (
 // parseFrame 解析DNY协议帧的核心函数
 // 根据TLV简洁设计模式，将原始字节流转换为结构化的DecodedDNYFrame对象
 func parseFrame(conn ziface.IConnection, data []byte) (*DecodedDNYFrame, error) {
+	// 🔧 强制调试输出 - 确保函数被调用
+	fmt.Printf("🔍 parseFrame被调用: dataLen=%d, dataHex=%x\n", len(data), data)
+
 	decodedFrame := &DecodedDNYFrame{
 		RawData:    data,
 		Connection: conn,
@@ -50,6 +53,8 @@ func parseFrame(conn ziface.IConnection, data []byte) (*DecodedDNYFrame, error) 
 	// 2. 按标准DNY帧结构解析
 	const minFrameLen = 14 // DNY包头(3) + 长度(2) + 物理ID(4) + 消息ID(2) + 命令(1) + 校验(2)
 	if len(data) < minFrameLen {
+		// 🔧 增强调试：输出不符合DNY最小长度的数据详情
+		fmt.Printf("🚨 数据长度不足DNY最小长度: dataLen=%d, minLen=%d, dataHex=%x\n", len(data), minFrameLen, data)
 		decodedFrame.FrameType = FrameTypeParseError
 		decodedFrame.ErrorMessage = fmt.Sprintf("数据长度不足 %d, 实际长度 %d", minFrameLen, len(data))
 		return decodedFrame, errors.New(decodedFrame.ErrorMessage)
@@ -72,6 +77,9 @@ func parseFrame(conn ziface.IConnection, data []byte) (*DecodedDNYFrame, error) 
 	// 完整帧长 = 包头(3) + 长度字段(2) + 长度字段值
 	expectedFrameLength := 3 + 2 + int(decodedFrame.LengthField)
 	if len(data) != expectedFrameLength {
+		// 🔧 增强调试：输出长度不匹配的详细信息
+		fmt.Printf("🚨 DNY帧长度不匹配: actualLen=%d, expectedLen=%d, lengthField=%d, dataHex=%x\n",
+			len(data), expectedFrameLength, decodedFrame.LengthField, data)
 		decodedFrame.FrameType = FrameTypeParseError
 		decodedFrame.ErrorMessage = fmt.Sprintf("帧长度与长度字段不匹配：预期 %d, 实际 %d, 长度字段值 %d",
 			expectedFrameLength, len(data), decodedFrame.LengthField)
@@ -153,29 +161,44 @@ func calculateDNYCrc(data []byte) []byte {
 func extractICCID(data []byte) (string, bool) {
 	dataStr := string(data)
 
+	// 🔧 强制调试输出 - 确保函数被调用
+	fmt.Printf("🔍 extractICCID被调用: dataLen=%d, dataStr='%s', dataHex=%x\n", len(data), dataStr, data)
+
 	// 排除DNY协议包：检查是否以"DNY"开头
 	if len(data) >= 3 && string(data[:3]) == "DNY" {
+		fmt.Printf("🔍 排除DNY协议包\n")
 		return "", false
 	}
 
 	// 尝试作为十六进制字符串解码（如：3839383630344439313632333930343838323937）
 	if len(dataStr)%2 == 0 && len(dataStr) >= 38 && len(dataStr) <= 50 {
+		fmt.Printf("🔍 尝试十六进制解码: len=%d\n", len(dataStr))
 		if decoded, err := hex.DecodeString(dataStr); err == nil {
 			decodedStr := string(decoded)
+			fmt.Printf("🔍 十六进制解码成功: %s\n", decodedStr)
 			// 验证解码后的字符串是否为有效ICCID（19-25位，支持十六进制字符）
 			if len(decodedStr) >= 19 && len(decodedStr) <= 25 && IsAllDigits([]byte(decodedStr)) {
+				fmt.Printf("🔍 十六进制ICCID验证通过!\n")
 				return decodedStr, true
+			} else {
+				fmt.Printf("🔍 十六进制ICCID验证失败: len=%d, IsAllDigits=%v\n", len(decodedStr), IsAllDigits([]byte(decodedStr)))
 			}
+		} else {
+			fmt.Printf("🔍 十六进制解码失败: %v\n", err)
 		}
 	}
 
 	// 直接检查是否为ICCID格式（19-25位，支持十六进制字符A-F）
 	if len(dataStr) >= 19 && len(dataStr) <= 25 && IsAllDigits([]byte(dataStr)) {
+		fmt.Printf("🔍 直接ICCID格式验证通过!\n")
 		return dataStr, true
+	} else {
+		fmt.Printf("🔍 直接ICCID格式验证失败: len=%d, IsAllDigits=%v\n", len(dataStr), IsAllDigits([]byte(dataStr)))
 	}
 
 	// 修复：只有当数据确实匹配ICCID格式时才返回true
 	// 之前的逻辑缺陷：总是在最后返回true，导致所有数据都被识别为ICCID
+	fmt.Printf("🔍 ICCID识别失败\n")
 	return "", false
 }
 
