@@ -194,7 +194,7 @@ func (m *ConnectionMonitor) OnRawDataReceived(conn ziface.IConnection, data []by
 	if len(data) > 0 && protocol.IsHexString(data) {
 		dataType = "十六进制数据"
 	} else if len(data) > 0 && protocol.IsAllDigits(data) {
-		dataType = "纯数字数据"
+		dataType = "数字数据"
 	}
 
 	// 限制数据长度，避免日志过大

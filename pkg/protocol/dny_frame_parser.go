@@ -142,15 +142,28 @@ func calculateDNYCrc(data []byte) []byte {
 func extractICCID(data []byte) (string, bool) {
 	dataStr := string(data)
 
+	// 排除DNY协议包：检查是否以"DNY"开头
+	if len(data) >= 3 && string(data[:3]) == "DNY" {
+		return "", false
+	}
+
 	// 尝试作为十六进制字符串解码（如：3839383630344439313632333930343838323937）
-	if len(dataStr)%2 == 0 && len(dataStr) >= 30 {
+	if len(dataStr)%2 == 0 && len(dataStr) >= 38 && len(dataStr) <= 50 {
 		if decoded, err := hex.DecodeString(dataStr); err == nil {
-			return string(decoded), true
+			decodedStr := string(decoded)
+			// 验证解码后的字符串是否为有效ICCID（19-25位，支持十六进制字符）
+			if len(decodedStr) >= 19 && len(decodedStr) <= 25 && IsAllDigits([]byte(decodedStr)) {
+				return decodedStr, true
+			}
 		}
 	}
 
-	// 直接作为字符串返回（如：898604D9162390488297）
-	return dataStr, true
+	// 直接检查是否为ICCID格式（19-25位，支持十六进制字符A-F）
+	if len(dataStr) >= 19 && len(dataStr) <= 25 && IsAllDigits([]byte(dataStr)) {
+		return dataStr, true
+	}
+
+	return "", false
 }
 
 // validatePhysicalID 验证物理ID格式
