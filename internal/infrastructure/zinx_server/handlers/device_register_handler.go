@@ -3,8 +3,6 @@ package handlers
 import (
 	"fmt"
 	"net"
-	"strconv"
-	"strings"
 	"time"
 
 	"github.com/aceld/zinx/ziface"
@@ -63,14 +61,18 @@ func (h *DeviceRegisterHandler) Handle(request ziface.IRequest) {
 
 // processDeviceRegistration 处理设备注册业务逻辑
 func (h *DeviceRegisterHandler) processDeviceRegistration(decodedFrame *protocol.DecodedDNYFrame, conn ziface.IConnection, deviceSession *session.DeviceSession) {
-	physicalId, _ := strconv.ParseUint(strings.ReplaceAll(decodedFrame.PhysicalID, "-", ""), 16, 32)
+	// 🔧 修复PhysicalID解析错误：使用统一的4字节转换方法，避免字符串解析溢出
+	physicalId, err := decodedFrame.GetPhysicalIDAsUint32()
+	if err != nil {
+		logger.WithFields(logrus.Fields{
+			"connID": conn.GetConnID(),
+			"error":  err,
+		}).Error("获取PhysicalID失败")
+		return
+	}
 	deviceId := decodedFrame.PhysicalID
 	messageID := decodedFrame.MessageID
 	data := decodedFrame.Payload
-
-	// 🔧 判断设备类型并采用不同的注册策略
-	tcpMonitor := monitor.GetGlobalMonitor()
-	isMasterDevice := tcpMonitor.IsMasterDevice(deviceId)
 
 	// 数据校验
 	if len(data) < 1 {
@@ -79,149 +81,76 @@ func (h *DeviceRegisterHandler) processDeviceRegistration(decodedFrame *protocol
 			"physicalId": fmt.Sprintf("0x%08X", uint32(physicalId)),
 			"messageID":  fmt.Sprintf("0x%04X", messageID),
 			"deviceId":   deviceId,
-			"deviceType": map[bool]string{true: "master", false: "slave"}[isMasterDevice],
 			"dataLen":    len(data),
 		}).Error("注册数据长度为0")
 		return
 	}
 
-	// 🔧 主从设备分别处理
-	if isMasterDevice {
-		// 主机设备注册：建立主连接
-		h.handleMasterDeviceRegister(deviceId, uint32(physicalId), messageID, conn, data)
-	} else {
-		// 分机设备注册：通过主机连接处理
-		h.handleSlaveDeviceRegister(deviceId, uint32(physicalId), messageID, conn, data)
-	}
+	// 🔧 统一设备注册处理
+	h.handleDeviceRegister(deviceId, uint32(physicalId), messageID, conn, data)
 }
 
-// 🔧 新增：处理主机设备注册
-func (h *DeviceRegisterHandler) handleMasterDeviceRegister(deviceId string, physicalId uint32, messageID uint16, conn ziface.IConnection, data []byte) {
-	// 主机设备建立主连接绑定
-	monitor.GetGlobalMonitor().BindDeviceIdToConnection(deviceId, conn) // deviceId 在这里是 PhysicalID 格式化后的字符串
+// 🔧 统一设备注册处理
+func (h *DeviceRegisterHandler) handleDeviceRegister(deviceId string, physicalId uint32, messageID uint16, conn ziface.IConnection, data []byte) {
+	// 设备连接绑定
+	monitor.GetGlobalMonitor().BindDeviceIdToConnection(deviceId, conn)
 
-	// 计划 3.c.1: 获取 ICCID (之前在 SimCardHandler 中已存入 PropKeyICCID)
+	// 获取 ICCID (从 DeviceSession 中获取，已在 SimCardHandler 中存入)
 	var iccid string
-	if propVal, err := conn.GetProperty(constants.PropKeyICCID); err == nil {
-		iccid, _ = propVal.(string)
+	deviceSession := session.GetDeviceSession(conn)
+	if deviceSession != nil {
+		iccid = deviceSession.ICCID
 	}
 	if iccid == "" {
 		logger.WithFields(logrus.Fields{
 			"connID":     conn.GetConnID(),
 			"physicalId": fmt.Sprintf("0x%08X", physicalId),
-			"deviceId":   deviceId, // 这是 PhysicalID
-		}).Warn("DeviceRegisterHandler: 主设备注册时未找到有效的ICCID (PropKeyICCID)")
-		// 根据业务需求，这里可能需要决定是否继续。暂时继续，但日志已记录。
+			"deviceId":   deviceId,
+		}).Warn("DeviceRegisterHandler: 设备注册时未找到有效的ICCID (DeviceSession)")
 	}
 
-	// 计划 3.c.2: 通过DeviceSession管理设备属性和连接状态
-	deviceSession := session.GetDeviceSession(conn)
+	// 通过DeviceSession管理设备属性和连接状态
 	if deviceSession != nil {
 		deviceSession.PhysicalID = deviceId
 		deviceSession.UpdateStatus(constants.ConnStateActive)
 		deviceSession.SyncToConnection(conn)
 	}
 
-	// 计划 3.c.4: 调用 network.UpdateConnectionActivity(conn)
+	// 调用连接活动更新
 	network.UpdateConnectionActivity(conn)
 
-	// 计划 3.c.5: 重置TCP ReadDeadline
+	// 重置TCP ReadDeadline
 	now := time.Now()
 	defaultReadDeadlineSeconds := config.GetConfig().TCPServer.DefaultReadDeadlineSeconds
 	if defaultReadDeadlineSeconds <= 0 {
 		defaultReadDeadlineSeconds = 90 // 默认值，以防配置错误
-		logger.Warnf("DeviceRegisterHandler (Master): DefaultReadDeadlineSeconds 配置错误或未配置，使用默认值: %ds", defaultReadDeadlineSeconds)
+		logger.Warnf("DeviceRegisterHandler: DefaultReadDeadlineSeconds 配置错误或未配置，使用默认值: %ds", defaultReadDeadlineSeconds)
 	}
 	defaultReadDeadline := time.Duration(defaultReadDeadlineSeconds) * time.Second
 	if tcpConn, ok := conn.GetTCPConnection().(*net.TCPConn); ok {
 		if err := tcpConn.SetReadDeadline(now.Add(defaultReadDeadline)); err != nil {
 			logger.WithFields(logrus.Fields{
 				"connID":   conn.GetConnID(),
-				"deviceId": iccid, // 日志中使用 ICCID
+				"deviceId": iccid,
 				"error":    err,
-			}).Error("DeviceRegisterHandler (Master): 设置ReadDeadline失败")
+			}).Error("DeviceRegisterHandler: 设置ReadDeadline失败")
 		}
 	}
 
-	// 记录主机设备注册信息
+	// 记录设备注册信息
 	logger.WithFields(logrus.Fields{
 		"connID":            conn.GetConnID(),
-		"physicalIdHex":     fmt.Sprintf("0x%08X", physicalId), // DNY 协议中的物理ID
-		"physicalIdStr":     deviceId,                          // 格式化后的物理ID字符串
-		"iccid":             iccid,                             // 从连接属性获取的ICCID
-		"deviceType":        "master",
+		"physicalIdHex":     fmt.Sprintf("0x%08X", physicalId),
+		"physicalIdStr":     deviceId,
+		"iccid":             iccid,
 		"connState":         constants.ConnStateActive,
 		"readDeadlineSetTo": now.Add(defaultReadDeadline).Format(time.RFC3339),
 		"remoteAddr":        conn.RemoteAddr().String(),
 		"timestamp":         now.Format(constants.TimeFormatDefault),
-	}).Info("主机设备注册成功，连接状态更新为Active，ReadDeadline已重置")
+	}).Info("设备注册成功，连接状态更新为Active，ReadDeadline已重置")
 
 	// 发送注册响应
-	h.sendRegisterResponse(deviceId, physicalId, messageID, conn) // deviceId 是 PhysicalID 格式化后的字符串
-}
-
-// 🔧 新增：处理分机设备注册
-func (h *DeviceRegisterHandler) handleSlaveDeviceRegister(deviceId string, physicalId uint32, messageID uint16, conn ziface.IConnection, data []byte) {
-	// 分机设备通过主机连接进行绑定
-	monitor.GetGlobalMonitor().BindDeviceIdToConnection(deviceId, conn) // deviceId 在这里是 PhysicalID 格式化后的字符串
-
-	// 计划 3.c.1: 获取 ICCID (之前在 SimCardHandler 中已存入 PropKeyICCID)
-	var iccid string
-	if propVal, err := conn.GetProperty(constants.PropKeyICCID); err == nil {
-		iccid, _ = propVal.(string)
-	}
-	if iccid == "" {
-		logger.WithFields(logrus.Fields{
-			"connID":     conn.GetConnID(),
-			"physicalId": fmt.Sprintf("0x%08X", physicalId),
-			"deviceId":   deviceId, // 这是 PhysicalID
-		}).Warn("DeviceRegisterHandler: 从设备注册时未找到有效的ICCID (PropKeyICCID)")
-	}
-
-	// 计划 3.c.2: 通过DeviceSession管理设备属性和连接状态
-	deviceSession := session.GetDeviceSession(conn)
-	if deviceSession != nil {
-		deviceSession.PhysicalID = deviceId
-		deviceSession.UpdateStatus(constants.ConnStateActive)
-		deviceSession.SyncToConnection(conn)
-	}
-
-	// 计划 3.c.4: 调用 network.UpdateConnectionActivity(conn)
-	network.UpdateConnectionActivity(conn)
-
-	// 计划 3.c.5: 重置TCP ReadDeadline
-	now := time.Now()
-	defaultReadDeadlineSeconds := config.GetConfig().TCPServer.DefaultReadDeadlineSeconds
-	if defaultReadDeadlineSeconds <= 0 {
-		defaultReadDeadlineSeconds = 90 // 默认值，以防配置错误
-		logger.Warnf("DeviceRegisterHandler (Slave): DefaultReadDeadlineSeconds 配置错误或未配置，使用默认值: %ds", defaultReadDeadlineSeconds)
-	}
-	defaultReadDeadline := time.Duration(defaultReadDeadlineSeconds) * time.Second
-	if tcpConn, ok := conn.GetTCPConnection().(*net.TCPConn); ok {
-		if err := tcpConn.SetReadDeadline(now.Add(defaultReadDeadline)); err != nil {
-			logger.WithFields(logrus.Fields{
-				"connID":   conn.GetConnID(),
-				"deviceId": iccid, // 日志中使用 ICCID
-				"error":    err,
-			}).Error("DeviceRegisterHandler (Slave): 设置ReadDeadline失败")
-		}
-	}
-
-	// 记录分机设备注册信息
-	logger.WithFields(logrus.Fields{
-		"connID":            conn.GetConnID(),
-		"physicalIdHex":     fmt.Sprintf("0x%08X", physicalId), // DNY 协议中的物理ID
-		"physicalIdStr":     deviceId,                          // 格式化后的物理ID字符串
-		"iccid":             iccid,                             // 从连接属性获取的ICCID
-		"deviceType":        "slave",
-		"connState":         constants.ConnStateActive,
-		"readDeadlineSetTo": now.Add(defaultReadDeadline).Format(time.RFC3339),
-		"remoteAddr":        conn.RemoteAddr().String(),
-		"timestamp":         now.Format(constants.TimeFormatDefault),
-	}).Info("分机设备注册成功，连接状态更新为Active，ReadDeadline已重置")
-
-	// 发送注册响应（通过主机连接）
-	h.sendRegisterResponse(deviceId, physicalId, messageID, conn) // deviceId 是 PhysicalID 格式化后的字符串
+	h.sendRegisterResponse(deviceId, physicalId, messageID, conn)
 }
 
 // 🔧 新增：统一的注册响应发送

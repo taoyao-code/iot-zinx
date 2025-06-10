@@ -1,6 +1,7 @@
 package protocol
 
 import (
+	"encoding/binary"
 	"errors"
 	"fmt"
 
@@ -88,6 +89,16 @@ func (df *DecodedDNYFrame) GetDeviceNumber() (uint32, error) {
 	return uint32(df.RawPhysicalID[0]) |
 		uint32(df.RawPhysicalID[1])<<8 |
 		uint32(df.RawPhysicalID[2])<<16, nil
+}
+
+// GetPhysicalIDAsUint32 获取完整的4字节PhysicalID作为uint32值
+// 这是解决PhysicalID解析错误的统一方法，避免字符串解析溢出问题
+func (df *DecodedDNYFrame) GetPhysicalIDAsUint32() (uint32, error) {
+	if df.FrameType != FrameTypeStandard || len(df.RawPhysicalID) != 4 {
+		return 0, errors.New("not a standard frame or RawPhysicalID is invalid")
+	}
+	// 直接将4字节数组转换为uint32（小端格式）
+	return binary.LittleEndian.Uint32(df.RawPhysicalID), nil
 }
 
 // IsValid 检查解码后的帧是否有效
