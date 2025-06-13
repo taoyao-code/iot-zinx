@@ -101,16 +101,32 @@ func (d *DNY_Decoder) Intercept(chain ziface.IChain) ziface.IcResp {
 
 		// 4.1 尝试解析 "link" 心跳包
 		if buffer.Len() >= constants.LinkMessageLength {
-			peekedBytes := buffer.Bytes()[:constants.LinkMessageLength]
-			if string(peekedBytes) == constants.IOT_LINK_HEARTBEAT {
-				buffer.Next(constants.LinkMessageLength)
-				logger.WithFields(logrus.Fields{
-					"connID": currentConnID,
-				}).Debug("拦截器：解析到link心跳包")
+			// peekedBytes := buffer.Bytes()[:constants.LinkMessageLength]
+			// if string(peekedBytes) == constants.IOT_LINK_HEARTBEAT {
+			// 	buffer.Next(constants.LinkMessageLength)
+			// 	logger.WithFields(logrus.Fields{
+			// 		"connID": currentConnID,
+			// 	}).Debug("拦截器：解析到link心跳包")
+			// 	iMessage.SetMsgID(constants.MsgIDLinkHeartbeat)
+			// 	iMessage.SetData(peekedBytes)
+			// 	iMessage.SetDataLen(uint32(len(peekedBytes)))
+			// 	heartbeatMsg, _ := ParseDNYProtocolData(peekedBytes) // ParseDNYProtocolData应能处理link
+			// 	return chain.ProceedWithIMessage(iMessage, heartbeatMsg)
+			// }
+			idx := bytes.Index(buffer.Bytes(), []byte(constants.IOT_LINK_HEARTBEAT))
+			if idx >= 0 && buffer.Len() >= idx+constants.LinkMessageLength {
+				if idx > 0 {
+					logger.WithFields(logrus.Fields{
+						"connID": currentConnID,
+						"prefix": fmt.Sprintf("%x", buffer.Bytes()[:idx]),
+					}).Debug("拦截器：link心跳包前有脏数据，已跳过")
+					buffer.Next(idx) // 丢弃前缀脏数据
+				}
+				linkBytes := buffer.Next(constants.LinkMessageLength)
 				iMessage.SetMsgID(constants.MsgIDLinkHeartbeat)
-				iMessage.SetData(peekedBytes)
-				iMessage.SetDataLen(uint32(len(peekedBytes)))
-				heartbeatMsg, _ := ParseDNYProtocolData(peekedBytes) // ParseDNYProtocolData应能处理link
+				iMessage.SetData(linkBytes)
+				iMessage.SetDataLen(uint32(len(linkBytes)))
+				heartbeatMsg, _ := ParseDNYProtocolData(linkBytes)
 				return chain.ProceedWithIMessage(iMessage, heartbeatMsg)
 			}
 		}
@@ -195,6 +211,8 @@ func (d *DNY_Decoder) Intercept(chain ziface.IChain) ziface.IcResp {
 							"error":    pErr.Error(),
 							"frameHex": fmt.Sprintf("%x", dnyFrameData),
 						}).Warn("拦截器：DNY帧解析失败(ParseDNYProtocolData)，丢弃当前帧并继续")
+
+						buffer.Next(1)
 						parsedMessage = true
 						continue
 					}
@@ -202,7 +220,8 @@ func (d *DNY_Decoder) Intercept(chain ziface.IChain) ziface.IcResp {
 					// ValidateDNYFrame is called inside ParseDNYProtocolData implicitly or explicitly by its logic
 					// No need to call it again here if ParseDNYProtocolData is comprehensive
 
-					iMessage.SetMsgID(parsedMsg.GetMsgID())
+					// iMessage.SetMsgID(parsedMsg.GetMsgID())
+					iMessage.SetMsgID(uint32(parsedMsg.MessageId))
 					iMessage.SetData(dnyFrameData)
 					iMessage.SetDataLen(uint32(len(dnyFrameData)))
 
