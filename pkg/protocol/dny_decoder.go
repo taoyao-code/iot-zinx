@@ -70,6 +70,7 @@ func (d *DNY_Decoder) Intercept(chain ziface.IChain) ziface.IcResp {
 		fmt.Println("拦截器：原始数据长度:", len(rawData))
 		fmt.Println("拦截器：原始数据内容(前50字节 hex):", fmt.Sprintf("%.50x", rawData))
 		fmt.Println("拦截器：原始数据内容(string):", string(rawData))
+		fmt.Println("拦截器：原始数据内容(十六进制):", fmt.Sprintf("%x", rawData))
 	}
 
 	// 以上打印语句用于调试和验证原始数据的状态
