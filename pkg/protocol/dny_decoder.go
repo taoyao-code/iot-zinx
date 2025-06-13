@@ -151,7 +151,8 @@ func (d *DNY_Decoder) Intercept(chain ziface.IChain) ziface.IcResp {
 			if string(headerBytes[:3]) == constants.DNYHeaderMagic {
 				// 读取长度字段
 				contentLength := binary.LittleEndian.Uint16(headerBytes[3:5])
-				totalFrameLen := constants.DNYMinHeaderLength + int(contentLength)
+				// 修正：totalFrameLen 应包含DNY头、长度字段、内容数据以及末尾的校验和
+				totalFrameLen := constants.DNYMinHeaderLength + int(contentLength) + constants.DNYChecksumLength
 
 				if buffer.Len() >= totalFrameLen {
 					// 缓冲区数据足够一个完整的DNY帧
