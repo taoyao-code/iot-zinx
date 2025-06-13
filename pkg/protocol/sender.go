@@ -102,7 +102,7 @@ func sendDNYPacket(conn ziface.IConnection, packet []byte, physicalID uint32, me
 		"physicalID": fmt.Sprintf("0x%08X", physicalID),
 		"messageID":  fmt.Sprintf("0x%04X", messageID),
 		"command":    fmt.Sprintf("0x%02X", command),
-		"dataHex":    hex.EncodeToString(packet),
+		"dataHex":    hex.EncodeToString(packet), // 确保这里记录的是完整的 packet
 		"dataLen":    len(packet),
 		"remoteAddr": conn.RemoteAddr().String(),
 		"timestamp":  time.Now().Format(constants.TimeFormatDefault),
@@ -118,6 +118,7 @@ func sendDNYPacket(conn ziface.IConnection, packet []byte, physicalID uint32, me
 				"physicalID": fmt.Sprintf("0x%08X", physicalID),
 				"messageID":  fmt.Sprintf("0x%04X", messageID),
 				"command":    fmt.Sprintf("0x%02X", command),
+				"dataHex":    hex.EncodeToString(packet), // 确保错误日志中也记录原始 packet
 				"error":      err.Error(),
 			}).Error("发送DNY协议数据失败")
 			return err
@@ -129,6 +130,7 @@ func sendDNYPacket(conn ziface.IConnection, packet []byte, physicalID uint32, me
 			"physicalID": fmt.Sprintf("0x%08X", physicalID),
 			"messageID":  fmt.Sprintf("0x%04X", messageID),
 			"command":    fmt.Sprintf("0x%02X", command),
+			"dataHex":    hex.EncodeToString(packet), // 确保错误日志中也记录原始 packet
 		}).Error("发送DNY协议数据失败：无法获取TCP连接")
 		return err
 	}

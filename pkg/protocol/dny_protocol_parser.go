@@ -85,7 +85,8 @@ func ParseDNYProtocolData(data []byte) (*dny_protocol.Message, error) {
 	expectedTotalPacketLength := PacketHeaderLength + DataLengthBytes + int(declaredDataLen) + ChecksumLength
 	if dataLen != expectedTotalPacketLength {
 		msg.MessageType = "error"
-		msg.ErrorMessage = fmt.Sprintf("packet length mismatch: declared content length %d implies total %d, but got %d", declaredDataLen, expectedTotalPacketLength, dataLen)
+		// 修改错误信息，增加可能原因的提示
+		msg.ErrorMessage = fmt.Sprintf("packet length mismatch: declared content length %d implies total %d, but got %d. Input data may be truncated or malformed by the caller (e.g., TCPMonitor).", declaredDataLen, expectedTotalPacketLength, dataLen)
 		return msg, errors.New(msg.ErrorMessage)
 	}
 
