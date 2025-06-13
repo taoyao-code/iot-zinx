@@ -2,6 +2,48 @@
 
 基于 Zinx 网络框架的充电设备网关系统，实现与充电桩设备的通信和管理。
 
+## 🚀 最新架构更新 (2025 年 6 月)
+
+### DNY 协议解析器统一重构
+
+项目完成了重大的协议解析器统一重构，实现了高内聚、低耦合的新架构：
+
+#### ✨ 重构亮点
+
+- **🎯 统一解析入口**: 所有 DNY 协议变体通过 `ParseDNYProtocolData()` 统一处理
+- **📦 标准化数据结构**: 使用 `*dny_protocol.Message` 统一消息格式
+- **🔧 向后兼容**: 保持现有业务逻辑无缝运行
+- **⚡ 性能优化**: 减少重复解析，提升处理效率
+
+#### 🏗️ 新架构特性
+
+```go
+// 统一解析器使用示例
+import "github.com/bujia-iot/iot-zinx/pkg/protocol"
+
+data := []byte("ICCID12345678901234567890") // 任意DNY协议数据
+msg, err := protocol.ParseDNYProtocolData(data)
+if err != nil {
+    log.Printf("解析失败: %v", err)
+    return
+}
+
+switch msg.MessageType {
+case "standard":    // 标准DNY协议帧
+case "iccid":       // ICCID消息
+case "heartbeat_link": // Link心跳
+case "error":       // 解析错误
+}
+```
+
+#### 📖 相关文档
+
+- **架构设计**: [docs/DNY 协议解析器统一架构设计.md](docs/DNY协议解析器统一架构设计.md)
+- **开发指南**: [docs/DNY 协议解析器\_开发者指南.md](docs/DNY协议解析器_开发者指南.md)
+- **完成报告**: [issues/协议解析器统一重构\_完成报告.md](issues/协议解析器统一重构_完成报告.md)
+
+---
+
 ## 项目介绍
 
 本系统是一个基于 TCP 协议的充电设备网关，负责连接和管理充电桩设备，处理设备上报的各种数据，并将业务请求转发给设备。系统采用六边形架构（端口与适配器架构），实现了业务逻辑与技术实现的分离。

@@ -41,14 +41,17 @@ func (s *TCPServer) Start() error {
 		return err
 	}
 
+	// 启动心跳管理器 - 在设置连接钩子之前初始化
+	s.startHeartbeatManager()
+
+	// 正确初始化包依赖关系，传入必要的依赖
+	s.initializePackageDependencies()
+
 	// 注册路由 - 核心指令流程
 	s.registerRoutes()
 
-	// 设置连接钩子 - 核心连接管理
+	// 设置连接钩子 - 核心连接管理（在依赖初始化完成后）
 	s.setupConnectionHooks()
-
-	// 启动心跳管理器
-	s.startHeartbeatManager()
 
 	// 启动服务器
 	return s.startServer()
@@ -56,9 +59,6 @@ func (s *TCPServer) Start() error {
 
 // initialize 初始化服务器配置
 func (s *TCPServer) initialize() error {
-	// 1. 初始化pkg包之间的依赖关系
-	pkg.InitPackages()
-
 	// 记录启动信息
 	zinxCfg := s.cfg.TCPServer.Zinx
 
@@ -97,6 +97,21 @@ func (s *TCPServer) initialize() error {
 // registerRoutes 注册路由
 func (s *TCPServer) registerRoutes() {
 	handlers.RegisterRouters(s.server)
+}
+
+// initializePackageDependencies 初始化包依赖关系，传入必要的依赖
+func (s *TCPServer) initializePackageDependencies() {
+	// 获取必要的依赖
+	sessionManager := pkg.Monitor.GetSessionManager()
+	connManager := s.server.GetConnMgr()
+
+	// 使用依赖注入初始化包
+	pkg.InitPackagesWithDependencies(sessionManager, connManager)
+
+	logger.WithFields(logrus.Fields{
+		"sessionManager": "initialized",
+		"connManager":    "initialized",
+	}).Info("包依赖关系已正确初始化")
 }
 
 // setupConnectionHooks 设置连接钩子
