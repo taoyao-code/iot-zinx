@@ -58,238 +58,260 @@ func (d *DNY_Decoder) Intercept(chain ziface.IChain) ziface.IcResp {
 	}
 
 	rawData := iMessage.GetData()
-	if len(rawData) == 0 {
-		logger.Debug(LOG_RAW_DATA_EMPTY)
-		return chain.ProceedWithIMessage(iMessage, nil)
-	}
+	// 注意：此处不检查 len(rawData) == 0，因为数据会追加到缓冲区统一处理
 
 	conn := d.getConnection(chain)
-	if conn == nil {
-		logger.Error("拦截器：无法获取连接对象")
-		return chain.ProceedWithIMessage(iMessage, nil)
-	}
+	// if conn == nil 在 getOrCreateBuffer 和 getConnID 中处理或提前返回
 
 	// 2. 获取或创建连接缓冲区
 	buffer := d.getOrCreateBuffer(conn)
-	if buffer == nil {
-		logger.Error("拦截器：无法创建连接缓冲区")
+	if buffer == nil { // 如果conn为nil, getOrCreateBuffer可能返回nil或panic，取决于实现
+		logger.Error("拦截器：无法获取或创建连接缓冲区")
+		// 如果 iMessage 是 nil, 传递 nil 可能导致后续问题，但这是基于原始代码的假设
 		return chain.ProceedWithIMessage(iMessage, nil)
 	}
 
 	// 3. 将新数据追加到缓冲区
-	if _, err := buffer.Write(rawData); err != nil {
+	if len(rawData) > 0 { // 只有当有新数据时才追加和记录日志
+		if _, err := buffer.Write(rawData); err != nil {
+			logger.WithFields(logrus.Fields{
+				"connID": d.getConnID(conn),
+				"error":  err.Error(),
+			}).Error("拦截器：写入缓冲区失败")
+			return chain.ProceedWithIMessage(iMessage, nil)
+		}
 		logger.WithFields(logrus.Fields{
-			"connID": conn.GetConnID(),
-			"error":  err.Error(),
-		}).Error("拦截器：写入缓冲区失败")
-		return chain.ProceedWithIMessage(iMessage, nil)
+			"connID":     d.getConnID(conn),
+			"newDataLen": len(rawData),
+			"bufferLen":  buffer.Len(),
+			"newDataHex": fmt.Sprintf("%.50x", rawData),
+		}).Debug("拦截器：数据已追加到缓冲区")
 	}
-
-	logger.WithFields(logrus.Fields{
-		"connID":     conn.GetConnID(),
-		"newDataLen": len(rawData),
-		"bufferLen":  buffer.Len(),
-		"newDataHex": fmt.Sprintf("%x", rawData),
-	}).Debug("拦截器：数据已追加到缓冲区")
 
 	// 4. 循环解析缓冲区中的完整消息
 	for buffer.Len() > 0 {
 		parsedMessage := false
+		currentConnID := d.getConnID(conn)
 
-		// 4.1 尝试解析 "link" 心跳包 (4字节)
+		logger.WithFields(logrus.Fields{
+			"connID":    currentConnID,
+			"bufferLen": buffer.Len(),
+			"bufferHex": fmt.Sprintf("%.50x", buffer.Bytes()),
+		}).Trace("拦截器：循环解析开始，当前缓冲区状态")
+
+		// 4.1 尝试解析 "link" 心跳包
 		if buffer.Len() >= constants.LinkMessageLength {
 			peekedBytes := buffer.Bytes()[:constants.LinkMessageLength]
 			if string(peekedBytes) == constants.IOT_LINK_HEARTBEAT {
-				// 消费这4字节
 				buffer.Next(constants.LinkMessageLength)
-
 				logger.WithFields(logrus.Fields{
-					"connID": conn.GetConnID(),
+					"connID": currentConnID,
 				}).Debug("拦截器：解析到link心跳包")
-
-				// 创建心跳消息并返回给框架路由（恢复原有流程）
 				iMessage.SetMsgID(constants.MsgIDLinkHeartbeat)
 				iMessage.SetData(peekedBytes)
 				iMessage.SetDataLen(uint32(len(peekedBytes)))
-
-				// 创建心跳消息对象传递给后续处理器
-				heartbeatMsg, _ := ParseDNYProtocolData(peekedBytes)
+				heartbeatMsg, _ := ParseDNYProtocolData(peekedBytes) // ParseDNYProtocolData应能处理link
 				return chain.ProceedWithIMessage(iMessage, heartbeatMsg)
 			}
 		}
 
-		// 4.2 尝试解析 ICCID 消息 (19-25字节)
+		// 4.2 尝试解析 ICCID 消息
 		if buffer.Len() >= constants.ICCIDMinLength {
-			// 检查不同长度的ICCID可能性
 			maxLen := minInt(constants.ICCIDMaxLength, buffer.Len())
+			foundICCID := false
 			for iccidLen := constants.ICCIDMinLength; iccidLen <= maxLen; iccidLen++ {
 				peekedBytes := buffer.Bytes()[:iccidLen]
 				if d.isValidICCID(peekedBytes) {
-					// 消费这些字节
 					buffer.Next(iccidLen)
-
 					logger.WithFields(logrus.Fields{
-						"connID": conn.GetConnID(),
+						"connID": currentConnID,
 						"iccid":  string(peekedBytes),
 					}).Info("拦截器：解析到ICCID消息")
-
-					// 创建ICCID消息并返回给框架路由（恢复原有流程）
 					iMessage.SetMsgID(constants.MsgIDICCID)
 					iMessage.SetData(peekedBytes)
 					iMessage.SetDataLen(uint32(len(peekedBytes)))
-
-					// 创建ICCID消息对象传递给后续处理器
-					iccidMsg, _ := ParseDNYProtocolData(peekedBytes)
+					iccidMsg, _ := ParseDNYProtocolData(peekedBytes) // ParseDNYProtocolData应能处理ICCID
 					return chain.ProceedWithIMessage(iMessage, iccidMsg)
 				}
 			}
+			if foundICCID {
+				continue
+			} // Should be handled by return inside loop
 		}
 
 		// 4.3 尝试解析 DNY 标准协议帧
 		if buffer.Len() >= constants.DNYMinHeaderLength {
 			headerBytes := buffer.Bytes()[:constants.DNYMinHeaderLength]
+
+			logger.WithFields(logrus.Fields{
+				"connID":      currentConnID,
+				"headerBytes": fmt.Sprintf("%x", headerBytes),
+			}).Trace("拦截器：尝试解析DNY帧，读取头部字节")
+
 			if string(headerBytes[:3]) == constants.DNYHeaderMagic {
-				// 读取长度字段
 				contentLength := binary.LittleEndian.Uint16(headerBytes[3:5])
-				// 修正：totalFrameLen 应包含DNY头、长度字段、内容数据以及末尾的校验和
 				totalFrameLen := constants.DNYMinHeaderLength + int(contentLength) + constants.DNYChecksumLength
 
+				logger.WithFields(logrus.Fields{
+					"connID":           currentConnID,
+					"contentLength":    contentLength,
+					"totalFrameLen":    totalFrameLen,
+					"currentBufferLen": buffer.Len(),
+				}).Trace("拦截器：识别到DNY帧头部，计算帧总长")
+
 				if buffer.Len() >= totalFrameLen {
-					// 缓冲区数据足够一个完整的DNY帧
 					dnyFrameData := make([]byte, totalFrameLen)
-					if _, err := buffer.Read(dnyFrameData); err != nil {
+					n, readErr := buffer.Read(dnyFrameData)
+					if readErr != nil {
 						logger.WithFields(logrus.Fields{
-							"connID": conn.GetConnID(),
-							"error":  err.Error(),
-						}).Error("拦截器：从缓冲区读取DNY帧失败")
-						conn.Stop()
+							"connID": currentConnID,
+							"error":  readErr.Error(),
+						}).Error("拦截器：从缓冲区读取DNY帧失败 (Read error)")
+						if conn != nil {
+							conn.Stop()
+						}
 						return chain.ProceedWithIMessage(iMessage, nil)
+					}
+					if n != totalFrameLen {
+						logger.WithFields(logrus.Fields{
+							"connID":       currentConnID,
+							"expectedRead": totalFrameLen,
+							"actualRead":   n,
+						}).Error("拦截器：从缓冲区读取DNY帧字节数与预期不匹配")
+						parsedMessage = true
+						continue
 					}
 
 					logger.WithFields(logrus.Fields{
-						"connID":   conn.GetConnID(),
-						"frameLen": totalFrameLen,
-						"frameHex": fmt.Sprintf("%x", dnyFrameData),
-					}).Debug("拦截器：解析到DNY标准帧")
+						"connID":          currentConnID,
+						"dnyFrameDataLen": len(dnyFrameData),
+						"dnyFrameDataHex": fmt.Sprintf("%x", dnyFrameData),
+					}).Trace("拦截器：成功从缓冲区读取DNY帧数据")
 
-					// 解析并验证DNY帧
-					parsedMsg, err := ParseDNYProtocolData(dnyFrameData)
-					if err != nil {
+					parsedMsg, pErr := ParseDNYProtocolData(dnyFrameData)
+					if pErr != nil {
 						logger.WithFields(logrus.Fields{
-							"connID":   conn.GetConnID(),
-							"error":    err.Error(),
+							"connID":   currentConnID,
+							"error":    pErr.Error(),
 							"frameHex": fmt.Sprintf("%x", dnyFrameData),
-						}).Warn("拦截器：DNY帧解析失败，丢弃并继续")
+						}).Warn("拦截器：DNY帧解析失败(ParseDNYProtocolData)，丢弃当前帧并继续")
 						parsedMessage = true
 						continue
 					}
 
-					// 使用新的ValidateDNYFrame函数进行严格验证
-					isValid, validationErr := ValidateDNYFrame(dnyFrameData)
-					if validationErr != nil {
-						logger.WithFields(logrus.Fields{
-							"connID":        conn.GetConnID(),
-							"validationErr": validationErr.Error(),
-							"frameHex":      fmt.Sprintf("%x", dnyFrameData),
-						}).Warn("拦截器：DNY帧验证过程出错，丢弃并继续")
-						parsedMessage = true
-						continue
-					}
+					// ValidateDNYFrame is called inside ParseDNYProtocolData implicitly or explicitly by its logic
+					// No need to call it again here if ParseDNYProtocolData is comprehensive
 
-					if !isValid {
-						logger.WithFields(logrus.Fields{
-							"connID":   conn.GetConnID(),
-							"frameHex": fmt.Sprintf("%x", dnyFrameData),
-						}).Warn("拦截器：DNY帧验证失败，丢弃并继续")
-						parsedMessage = true
-						continue
-					}
-
-					// 验证校验和
-					if parsedMsg.MessageType == "error" {
-						logger.WithFields(logrus.Fields{
-							"connID":   conn.GetConnID(),
-							"error":    parsedMsg.ErrorMessage,
-							"frameHex": fmt.Sprintf("%x", dnyFrameData),
-						}).Warn("拦截器：DNY帧校验失败，丢弃并继续")
-						parsedMessage = true
-						continue
-					}
-
-					// 成功解析DNY帧，设置消息并返回
-					// 根据文档要求：只有DNY标准协议帧才返回给Zinx框架进行路由
 					iMessage.SetMsgID(parsedMsg.GetMsgID())
-					iMessage.SetData(dnyFrameData) // 返回完整的DNY帧原始数据
+					iMessage.SetData(dnyFrameData)
 					iMessage.SetDataLen(uint32(len(dnyFrameData)))
 
 					logger.WithFields(logrus.Fields{
-						"connID":    conn.GetConnID(),
+						"connID":    currentConnID,
 						"msgID":     fmt.Sprintf("0x%04X", parsedMsg.GetMsgID()),
 						"commandID": fmt.Sprintf("0x%02X", parsedMsg.CommandId),
 						"frameLen":  len(dnyFrameData),
 					}).Debug("拦截器：DNY帧解析成功，返回给框架路由")
-
 					return chain.ProceedWithIMessage(iMessage, parsedMsg)
 				} else {
-					// DNY帧头部存在，但数据不足，等待更多数据
 					logger.WithFields(logrus.Fields{
-						"connID":      conn.GetConnID(),
+						"connID":      currentConnID,
 						"bufferLen":   buffer.Len(),
 						"expectedLen": totalFrameLen,
 					}).Debug("拦截器：DNY帧数据不完整，等待更多数据")
+					parsedMessage = false // Explicitly false as we are breaking to wait
 					break
 				}
 			} else {
-				// 未知数据前缀，根据文档要求处理未知协议/数据
-				// 处理策略：丢弃一个字节后继续尝试，或者关闭连接
 				logger.WithFields(logrus.Fields{
-					"connID":     conn.GetConnID(),
-					"bufferHead": fmt.Sprintf("%x", buffer.Bytes()[:minInt(buffer.Len(), 10)]),
-				}).Warn("拦截器：发现未知数据前缀")
+					"connID":     currentConnID,
+					"bufferHead": fmt.Sprintf("%.20x", buffer.Bytes()),
+				}).Warn("拦截器：发现未知数据前缀，尝试恢复同步")
 
-				// 文档建议：可以关闭连接，或丢弃缓冲区数据并尝试从下一个数据包开始
-				// 这里采用保守策略：丢弃一个字节后继续尝试
-				discarded := buffer.Next(1)
-				logger.WithFields(logrus.Fields{
-					"connID":       conn.GetConnID(),
-					"discardedHex": fmt.Sprintf("%x", discarded),
-				}).Debug("拦截器：丢弃1字节未知数据后继续")
+				dnyMagicBytes := []byte(constants.DNYHeaderMagic)
+				idx := bytes.Index(buffer.Bytes(), dnyMagicBytes)
 
+				if idx > 0 {
+					discardedBytes := buffer.Next(idx)
+					logger.WithFields(logrus.Fields{
+						"connID":              currentConnID,
+						"discardedCount":      idx,
+						"discardedHex":        fmt.Sprintf("%.20x", discardedBytes),
+						"remainingBufferHead": fmt.Sprintf("%.20x", buffer.Bytes()),
+					}).Warn("拦截器：丢弃未知前缀直到下一个DNY标识")
+				} else if idx == -1 {
+					discardCount := buffer.Len()
+					logDiscardHex := buffer.Bytes()
+					if len(logDiscardHex) > 50 {
+						logDiscardHex = logDiscardHex[:50]
+					}
+
+					buffer.Reset()
+					logger.WithFields(logrus.Fields{
+						"connID":             currentConnID,
+						"discardedCount":     discardCount,
+						"discardedHexSample": fmt.Sprintf("%x", logDiscardHex),
+					}).Warn("拦截器：未在缓冲区找到DNY标识，已清空整个缓冲区以尝试恢复")
+					parsedMessage = true
+					break
+				}
+				// If idx == 0, it means DNY is at the start, which should be handled by the 'if' block above.
+				// This path (else of DNYHeaderMagic check) implies it wasn't DNY at the start.
 				parsedMessage = true
 				continue
 			}
+		} else { // buffer.Len() < constants.DNYMinHeaderLength
+			logger.WithFields(logrus.Fields{
+				"connID":         currentConnID,
+				"bufferLen":      buffer.Len(),
+				"minRequiredDNY": constants.DNYMinHeaderLength,
+			}).Trace("拦截器：缓冲区数据不足以构成DNY最小头部，尝试其他解析或等待")
+			// This else block is for when buffer is too short for DNYMinHeaderLength
+			// If it's also too short for Link or ICCID, the outer loop condition or specific checks will handle it.
+			// We might need to break here if no other protocol matches and buffer is too short for DNY.
+			// The logic below handles breaking if nothing was parsed.
 		}
 
-		// 4.4 数据不足以构成任何已知消息类型，等待更多数据
 		if !parsedMessage && buffer.Len() > 0 {
-			minRequiredLen := minInt3(constants.LinkMessageLength, constants.ICCIDMinLength, constants.DNYMinHeaderLength)
-			if buffer.Len() < minRequiredLen {
-				logger.WithFields(logrus.Fields{
-					"connID":         conn.GetConnID(),
-					"bufferLen":      buffer.Len(),
-					"minRequiredLen": minRequiredLen,
-				}).Debug("拦截器：缓冲区数据不足，等待更多数据")
+			minRequiredForAny := constants.DNYMinHeaderLength // Default to DNY
+			if constants.LinkMessageLength < minRequiredForAny {
+				minRequiredForAny = constants.LinkMessageLength
 			}
-			break
+			if constants.ICCIDMinLength < minRequiredForAny {
+				minRequiredForAny = constants.ICCIDMinLength
+			}
+
+			if buffer.Len() < minRequiredForAny {
+				logger.WithFields(logrus.Fields{
+					"connID":         currentConnID,
+					"bufferLen":      buffer.Len(),
+					"minRequiredAny": minRequiredForAny,
+				}).Debug("拦截器：缓冲区数据不足以构成任何已知消息的最小长度，等待更多数据")
+				break // Not enough data for any known type
+			}
+			// If we are here, it means buffer.Len() >= minRequiredForAny,
+			// but none of the specific parsers (link, iccid, dny) succeeded AND parsedMessage is still false.
+			// This could be an unknown protocol or a partial DNY frame that didn't trigger the "DNY data incomplete" break.
+			// To prevent potential infinite loops if DNY parser logic has a subtle bug not breaking correctly for partial data:
+			logger.WithFields(logrus.Fields{
+				"connID":    currentConnID,
+				"bufferHex": fmt.Sprintf("%.50x", buffer.Bytes()),
+			}).Warn("拦截器：无法解析当前缓冲区数据为任何已知类型，但数据仍存在。为避免潜在死循环，将尝试丢弃1字节。")
+			buffer.Next(1)       // Fallback: discard 1 byte and retry loop.
+			parsedMessage = true // Mark as "handled" to ensure loop continues or exits correctly.
+			continue
 		}
 
-		// 如果缓冲区为空，循环自然结束
 		if buffer.Len() == 0 {
+			logger.WithFields(logrus.Fields{"connID": currentConnID}).Trace("拦截器：缓冲区已空，结束当前轮次解析")
 			break
 		}
 	}
 
-	// 如果执行到这里，意味着当前没有完整的消息可处理
-	// 根据文档要求返回(nil, nil)表示：
-	// 1. 缓冲区中的数据不足以构成任何已知类型的完整消息时
-	// 2. 所有可处理的消息都已在内部消费（link心跳和ICCID）
-	// 3. 缓冲区被清空时
 	logger.WithFields(logrus.Fields{
-		"connID":    conn.GetConnID(),
+		"connID":    d.getConnID(conn),
 		"bufferLen": buffer.Len(),
-	}).Debug("拦截器：当前无完整消息，等待更多数据")
-
-	// 返回nil,nil表示此次不路由消息，框架会继续等待更多数据
+	}).Debug("拦截器：当前无完整消息或缓冲区已处理完毕，等待更多数据")
 	return chain.ProceedWithIMessage(nil, nil)
 }
 
@@ -314,7 +336,7 @@ func (d *DNY_Decoder) getConnection(chain ziface.IChain) ziface.IConnection {
 }
 
 // getConnID 安全获取连接ID的辅助函数
-func getConnID(conn ziface.IConnection) uint64 {
+func (d *DNY_Decoder) getConnID(conn ziface.IConnection) uint64 {
 	if conn != nil {
 		return conn.GetConnID()
 	}

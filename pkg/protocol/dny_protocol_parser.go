@@ -12,6 +12,9 @@ import (
 	// 使用正确的模块路径
 	"github.com/bujia-iot/iot-zinx/internal/domain/dny_protocol"
 	"github.com/bujia-iot/iot-zinx/pkg/constants"
+
+	"github.com/bujia-iot/iot-zinx/internal/infrastructure/logger" // 新增：导入logger包
+	"github.com/sirupsen/logrus"                                   // 新增：导入logrus包
 	// "github.com/bujia/pkg/util/conversion" // 暂时注释，待确认路径或移除依赖
 	// "github.com/bujia/pkg/util/log" // 暂时注释
 	// "github.com/bujia/pkg/util/string_util" // 暂时注释
@@ -34,6 +37,12 @@ const (
 // ParseDNYProtocolData 解析DNY协议数据，支持标准DNY帧和链路心跳
 // 返回统一的 *dny_protocol.Message 结构
 func ParseDNYProtocolData(data []byte) (*dny_protocol.Message, error) {
+	// DEBUG: Log input to ParseDNYProtocolData
+	logger.WithFields(logrus.Fields{
+		"inputDataLen": len(data),
+		"inputDataHex": fmt.Sprintf("%.100x", data), // 最多显示前100字节
+	}).Trace("ParseDNYProtocolData: 收到待解析数据")
+
 	dataLen := len(data)
 	msg := &dny_protocol.Message{RawData: data} // 存储原始数据
 
@@ -136,9 +145,14 @@ func ParseDNYProtocolData(data []byte) (*dny_protocol.Message, error) {
 }
 
 // CalculatePacketChecksumInternal 是 CalculatePacketChecksum 的内部版本，避免循环依赖或公开不必要的接口
-// dataFrame 参数应为从包头"DNY"开始，直到数据内容结束的部分。
-// 根据协议文档："校验从包头到数据的内容"，计算所有字节的累加和
+// dataFrame 参数应为从包头\"DNY\"开始，直到数据内容结束的部分。\n// 根据协议文档：\"校验从包头到数据的内容\"，计算所有字节的累加和
 func CalculatePacketChecksumInternal(dataFrame []byte) (uint16, error) {
+	// DEBUG: Log input to CalculatePacketChecksumInternal
+	logger.WithFields(logrus.Fields{
+		"dataFrameLen": len(dataFrame),
+		"dataFrameHex": fmt.Sprintf("%.100x", dataFrame), // 最多显示前100字节
+	}).Trace("CalculatePacketChecksumInternal: 收到待计算校验和的数据帧")
+
 	if len(dataFrame) == 0 {
 		return 0, errors.New("data frame for checksum calculation is empty")
 	}
