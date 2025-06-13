@@ -316,6 +316,48 @@ func isValidICCID(data []byte) bool {
 	return isAllDigits(data)
 }
 
+// ValidateDNYFrame 验证DNY协议帧的完整性和校验和
+// 根据文档要求，这是DNY协议解析的核心验证函数
+func ValidateDNYFrame(frameData []byte) (bool, error) {
+	if len(frameData) < MinPacketLength {
+		return false, fmt.Errorf("frame too short: %d bytes, minimum required: %d", len(frameData), MinPacketLength)
+	}
+
+	// 检查包头
+	if string(frameData[:3]) != HeaderDNY {
+		return false, fmt.Errorf("invalid header: expected 'DNY', got '%s'", string(frameData[:3]))
+	}
+
+	// 解析长度字段
+	declaredLength := binary.LittleEndian.Uint16(frameData[3:5])
+	expectedTotalLength := 3 + 2 + int(declaredLength) // DNY(3) + Length(2) + Content(declaredLength)
+
+	if len(frameData) != expectedTotalLength {
+		return false, fmt.Errorf("length mismatch: declared %d, actual frame %d, expected total %d",
+			declaredLength, len(frameData), expectedTotalLength)
+	}
+
+	// 计算并验证校验和
+	contentEnd := len(frameData) - ChecksumLength
+	expectedChecksum := binary.LittleEndian.Uint16(frameData[contentEnd:])
+
+	actualChecksum, err := CalculatePacketChecksumInternal(frameData[:contentEnd])
+	if err != nil {
+		return false, fmt.Errorf("checksum calculation failed: %v", err)
+	}
+
+	if actualChecksum != expectedChecksum {
+		return false, fmt.Errorf("checksum mismatch: expected 0x%04X, got 0x%04X", expectedChecksum, actualChecksum)
+	}
+
+	return true, nil
+}
+
+// IsValidICCIDPrefix 检查数据是否符合ICCID前缀格式（为兼容文档中的函数名）
+func IsValidICCIDPrefix(data []byte) bool {
+	return isValidICCID(data)
+}
+
 // 以下是旧的 BuildDNYResponsePacket 和 ParseDNYData 函数，需要移除或重构
 // // BuildDNYResponsePacket 构建DNY响应数据包
 // func BuildDNYResponsePacket(commandID byte, physicalID uint32, messageID uint16, payload []byte) ([]byte, error) { ... }

@@ -17,6 +17,20 @@ const (
 	IOT_SIM_CARD_LENGTH = 20     // ICCID长度
 	IOT_LINK_HEARTBEAT  = "link" // Link心跳字符串
 	DNY_MIN_PACKET_LEN  = 12     // DNY协议最小数据包长度
+
+	// 连接缓冲区管理常量
+	ConnectionBufferKey = "dny_connection_buffer" // 连接缓冲区属性键
+
+	// 消息解析常量
+	LinkMessageLength  = 4      // "link"心跳消息长度
+	LinkMessagePayload = "link" // Link心跳消息内容（文档兼容性）
+	ICCIDMinLength     = 19     // ICCID最小长度
+	ICCIDMaxLength     = 25     // ICCID最大长度
+	ICCIDMessageLength = 20     // ICCID标准长度（文档兼容性）
+	ICCIDValidPrefix   = "8986" // ICCID有效前缀示例
+	DNYMinHeaderLength = 5      // DNY协议最小头部长度("DNY" + 长度字段)
+	DNYHeaderMagic     = "DNY"  // DNY协议魔数
+	DNYChecksumLength  = 2      // DNY校验和长度
 )
 
 // DNY命令名称映射

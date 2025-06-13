@@ -1,6 +1,7 @@
 package network
 
 import (
+	"bytes"
 	"fmt"
 	"net"
 	"strings"
@@ -414,6 +415,18 @@ func (ch *ConnectionHooks) OnConnectionLost(conn ziface.IConnection) {
 
 	if prop, err := conn.GetProperty(constants.PropKeyICCID); err == nil && prop != nil {
 		iccid = prop.(string)
+	}
+
+	// 清理DNY解码器的连接缓冲区
+	if prop, err := conn.GetProperty(constants.ConnectionBufferKey); err == nil && prop != nil {
+		if buffer, ok := prop.(*bytes.Buffer); ok {
+			// bytes.Buffer 不需要显式Close，将其从属性中移除，GC会回收
+			logger.WithFields(logrus.Fields{
+				"connID":     connID,
+				"bufferSize": buffer.Len(),
+			}).Debug("清理DNY解码器连接缓冲区")
+		}
+		conn.RemoveProperty(constants.ConnectionBufferKey)
 	}
 
 	// 记录连接关闭的详细信息
