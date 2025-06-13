@@ -268,17 +268,18 @@ func BuildDNYRequestPacket(physicalID uint32, messageID uint16, command uint8, d
 // buildDNYPacket 构建DNY协议数据包的通用实现
 // 请求包和响应包的格式相同，只是语义不同
 func buildDNYPacket(physicalID uint32, messageID uint16, command uint8, data []byte) []byte {
-	// 计算数据段长度（物理ID + 消息ID + 命令 + 数据 + 校验）
-	dataLen := 4 + 2 + 1 + len(data) + 2
+	// 计算纯数据内容长度（物理ID + 消息ID + 命令 + 实际数据）
+	contentLen := 4 + 2 + 1 + len(data)
 
-	// 构建数据包（不包含校验和）
-	packet := make([]byte, 0, 5+dataLen) // 包头(3) + 长度(2) + 数据段
+	// 构建数据包
+	// 总长度 = 包头(3) + 长度字段(2) + 内容长度(contentLen) + 校验和(2)
+	packet := make([]byte, 0, 3+2+contentLen+2)
 
 	// 包头 "DNY"
 	packet = append(packet, 'D', 'N', 'Y')
 
-	// 长度（小端模式）
-	packet = append(packet, byte(dataLen), byte(dataLen>>8))
+	// 长度字段（小端模式），写入纯数据内容的长度
+	packet = append(packet, byte(contentLen), byte(contentLen>>8))
 
 	// 物理ID（小端模式）
 	packet = append(packet, byte(physicalID), byte(physicalID>>8), byte(physicalID>>16), byte(physicalID>>24))
@@ -293,8 +294,9 @@ func buildDNYPacket(physicalID uint32, messageID uint16, command uint8, data []b
 	packet = append(packet, data...)
 
 	// 使用当前配置的校验和计算方法计算校验和
-	// 校验和是对包头到数据部分（不含校验和）的累加和
-	checksum := CalculatePacketChecksum(packet)
+	// 校验和计算范围是从包头第一个字节到数据内容最后一个字节（校验位前）。
+	// 即 DNY + Length + PhysicalID + MessageID + Command + Data
+	checksum := CalculatePacketChecksum(packet) // CalculatePacketChecksum 应计算当前 packet 内容的校验和
 
 	// 添加校验和（小端序）
 	packet = append(packet, byte(checksum), byte(checksum>>8))
