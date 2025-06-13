@@ -166,7 +166,9 @@ func (d *DNY_Decoder) Intercept(chain ziface.IChain) ziface.IcResp {
 
 			if string(headerBytes[:3]) == constants.DNYHeaderMagic {
 				contentLength := binary.LittleEndian.Uint16(headerBytes[3:5])
-				totalFrameLen := constants.DNYMinHeaderLength + int(contentLength) + constants.DNYChecksumLength
+				// 修正 totalFrameLen 的计算，根据协议，contentLength 包含了校验和的长度
+				// totalFrameLen := constants.DNYMinHeaderLength + int(contentLength) + constants.DNYChecksumLength // 错误行
+				totalFrameLen := constants.DNYMinHeaderLength + int(contentLength) // 正确行
 
 				logger.WithFields(logrus.Fields{
 					"connID":           currentConnID,
@@ -211,8 +213,6 @@ func (d *DNY_Decoder) Intercept(chain ziface.IChain) ziface.IcResp {
 							"error":    pErr.Error(),
 							"frameHex": fmt.Sprintf("%x", dnyFrameData),
 						}).Warn("拦截器：DNY帧解析失败(ParseDNYProtocolData)，丢弃当前帧并继续")
-
-						buffer.Next(1)
 						parsedMessage = true
 						continue
 					}
