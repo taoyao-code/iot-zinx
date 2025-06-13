@@ -82,20 +82,30 @@ func ParseDNYProtocolData(data []byte) (*dny_protocol.Message, error) {
 	}
 
 	declaredDataLen := binary.LittleEndian.Uint16(data[DataLengthPos : DataLengthPos+DataLengthBytes])
-	expectedTotalPacketLength := PacketHeaderLength + DataLengthBytes + int(declaredDataLen) + ChecksumLength
+	// 修正：expectedTotalPacketLength 的计算。declaredDataLen (协议中的“长度”字段)
+	// 已经包含了 PhysicalID, MessageID, Command, Data 和 Checksum 的总长度。
+	// 因此，整个数据包的实际总长度是 包头(3) + 长度字段本身(2) + declaredDataLen。
+	expectedTotalPacketLength := PacketHeaderLength + DataLengthBytes + int(declaredDataLen)
+
 	if dataLen != expectedTotalPacketLength {
 		msg.MessageType = "error"
-		// 修改错误信息，增加可能原因的提示
-		msg.ErrorMessage = fmt.Sprintf("packet length mismatch: declared content length %d implies total %d, but got %d. Input data may be truncated or malformed by the caller (e.g., TCPMonitor).", declaredDataLen, expectedTotalPacketLength, dataLen)
+		msg.ErrorMessage = fmt.Sprintf("packet length mismatch: declared content length %d (physicalID+msgID+cmd+data+checksum) implies total %d, but got %d. Input data may be truncated or malformed.", declaredDataLen, expectedTotalPacketLength, dataLen)
 		return msg, errors.New(msg.ErrorMessage)
 	}
 
+	// contentStart 指向 PhysicalID 的开始
 	contentStart := PacketHeaderLength + DataLengthBytes
-	contentEnd := contentStart + int(declaredDataLen)
-	contentBytes := data[contentStart:contentEnd]
+	// contentAndChecksumEnd 指向整个 DNY 帧的末尾（即校验和之后）
+	contentAndChecksumEnd := expectedTotalPacketLength
+	// checksumStart 指向校验和字段的开始
+	checksumStart := contentAndChecksumEnd - ChecksumLength
 
-	expectedChecksum := binary.LittleEndian.Uint16(data[contentEnd : contentEnd+ChecksumLength])
-	actualChecksum, err := CalculatePacketChecksumInternal(data[:contentEnd])
+	// 提取校验和
+	expectedChecksum := binary.LittleEndian.Uint16(data[checksumStart:contentAndChecksumEnd])
+
+	// 计算校验和的数据范围：从包头到数据内容结束（不包括校验和本身）
+	dataForChecksum := data[:checksumStart]
+	actualChecksum, err := CalculatePacketChecksumInternal(dataForChecksum)
 	if err != nil {
 		msg.MessageType = "error"
 		msg.ErrorMessage = fmt.Sprintf("checksum calculation error: %v", err)
@@ -108,6 +118,10 @@ func ParseDNYProtocolData(data []byte) (*dny_protocol.Message, error) {
 		msg.ErrorMessage = fmt.Sprintf("checksum mismatch: expected %04X, got %04X", expectedChecksum, actualChecksum)
 		// 即使校验和错误，也继续解析其他字段，但标记为错误类型
 	}
+
+	// contentBytes 是 PhysicalID, MessageID, Command, Data 的部分
+	// 其结束位置是 checksumStart
+	contentBytes := data[contentStart:checksumStart]
 
 	if len(contentBytes) < PhysicalIDLength+MessageIDLength+CommandLength {
 		newErrorMsg := fmt.Sprintf("content too short: %d bytes, needs at least %d for headers", len(contentBytes), PhysicalIDLength+MessageIDLength+CommandLength)
