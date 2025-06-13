@@ -268,12 +268,19 @@ func BuildDNYRequestPacket(physicalID uint32, messageID uint16, command uint8, d
 // buildDNYPacket 构建DNY协议数据包的通用实现
 // 请求包和响应包的格式相同，只是语义不同
 func buildDNYPacket(physicalID uint32, messageID uint16, command uint8, data []byte) []byte {
-	// 计算纯数据内容长度（物理ID + 消息ID + 命令 + 实际数据）
-	contentLen := 4 + 2 + 1 + len(data)
+	// 计算纯数据内容长度（物理ID + 消息ID + 命令 + 实际数据 + 校验和）
+	// 根据协议，“长度”字段的值应为 PhysicalID(4) + MessageID(2) + 命令(1) + 数据(n) + 校验(2) 的总和
+	contentLen := PhysicalIDLength + MessageIDLength + CommandLength + len(data) + ChecksumLength
 
 	// 构建数据包
-	// 总长度 = 包头(3) + 长度字段(2) + 内容长度(contentLen) + 校验和(2)
-	packet := make([]byte, 0, 3+2+contentLen+2)
+	// 总长度 = 包头(3) + 长度字段(2) + 内容长度(contentLen)
+	// 注意：这里的 contentLen 已经是协议中“长度”字段的值，它本身不包含包头和长度字段本身的长度。
+	// 所以实际的数据包总长是：PacketHeaderLength + DataLengthBytes + contentLen
+	// 而 make 的第二个参数是 cap，我们希望预分配足够的空间。
+	// 整个包的长度是： DNY(3) + LengthField(2) + PhysicalID(4) + MessageID(2) + Command(1) + Data(n) + Checksum(2)
+	// 其中 PhysicalID(4) + MessageID(2) + Command(1) + Data(n) + Checksum(2) 就是 contentLen
+	// 所以总包长是 3 + 2 + contentLen
+	packet := make([]byte, 0, PacketHeaderLength+DataLengthBytes+contentLen)
 
 	// 包头 "DNY"
 	packet = append(packet, 'D', 'N', 'Y')
