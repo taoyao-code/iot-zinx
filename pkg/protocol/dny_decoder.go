@@ -131,28 +131,23 @@ func (d *DNY_Decoder) Intercept(chain ziface.IChain) ziface.IcResp {
 			}
 		}
 
-		// 4.2 尝试解析 ICCID 消息
-		if buffer.Len() >= constants.ICCIDMinLength {
-			maxLen := minInt(constants.ICCIDMaxLength, buffer.Len())
-			foundICCID := false
-			for iccidLen := constants.ICCIDMinLength; iccidLen <= maxLen; iccidLen++ {
-				peekedBytes := buffer.Bytes()[:iccidLen]
-				if d.isValidICCID(peekedBytes) {
-					buffer.Next(iccidLen)
-					logger.WithFields(logrus.Fields{
-						"connID": currentConnID,
-						"iccid":  string(peekedBytes),
-					}).Info("拦截器：解析到ICCID消息")
-					iMessage.SetMsgID(constants.MsgIDICCID)
-					iMessage.SetData(peekedBytes)
-					iMessage.SetDataLen(uint32(len(peekedBytes)))
-					iccidMsg, _ := ParseDNYProtocolData(peekedBytes) // ParseDNYProtocolData应能处理ICCID
-					return chain.ProceedWithIMessage(iMessage, iccidMsg)
-				}
+		// 4.2 尝试解析 ICCID 消息 (固定20字节, constants.IOT_SIM_CARD_LENGTH)
+		if buffer.Len() >= constants.IOT_SIM_CARD_LENGTH { // 使用精确的、已定义的常量
+			peekedBytes := buffer.Bytes()[:constants.IOT_SIM_CARD_LENGTH]
+			if d.isValidICCID(peekedBytes) { // d.isValidICCID 只做内容校验 (是否为十六进制字符)
+				buffer.Next(constants.IOT_SIM_CARD_LENGTH) // 消耗掉已解析的ICCID字节
+				logger.WithFields(logrus.Fields{
+					"connID": currentConnID,
+					"iccid":  string(peekedBytes),
+				}).Info("拦截器：解析到ICCID消息")
+				iMessage.SetMsgID(constants.MsgIDICCID) // 使用 pkg/constants 中定义的 MsgIDICCID
+				iMessage.SetData(peekedBytes)
+				iMessage.SetDataLen(uint32(len(peekedBytes)))
+				// ParseDNYProtocolData 内部也会对ICCID进行一次判断和封装，这里直接用 peekedBytes
+				// 但为了统一消息结构体，仍然调用它，它会识别出这是ICCID并填充相应字段
+				iccidMsg, _ := ParseDNYProtocolData(peekedBytes)
+				return chain.ProceedWithIMessage(iMessage, iccidMsg)
 			}
-			if foundICCID {
-				continue
-			} // Should be handled by return inside loop
 		}
 
 		// 4.3 尝试解析 DNY 标准协议帧

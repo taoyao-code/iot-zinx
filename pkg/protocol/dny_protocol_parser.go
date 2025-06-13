@@ -53,8 +53,8 @@ func ParseDNYProtocolData(data []byte) (*dny_protocol.Message, error) {
 	}
 
 	// 尝试解析为ICCID - 根据文档：通讯模块连接上服务器后会发送SIM卡号（ICCID），以字符串方式发送
-	// ICCID可能包含数字和字母（十六进制字符），长度通常为19-25字符
-	if dataLen >= 19 && dataLen <= 25 && isValidICCID(data) {
+	// ICCID固定长度为20字节 (constants.IOT_SIM_CARD_LENGTH)
+	if dataLen == constants.IOT_SIM_CARD_LENGTH && isValidICCID(data) { // 使用精确长度判断
 		msg.MessageType = "iccid"
 		msg.ICCIDValue = string(data) // 直接使用原始数据作为ICCID，符合文档描述
 		return msg, nil
@@ -181,9 +181,17 @@ func CalculatePacketChecksumInternal(dataFrame []byte) (uint16, error) {
 
 // BuildDNYResponsePacketUnified 使用统一的 dny_protocol.Message 构建DNY响应数据包
 func BuildDNYResponsePacketUnified(msg *dny_protocol.Message) ([]byte, error) {
-	contentLen := PhysicalIDLength + MessageIDLength + CommandLength + len(msg.Data)
-	if contentLen > 0xFFFF {
-		return nil, errors.New("payload too large for DNY packet")
+	// 根据协议，“长度”字段的值应为 PhysicalID(4) + MessageID(2) + 命令(1) + 数据(n) + 校验(2) 的总和
+	contentLen := uint16(PhysicalIDLength + MessageIDLength + CommandLength + len(msg.Data) + ChecksumLength)
+	// 之前的错误： contentLen := PhysicalIDLength + MessageIDLength + CommandLength + len(msg.Data)
+
+	if contentLen > 0xFFFF { // 理论上 uint16 最大值就是0xFFFF，但这里是检查计算后的 contentLen 是否超出了协议本身允许的最大包长限制（如果有的话，但协议文档是256字节，这里用0xFFFF作为uint16的自然上限）
+		// 协议规定每包最多256字节，指的是“长度”字段声明的这部分内容。
+		// 3(DNY) + 2(LenField) + 256 = 261.
+		// 此处 contentLen 是“长度”字段的值，其最大为256.
+		if contentLen > 256 {
+			return nil, errors.New("payload too large for DNY packet (max content length 256 bytes)")
+		}
 	}
 
 	packet := new(bytes.Buffer)
