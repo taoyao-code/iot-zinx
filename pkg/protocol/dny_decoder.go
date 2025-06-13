@@ -60,6 +60,30 @@ func (d *DNY_Decoder) Intercept(chain ziface.IChain) ziface.IcResp {
 	rawData := iMessage.GetData()
 	// 注意：此处不检查 len(rawData) == 0，因为数据会追加到缓冲区统一处理
 
+	// 打印日志，便于分析数据问题，完整日志数据，包括空数据，无效数据，任何数据都保存！！！！
+
+	fmt.Println("拦截器：原始数据打印开始")
+	fmt.Println("拦截器：原始数据长度:", len(rawData))
+	fmt.Println("拦截器：原始数据内容:", fmt.Sprintf("%.50x", rawData))
+	fmt.Println("拦截器：原始数据十六进制:", fmt.Sprintf("%x", rawData))
+	fmt.Println("拦截器：原始数据字符串:", string(rawData))
+	fmt.Println("拦截器：原始数据类型:", fmt.Sprintf("%T", rawData))
+	fmt.Println("拦截器：原始数据是否为nil:", rawData == nil)
+	fmt.Println("拦截器：原始数据是否为空:", len(rawData) == 0)
+	fmt.Println("拦截器：原始数据是否为字节切片:", bytes.Equal(rawData, []byte{}))
+	fmt.Println("拦截器：原始数据是否为空切片:", len(rawData) == 0 && rawData != nil)
+	fmt.Println("拦截器：原始数据是否为非空切片:", len(rawData) > 0 && rawData != nil)
+	fmt.Println("拦截器：原始数据是否为非nil切片:", rawData != nil && len(rawData) > 0)
+	fmt.Println("拦截器：原始数据是否为字节数组:", fmt.Sprintf("%T", rawData) == "[]uint8")
+	fmt.Println("拦截器：原始数据是否为字节切片:", fmt.Sprintf("%T", rawData) == "[]byte")
+	fmt.Println("拦截器：原始数据是否为字符串:", fmt.Sprintf("%T", rawData) == "string")
+	fmt.Println("拦截器：原始数据是否为空字符串:", rawData == nil || len(rawData) == 0)
+	fmt.Println("拦截器：原始数据是否为非空字符串:", rawData != nil && len(rawData) > 0)
+	fmt.Println("拦截器：原始数据是否为非nil字符串:", rawData != nil && len(rawData) > 0)
+
+	// 以上打印语句用于调试和验证原始数据的状态
+	fmt.Println("拦截器：原始数据打印结束")
+
 	conn := d.getConnection(chain)
 	// if conn == nil 在 getOrCreateBuffer 和 getConnID 中处理或提前返回
 

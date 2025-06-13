@@ -3,7 +3,7 @@ package protocol
 import (
 	"bytes"
 	"encoding/binary"
-	"encoding/hex"
+	"encoding/hex" // 确保导入 encoding/hex
 	"errors"
 	"fmt"
 	"strconv"
@@ -40,8 +40,8 @@ func ParseDNYProtocolData(data []byte) (*dny_protocol.Message, error) {
 	// DEBUG: Log input to ParseDNYProtocolData
 	logger.WithFields(logrus.Fields{
 		"inputDataLen": len(data),
-		"inputDataHex": fmt.Sprintf("%.100x", data), // 最多显示前100字节
-	}).Trace("ParseDNYProtocolData: 收到待解析数据")
+		"inputDataHex": hex.EncodeToString(data), // 修改：记录完整的十六进制数据
+	}).Debug("ParseDNYProtocolData: 收到待解析数据") // 修改：日志级别调整为 Debug
 
 	dataLen := len(data)
 	msg := &dny_protocol.Message{RawData: data} // 存储原始数据
