@@ -19,10 +19,8 @@ import (
 
 const (
 	HeaderDNY          = "DNY"
-	HeaderICCID        = "ICCID"
 	HeaderLink         = "link"
 	MinPacketLength    = 12 // DNY + Length(2) + PhysicalID(4) + MessageID(2) + Command(1) + Checksum(2)
-	ICCIDPacketLength  = 25 // ICCID + ICCIDValue(20)
 	LinkPacketLength   = 4  // link
 	PhysicalIDLength   = 4
 	MessageIDLength    = 2
@@ -33,7 +31,7 @@ const (
 	DataLengthBytes    = 2
 )
 
-// ParseDNYProtocolData 解析DNY协议数据，支持标准DNY帧、ICCID和链路心跳
+// ParseDNYProtocolData 解析DNY协议数据，支持标准DNY帧和链路心跳
 // 返回统一的 *dny_protocol.Message 结构
 func ParseDNYProtocolData(data []byte) (*dny_protocol.Message, error) {
 	dataLen := len(data)
@@ -45,11 +43,11 @@ func ParseDNYProtocolData(data []byte) (*dny_protocol.Message, error) {
 		return msg, errors.New(msg.ErrorMessage)
 	}
 
-	// 尝试解析为ICCID (25字节, "ICCID"开头)
-	if dataLen == ICCIDPacketLength && string(data[:5]) == HeaderICCID {
+	// 尝试解析为ICCID - 根据文档：通讯模块连接上服务器后会发送SIM卡号（ICCID），以字符串方式发送
+	// ICCID可能包含数字和字母（十六进制字符），长度通常为19-25字符
+	if dataLen >= 19 && dataLen <= 25 && isValidICCID(data) {
 		msg.MessageType = "iccid"
-		msg.ICCIDValue = string(data[5:])
-		// msg.Id = constants.MsgIDICCID // 示例：可以为特殊消息定义MsgID
+		msg.ICCIDValue = string(data) // 直接使用原始数据作为ICCID，符合文档描述
 		return msg, nil
 	}
 
@@ -139,17 +137,14 @@ func ParseDNYProtocolData(data []byte) (*dny_protocol.Message, error) {
 
 // CalculatePacketChecksumInternal 是 CalculatePacketChecksum 的内部版本，避免循环依赖或公开不必要的接口
 // dataFrame 参数应为从包头"DNY"开始，直到数据内容结束的部分。
+// 根据协议文档："校验从包头到数据的内容"，计算所有字节的累加和
 func CalculatePacketChecksumInternal(dataFrame []byte) (uint16, error) {
-	if len(dataFrame) < PacketHeaderLength+DataLengthBytes {
-		return 0, errors.New("data frame too short to calculate checksum, needs at least header and length fields")
-	}
-	startOffset := PacketHeaderLength + DataLengthBytes
-	if len(dataFrame) < startOffset {
-		return 0, errors.New("data frame too short, does not contain content part for checksum")
+	if len(dataFrame) == 0 {
+		return 0, errors.New("data frame for checksum calculation is empty")
 	}
 
 	var sum uint16
-	for _, b := range dataFrame[startOffset:] { // 从物理ID开始计算
+	for _, b := range dataFrame { // 从包头"DNY"开始计算到数据内容结束
 		sum += uint16(b)
 	}
 	return sum, nil
@@ -288,7 +283,7 @@ func IsSpecialMessage(data []byte) bool {
 	dataStr := string(data)
 
 	// 检查是否为ICCID（数字字符串，通常20位）
-	if isAllDigits(data) && len(data) == constants.IOT_SIM_CARD_LENGTH {
+	if isValidICCID(data) && len(data) == constants.IOT_SIM_CARD_LENGTH {
 		return true
 	}
 
@@ -300,18 +295,25 @@ func IsSpecialMessage(data []byte) bool {
 	return false
 }
 
-// isAllDigits 内部辅助函数：检查字节数组是否全为数字字符
+// isAllDigits 内部辅助函数：
 func isAllDigits(data []byte) bool {
 	if len(data) == 0 {
 		return false
 	}
 
 	for _, b := range data {
-		if b < '0' || b > '9' {
+		// 检查是否为十六进制字符：0-9, A-F, a-f
+		if !((b >= '0' && b <= '9') || (b >= 'A' && b <= 'F') || (b >= 'a' && b <= 'f')) {
 			return false
 		}
 	}
 	return true
+}
+
+// isValidICCID 检查字节数组是否为有效的ICCID格式
+// ICCID可以包含数字和字母（十六进制字符），符合实际SIM卡ICCID格式
+func isValidICCID(data []byte) bool {
+	return isAllDigits(data)
 }
 
 // 以下是旧的 BuildDNYResponsePacket 和 ParseDNYData 函数，需要移除或重构

@@ -9,17 +9,16 @@ import (
 func TestParseDNYProtocolData(t *testing.T) {
 	// 测试ICCID消息解析
 	t.Run("ICCID Message", func(t *testing.T) {
-		iccidData := []byte("ICCID12345678901234567890")
+		iccidData := []byte("12345678901234567890")
 		msg, err := ParseDNYProtocolData(iccidData)
-		
 		if err != nil {
 			t.Fatalf("Expected no error, got: %v", err)
 		}
-		
+
 		if msg.MessageType != "iccid" {
 			t.Errorf("Expected MessageType 'iccid', got: %s", msg.MessageType)
 		}
-		
+
 		if msg.ICCIDValue != "12345678901234567890" {
 			t.Errorf("Expected ICCID '12345678901234567890', got: %s", msg.ICCIDValue)
 		}
@@ -29,11 +28,10 @@ func TestParseDNYProtocolData(t *testing.T) {
 	t.Run("Link Heartbeat", func(t *testing.T) {
 		linkData := []byte("link")
 		msg, err := ParseDNYProtocolData(linkData)
-		
 		if err != nil {
 			t.Fatalf("Expected no error, got: %v", err)
 		}
-		
+
 		if msg.MessageType != "heartbeat_link" {
 			t.Errorf("Expected MessageType 'heartbeat_link', got: %s", msg.MessageType)
 		}
@@ -43,11 +41,11 @@ func TestParseDNYProtocolData(t *testing.T) {
 	t.Run("Empty Data", func(t *testing.T) {
 		emptyData := []byte{}
 		msg, err := ParseDNYProtocolData(emptyData)
-		
+
 		if err == nil {
 			t.Fatal("Expected error for empty data, got none")
 		}
-		
+
 		if msg.MessageType != "error" {
 			t.Errorf("Expected MessageType 'error', got: %s", msg.MessageType)
 		}

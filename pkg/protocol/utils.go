@@ -11,7 +11,8 @@ func IsAllDigits(data []byte) bool {
 	}
 
 	for _, b := range data {
-		if b < '0' || b > '9' {
+		// 检查是否为十六进制字符：0-9, A-F, a-f
+		if !((b >= '0' && b <= '9') || (b >= 'A' && b <= 'F') || (b >= 'a' && b <= 'f')) {
 			return false
 		}
 	}
