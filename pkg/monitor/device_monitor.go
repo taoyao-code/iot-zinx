@@ -86,7 +86,7 @@ func NewDeviceMonitor(config *DeviceMonitorConfig) *DeviceMonitor {
 		cancel:                 cancel,
 		sessionManager:         GetSessionManager(),
 		deviceGroupManager:     GetDeviceGroupManager(),
-		connectionMonitor:      GetGlobalMonitor(),
+		connectionMonitor:      globalConnectionMonitor, // 使用全局连接监视器
 	}
 
 	logger.WithFields(logrus.Fields{
@@ -119,6 +119,10 @@ func (dm *DeviceMonitor) Start() error {
 	// 启动设备组状态监控协程
 	dm.wg.Add(1)
 	go dm.groupStatusMonitorLoop()
+
+	// 启动会话清理协程
+	dm.wg.Add(1)
+	go dm.sessionCleanupLoop()
 
 	logger.Info("设备监控器已启动")
 	return nil
@@ -222,10 +226,10 @@ func (dm *DeviceMonitor) OnDeviceDisconnect(deviceID string, conn ziface.IConnec
 		return
 	}
 
-	// 挂起设备会话
-	dm.sessionManager.SuspendSession(deviceID)
+	// 🔧 优化：DeviceMonitor不直接管理会话状态，避免与TCPMonitor重复调用
+	// 会话状态管理由TCPMonitor统一处理，这里只更新监控相关的统计信息
 
-	// 增加断开计数
+	// 增加断开计数（监控统计）
 	session.DisconnectCount++
 	session.LastDisconnectTime = time.Now()
 
@@ -440,6 +444,42 @@ func (dm *DeviceMonitor) checkGroupStatus() {
 
 	// 检查每个设备组的状态
 	// 这里可以添加更详细的设备组健康检查逻辑
+}
+
+// sessionCleanupLoop 会话清理循环
+func (dm *DeviceMonitor) sessionCleanupLoop() {
+	defer dm.wg.Done()
+
+	// 每30分钟清理一次过期会话
+	ticker := time.NewTicker(30 * time.Minute)
+	defer ticker.Stop()
+
+	logger.Info("会话清理循环已启动，间隔30分钟")
+
+	for {
+		select {
+		case <-dm.ctx.Done():
+			logger.Debug("会话清理循环已停止")
+			return
+		case <-ticker.C:
+			dm.cleanupExpiredSessions()
+		}
+	}
+}
+
+// cleanupExpiredSessions 清理过期会话
+func (dm *DeviceMonitor) cleanupExpiredSessions() {
+	logger.Debug("开始清理过期会话")
+
+	expiredCount := dm.sessionManager.CleanupExpiredSessions()
+
+	if expiredCount > 0 {
+		logger.WithFields(logrus.Fields{
+			"expiredCount": expiredCount,
+		}).Info("已清理过期会话")
+	} else {
+		logger.Debug("没有发现过期会话")
+	}
 }
 
 // CheckDeviceStatus 检查并更新设备状态

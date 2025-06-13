@@ -324,7 +324,7 @@ func (m *ConnectionMonitor) Close() {
 // UpdateLastHeartbeatTime 更新上次心跳时间
 func (m *ConnectionMonitor) UpdateLastHeartbeatTime(conn ziface.IConnection) {
 	// 委托给pkg/monitor中的实现，避免重复逻辑
-	monitor.GetGlobalMonitor().UpdateLastHeartbeatTime(conn)
+	monitor.GetGlobalConnectionMonitor().UpdateLastHeartbeatTime(conn)
 }
 
 // ParseManualHexData 手动解析十六进制数据
@@ -356,5 +356,5 @@ func (m *ConnectionMonitor) ParseManualHexData(hexData, description string) {
 // BindDeviceIdToConnection 当连接绑定设备ID时调用
 func (m *ConnectionMonitor) BindDeviceIdToConnection(deviceId string, conn ziface.IConnection) {
 	// 委托给pkg/monitor中的实现，避免重复逻辑
-	monitor.GetGlobalMonitor().BindDeviceIdToConnection(deviceId, conn)
+	monitor.GetGlobalConnectionMonitor().BindDeviceIdToConnection(deviceId, conn)
 }

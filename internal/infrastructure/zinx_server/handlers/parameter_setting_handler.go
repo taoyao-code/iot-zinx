@@ -115,5 +115,5 @@ func (h *ParameterSettingHandler) processParameterSetting(decodedFrame *protocol
 	}).Debug("参数设置响应发送成功")
 
 	// 更新心跳时间
-	monitor.GetGlobalMonitor().UpdateLastHeartbeatTime(conn)
+	monitor.GetGlobalConnectionMonitor().UpdateLastHeartbeatTime(conn)
 }

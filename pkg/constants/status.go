@@ -13,6 +13,18 @@ const (
 	DeviceStatusUnknown = "unknown"
 )
 
+// 会话状态常量 - 用于 DeviceSession.Status 字段
+const (
+	// SessionStatusActive 会话活跃状态（等同于设备在线）
+	SessionStatusActive = DeviceStatusOnline
+	// SessionStatusSuspended 会话挂起状态（设备断开但允许重连）
+	SessionStatusSuspended = DeviceStatusReconnecting
+	// SessionStatusExpired 会话过期状态（设备离线）
+	SessionStatusExpired = DeviceStatusOffline
+	// SessionStatusUnknown 会话未知状态
+	SessionStatusUnknown = DeviceStatusUnknown
+)
+
 // 连接状态常量
 const (
 	// ConnStatusActive 连接活跃状态 - 与设备在线状态对应
@@ -71,6 +83,24 @@ const (
 	PropKeyDeviceVersion = "device_version"
 	// PropKeyDeviceSessionPrefix 设备会话存储键前缀
 	PropKeyDeviceSessionPrefix = "device_session_"
+
+	// ConnectionPropertyKeys 连接属性键 - 用于conn.SetProperty/GetProperty
+	// ConnPropertyDeviceCode 设备识别码属性键
+	ConnPropertyDeviceCode = "device_code"
+	// ConnPropertyDeviceNumber 设备编号属性键
+	ConnPropertyDeviceNumber = "device_number"
+	// ConnPropertyICCIDReceived ICCID接收状态属性键
+	ConnPropertyICCIDReceived = "iccid_received"
+	// ConnPropertyLastHeartbeatType 最后心跳类型属性键
+	ConnPropertyLastHeartbeatType = "last_heartbeat_type"
+	// ConnPropertyLastParseError 最后解析错误属性键
+	ConnPropertyLastParseError = "last_parse_error"
+	// ConnPropertyMainHeartbeatTime 主心跳时间属性键
+	ConnPropertyMainHeartbeatTime = "main_heartbeat_time"
+	// ConnPropertyDisconnectReason 断开连接原因属性键
+	ConnPropertyDisconnectReason = "disconnect_reason"
+	// ConnPropertyCloseReason 关闭原因属性键
+	ConnPropertyCloseReason = "close_reason"
 )
 
 // 连接详细状态常量

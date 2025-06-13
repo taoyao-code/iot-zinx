@@ -134,4 +134,7 @@ type ISessionManager interface {
 
 	// GetAllSessions 获取所有设备会话
 	GetAllSessions() map[string]*DeviceSession
+
+	// HandleDeviceDisconnect 处理设备断开连接
+	HandleDeviceDisconnect(deviceID string)
 }

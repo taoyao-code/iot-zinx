@@ -3,8 +3,8 @@ package handlers
 import (
 	"github.com/aceld/zinx/ziface"
 	"github.com/bujia-iot/iot-zinx/internal/domain/dny_protocol"
+	"github.com/bujia-iot/iot-zinx/pkg/constants"
 	"github.com/bujia-iot/iot-zinx/pkg/monitor"
-	"github.com/bujia-iot/iot-zinx/pkg/protocol"
 )
 
 // RegisterRouters 注册所有路由
@@ -19,11 +19,11 @@ func RegisterRouters(server ziface.IServer) {
 
 	// 一、特殊消息处理器（非DNY协议数据，没有标准DNY包头）
 	// ----------------------------------------------------------------------------
-	server.AddRouter(protocol.MSG_ID_ICCID, &SimCardHandler{})           // SIM卡号/ICCID处理 - 处理20位纯数字ICCID上报 (修正: MSG_ID_HEARTBEAT -> MSG_ID_ICCID)
-	server.AddRouter(protocol.MSG_ID_HEARTBEAT, &LinkHeartbeatHandler{}) // link心跳处理 - 处理"link"字符串心跳
+	server.AddRouter(constants.MsgIDICCID, &SimCardHandler{})               // SIM卡号/ICCID处理 - 处理20位纯数字ICCID上报
+	server.AddRouter(constants.MsgIDLinkHeartbeat, &LinkHeartbeatHandler{}) // link心跳处理 - 处理"link"字符串心跳
 
 	// 用于处理无法识别的数据类型（解析错误或格式不符合预期）
-	server.AddRouter(protocol.MSG_ID_UNKNOWN, &NonDNYDataHandler{}) // 处理解析失败或未知类型的数据
+	server.AddRouter(constants.MsgIDUnknown, &NonDNYDataHandler{}) // 处理解析失败或未知类型的数据
 
 	// 二、心跳类消息处理器
 	// ----------------------------------------------------------------------------
@@ -44,9 +44,9 @@ func RegisterRouters(server ziface.IServer) {
 
 	// 五、业务逻辑
 	// ----------------------------------------------------------------------------
-	server.AddRouter(dny_protocol.CmdSwipeCard, &SwipeCardHandler{})                                     // 0x02 刷卡操作
-	server.AddRouter(dny_protocol.CmdChargeControl, NewChargeControlHandler(monitor.GetGlobalMonitor())) // 0x82 充电控制
-	server.AddRouter(dny_protocol.CmdSettlement, &SettlementHandler{})                                   // 0x03 结算消费信息上传
+	server.AddRouter(dny_protocol.CmdSwipeCard, &SwipeCardHandler{})                                               // 0x02 刷卡操作
+	server.AddRouter(dny_protocol.CmdChargeControl, NewChargeControlHandler(monitor.GetGlobalConnectionMonitor())) // 0x82 充电控制
+	server.AddRouter(dny_protocol.CmdSettlement, &SettlementHandler{})                                             // 0x03 结算消费信息上传
 
 	// 六、参数设置
 	// ----------------------------------------------------------------------------

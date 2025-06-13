@@ -101,5 +101,5 @@ func (h *PowerHeartbeatHandler) processPowerHeartbeat(decodedFrame *protocol.Dec
 	}
 
 	// 更新心跳时间
-	monitor.GetGlobalMonitor().UpdateLastHeartbeatTime(conn)
+	monitor.GetGlobalConnectionMonitor().UpdateLastHeartbeatTime(conn)
 }

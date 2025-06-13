@@ -20,10 +20,19 @@ type DNYProtocolSender interface {
 // 全局DNY发送器
 var globalDNYSender DNYProtocolSender
 
+// 全局连接监视器引用
+var globalConnectionMonitor IConnectionMonitor
+
 // SetDNYProtocolSender 设置DNY协议发送器
 // 在主程序初始化时调用，避免循环依赖
 func SetDNYProtocolSender(sender DNYProtocolSender) {
 	globalDNYSender = sender
+}
+
+// SetConnectionMonitor 设置连接监视器
+// 在主程序初始化时调用
+func SetConnectionMonitor(monitor IConnectionMonitor) {
+	globalConnectionMonitor = monitor
 }
 
 // DeviceGroup 设备组，管理同一ICCID下的多个设备
@@ -231,31 +240,38 @@ func (dgm *DeviceGroupManager) synchronousBroadcast(iccid string, devices map[st
 		}
 
 		// 直接获取设备连接（支持直连模式，不依赖主从关系）
-		if conn, exists := GetGlobalMonitor().GetConnectionByDeviceId(deviceID); exists {
-			var err error
+		if globalConnectionMonitor != nil {
+			if conn, exists := globalConnectionMonitor.GetConnectionByDeviceId(deviceID); exists {
+				var err error
 
-			// 尝试使用DNY协议发送
-			if globalDNYSender != nil {
-				err = globalDNYSender.SendDNYData(conn, data)
+				// 尝试使用DNY协议发送
+				if globalDNYSender != nil {
+					err = globalDNYSender.SendDNYData(conn, data)
+				} else {
+					// 回退到原始TCP发送
+					err = conn.SendMsg(0, data)
+				}
+
+				if err != nil {
+					logger.WithFields(logrus.Fields{
+						"deviceID": deviceID,
+						"iccid":    iccid,
+						"error":    err.Error(),
+					}).Error("设备组广播失败")
+				} else {
+					successCount++
+				}
 			} else {
-				// 回退到原始TCP发送
-				err = conn.SendMsg(0, data)
-			}
-
-			if err != nil {
 				logger.WithFields(logrus.Fields{
 					"deviceID": deviceID,
 					"iccid":    iccid,
-					"error":    err.Error(),
-				}).Error("设备组广播失败")
-			} else {
-				successCount++
+				}).Debug("设备不在线，跳过广播")
 			}
 		} else {
 			logger.WithFields(logrus.Fields{
 				"deviceID": deviceID,
 				"iccid":    iccid,
-			}).Debug("设备不在线，跳过广播")
+			}).Error("全局连接监视器未初始化")
 		}
 	}
 
@@ -312,24 +328,26 @@ func (dgm *DeviceGroupManager) concurrentBroadcast(iccid string, devices map[str
 			defer func() { <-semaphore }() // 释放信号量
 
 			// 直接获取设备连接（支持直连模式）
-			if conn, exists := GetGlobalMonitor().GetConnectionByDeviceId(deviceID); exists {
-				var err error
+			if globalConnectionMonitor != nil {
+				if conn, exists := globalConnectionMonitor.GetConnectionByDeviceId(deviceID); exists {
+					var err error
 
-				// 根据协议类型选择发送方式
-				if isDNYProtocol {
-					err = globalDNYSender.SendDNYData(conn, data)
-				} else {
-					err = conn.SendMsg(0, data)
-				}
+					// 根据协议类型选择发送方式
+					if isDNYProtocol {
+						err = globalDNYSender.SendDNYData(conn, data)
+					} else {
+						err = conn.SendMsg(0, data)
+					}
 
-				if err != nil {
-					logger.WithFields(logrus.Fields{
-						"deviceID": deviceID,
-						"iccid":    iccid,
-						"error":    err.Error(),
-					}).Error("设备组广播失败")
-				} else {
-					atomic.AddInt32(&successCounter, 1)
+					if err != nil {
+						logger.WithFields(logrus.Fields{
+							"deviceID": deviceID,
+							"iccid":    iccid,
+							"error":    err.Error(),
+						}).Error("设备组广播失败")
+					} else {
+						atomic.AddInt32(&successCounter, 1)
+					}
 				}
 			}
 		}(deviceID, session)

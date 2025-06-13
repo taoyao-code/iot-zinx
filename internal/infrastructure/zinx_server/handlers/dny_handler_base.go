@@ -30,9 +30,9 @@ func (h *DNYHandlerBase) PreHandle(request ziface.IRequest) {
 
 	// 检查是否为特殊消息ID，特殊消息不需要DNY消息转换
 	msgID := msg.GetMsgID()
-	if msgID == protocol.MSG_ID_HEARTBEAT || msgID == protocol.MSG_ID_HEARTBEAT || msgID == protocol.MSG_ID_UNKNOWN {
+	if msgID == constants.MsgIDLinkHeartbeat || msgID == constants.MsgIDICCID || msgID == constants.MsgIDUnknown {
 		// 特殊消息不进行DNY消息转换，直接更新心跳时间
-		monitor.GetGlobalMonitor().UpdateLastHeartbeatTime(conn)
+		monitor.GetGlobalConnectionMonitor().UpdateLastHeartbeatTime(conn)
 		// 同时更新自定义心跳管理器的连接活动时间
 		network.UpdateConnectionActivity(conn)
 		return
@@ -85,7 +85,7 @@ func (h *DNYHandlerBase) PreHandle(request ziface.IRequest) {
 		}
 
 		// 更新心跳时间并继续处理
-		monitor.GetGlobalMonitor().UpdateLastHeartbeatTime(conn)
+		monitor.GetGlobalConnectionMonitor().UpdateLastHeartbeatTime(conn)
 		// 同时更新自定义心跳管理器的连接活动时间
 		network.UpdateConnectionActivity(conn)
 		return
@@ -119,7 +119,7 @@ func (h *DNYHandlerBase) PreHandle(request ziface.IRequest) {
 	}
 
 	// 更新心跳时间
-	monitor.GetGlobalMonitor().UpdateLastHeartbeatTime(conn)
+	monitor.GetGlobalConnectionMonitor().UpdateLastHeartbeatTime(conn)
 	// 同时更新自定义心跳管理器的连接活动时间
 	network.UpdateConnectionActivity(conn)
 }
@@ -151,7 +151,7 @@ func (h *DNYHandlerBase) GetICCID(conn ziface.IConnection) string {
 
 // UpdateDeviceStatus 更新设备状态
 func (h *DNYHandlerBase) UpdateDeviceStatus(deviceID string, status string) {
-	monitor.GetGlobalMonitor().UpdateDeviceStatus(deviceID, status)
+	monitor.GetGlobalConnectionMonitor().UpdateDeviceStatus(deviceID, status)
 }
 
 // UpdateHeartbeat 更新设备心跳时间
@@ -159,7 +159,7 @@ func (h *DNYHandlerBase) UpdateDeviceStatus(deviceID string, status string) {
 func (h *DNYHandlerBase) UpdateHeartbeat(conn ziface.IConnection) {
 	// 只调用更新心跳时间，内部会自动处理设备状态更新
 	// 这样避免了重复调用UpdateDeviceStatus导致的性能问题
-	monitor.GetGlobalMonitor().UpdateLastHeartbeatTime(conn)
+	monitor.GetGlobalConnectionMonitor().UpdateLastHeartbeatTime(conn)
 	// 同时更新自定义心跳管理器的连接活动时间
 	network.UpdateConnectionActivity(conn)
 }

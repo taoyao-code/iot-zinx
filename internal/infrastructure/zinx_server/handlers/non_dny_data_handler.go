@@ -43,5 +43,5 @@ func (h *NonDNYDataHandler) Handle(request ziface.IRequest) {
 	// 这个处理器仅用于处理完全无法识别的数据
 
 	// 为防止连接被意外关闭，更新心跳时间
-	monitor.GetGlobalMonitor().UpdateLastHeartbeatTime(conn)
+	monitor.GetGlobalConnectionMonitor().UpdateLastHeartbeatTime(conn)
 }

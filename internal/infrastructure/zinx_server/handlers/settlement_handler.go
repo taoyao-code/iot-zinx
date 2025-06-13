@@ -153,5 +153,5 @@ func (h *SettlementHandler) processSettlement(decodedFrame *protocol.DecodedDNYF
 	}).Debug("结算响应发送成功")
 
 	// 更新心跳时间
-	monitor.GetGlobalMonitor().UpdateLastHeartbeatTime(conn)
+	monitor.GetGlobalConnectionMonitor().UpdateLastHeartbeatTime(conn)
 }

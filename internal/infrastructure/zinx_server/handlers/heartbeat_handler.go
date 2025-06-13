@@ -51,7 +51,7 @@ func (h *HeartbeatHandler) Handle(request ziface.IRequest) {
 	}
 
 	// 5. 记录处理日志
-	h.LogFrameProcessing("HeartbeatHandler", decodedFrame, uint32(conn.GetConnID()))
+	h.LogFrameProcessing("HeartbeatHandler", decodedFrame, conn)
 
 	// 6. 执行心跳业务逻辑
 	h.processHeartbeat(decodedFrame, conn, deviceSession)
@@ -108,11 +108,11 @@ func (h *HeartbeatHandler) updateHeartbeatTime(conn ziface.IConnection, deviceSe
 	}
 
 	// 使用监控器更新设备状态
-	monitor.GetGlobalMonitor().UpdateLastHeartbeatTime(conn)
+	monitor.GetGlobalConnectionMonitor().UpdateLastHeartbeatTime(conn)
 
 	// 更新设备状态为在线
 	if deviceSession != nil && deviceSession.DeviceID != "" {
-		monitor.GetGlobalMonitor().UpdateDeviceStatus(deviceSession.DeviceID, constants.DeviceStatusOnline)
+		monitor.GetGlobalConnectionMonitor().UpdateDeviceStatus(deviceSession.DeviceID, constants.DeviceStatusOnline)
 	}
 }
 

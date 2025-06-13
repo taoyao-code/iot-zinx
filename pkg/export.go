@@ -94,9 +94,9 @@ var Protocol = ProtocolExport{
 	IsDNYProtocolData:        protocol.IsDNYProtocolData,
 	IsHexString:              protocol.IsHexString,
 	IsAllDigits:              protocol.IsAllDigits,
-	HandleSpecialMessage:     protocol.HandleSpecialMessage,
-	IOT_SIM_CARD_LENGTH:      protocol.IOT_SIM_CARD_LENGTH,
-	IOT_LINK_HEARTBEAT:       protocol.IOT_LINK_HEARTBEAT,
+	HandleSpecialMessage:     protocol.IsSpecialMessage, // 修正：指向统一解析器中的函数
+	IOT_SIM_CARD_LENGTH:      constants.IOT_SIM_CARD_LENGTH,
+	IOT_LINK_HEARTBEAT:       constants.IOT_LINK_HEARTBEAT,
 	NewRawDataHook:           protocol.NewRawDataHook,
 	DefaultRawDataHandler:    protocol.DefaultRawDataHandler,
 	PrintRawData:             protocol.PrintRawData,
@@ -203,7 +203,8 @@ type MonitorInterface struct {
 // Monitor 监控相关工具导出
 var Monitor = MonitorInterface{
 	GetGlobalMonitor: func() monitor.IConnectionMonitor {
-		return monitor.GetGlobalMonitor()
+		// 返回全局连接监视器，如果未初始化则返回 nil
+		return globalConnectionMonitor
 	},
 
 	// 🔧 新增：设备组管理接口实现
@@ -258,13 +259,20 @@ var Monitor = MonitorInterface{
 
 	// 连接管理实现
 	GetConnectionByDeviceId: func(deviceId string) (ziface.IConnection, bool) {
-		return monitor.GetGlobalMonitor().GetConnectionByDeviceId(deviceId)
+		if globalConnectionMonitor != nil {
+			return globalConnectionMonitor.GetConnectionByDeviceId(deviceId)
+		}
+		return nil, false
 	},
 	BindDeviceIdToConnection: func(deviceId string, conn ziface.IConnection) {
-		monitor.GetGlobalMonitor().BindDeviceIdToConnection(deviceId, conn)
+		if globalConnectionMonitor != nil {
+			globalConnectionMonitor.BindDeviceIdToConnection(deviceId, conn)
+		}
 	},
 	UpdateLastHeartbeatTime: func(conn ziface.IConnection) {
-		monitor.GetGlobalMonitor().UpdateLastHeartbeatTime(conn)
+		if globalConnectionMonitor != nil {
+			globalConnectionMonitor.UpdateLastHeartbeatTime(conn)
+		}
 	},
 }
 

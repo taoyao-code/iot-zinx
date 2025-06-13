@@ -1,15 +1,13 @@
 package dny_protocol
 
 import (
-	"encoding/binary"
-
 	"github.com/aceld/zinx/ziface"
 )
 
 // Message 实现了Zinx框架的IMessage接口，表示一个DNY协议帧
 type Message struct {
 	// Zinx IMessage基本字段
-	Id      uint32 // 命令ID (1字节)
+	Id      uint32 // 命令ID (用于Zinx路由)
 	DataLen uint32 // 数据长度 (2字节)
 	Data    []byte // 数据内容
 	RawData []byte // 原始数据
@@ -17,9 +15,14 @@ type Message struct {
 	// DNY协议特有字段
 	PacketHeader string // 包头 (3字节)
 	PhysicalId   uint32 // 物理ID (4字节)
-	CommandId    uint32 // 命令ID (1字节)
+	CommandId    uint32 // DNY协议命令ID (1字节), 注意：NewMessage中与Id一致，实际应为byte
 	MessageId    uint16 // 消息ID (2字节)
 	Checksum     uint16 // 校验和 (2字节)
+
+	// 统一协议解析新增字段
+	MessageType  string // 消息类型, e.g., "standard", "iccid", "heartbeat_link", "error"
+	ICCIDValue   string // ICCID值 (当MessageType为"iccid"时)
+	ErrorMessage string // 错误信息 (当MessageType为"error"时)
 }
 
 // GetMsgID 实现IMessage接口，获取消息ID
@@ -76,14 +79,15 @@ func (m *Message) SetPhysicalId(physicalId uint32) {
 // NewMessage 创建一个新的DNY消息
 func NewMessage(id uint32, physicalId uint32, data []byte, messageId uint16) *Message {
 	return &Message{
-		Id:           id,
+		Id:           id, // Zinx MsgID
 		DataLen:      uint32(len(data)),
 		Data:         data,
 		PhysicalId:   physicalId,
 		MessageId:    messageId,
-		CommandId:    id,
+		CommandId:    id, // DNY CommandId, 假设与Zinx MsgID在发送时一致或通过此映射
 		PacketHeader: "DNY",
-		Checksum:     0,
+		Checksum:     0,          // 校验和在打包时计算并填充
+		MessageType:  "standard", // 默认为标准消息
 	}
 }
 
@@ -114,12 +118,6 @@ type MessageInfo struct {
 	Direction   string           `json:"direction"` // "ingress" 或 "egress"
 }
 
-// 🔧 已删除重复的废弃函数：BuildDNYPacket、CalculateChecksum、ParseDNYPacket
-// 请使用pkg/protocol中的统一接口：
-// - pkg.Protocol.BuildDNYResponsePacket() 替代 BuildDNYPacket
-// - pkg.Protocol.CalculatePacketChecksum() 替代 CalculateChecksum
-// - pkg.Protocol.ParseDNYData() 替代 ParseDNYPacket
-
 // DNYPacketInfo DNY数据包解析信息
 type DNYPacketInfo struct {
 	PhysicalID       uint32 `json:"physicalId"`
@@ -131,69 +129,101 @@ type DNYPacketInfo struct {
 	ChecksumValid    bool   `json:"checksumValid"`
 }
 
-// BuildChargeControlPacket 构建充电控制协议包
-func BuildChargeControlPacket(physicalID uint32, messageID uint16, rateMode byte, balance uint32,
-	portNumber byte, chargeCommand byte, chargeDuration uint16, orderNumber string,
-	maxChargeDuration uint16, maxPower uint16, qrCodeLight byte,
+// BuildChargeControlPacket 构建充电控制协议包 (0x82命令)
+func BuildChargeControlPacket(
+	physicalID uint32,
+	messageID uint16,
+	rateMode byte,
+	balance uint32,
+	portNumber byte,
+	chargeCommand byte,
+	chargeDuration uint16,
+	orderNumber string,
+	maxChargeDuration uint16,
+	maxPower uint16,
+	qrCodeLight byte,
 ) []byte {
-	// 确保订单编号长度为16字节
-	orderBytes := make([]byte, 16)
-	if len(orderNumber) > 0 {
-		copy(orderBytes, []byte(orderNumber))
-	}
-
 	// 构建充电控制数据 (30字节)
 	data := make([]byte, 30)
 
 	// 费率模式(1字节)
 	data[0] = rateMode
+
 	// 余额/有效期(4字节，小端序)
-	binary.LittleEndian.PutUint32(data[1:5], balance)
+	data[1] = byte(balance)
+	data[2] = byte(balance >> 8)
+	data[3] = byte(balance >> 16)
+	data[4] = byte(balance >> 24)
+
 	// 端口号(1字节)
 	data[5] = portNumber
+
 	// 充电命令(1字节)
 	data[6] = chargeCommand
+
 	// 充电时长/电量(2字节，小端序)
-	binary.LittleEndian.PutUint16(data[7:9], chargeDuration)
+	data[7] = byte(chargeDuration)
+	data[8] = byte(chargeDuration >> 8)
+
 	// 订单编号(16字节)
+	orderBytes := make([]byte, 16)
+	if len(orderNumber) > 0 {
+		copy(orderBytes, []byte(orderNumber))
+	}
 	copy(data[9:25], orderBytes)
+
 	// 最大充电时长(2字节，小端序)
-	binary.LittleEndian.PutUint16(data[25:27], maxChargeDuration)
+	data[25] = byte(maxChargeDuration)
+	data[26] = byte(maxChargeDuration >> 8)
+
 	// 过载功率(2字节，小端序)
-	binary.LittleEndian.PutUint16(data[27:29], maxPower)
+	data[27] = byte(maxPower)
+	data[28] = byte(maxPower >> 8)
+
 	// 二维码灯(1字节)
 	data[29] = qrCodeLight
 
-	// 🔧 使用pkg包中的统一接口构建DNY协议包
-	// 注意：这里需要导入pkg包，但可能会引起循环导入
-	// 临时方案：手动构建协议包
-	dataLen := 4 + 2 + 1 + len(data)
-	packet := make([]byte, 0, 5+dataLen+2)
+	// 构建完整的DNY协议包
+	return buildDNYPacket(physicalID, messageID, CmdChargeControl, data)
+}
+
+// buildDNYPacket 构建DNY协议数据包的通用实现
+func buildDNYPacket(physicalID uint32, messageID uint16, command uint8, data []byte) []byte {
+	// 计算数据长度 (物理ID + 消息ID + 命令 + 数据)
+	contentLen := 4 + 2 + 1 + len(data) // PhysicalID(4) + MessageID(2) + Command(1) + Data
+
+	// 创建包缓冲区
+	packet := make([]byte, 0, 3+2+contentLen+2) // Header(3) + Length(2) + Content + Checksum(2)
 
 	// 包头 "DNY"
 	packet = append(packet, 'D', 'N', 'Y')
 
-	// 长度（小端模式）
-	packet = append(packet, byte(dataLen), byte(dataLen>>8))
+	// 数据长度 (2字节，小端序)
+	packet = append(packet, byte(contentLen), byte(contentLen>>8))
 
-	// 物理ID（小端模式）
-	packet = append(packet, byte(physicalID), byte(physicalID>>8),
-		byte(physicalID>>16), byte(physicalID>>24))
+	// 物理ID (4字节，小端序)
+	packet = append(packet,
+		byte(physicalID),
+		byte(physicalID>>8),
+		byte(physicalID>>16),
+		byte(physicalID>>24))
 
-	// 消息ID（小端模式）
+	// 消息ID (2字节，小端序)
 	packet = append(packet, byte(messageID), byte(messageID>>8))
 
-	// 命令
-	packet = append(packet, CmdChargeControl)
+	// 命令 (1字节)
+	packet = append(packet, command)
 
 	// 数据
 	packet = append(packet, data...)
 
-	// 校验和计算
+	// 计算校验和 (从物理ID开始的所有字节)
 	var checksum uint16
-	for _, b := range packet[5:] {
-		checksum += uint16(b)
+	for i := 5; i < len(packet); i++ { // 从物理ID开始(跳过"DNY"和长度字段)
+		checksum += uint16(packet[i])
 	}
+
+	// 校验和 (2字节，小端序)
 	packet = append(packet, byte(checksum), byte(checksum>>8))
 
 	return packet

@@ -46,7 +46,7 @@ func (h *LinkHeartbeatHandler) Handle(request ziface.IRequest) {
 	}
 
 	// 记录帧处理日志
-	h.LogFrameProcessing("LinkHeartbeatHandler", decodedFrame, uint32(conn.GetConnID()))
+	h.LogFrameProcessing("LinkHeartbeatHandler", decodedFrame, conn)
 
 	// 验证是否为link心跳帧
 	if decodedFrame.FrameType != protocol.FrameTypeLinkHeartbeat {
@@ -70,12 +70,7 @@ func (h *LinkHeartbeatHandler) Handle(request ziface.IRequest) {
 
 	// 设置连接属性 (向后兼容)
 	now := time.Now()
-	if err := h.SetConnectionAttribute(conn, constants.PropKeyLastLink, now.Unix()); err != nil {
-		logger.WithFields(logrus.Fields{
-			"connID": conn.GetConnID(),
-			"error":  err,
-		}).Warn("设置LastLink属性失败")
-	}
+	h.SetConnectionAttribute(conn, constants.PropKeyLastLink, now.Unix())
 
 	// 1. 调用 HeartbeatManager.UpdateConnectionActivity(conn)
 	network.UpdateConnectionActivity(conn)

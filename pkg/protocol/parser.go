@@ -4,6 +4,8 @@ import (
 	"encoding/binary"
 	"encoding/hex"
 	"fmt"
+
+	"github.com/bujia-iot/iot-zinx/pkg/constants"
 )
 
 // DNYParseResult DNY协议解析结果
@@ -130,7 +132,7 @@ func ParseMultipleDNYFrames(data []byte) ([]*DNYParseResult, error) {
 
 	for offset < len(data) {
 		// 检查剩余数据是否足够解析一个DNY帧
-		if len(data[offset:]) < DNY_MIN_PACKET_LEN {
+		if len(data[offset:]) < constants.DNY_MIN_PACKET_LEN {
 			break
 		}
 

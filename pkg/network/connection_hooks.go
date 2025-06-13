@@ -433,7 +433,7 @@ func (ch *ConnectionHooks) OnConnectionLost(conn ziface.IConnection) {
 
 	// 获取断开原因
 	disconnectReason := "未知原因"
-	if prop, err := conn.GetProperty("close_reason"); err == nil && prop != nil {
+	if prop, err := conn.GetProperty(constants.ConnPropertyCloseReason); err == nil && prop != nil {
 		disconnectReason = prop.(string)
 	}
 	fields["reason"] = disconnectReason

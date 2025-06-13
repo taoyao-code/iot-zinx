@@ -52,13 +52,10 @@ type SessionManager struct {
 	// 会话超时时间
 	sessionTimeout time.Duration
 
-	// 物理ID到会话ID的映射
-	physicalIDMap sync.Map // map[uint32]string - physicalID -> sessionID
+	// 🔧 移除冗余字段：physicalIDMap 和 iccidMap
+	// 这些功能已由 DeviceGroupManager 替代，避免数据冗余和不一致
 
-	// ICCID到会话ID的映射
-	iccidMap sync.Map // map[string]string - iccid -> sessionID
-
-	// 🔧 新增：集成设备组管理器
+	// 🔧 集成设备组管理器
 	deviceGroupManager *DeviceGroupManager
 }
 
@@ -231,7 +228,9 @@ func (m *SessionManager) UpdateSession(deviceID string, updateFunc func(*DeviceS
 	return false
 }
 
-// SuspendSession 挂起设备会话（设备断开连接时调用）
+// SuspendSession 挂起设备会话（设备临时断开连接时调用）
+// 使用场景：连接意外断开，设备预期会重连
+// 状态转换：Online → Reconnecting
 func (m *SessionManager) SuspendSession(deviceID string) bool {
 	return m.UpdateSession(deviceID, func(session *DeviceSession) {
 		session.Status = constants.DeviceStatusReconnecting
@@ -392,4 +391,20 @@ func (sm *SessionManager) GetAllSessions() map[string]*DeviceSession {
 	})
 
 	return result
+}
+
+// HandleDeviceDisconnect 处理设备最终断开连接
+// 使用场景：设备确认离线，不再期望短期内重连
+// 状态转换：Reconnecting → Offline 或 Online → Offline
+func (sm *SessionManager) HandleDeviceDisconnect(deviceID string) {
+	logger.WithField("deviceID", deviceID).Info("SessionManager: 处理设备最终断开连接")
+
+	// 更新设备会话状态
+	sm.UpdateSession(deviceID, func(session *DeviceSession) {
+		session.Status = constants.DeviceStatusOffline
+		session.LastDisconnectTime = time.Now()
+		session.DisconnectCount++
+		// 🔧 新增：设置较长的过期时间用于离线会话保留
+		session.ExpiresAt = time.Now().Add(24 * time.Hour) // 离线状态保留24小时
+	})
 }

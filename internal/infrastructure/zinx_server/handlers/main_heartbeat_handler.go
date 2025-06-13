@@ -49,7 +49,7 @@ func (h *MainHeartbeatHandler) Handle(request ziface.IRequest) {
 	}
 
 	// 5. 记录处理日志
-	h.LogFrameProcessing("MainHeartbeatHandler", decodedFrame, uint32(conn.GetConnID()))
+	h.LogFrameProcessing("MainHeartbeatHandler", decodedFrame, conn)
 
 	// 6. 执行主机心跳业务逻辑
 	h.processMainHeartbeat(decodedFrame, conn, deviceSession)
@@ -101,7 +101,7 @@ func (h *MainHeartbeatHandler) updateMainHeartbeatTime(conn ziface.IConnection, 
 	if deviceSession != nil {
 		deviceSession.UpdateHeartbeat()
 		deviceSession.UpdateStatus(constants.ConnStatusActive)
-		deviceSession.SetProperty("main_heartbeat_time", now.Unix())
+		deviceSession.SetProperty(constants.ConnPropertyMainHeartbeatTime, now.Unix())
 		deviceSession.SyncToConnection(conn)
 	}
 }

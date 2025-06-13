@@ -96,5 +96,5 @@ func (h *GetServerTimeHandler) processGetServerTime(decodedFrame *protocol.Decod
 	}).Debug("获取服务器时间响应发送成功")
 
 	// 更新心跳时间
-	monitor.GetGlobalMonitor().UpdateLastHeartbeatTime(conn)
+	monitor.GetGlobalConnectionMonitor().UpdateLastHeartbeatTime(conn)
 }

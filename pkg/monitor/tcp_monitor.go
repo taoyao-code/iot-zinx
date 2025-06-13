@@ -3,6 +3,7 @@ package monitor
 import (
 	"encoding/hex"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
@@ -10,7 +11,6 @@ import (
 	"github.com/bujia-iot/iot-zinx/internal/infrastructure/logger"
 	"github.com/bujia-iot/iot-zinx/pkg/constants"
 	"github.com/bujia-iot/iot-zinx/pkg/protocol"
-	"github.com/bujia-iot/iot-zinx/pkg/session"
 	"github.com/sirupsen/logrus"
 )
 
@@ -18,895 +18,459 @@ import (
 type TCPMonitor struct {
 	enabled bool
 
-	// 存储所有设备ID到连接的映射，用于消息转发
-	deviceIdToConnMap   sync.Map // map[string]ziface.IConnection
-	connIdToDeviceIdMap sync.Map // map[uint64]string
+	// 存储设备ID到连接ID的映射
+	deviceIdToConnMap map[string]uint64
+	// 存储连接ID到其上所有设备ID集合的映射
+	connIdToDeviceIdsMap map[uint64]map[string]struct{}
 
-	// 🔧 新增：支持一对多连接关系 - 一个连接可以承载多个设备的数据
-	connIdToDeviceIdsMap sync.Map // map[uint64]map[string]bool - 连接ID -> 设备ID集合
+	// 保护映射的读写锁
+	mapMutex sync.RWMutex
 
-	// 🔧 新增：主机连接映射 - 记录哪个连接是主机建立的
-	masterConnectionMap sync.Map // map[uint64]string - 连接ID -> 主机设备ID
+	// Session管理器，用于在连接断开时通知
+	sessionManager ISessionManager // 使用在 pkg/monitor/interface.go 中定义的接口
 
-	// 并发安全保护锁 - 保护复合操作的原子性
-	bindMutex sync.RWMutex
+	// Zinx连接管理器，用于通过ConnID获取IConnection实例
+	connManager ziface.IConnManager
 }
 
 // 确保TCPMonitor实现了IConnectionMonitor接口
 var _ IConnectionMonitor = (*TCPMonitor)(nil)
 
-// 全局TCP数据监视器
-var (
-	globalMonitorOnce     sync.Once
-	globalMonitor         *TCPMonitor
-	statusUpdateOptimizer *StatusUpdateOptimizer
-)
-
-// GetGlobalMonitor 获取全局监视器实例
-func GetGlobalMonitor() *TCPMonitor {
-	globalMonitorOnce.Do(func() {
-		globalMonitor = &TCPMonitor{
-			enabled: true,
-		}
-		fmt.Println("TCP数据监视器已初始化")
-	})
-	return globalMonitor
-}
-
 // OnConnectionEstablished 当连接建立时通知TCP监视器
 func (m *TCPMonitor) OnConnectionEstablished(conn ziface.IConnection) {
-	// 这里调用TCP监视器的连接建立方法
-	fmt.Printf("\n[%s] 连接已建立 - ConnID: %d, 远程地址: %s\n",
-		time.Now().Format(constants.TimeFormatDefault),
-		conn.GetConnID(),
-		conn.RemoteAddr().String())
+	logger.WithFields(logrus.Fields{
+		"connID":     conn.GetConnID(),
+		"remoteAddr": conn.RemoteAddr().String(),
+		"timestamp":  time.Now().Format(constants.TimeFormatDefault),
+	}).Info("TCPMonitor: Connection established.")
 }
 
 // OnConnectionClosed 当连接关闭时通知TCP监视器
-// 🔧 修改：支持主机-分机架构，清理连接下的所有设备
 func (m *TCPMonitor) OnConnectionClosed(conn ziface.IConnection) {
-	// 获取连接ID和远程地址
-	connID := conn.GetConnID()
-	remoteAddr := conn.RemoteAddr().String()
+	closedConnID := conn.GetConnID()
+	var remoteAddrStr string
+	if remoteAddr := conn.RemoteAddr(); remoteAddr != nil {
+		remoteAddrStr = remoteAddr.String()
+	}
 
-	// 记录连接关闭
-	fmt.Printf("\n[%s] 连接已关闭 - ConnID: %d, 远程地址: %s\n",
-		time.Now().Format(constants.TimeFormatDefault),
-		connID,
-		remoteAddr)
+	m.mapMutex.Lock()
+	defer m.mapMutex.Unlock()
 
-	// 使用锁保护清理操作的原子性
-	m.bindMutex.Lock()
-	defer m.bindMutex.Unlock()
+	logFields := logrus.Fields{"closedConnID": closedConnID, "remoteAddr": remoteAddrStr}
+	logger.WithFields(logFields).Info("TCPMonitor: Connection closed. Cleaning up associated devices.")
 
-	// 🔧 新增：检查是否为主机连接
-	if masterDeviceId, isMasterConn := m.masterConnectionMap.Load(connID); isMasterConn {
-		// 主机连接关闭，清理所有关联的设备
-		m.handleMasterConnectionClosed(connID, masterDeviceId.(string), conn)
+	// 找出该连接上所有的设备ID
+	deviceIDsToNotify := make(map[string]struct{})
+	if deviceSet, exists := m.connIdToDeviceIdsMap[closedConnID]; exists {
+		for deviceID := range deviceSet {
+			deviceIDsToNotify[deviceID] = struct{}{}
+		}
+		delete(m.connIdToDeviceIdsMap, closedConnID)
+		logger.WithFields(logFields).Infof("TCPMonitor: Removed device set for connection. Found %d devices in set.", len(deviceSet))
+	} else {
+		logger.WithFields(logFields).Warn("TCPMonitor: No device set found in connIdToDeviceIdsMap for closed connection.")
+	}
+
+	if len(deviceIDsToNotify) == 0 {
+		logger.WithFields(logFields).Info("TCPMonitor: No devices found associated with closed connection to process.")
 		return
 	}
 
-	// 原有的单设备连接关闭逻辑
-	m.handleSingleDeviceConnectionClosed(connID, conn, remoteAddr)
-}
+	logger.WithFields(logFields).Infof("TCPMonitor: Processing %d unique devices for closed connection.", len(deviceIDsToNotify))
+	for deviceID := range deviceIDsToNotify {
+		deviceLogFields := logrus.Fields{"deviceID": deviceID, "closedConnID": closedConnID}
 
-// handleMasterConnectionClosed 处理主机连接关闭
-func (m *TCPMonitor) handleMasterConnectionClosed(connID uint64, masterDeviceId string, conn ziface.IConnection) {
-	logger.WithFields(logrus.Fields{
-		"connID":         connID,
-		"masterDeviceId": masterDeviceId,
-	}).Info("主机连接关闭，清理所有关联设备")
-
-	// 获取该连接下的所有设备
-	deviceIds := make([]string, 0)
-	if deviceSetVal, exists := m.connIdToDeviceIdsMap.Load(connID); exists {
-		deviceSet := deviceSetVal.(map[string]bool)
-		for deviceId := range deviceSet {
-			deviceIds = append(deviceIds, deviceId)
-		}
-	} else {
-		// 如果没有设备集合记录，至少包含主设备
-		deviceIds = append(deviceIds, masterDeviceId)
-	}
-
-	// 逐个清理设备映射和状态
-	for _, deviceID := range deviceIds {
-		// 清理设备映射
-		m.deviceIdToConnMap.Delete(deviceID)
-
-		// 获取设备会话信息（用于处理设备组）
-		sessionManager := GetSessionManager()
-		if session, exists := sessionManager.GetSession(deviceID); exists {
-			// 挂起设备会话
-			sessionManager.SuspendSession(deviceID)
-
-			// 🔧 处理设备组：检查ICCID下是否还有其他活跃设备
-			if session.ICCID != "" {
-				allDevices := sessionManager.GetAllSessionsByICCID(session.ICCID)
-				activeDevices := 0
-				for otherDeviceID, otherSession := range allDevices {
-					if otherDeviceID != deviceID && otherSession.Status == constants.DeviceStatusOnline {
-						activeDevices++
-					}
-				}
-
-				logger.WithFields(logrus.Fields{
-					"deviceId":      deviceID,
-					"iccid":         session.ICCID,
-					"activeDevices": activeDevices,
-					"totalDevices":  len(allDevices),
-				}).Info("设备断开连接，ICCID下仍有其他活跃设备")
-			}
-		}
-
-		// 通知设备监控器设备断开连接
-		deviceMonitor := GetGlobalDeviceMonitor()
-		if deviceMonitor != nil {
-			deviceMonitor.OnDeviceDisconnect(deviceID, conn, "master_connection_closed")
-		}
-
-		// 更新设备状态为离线
-		if UpdateDeviceStatusFunc != nil {
-			UpdateDeviceStatusFunc(deviceID, constants.DeviceStatusOffline)
-		}
-
-		logger.WithFields(logrus.Fields{
-			"deviceId": deviceID,
-			"connID":   connID,
-		}).Info("设备映射已清理")
-	}
-
-	// 清理连接级别的映射
-	m.connIdToDeviceIdMap.Delete(connID)
-	m.connIdToDeviceIdsMap.Delete(connID)
-	m.masterConnectionMap.Delete(connID)
-
-	logger.WithFields(logrus.Fields{
-		"connID":         connID,
-		"masterDeviceId": masterDeviceId,
-		"cleanedDevices": len(deviceIds),
-	}).Info("主机连接清理完成")
-}
-
-// handleSingleDeviceConnectionClosed 处理单设备连接关闭
-func (m *TCPMonitor) handleSingleDeviceConnectionClosed(connID uint64, conn ziface.IConnection, remoteAddr string) {
-	// 获取关联的设备ID
-	var deviceID string
-	if val, err := conn.GetProperty(constants.PropKeyDeviceId); err == nil && val != nil {
-		deviceID = val.(string)
-	}
-
-	// 安全清理连接ID映射
-	m.connIdToDeviceIdMap.Delete(connID)
-
-	// 如果有关联的设备ID，进行设备相关清理
-	if deviceID != "" {
-		// 验证这确实是该设备的当前连接
-		if currentConn, exists := m.deviceIdToConnMap.Load(deviceID); exists {
-			if currentConnObj, ok := currentConn.(ziface.IConnection); ok && currentConnObj.GetConnID() == connID {
-				// 确认是当前连接，才清理设备映射
-				m.deviceIdToConnMap.Delete(deviceID)
-
-				// 🔧 处理设备组中的设备断开
-				sessionManager := GetSessionManager()
-				if session, exists := sessionManager.GetSession(deviceID); exists {
-					// 挂起设备会话
-					sessionManager.SuspendSession(deviceID)
-
-					// 检查同一ICCID下的其他设备
-					if session.ICCID != "" {
-						allDevices := sessionManager.GetAllSessionsByICCID(session.ICCID)
-						activeDevices := 0
-
-						for otherDeviceID, otherSession := range allDevices {
-							if otherDeviceID != deviceID && otherSession.Status == constants.DeviceStatusOnline {
-								activeDevices++
-							}
-						}
-
-						logger.WithFields(logrus.Fields{
-							"deviceId":      deviceID,
-							"iccid":         session.ICCID,
-							"activeDevices": activeDevices,
-							"totalDevices":  len(allDevices),
-						}).Info("设备断开连接，ICCID下仍有其他活跃设备")
-					}
-				}
-
-				// 记录设备离线
-				logger.WithFields(logrus.Fields{
-					"deviceId":   deviceID,
-					"connID":     connID,
-					"remoteAddr": remoteAddr,
-				}).Info("设备连接已关闭，清理映射关系")
+		// 从 deviceIdToConnMap 中移除设备，前提是它确实映射到这个已关闭的连接
+		if mappedConnID, ok := m.deviceIdToConnMap[deviceID]; ok {
+			if mappedConnID == closedConnID {
+				delete(m.deviceIdToConnMap, deviceID)
+				logger.WithFields(deviceLogFields).Info("TCPMonitor: Removed device from deviceIdToConnMap.")
 			} else {
-				// 这不是当前连接，可能是旧连接，只记录日志
-				logger.WithFields(logrus.Fields{
-					"deviceId":      deviceID,
-					"closedConnID":  connID,
-					"currentConnID": currentConnObj.GetConnID(),
-					"remoteAddr":    remoteAddr,
-				}).Info("关闭的连接不是设备当前连接，跳过设备映射清理")
-				return // 不进行设备状态更新
+				logger.WithFields(deviceLogFields).Warnf("TCPMonitor: Device was on closed ConnID, but deviceIdToConnMap now points to different ConnID %d. Not removing from map.", mappedConnID)
 			}
+		} else {
+			logger.WithFields(deviceLogFields).Warn("TCPMonitor: Device was on closed ConnID, but not found in deviceIdToConnMap (already cleaned or never fully bound?).")
 		}
 
-		// 通知全局设备监控器设备断开连接
-		deviceMonitor := GetGlobalDeviceMonitor()
-		if deviceMonitor != nil {
-			deviceMonitor.OnDeviceDisconnect(deviceID, conn, "connection_closed")
-		}
-
-		// 更新设备状态为离线或重连中
-		if UpdateDeviceStatusFunc != nil {
-			UpdateDeviceStatusFunc(deviceID, constants.DeviceStatusOffline)
+		// 通知 SessionManager 设备断开连接
+		if m.sessionManager != nil {
+			// 🔧 根据断开原因选择合适的处理方式
+			reason := m.getDisconnectReason(conn)
+			if m.isTemporaryDisconnect(reason) {
+				// 临时断开：挂起会话，期望重连
+				m.sessionManager.SuspendSession(deviceID)
+				logger.WithFields(deviceLogFields).WithField("reason", reason).Info("TCPMonitor: Device temporarily disconnected, session suspended.")
+			} else {
+				// 最终断开：设备离线
+				m.sessionManager.HandleDeviceDisconnect(deviceID)
+				logger.WithFields(deviceLogFields).WithField("reason", reason).Info("TCPMonitor: Device permanently disconnected, session marked offline.")
+			}
+		} else {
+			logger.WithFields(deviceLogFields).Warn("TCPMonitor: SessionManager is nil. Cannot notify about disconnect.")
 		}
 	}
 }
 
 // OnRawDataReceived 当接收到原始数据时调用
 func (m *TCPMonitor) OnRawDataReceived(conn ziface.IConnection, data []byte) {
-	if m.enabled {
-		// 获取连接信息
-		remoteAddr := conn.RemoteAddr().String()
-		connID := conn.GetConnID()
+	if !m.enabled {
+		return
+	}
+	remoteAddr := conn.RemoteAddr().String()
+	connID := conn.GetConnID()
+	timestamp := time.Now().Format(constants.TimeFormatDefault)
 
-		// 强制打印到控制台和标准输出，确保可见性
-		timestamp := time.Now().Format(constants.TimeFormatDefault)
+	logFields := logrus.Fields{
+		"connID":     connID,
+		"remoteAddr": remoteAddr,
+		"dataLen":    len(data),
+		"dataHex":    hex.EncodeToString(data),
+		"timestamp":  timestamp,
+	}
+	logger.WithFields(logFields).Info("TCPMonitor: Raw data received.")
 
-		// 使用logger记录接收的数据，确保INFO级别
-		logger.WithFields(logrus.Fields{
-			"connID":     connID,
-			"remoteAddr": remoteAddr,
-			"dataLen":    len(data),
-			"dataHex":    hex.EncodeToString(data),
-			"timestamp":  timestamp,
-		}).Info("TCP数据接收 - 原始数据包")
-
-		// 🔧 使用统一的DNY协议检查和解析接口
-		if protocol.IsDNYProtocolData(data) {
-			fmt.Printf("【DNY协议】检测到DNY协议数据包\n")
-			// 使用新的统一解析接口
-			if result, err := protocol.ParseDNYData(data); err == nil {
-				fmt.Println(result.String())
-
-				// 记录详细的解析信息
-				logger.WithFields(logrus.Fields{
-					"connID":     connID,
-					"command":    fmt.Sprintf("0x%02X", result.Command),
-					"physicalID": fmt.Sprintf("0x%08X", result.PhysicalID),
-					"messageID":  fmt.Sprintf("0x%04X", result.MessageID),
-					"dataHex":    hex.EncodeToString(data),
-				}).Info("接收DNY协议数据")
-			} else {
-				fmt.Printf("解析失败: %v\n", err)
-			}
+	if protocol.IsDNYProtocolData(data) {
+		if result, err := protocol.ParseDNYData(data); err == nil {
+			dnyLogFields := logFields
+			dnyLogFields["dny_command"] = fmt.Sprintf("0x%02X", result.Command)
+			dnyLogFields["dny_physicalID"] = fmt.Sprintf("0x%08X", result.PhysicalID)
+			dnyLogFields["dny_messageID"] = fmt.Sprintf("0x%04X", result.MessageID)
+			logger.WithFields(dnyLogFields).Info("TCPMonitor: DNY protocol data received and parsed.")
+		} else {
+			logger.WithFields(logFields).Errorf("TCPMonitor: Failed to parse DNY protocol data: %v", err)
 		}
-
-		fmt.Println("----------------------------------------")
 	}
 }
 
 // OnRawDataSent 当发送原始数据时调用
 func (m *TCPMonitor) OnRawDataSent(conn ziface.IConnection, data []byte) {
-	if m.enabled {
-		// 获取连接信息
-		remoteAddr := conn.RemoteAddr().String()
-		connID := conn.GetConnID()
+	if !m.enabled {
+		return
+	}
+	remoteAddr := conn.RemoteAddr().String()
+	connID := conn.GetConnID()
+	timestamp := time.Now().Format(constants.TimeFormatDefault)
 
-		// 打印数据日志
-		timestamp := time.Now().Format(constants.TimeFormatDefault)
-		fmt.Printf("\n[%s] 发送数据 - ConnID: %d, 远程地址: %s\n", timestamp, connID, remoteAddr)
-		fmt.Printf("数据(HEX): %s\n", hex.EncodeToString(data))
+	logFields := logrus.Fields{
+		"connID":     connID,
+		"remoteAddr": remoteAddr,
+		"dataLen":    len(data),
+		"dataHex":    hex.EncodeToString(data),
+		"timestamp":  timestamp,
+	}
+	logger.WithFields(logFields).Info("TCPMonitor: Raw data sent.")
 
-		// 使用logger记录发送的数据，确保INFO级别
-		logger.WithFields(logrus.Fields{
-			"connID":     connID,
-			"remoteAddr": remoteAddr,
-			"dataLen":    len(data),
-			"dataHex":    hex.EncodeToString(data),
-			"timestamp":  timestamp,
-		}).Info("发送数据 - write buffer")
+	if protocol.IsDNYProtocolData(data) {
+		if result, err := protocol.ParseDNYData(data); err == nil {
+			dnyLogFields := logFields
+			dnyLogFields["dny_command"] = fmt.Sprintf("0x%02X", result.Command)
+			dnyLogFields["dny_physicalID"] = fmt.Sprintf("0x%08X", result.PhysicalID)
+			dnyLogFields["dny_messageID"] = fmt.Sprintf("0x%04X", result.MessageID)
+			logger.WithFields(dnyLogFields).Info("TCPMonitor: DNY protocol data sent and parsed.")
+		} else {
+			logger.WithFields(logFields).Errorf("TCPMonitor: Failed to parse DNY protocol data for sending log: %v", err)
+		}
+	}
+}
 
-		// 🔧 使用统一的DNY协议检查和解析接口
-		if protocol.IsDNYProtocolData(data) {
-			// 使用统一解析接口正确解析DNY协议数据
-			if result, err := protocol.ParseDNYData(data); err == nil {
-				// 记录详细的解析信息
-				logger.WithFields(logrus.Fields{
-					"connID":     connID,
-					"command":    fmt.Sprintf("0x%02X", result.Command),
-					"physicalID": fmt.Sprintf("0x%08X", result.PhysicalID),
-					"messageID":  fmt.Sprintf("0x%04X", result.MessageID),
-					"dataHex":    hex.EncodeToString(data),
-				}).Info("发送DNY协议数据1")
+// BindDeviceIdToConnection 将设备ID与连接关联。
+// 此函数负责核心的映射关系管理。
+// 注意：此函数不再负责在连接上设置属性 (如 PropKeyDeviceId, PropKeyICCID)。
+// 这些属性的设置应该由更高层逻辑（如 DeviceRegisterHandler）根据业务需求处理。
+func (m *TCPMonitor) BindDeviceIdToConnection(deviceID string, conn ziface.IConnection) {
+	m.mapMutex.Lock()
+	defer m.mapMutex.Unlock()
+
+	newConnID := conn.GetConnID()
+	logFields := logrus.Fields{"deviceID": deviceID, "newConnID": newConnID, "remoteAddr": conn.RemoteAddr().String()}
+
+	// 检查设备是否之前绑定到其他连接
+	if oldConnID, exists := m.deviceIdToConnMap[deviceID]; exists && oldConnID != newConnID {
+		logger.WithFields(logFields).WithField("oldConnID", oldConnID).Info("TCPMonitor: Device switching connection. Cleaning up old connection's device set.")
+		// 从旧连接的设备集合中移除此设备
+		if oldDeviceSet, ok := m.connIdToDeviceIdsMap[oldConnID]; ok {
+			delete(oldDeviceSet, deviceID)
+			if len(oldDeviceSet) == 0 {
+				// 如果旧连接的设备集合为空，则删除该连接的条目
+				delete(m.connIdToDeviceIdsMap, oldConnID)
+				logger.WithFields(logFields).WithField("oldConnID", oldConnID).Info("TCPMonitor: Removed empty device set for old connection.")
 			} else {
-				fmt.Printf("解析失败: %v\n", err)
+				// 否则更新旧连接的设备集合
+				m.connIdToDeviceIdsMap[oldConnID] = oldDeviceSet
 			}
 		}
-
-		fmt.Println("----------------------------------------")
 	}
-}
 
-// BindDeviceIdToConnection 绑定设备ID到连接并更新在线状态
-// 🔧 修改：支持主机-分机架构，一个连接可以承载多个设备的数据
-func (m *TCPMonitor) BindDeviceIdToConnection(deviceId string, conn ziface.IConnection) {
-	// 使用锁保护整个绑定操作的原子性
-	m.bindMutex.Lock()
-	defer m.bindMutex.Unlock()
+	// 更新 deviceId 到 newConnID 的映射
+	m.deviceIdToConnMap[deviceID] = newConnID
+	logger.WithFields(logFields).Info("TCPMonitor: Device bound to connection in deviceIdToConnMap.")
 
-	// 获取连接ID
-	connID := conn.GetConnID()
-
-	// 🔧 新增：判断设备类型（基于deviceId格式：前2位16进制为设备识别码）
-	isMasterDevice := m.isMasterDevice(deviceId)
-
-	if isMasterDevice {
-		// 主机设备：建立主连接，负责整个设备组的通信
-		m.handleMasterDeviceBinding(deviceId, conn, connID)
-	} else {
-		// 分机设备：通过主机连接通信，需要找到对应的主机连接
-		m.handleSlaveDeviceBinding(deviceId, conn, connID)
+	// 将 deviceID 添加到 newConnID 的设备集合中
+	if _, ok := m.connIdToDeviceIdsMap[newConnID]; !ok {
+		m.connIdToDeviceIdsMap[newConnID] = make(map[string]struct{})
+		logger.WithFields(logFields).Info("TCPMonitor: Created new device set for new connection.")
 	}
+	m.connIdToDeviceIdsMap[newConnID][deviceID] = struct{}{}
+	logger.WithFields(logFields).Infof("TCPMonitor: Device added to connection's device set. Set size: %d.", len(m.connIdToDeviceIdsMap[newConnID]))
+
+	// 关于连接属性 (conn.SetProperty):
+	// TCPMonitor 不再直接管理连接上的业务属性如 PropKeyDeviceId 或 PropKeyICCID。
+	// 这些属性的设置和管理应由 DeviceRegisterHandler 或其他业务处理器负责。
+	// 例如，DeviceRegisterHandler 在处理第一个设备（可能是主设备）注册时，
+	// 可以设置 PropKeyICCID。如果需要 PropKeyDeviceId，也应由它决定如何设置。
 }
 
-// isMasterDevice 判断是否为主机设备
-// 主机设备的识别码为 09，分机设备为 04, 05, 06 等
-func (m *TCPMonitor) isMasterDevice(deviceId string) bool {
-	if len(deviceId) >= 8 {
-		// deviceId格式：04A228CD -> 识别码为04
-		// 主机识别码为09
-		return deviceId[:2] == "09"
+// GetConnectionByDeviceId 根据设备ID获取连接对象。
+// 如果设备未绑定或连接不存在，则返回 (nil, false)。
+func (m *TCPMonitor) GetConnectionByDeviceId(deviceID string) (ziface.IConnection, bool) {
+	m.mapMutex.RLock()
+	connID, exists := m.deviceIdToConnMap[deviceID]
+	m.mapMutex.RUnlock()
+
+	if !exists {
+		logger.WithField("deviceID", deviceID).Warn("TCPMonitor: GetConnectionByDeviceId - DeviceID not found in map.")
+		return nil, false
 	}
-	return false
+
+	if m.connManager == nil {
+		logger.WithField("deviceID", deviceID).Error("TCPMonitor: GetConnectionByDeviceId - ConnManager is not initialized.")
+		return nil, false
+	}
+
+	conn, err := m.connManager.Get(connID)
+	if err != nil {
+		logger.WithFields(logrus.Fields{
+			"deviceID": deviceID,
+			"connID":   connID,
+			"error":    err,
+		}).Warn("TCPMonitor: GetConnectionByDeviceId - Connection not found in Zinx ConnManager or error occurred.")
+		return nil, false
+	}
+	return conn, true
 }
 
-// 🔧 新增：公开的主机设备判断方法
-func (m *TCPMonitor) IsMasterDevice(deviceId string) bool {
-	return m.isMasterDevice(deviceId)
-}
+// GetDeviceIdsByConnId 根据连接ID获取其上所有设备的ID列表。
+// 如果连接ID不存在或没有设备，返回空切片。
+func (m *TCPMonitor) GetDeviceIdsByConnId(connID uint64) []string { // Plural form
+	m.mapMutex.RLock()
+	defer m.mapMutex.RUnlock()
 
-// handleMasterDeviceBinding 处理主机设备绑定
-func (m *TCPMonitor) handleMasterDeviceBinding(deviceId string, conn ziface.IConnection, connID uint64) {
-	logger.WithFields(logrus.Fields{
-		"deviceId": deviceId,
-		"connID":   connID,
-		"type":     "master",
-	}).Info("绑定主机设备")
-
-	// 检查是否已有该主机的连接
-	if oldConn, exists := m.deviceIdToConnMap.Load(deviceId); exists {
-		if oldConnObj, ok := oldConn.(ziface.IConnection); ok && oldConnObj.GetConnID() != connID {
-			// 主机重连，清理旧连接的所有设备映射
-			m.cleanupMasterConnection(oldConnObj.GetConnID(), deviceId)
+	deviceIDs := make([]string, 0)
+	if deviceSet, exists := m.connIdToDeviceIdsMap[connID]; exists {
+		for deviceID := range deviceSet {
+			deviceIDs = append(deviceIDs, deviceID)
 		}
+		logger.WithFields(logrus.Fields{
+			"connID":      connID,
+			"deviceCount": len(deviceIDs),
+		}).Debug("TCPMonitor: GetDeviceIdsByConnId - Found devices for connection.")
+	} else {
+		logger.WithField("connID", connID).Debug("TCPMonitor: GetDeviceIdsByConnId - No devices found for connection.")
 	}
-
-	// 建立主机设备绑定
-	m.deviceIdToConnMap.Store(deviceId, conn)
-	m.connIdToDeviceIdMap.Store(connID, deviceId)
-
-	// 🔧 标记为主机连接
-	m.masterConnectionMap.Store(connID, deviceId)
-
-	// 🔧 初始化连接的设备集合
-	deviceSet := make(map[string]bool)
-	deviceSet[deviceId] = true
-	m.connIdToDeviceIdsMap.Store(connID, deviceSet)
-
-	// 设置连接属性
-	m.setConnectionProperties(deviceId, conn)
-
-	logger.WithFields(logrus.Fields{
-		"deviceId": deviceId,
-		"connID":   connID,
-		"type":     "master",
-	}).Info("主机设备绑定成功")
+	return deviceIDs
 }
 
-// handleSlaveDeviceBinding 处理分机设备绑定
-func (m *TCPMonitor) handleSlaveDeviceBinding(deviceId string, conn ziface.IConnection, connID uint64) {
-	// 检查设备是否已绑定到当前连接，避免重复注册
-	if currentConnVal, exists := m.deviceIdToConnMap.Load(deviceId); exists {
-		if currentConn, ok := currentConnVal.(ziface.IConnection); ok && currentConn.GetConnID() == connID {
-			// 设备已经绑定到当前连接，仅记录调试日志并更新最后心跳时间
-			logger.WithFields(logrus.Fields{
-				"deviceId":   deviceId,
-				"connID":     connID,
-				"remoteAddr": conn.RemoteAddr().String(),
-				"type":       "slave",
-			}).Debug("分机设备已绑定到当前连接，跳过重复注册")
+// SetSessionManager 设置 SessionManager，用于解耦和测试。
+// 通常在 GetGlobalMonitor 初始化时设置。
+func (m *TCPMonitor) SetSessionManager(sm ISessionManager) {
+	m.mapMutex.Lock()
+	defer m.mapMutex.Unlock()
+	m.sessionManager = sm
+}
 
-			// 仅更新心跳时间
-			m.UpdateLastHeartbeatTime(conn)
+// SetConnManager 设置 Zinx ConnManager，用于解耦和测试。
+// 通常在 GetGlobalMonitor 初始化时设置。
+func (m *TCPMonitor) SetConnManager(cm ziface.IConnManager) {
+	m.mapMutex.Lock()
+	defer m.mapMutex.Unlock()
+	m.connManager = cm
+}
+
+// Enable 启用监视器
+func (m *TCPMonitor) Enable() {
+	m.enabled = true
+	logger.Info("TCPMonitor: Enabled.")
+}
+
+// Disable 禁用监视器
+func (m *TCPMonitor) Disable() {
+	m.enabled = false
+	logger.Info("TCPMonitor: Disabled.")
+}
+
+// IsEnabled 检查监视器是否启用
+func (m *TCPMonitor) IsEnabled() bool {
+	return m.enabled
+}
+
+// ForEachConnection 遍历所有设备连接
+// 实现 IConnectionMonitor 接口
+func (m *TCPMonitor) ForEachConnection(callback func(deviceId string, conn ziface.IConnection) bool) {
+	m.mapMutex.RLock()
+	// 在循环外部 defer m.mapMutex.RUnlock()，以确保即使在回调返回false或发生panic时也能解锁
+	// defer m.mapMutex.RUnlock() //  <-- 移动到函数末尾或在循环后
+
+	// 创建一个副本进行迭代，以避免在回调中修改映射时发生并发问题（如果回调会修改的话）
+	// 但如果回调只是读取，则直接迭代是安全的。鉴于我们持有读锁，直接迭代是OK的。
+
+	// 修正：将 RUnlock 移至函数末尾
+	deviceConnMapSnapshot := make(map[string]uint64)
+	for k, v := range m.deviceIdToConnMap {
+		deviceConnMapSnapshot[k] = v
+	}
+	m.mapMutex.RUnlock() // 在复制后释放锁，允许回调中进行写操作（如果需要）
+
+	for deviceID, connID := range deviceConnMapSnapshot {
+		// 注意：如果回调函数中可能会修改TCPMonitor的映射，
+		// 那么在调用回调之前释放读锁，并在回调之后重新获取锁（如果还需要继续迭代）会更安全，
+		// 或者在回调中传递必要的锁。
+		// 但IConnectionMonitor接口定义的回调通常不期望这样做。
+		// 简单的做法是持有读锁完成整个迭代。
+
+		// 重新获取读锁以安全地访问 connManager
+		// m.mapMutex.RLock() // 不需要，因为 connManager 不是在 mapMutex 保护下的
+		if m.connManager == nil {
+			logger.WithField("deviceID", deviceID).Error("TCPMonitor: ForEachConnection - ConnManager is not initialized.")
+			// m.mapMutex.RUnlock() // 如果在这里return，需要确保解锁
+			return
+		}
+		conn, err := m.connManager.Get(connID)
+		// m.mapMutex.RUnlock() // 在访问connManager后可以释放锁
+		if err != nil {
+			logger.WithFields(logrus.Fields{
+				"deviceID": deviceID,
+				"connID":   connID,
+				"error":    err,
+			}).Warn("TCPMonitor: ForEachConnection - Connection not found in Zinx ConnManager or error occurred.")
+			continue
+		}
+		if !callback(deviceID, conn) {
 			return
 		}
 	}
-
-	logger.WithFields(logrus.Fields{
-		"deviceId": deviceId,
-		"connID":   connID,
-		"type":     "slave",
-	}).Info("绑定分机设备")
-
-	// 获取ICCID信息，用于记录日志
-	iccid := m.getICCIDFromConnection(conn)
-
-	// 修改：优先支持分机设备独立通信模式
-	// 直接建立分机到连接的映射，不要求必须通过主机连接
-	m.deviceIdToConnMap.Store(deviceId, conn)
-	m.connIdToDeviceIdMap.Store(connID, deviceId)
-
-	// 创建新的设备集合
-	deviceSet := make(map[string]bool)
-	deviceSet[deviceId] = true
-	m.connIdToDeviceIdsMap.Store(connID, deviceSet)
-
-	// 设置连接属性
-	m.setConnectionProperties(deviceId, conn)
-
-	// 判断是否是直连模式（通过检查是否为独立连接）
-	directMode := true
-	if _, isMasterConn := m.masterConnectionMap.Load(connID); isMasterConn {
-		directMode = false
-	}
-
-	logger.WithFields(logrus.Fields{
-		"deviceId":   deviceId,
-		"connID":     connID,
-		"iccid":      iccid,
-		"remoteAddr": conn.RemoteAddr().String(),
-		"directMode": directMode,
-		"deviceType": "slave",
-	}).Info("分机设备已成功绑定到独立连接")
-
-	// 尝试关联主机连接（仅用于优化通信，非必须）
-	// 方案1：检查当前连接是否为主机连接
-	if _, isMasterConn := m.masterConnectionMap.Load(connID); isMasterConn {
-		logger.WithFields(logrus.Fields{
-			"deviceId": deviceId,
-			"connID":   connID,
-		}).Debug("分机设备使用主机连接，无需关联")
-		return
-	}
-
-	// 方案2：可选地尝试关联主机连接（用于组网场景），但不要求必须关联
-	if iccid != "" {
-		if masterConnID := m.findMasterConnectionByICCID(iccid); masterConnID != 0 {
-			if _, exists := m.getMasterConnection(masterConnID); exists {
-				// 记录设备组关联关系，但不改变设备的独立通信能力
-				logger.WithFields(logrus.Fields{
-					"slaveDeviceId": deviceId,
-					"masterConnID":  masterConnID,
-					"iccid":         iccid,
-					"directMode":    directMode,
-				}).Debug("分机设备已关联到主机连接（仅组网关系）")
-			}
-		}
-	}
 }
 
-// addSlaveToMasterConnection 将分机添加到主机连接
-func (m *TCPMonitor) addSlaveToMasterConnection(deviceId string, masterConn ziface.IConnection, masterConnID uint64, masterDeviceId string) {
-	// 绑定分机到主机连接
-	m.deviceIdToConnMap.Store(deviceId, masterConn)
-
-	// 🔧 更新连接的设备集合
-	if deviceSetVal, exists := m.connIdToDeviceIdsMap.Load(masterConnID); exists {
-		deviceSet := deviceSetVal.(map[string]bool)
-		deviceSet[deviceId] = true
-		m.connIdToDeviceIdsMap.Store(masterConnID, deviceSet)
-	} else {
-		// 创建新的设备集合
-		deviceSet := make(map[string]bool)
-		deviceSet[deviceId] = true
-		if masterDeviceId != "" {
-			deviceSet[masterDeviceId] = true
-		}
-		m.connIdToDeviceIdsMap.Store(masterConnID, deviceSet)
-	}
-
-	// 设置分机设备属性（但不覆盖连接的主设备属性）
-	m.setDeviceProperties(deviceId, masterConn)
-
-	logger.WithFields(logrus.Fields{
-		"slaveDeviceId":  deviceId,
-		"masterConnID":   masterConnID,
-		"masterDeviceId": masterDeviceId,
-	}).Info("分机设备已添加到主机连接")
-}
-
-// setConnectionProperties 设置连接属性（用于主机）
-func (m *TCPMonitor) setConnectionProperties(deviceId string, conn ziface.IConnection) {
-	// 通过DeviceSession管理设备连接信息
-	deviceSession := session.GetDeviceSession(conn)
-	if deviceSession != nil {
-		// 设置设备ID和连接状态
-		deviceSession.DeviceID = deviceId
-		deviceSession.UpdateStatus(constants.ConnStatusActive)
-		deviceSession.UpdateHeartbeat()
-
-		// 同步到连接属性（为了兼容性）
-		deviceSession.SyncToConnection(conn)
-	}
-
-	// 记录设备上线日志
-	logger.WithFields(logrus.Fields{
-		"deviceId":   deviceId,
-		"connID":     conn.GetConnID(),
-		"remoteAddr": conn.RemoteAddr().String(),
-	}).Info("设备连接绑定成功")
-
-	// 更新设备状态为在线（使用优化器）
-	if statusUpdateOptimizer != nil {
-		statusUpdateOptimizer.UpdateDeviceStatus(deviceId, constants.DeviceStatusOnline, "register")
-	} else if UpdateDeviceStatusFunc != nil {
-		UpdateDeviceStatusFunc(deviceId, constants.DeviceStatusOnline)
-	}
-
-	// 通知全局设备监控器设备已注册
-	deviceMonitor := GetGlobalDeviceMonitor()
-	if deviceMonitor != nil {
-		deviceMonitor.OnDeviceRegistered(deviceId, conn)
-	}
-}
-
-// setDeviceProperties 设置设备属性（用于分机，不影响连接级别属性）
-func (m *TCPMonitor) setDeviceProperties(deviceId string, conn ziface.IConnection) {
-	// 更新设备状态为在线
-	if statusUpdateOptimizer != nil {
-		statusUpdateOptimizer.UpdateDeviceStatus(deviceId, constants.DeviceStatusOnline, "register")
-	} else if UpdateDeviceStatusFunc != nil {
-		UpdateDeviceStatusFunc(deviceId, constants.DeviceStatusOnline)
-	}
-
-	// 通知全局设备监控器设备已注册
-	deviceMonitor := GetGlobalDeviceMonitor()
-	if deviceMonitor != nil {
-		deviceMonitor.OnDeviceRegistered(deviceId, conn)
-	}
-
-	logger.WithFields(logrus.Fields{
-		"deviceId": deviceId,
-		"connID":   conn.GetConnID(),
-	}).Info("分机设备属性设置完成")
-}
-
-// cleanupMasterConnection 清理主机连接的所有设备映射
-func (m *TCPMonitor) cleanupMasterConnection(oldConnID uint64, masterDeviceId string) {
-	logger.WithFields(logrus.Fields{
-		"oldConnID":      oldConnID,
-		"masterDeviceId": masterDeviceId,
-	}).Info("清理主机连接的所有设备映射")
-
-	// 获取该连接下的所有设备
-	if deviceSetVal, exists := m.connIdToDeviceIdsMap.Load(oldConnID); exists {
-		deviceSet := deviceSetVal.(map[string]bool)
-
-		// 清理所有设备的映射
-		for deviceId := range deviceSet {
-			m.deviceIdToConnMap.Delete(deviceId)
-			logger.WithFields(logrus.Fields{
-				"deviceId":  deviceId,
-				"oldConnID": oldConnID,
-			}).Debug("已清理设备映射")
-		}
-
-		// 清理连接映射
-		m.connIdToDeviceIdsMap.Delete(oldConnID)
-	}
-
-	// 清理主机连接标记
-	m.masterConnectionMap.Delete(oldConnID)
-	m.connIdToDeviceIdMap.Delete(oldConnID)
-}
-
-// getICCIDFromConnection 从连接获取ICCID
-func (m *TCPMonitor) getICCIDFromConnection(conn ziface.IConnection) string {
-	if val, err := conn.GetProperty(constants.PropKeyICCID); err == nil && val != nil {
-		return val.(string)
-	}
-	return ""
-}
-
-// findMasterConnectionByICCID 根据ICCID查找主机连接
-func (m *TCPMonitor) findMasterConnectionByICCID(iccid string) uint64 {
-	// 遍历所有主机连接，查找匹配的ICCID
-	var foundConnID uint64 = 0
-	m.masterConnectionMap.Range(func(connIDVal, masterDeviceIdVal interface{}) bool {
-		connID := connIDVal.(uint64)
-		if masterConn, exists := m.getMasterConnection(connID); exists {
-			if connICCID := m.getICCIDFromConnection(masterConn); connICCID == iccid {
-				foundConnID = connID
-				return false // 停止遍历
-			}
-		}
-		return true // 继续遍历
-	})
-	return foundConnID
-}
-
-// getMasterConnection 获取主机连接
-func (m *TCPMonitor) getMasterConnection(connID uint64) (ziface.IConnection, bool) {
-	if masterDeviceIdVal, exists := m.masterConnectionMap.Load(connID); exists {
-		masterDeviceId := masterDeviceIdVal.(string)
-		if connVal, exists := m.deviceIdToConnMap.Load(masterDeviceId); exists {
-			if conn, ok := connVal.(ziface.IConnection); ok {
-				return conn, true
-			}
-		}
-	}
-	return nil, false
-}
-
-// GetConnectionByDeviceId 根据设备ID获取连接
-// 🔧 支持主从架构：分机设备返回主机连接
-func (m *TCPMonitor) GetConnectionByDeviceId(deviceId string) (ziface.IConnection, bool) {
-	connVal, ok := m.deviceIdToConnMap.Load(deviceId)
-	if !ok {
-		return nil, false
-	}
-	conn, ok := connVal.(ziface.IConnection)
-	return conn, ok
-}
-
-// GetMasterConnectionForDevice 为设备获取主机连接信息
-// 返回：主机连接、主机设备ID、是否找到
-// 🔧 主从架构支持：分机设备返回主机连接，主机设备返回自身连接
-func (m *TCPMonitor) GetMasterConnectionForDevice(deviceId string) (ziface.IConnection, string, bool) {
-	// 如果是主机设备，直接返回自身连接
-	if m.isMasterDevice(deviceId) {
-		if conn, exists := m.GetConnectionByDeviceId(deviceId); exists {
-			return conn, deviceId, true
-		}
-		return nil, "", false
-	}
-
-	// 分机设备，查找对应的主机连接
-	if conn, exists := m.GetConnectionByDeviceId(deviceId); exists {
-		// 分机设备已绑定，获取连接ID
-		connID := conn.GetConnID()
-
-		// 查找主机设备ID
-		if masterDeviceIdVal, isMasterConn := m.masterConnectionMap.Load(connID); isMasterConn {
-			masterDeviceId := masterDeviceIdVal.(string)
-			return conn, masterDeviceId, true
-		}
-	}
-
-	return nil, "", false
-}
-
-// GetDeviceIdByConnId 根据连接ID获取设备ID
-// 🔧 实现接口要求的方法，支持主从架构
+// GetDeviceIdByConnId 根据连接ID获取设备ID。
+// IConnectionMonitor 接口期望返回单个 (string, bool)。
+// 此实现返回在给定 connId 的设备集中的第一个设备ID（如果存在）。
+// 警告：对于一个连接上有多个设备的情况，其选择是不确定的。
 func (m *TCPMonitor) GetDeviceIdByConnId(connId uint64) (string, bool) {
-	// 首先尝试从单设备映射获取
-	if deviceIdVal, exists := m.connIdToDeviceIdMap.Load(connId); exists {
-		if deviceId, ok := deviceIdVal.(string); ok {
-			return deviceId, true
+	m.mapMutex.RLock()
+	defer m.mapMutex.RUnlock()
+
+	if deviceSet, exists := m.connIdToDeviceIdsMap[connId]; exists {
+		for deviceID := range deviceSet {
+			logger.WithFields(logrus.Fields{
+				"connID":     connId,
+				"deviceID":   deviceID,
+				"totalCount": len(deviceSet),
+			}).Debug("TCPMonitor: GetDeviceIdByConnId - Returning first device (behavior is non-deterministic for multiple devices).")
+			return deviceID, true // 返回找到的第一个
 		}
 	}
-
-	// 然后尝试从主机连接映射获取（返回主机设备ID）
-	if masterDeviceIdVal, exists := m.masterConnectionMap.Load(connId); exists {
-		if masterDeviceId, ok := masterDeviceIdVal.(string); ok {
-			return masterDeviceId, true
-		}
-	}
-
+	logger.WithField("connID", connId).Debug("TCPMonitor: GetDeviceIdByConnId - No devices found for connection.")
 	return "", false
 }
 
-// 🔧 新增：检查设备是否为分机设备且已绑定到主机连接
-func (m *TCPMonitor) IsSlaveDeviceBound(deviceId string) bool {
-	if !m.isMasterDevice(deviceId) {
-		// 分机设备，检查是否已绑定到某个主机连接
-		if _, exists := m.deviceIdToConnMap.Load(deviceId); exists {
-			return true
-		}
-	}
-	return false
-}
-
-// 🔧 新增：获取指定连接下的所有分机设备ID列表
-// 用于心跳管理和主机断开时处理分机设备
-func (m *TCPMonitor) GetSlaveDevicesForConnection(connID uint64) []string {
-	slaveDevices := make([]string, 0)
-
-	// 检查是否为主机连接
-	if masterDeviceId, isMasterConn := m.masterConnectionMap.Load(connID); isMasterConn {
-		// 获取该连接下的所有设备
-		if deviceSetVal, exists := m.connIdToDeviceIdsMap.Load(connID); exists {
-			deviceSet := deviceSetVal.(map[string]bool)
-
-			// 筛选出分机设备（排除主机设备本身）
-			masterDeviceIdStr := masterDeviceId.(string)
-			for deviceId := range deviceSet {
-				if deviceId != masterDeviceIdStr && !m.isMasterDevice(deviceId) {
-					slaveDevices = append(slaveDevices, deviceId)
-				}
-			}
-		}
-	}
-
-	logger.WithFields(logrus.Fields{
-		"connID":       connID,
-		"slaveCount":   len(slaveDevices),
-		"slaveDevices": slaveDevices,
-	}).Debug("获取主机连接下的分机设备列表")
-
-	return slaveDevices
-}
-
-// UpdateLastHeartbeatTime 更新最后一次心跳时间、连接状态并更新设备状态
+// UpdateLastHeartbeatTime 更新最后一次DNY心跳时间、连接状态并更新设备状态
 func (m *TCPMonitor) UpdateLastHeartbeatTime(conn ziface.IConnection) {
-	now := time.Now()
-	timeStr := now.Format(constants.TimeFormatDefault)
-	// 通过DeviceSession管理心跳时间
-	deviceSession := session.GetDeviceSession(conn)
-	if deviceSession != nil {
-		deviceSession.UpdateHeartbeat()
-		deviceSession.UpdateStatus(constants.ConnStatusActive)
-		deviceSession.SyncToConnection(conn)
-	}
-	// 安全获取设备ID
-	var deviceId string
-	if val, err := conn.GetProperty(constants.PropKeyDeviceId); err == nil && val != nil {
-		if id, ok := val.(string); ok {
-			deviceId = id
-		} else {
-			logger.WithFields(logrus.Fields{
-				"connID": conn.GetConnID(),
-				"type":   fmt.Sprintf("%T", val),
-			}).Warn("设备ID类型不正确")
-		}
-	}
+	connID := conn.GetConnID()
+	logFields := logrus.Fields{"connID": connID}
 
-	// 只处理已注册的设备心跳
-	if deviceId == "" {
-		logger.WithFields(logrus.Fields{
-			"connID":        conn.GetConnID(),
-			"heartbeatTime": timeStr,
-		}).Debug("未注册设备心跳，跳过状态更新")
+	// 使用 GetDeviceIdsByConnId (plural) 获取所有设备
+	actualDeviceIDs := m.GetDeviceIdsByConnId(connID) // plural
+	if len(actualDeviceIDs) == 0 {
+		logger.WithFields(logFields).Warn("TCPMonitor: UpdateLastHeartbeatTime - No devices found for this connection using GetDeviceIdsByConnId.")
 		return
 	}
 
-	// 记录心跳日志
-	logger.WithFields(logrus.Fields{
-		"deviceId":      deviceId,
-		"connID":        conn.GetConnID(),
-		"heartbeatTime": timeStr,
-	}).Debug("更新设备心跳时间")
+	for _, deviceID := range actualDeviceIDs {
+		sessionLogFields := logrus.Fields{"connID": connID, "deviceID": deviceID}
+		logger.WithFields(sessionLogFields).Debug("TCPMonitor: 更新设备心跳时间")
 
-	// 更新设备状态为在线（使用优化器）
-	if statusUpdateOptimizer != nil {
-		// 使用优化器进行状态更新，避免冗余调用
-		statusUpdateOptimizer.UpdateDeviceStatus(deviceId, constants.DeviceStatusOnline, "heartbeat")
-	} else if UpdateDeviceStatusFunc != nil {
-		// 后备方案：直接调用原始函数
-		UpdateDeviceStatusFunc(deviceId, constants.DeviceStatusOnline)
-	}
-
-	// 通知全局设备监控器设备心跳
-	deviceMonitor := GetGlobalDeviceMonitor()
-	if deviceMonitor != nil {
-		deviceMonitor.OnDeviceHeartbeat(deviceId, conn)
-	}
-}
-
-// 更新设备状态的函数类型定义
-type UpdateDeviceStatusFuncType = constants.UpdateDeviceStatusFuncType
-
-// UpdateDeviceStatusFunc 更新设备状态的函数，需要外部设置
-var UpdateDeviceStatusFunc UpdateDeviceStatusFuncType
-
-// SetUpdateDeviceStatusFunc 设置更新设备状态的函数
-func SetUpdateDeviceStatusFunc(fn UpdateDeviceStatusFuncType) {
-	UpdateDeviceStatusFunc = fn
-
-	// 同时初始化状态更新优化器
-	if statusUpdateOptimizer == nil {
-		statusUpdateOptimizer = NewStatusUpdateOptimizer(fn)
-		logger.Info("设备状态更新优化器已初始化并集成到TCP监控器")
+		if m.sessionManager != nil {
+			// 委托给SessionManager处理心跳更新
+			m.sessionManager.UpdateSession(deviceID, func(session *DeviceSession) {
+				session.LastHeartbeatTime = time.Now()
+				session.Status = constants.DeviceStatusOnline
+			})
+		}
 	}
 }
 
 // UpdateDeviceStatus 更新设备状态
 func (m *TCPMonitor) UpdateDeviceStatus(deviceId string, status string) {
-	// 根据设备ID查找连接
-	if conn, exists := m.GetConnectionByDeviceId(deviceId); exists {
-		// 记录设备状态变更
-		logger.WithFields(logrus.Fields{
-			"deviceId":   deviceId,
-			"connID":     conn.GetConnID(),
-			"remoteAddr": conn.RemoteAddr().String(),
-			"status":     status,
-		}).Info("设备状态更新")
+	logFields := logrus.Fields{"deviceID": deviceId, "status": status}
+	logger.WithFields(logFields).Debug("TCPMonitor: 更新设备状态")
 
-		// 通过DeviceSession管理设备状态
-		deviceSession := session.GetDeviceSession(conn)
-		if deviceSession != nil {
-			// 更新设备状态
-			if status == constants.DeviceStatusOffline {
-				deviceSession.UpdateStatus(constants.ConnStatusInactive)
-			} else if status == constants.DeviceStatusOnline {
-				deviceSession.UpdateStatus(constants.ConnStatusActive)
-				deviceSession.UpdateHeartbeat()
+	if m.sessionManager != nil {
+		// 委托给SessionManager处理状态更新
+		m.sessionManager.UpdateSession(deviceId, func(session *DeviceSession) {
+			session.Status = status
+			// 如果状态变为在线，更新心跳时间
+			if status == constants.DeviceStatusOnline {
+				session.LastHeartbeatTime = time.Now()
 			}
-
-			// 同步到连接属性
-			deviceSession.SyncToConnection(conn)
-		}
-	} else {
-		// 设备不在线，只记录状态变更
-		logger.WithFields(logrus.Fields{
-			"deviceId": deviceId,
-			"status":   status,
-		}).Info("设备状态更新(设备不在线)")
-	}
-
-	// 调用外部提供的设备状态更新函数（使用优化器）
-	if statusUpdateOptimizer != nil {
-		statusUpdateOptimizer.UpdateDeviceStatus(deviceId, status, "manual")
-	} else if UpdateDeviceStatusFunc != nil {
-		UpdateDeviceStatusFunc(deviceId, status)
-	}
-}
-
-// ForEachConnection 遍历所有设备连接
-func (m *TCPMonitor) ForEachConnection(callback func(deviceId string, conn ziface.IConnection) bool) {
-	// 用于跟踪需要清理的无效连接
-	invalidConnections := make([]string, 0)
-
-	// 遍历设备ID到连接的映射
-	m.deviceIdToConnMap.Range(func(key, value interface{}) bool {
-		deviceId, ok1 := key.(string)
-		conn, ok2 := value.(ziface.IConnection)
-
-		if !ok1 || !ok2 {
-			logger.WithFields(logrus.Fields{
-				"key": key,
-			}).Warn("发现无效的映射关系，将清理")
-			invalidConnections = append(invalidConnections, deviceId)
-			return true
-		}
-
-		// 检查连接是否仍然有效
-		if conn == nil || conn.GetTCPConnection() == nil {
-			logger.WithFields(logrus.Fields{
-				"deviceId": deviceId,
-			}).Warn("发现无效连接，将从映射中移除")
-			invalidConnections = append(invalidConnections, deviceId)
-			return true
-		}
-
-		// 检查连接状态 - 只跳过已关闭的连接，保留inactive状态的连接用于心跳
-		if val, err := conn.GetProperty(constants.PropKeyConnStatus); err == nil && val != nil {
-			status := val.(string)
-			if status == constants.ConnStatusClosed {
-				logger.WithFields(logrus.Fields{
-					"deviceId": deviceId,
-					"status":   status,
-				}).Debug("跳过已关闭连接")
-				return true
-			}
-		}
-
-		// 执行回调函数
-		return callback(deviceId, conn)
-	})
-
-	// 清理无效连接
-	for _, deviceId := range invalidConnections {
-		m.deviceIdToConnMap.Delete(deviceId)
-		// 也需要清理反向映射
-		m.connIdToDeviceIdMap.Range(func(connKey, deviceKey interface{}) bool {
-			if deviceKey == deviceId {
-				m.connIdToDeviceIdMap.Delete(connKey)
-				return false
-			}
-			return true
 		})
 	}
 }
+
+// getDisconnectReason 获取连接断开原因
+func (m *TCPMonitor) getDisconnectReason(conn ziface.IConnection) string {
+	// 尝试从连接属性中获取断开原因
+	if prop, err := conn.GetProperty(constants.ConnPropertyDisconnectReason); err == nil && prop != nil {
+		return prop.(string)
+	}
+
+	// 尝试从连接属性中获取关闭原因
+	if prop, err := conn.GetProperty(constants.ConnPropertyCloseReason); err == nil && prop != nil {
+		return prop.(string)
+	}
+
+	// 默认返回未知原因
+	return "unknown"
+}
+
+// isTemporaryDisconnect 判断是否为临时断开
+func (m *TCPMonitor) isTemporaryDisconnect(reason string) bool {
+	// 定义临时断开的原因模式
+	temporaryReasons := []string{
+		"network_timeout",    // 网络超时
+		"i/o timeout",        // IO超时
+		"connection_lost",    // 连接丢失
+		"heartbeat_timeout",  // 心跳超时
+		"read_timeout",       // 读取超时
+		"write_timeout",      // 写入超时
+		"temp_network_error", // 临时网络错误
+	}
+
+	// 检查断开原因是否为临时性质
+	for _, tempReason := range temporaryReasons {
+		if strings.Contains(strings.ToLower(reason), tempReason) {
+			return true
+		}
+	}
+
+	// 永久断开的原因模式
+	permanentReasons := []string{
+		"client_shutdown",   // 客户端主动关闭
+		"normal_close",      // 正常关闭
+		"connection_reset",  // 连接重置
+		"manual_disconnect", // 手动断开
+		"device_offline",    // 设备离线
+		"admin_disconnect",  // 管理员断开
+	}
+
+	// 检查是否为永久断开
+	for _, permReason := range permanentReasons {
+		if strings.Contains(strings.ToLower(reason), permReason) {
+			return false
+		}
+	}
+
+	// 对于未知原因，默认认为是临时断开，给设备重连机会
+	return true
+}
+
+// 确保TCPMonitor实现了我们自定义的IConnectionMonitor接口
+var _ IConnectionMonitor = (*TCPMonitor)(nil)

@@ -72,7 +72,7 @@ func SetSpecialMessageProperties(conn ziface.IConnection, dnyMsg *dny_protocol.M
 	}
 
 	switch dnyMsg.GetMsgID() {
-	case MSG_ID_ICCID:
+	case constants.MsgIDICCID:
 		iccid := string(dnyMsg.GetData())
 		// ICCID通过DeviceSession管理
 		deviceSession := session.GetDeviceSession(conn)
@@ -82,7 +82,7 @@ func SetSpecialMessageProperties(conn ziface.IConnection, dnyMsg *dny_protocol.M
 		}
 		logger.WithField("iccid", iccid).Info("已设置ICCID连接属性")
 
-	case MSG_ID_HEARTBEAT:
+	case constants.MsgIDLinkHeartbeat:
 		// 心跳信息通过DeviceSession管理
 		deviceSession := session.GetDeviceSession(conn)
 		if deviceSession != nil {
@@ -131,24 +131,9 @@ func setChecksumProperties(conn ziface.IConnection, dnyMsg *dny_protocol.Message
 	// 从数据中获取校验和
 	checksum := uint16(rawData[checksumPos]) | uint16(rawData[checksumPos+1])<<8
 
-	// 保存当前校验和计算方法
-	originalMethod := GetChecksumMethod()
-
-	// 尝试方法1
-	SetChecksumMethod(CHECKSUM_METHOD_1)
-	checksum1 := CalculatePacketChecksum(rawData[:checksumPos])
-	isValid1 := (checksum1 == checksum)
-
-	// 尝试方法2
-	SetChecksumMethod(CHECKSUM_METHOD_2)
-	checksum2 := CalculatePacketChecksum(rawData[:checksumPos])
-	isValid2 := (checksum2 == checksum)
-
-	// 恢复原始方法
-	SetChecksumMethod(originalMethod)
-
-	// 设置校验和有效属性
-	checksumValid := isValid1 || isValid2
+	// 使用简单的累加校验和进行验证
+	calculatedChecksum := CalculatePacketChecksum(rawData[:checksumPos])
+	checksumValid := (calculatedChecksum == checksum)
 
 	// 使用DeviceSession统一管理连接属性
 	deviceSession := session.GetDeviceSession(conn)
@@ -160,12 +145,10 @@ func setChecksumProperties(conn ziface.IConnection, dnyMsg *dny_protocol.Message
 	// 如果校验和无效，记录详细信息
 	if !checksumValid {
 		logger.WithFields(logrus.Fields{
-			"command":          fmt.Sprintf("0x%02X", uint8(dnyMsg.GetMsgID())),
-			"expectedChecksum": fmt.Sprintf("0x%04X", checksum),
-			"method1Checksum":  fmt.Sprintf("0x%04X", checksum1),
-			"method1Valid":     isValid1,
-			"method2Checksum":  fmt.Sprintf("0x%04X", checksum2),
-			"method2Valid":     isValid2,
+			"command":            fmt.Sprintf("0x%02X", uint8(dnyMsg.GetMsgID())),
+			"expectedChecksum":   fmt.Sprintf("0x%04X", checksum),
+			"calculatedChecksum": fmt.Sprintf("0x%04X", calculatedChecksum),
+			"checksumValid":      checksumValid,
 		}).Debug("校验和验证详情")
 	}
 }
