@@ -241,3 +241,11 @@ func (h *DNYFrameHandlerBase) SetConnectionAttribute(conn ziface.IConnection, ke
 		conn.SetProperty(key, value)
 	}
 }
+
+// getConnID 安全获取连接ID的辅助函数
+func getConnID(conn ziface.IConnection) uint64 {
+	if conn != nil {
+		return conn.GetConnID()
+	}
+	return 0 // 或其他表示无效/未知连接的值
+}
