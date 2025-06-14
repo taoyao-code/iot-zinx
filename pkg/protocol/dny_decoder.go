@@ -58,7 +58,6 @@ func (d *DNY_Decoder) Intercept(chain ziface.IChain) ziface.IcResp {
 	}
 
 	rawData := iMessage.GetData()
-	// 注意：此处不检查 len(rawData) == 0，因为数据会追加到缓冲区统一处理
 
 	// 打印日志，便于分析数据问题，完整日志数据，包括空数据，无效数据，任何数据都保存！！！！
 
@@ -72,9 +71,6 @@ func (d *DNY_Decoder) Intercept(chain ziface.IChain) ziface.IcResp {
 		fmt.Println("拦截器：原始数据内容(string):", string(rawData))
 		fmt.Println("拦截器：原始数据内容(十六进制):", fmt.Sprintf("%x", rawData))
 	}
-
-	// 以上打印语句用于调试和验证原始数据的状态
-	fmt.Println("拦截器：原始数据打印结束")
 
 	conn := d.getConnection(chain)
 	// if conn == nil 在 getOrCreateBuffer 和 getConnID 中处理或提前返回
@@ -117,18 +113,6 @@ func (d *DNY_Decoder) Intercept(chain ziface.IChain) ziface.IcResp {
 
 		// 4.1 尝试解析 "link" 心跳包
 		if buffer.Len() >= constants.LinkMessageLength {
-			// peekedBytes := buffer.Bytes()[:constants.LinkMessageLength]
-			// if string(peekedBytes) == constants.IOT_LINK_HEARTBEAT {
-			// 	buffer.Next(constants.LinkMessageLength)
-			// 	logger.WithFields(logrus.Fields{
-			// 		"connID": currentConnID,
-			// 	}).Debug("拦截器：解析到link心跳包")
-			// 	iMessage.SetMsgID(constants.MsgIDLinkHeartbeat)
-			// 	iMessage.SetData(peekedBytes)
-			// 	iMessage.SetDataLen(uint32(len(peekedBytes)))
-			// 	heartbeatMsg, _ := ParseDNYProtocolData(peekedBytes) // ParseDNYProtocolData应能处理link
-			// 	return chain.ProceedWithIMessage(iMessage, heartbeatMsg)
-			// }
 			idx := bytes.Index(buffer.Bytes(), []byte(constants.IOT_LINK_HEARTBEAT))
 			if idx >= 0 && buffer.Len() >= idx+constants.LinkMessageLength {
 				if idx > 0 {
