@@ -105,8 +105,15 @@ func (ch *ConnectionHooks) OnConnectionStart(conn ziface.IConnection) {
 	// 获取TCP连接并设置TCP参数
 	// 计划3.a & 5: 此处将修改 readDeadLine 的初始值，从配置加载
 	initialReadDeadlineSeconds := config.GetConfig().TCPServer.InitialReadDeadlineSeconds
+
+	// 🔧 修复：添加调试日志来检查配置加载
+	logger.WithFields(logrus.Fields{
+		"configValue": initialReadDeadlineSeconds,
+		"connID":      connID,
+	}).Debug("从配置文件读取初始超时时间")
+
 	if initialReadDeadlineSeconds <= 0 {
-		initialReadDeadlineSeconds = 30 // 默认值，以防配置错误
+		initialReadDeadlineSeconds = 60 // 🔧 修复：增加默认值到60秒
 		logger.Warnf("OnConnectionStart: InitialReadDeadlineSeconds 配置错误或未配置，使用默认值: %ds", initialReadDeadlineSeconds)
 	}
 	initialReadDeadline := time.Duration(initialReadDeadlineSeconds) * time.Second

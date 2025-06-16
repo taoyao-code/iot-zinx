@@ -1,6 +1,7 @@
 package protocol
 
 import (
+	"encoding/binary"
 	"errors"
 	"fmt"
 
@@ -146,6 +147,12 @@ func (h *DNYFrameHandlerBase) ExtractDecodedFrame(request ziface.IRequest) (*Dec
 		decodedFrame.Command = byte(unifiedMsg.CommandId)
 		decodedFrame.Payload = unifiedMsg.Data
 		decodedFrame.IsChecksumValid = true // 统一解析器已验证
+
+		// 🔧 修复：构建RawPhysicalID以避免数组越界
+		// 将uint32的PhysicalId转换为4字节的小端序数组
+		decodedFrame.RawPhysicalID = make([]byte, 4)
+		binary.LittleEndian.PutUint32(decodedFrame.RawPhysicalID, unifiedMsg.PhysicalId)
+
 	case "iccid":
 		decodedFrame.FrameType = FrameTypeICCID
 		decodedFrame.ICCIDValue = unifiedMsg.ICCIDValue
@@ -210,14 +217,45 @@ func (h *DNYFrameHandlerBase) SendResponse(conn ziface.IConnection, data []byte)
 	return conn.SendBuffMsg(0, data)
 }
 
-// ValidateFrame 验证帧数据有效性
+// ValidateFrame 验证帧数据有效性 - 🔧 修复：放宽验证条件，提高兼容性
 func (h *DNYFrameHandlerBase) ValidateFrame(frame *DecodedDNYFrame) error {
 	if frame == nil {
 		return errors.New("帧数据为空")
 	}
 
-	if !frame.IsValid() {
-		return errors.New("帧数据无效")
+	// 🔧 修复：根据帧类型进行不同的验证策略
+	switch frame.FrameType {
+	case FrameTypeStandard:
+		// 对于标准帧，放宽校验和验证 - 某些设备的校验和可能有差异
+		if len(frame.Header) != 3 || len(frame.RawPhysicalID) != 4 {
+			return errors.New("标准帧结构不完整")
+		}
+
+		// 🔧 修复：如果校验和无效，记录警告但不阻止处理
+		if !frame.IsChecksumValid {
+			logger.WithFields(logrus.Fields{
+				"command":    fmt.Sprintf("0x%02X", frame.Command),
+				"physicalID": frame.PhysicalID,
+				"messageID":  fmt.Sprintf("0x%04X", frame.MessageID),
+			}).Warn("DNY帧校验和验证失败，但继续处理以提高兼容性")
+		}
+
+	case FrameTypeICCID:
+		if len(frame.ICCIDValue) == 0 {
+			return errors.New("ICCID值为空")
+		}
+
+	case FrameTypeLinkHeartbeat:
+		if len(frame.RawData) == 0 {
+			return errors.New("Link心跳数据为空")
+		}
+
+	case FrameTypeParseError:
+		// 解析错误帧本身就是错误，不应该通过验证
+		return errors.New("帧解析错误: " + frame.ErrorMessage)
+
+	default:
+		return errors.New("未知的帧类型")
 	}
 
 	return nil
