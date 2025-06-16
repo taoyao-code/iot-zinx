@@ -57,7 +57,7 @@ func (h *HeartbeatHandler) Handle(request ziface.IRequest) {
 	h.processHeartbeat(decodedFrame, conn, deviceSession)
 }
 
-// processHeartbeat 处理心跳业务逻辑
+// processHeartbeat 处理心跳业务逻辑 - 🔧 修复：添加数组边界检查
 func (h *HeartbeatHandler) processHeartbeat(decodedFrame *protocol.DecodedDNYFrame, conn ziface.IConnection, deviceSession *session.DeviceSession) {
 	// 从解码帧获取设备信息
 	physicalId := decodedFrame.PhysicalID
@@ -70,6 +70,29 @@ func (h *HeartbeatHandler) processHeartbeat(decodedFrame *protocol.DecodedDNYFra
 		"dataLen":    len(data),
 	}).Debug("收到心跳请求")
 
+	// 🔧 修复：添加边界检查，防止数组越界错误
+	if len(data) < 4 {
+		logger.WithFields(logrus.Fields{
+			"connID":  conn.GetConnID(),
+			"dataLen": len(data),
+			"command": fmt.Sprintf("0x%02X", decodedFrame.Command),
+		}).Debug("心跳数据长度不足4字节，跳过详细解析")
+
+		// 仍然更新心跳时间，保持连接活跃
+		h.updateHeartbeatTime(conn, deviceSession)
+
+		// 记录简化的设备心跳日志
+		logger.WithFields(logrus.Fields{
+			"connID":     conn.GetConnID(),
+			"physicalId": physicalId,
+			"deviceId":   deviceSession.DeviceID,
+			"remoteAddr": conn.RemoteAddr().String(),
+			"timestamp":  time.Now().Format(constants.TimeFormatDefault),
+			"dataLen":    len(data),
+		}).Info("设备心跳处理完成 (数据长度不足)")
+		return
+	}
+
 	// 获取ICCID
 	var iccid string
 	if val, err := conn.GetProperty(constants.PropKeyICCID); err == nil && val != nil {
@@ -77,9 +100,10 @@ func (h *HeartbeatHandler) processHeartbeat(decodedFrame *protocol.DecodedDNYFra
 	}
 
 	// 检测是否为旧格式心跳包（命令字为0x01，数据长度为20字节）
-	// TODO:
+	// TODO: 这里可以添加更详细的旧格式解析逻辑
 	if decodedFrame.Command == uint8(dny_protocol.CmdHeartbeat) && len(data) == 20 {
 		// 解析物理ID字符串为数字（physicalId格式如"0x04A228CD"）
+		// 由于已经通过边界检查，这里可以安全访问数组
 	}
 
 	// 根据协议规范，心跳包不需要服务器应答，只需更新心跳时间

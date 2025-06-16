@@ -56,7 +56,20 @@ func RegisterRouters(server ziface.IServer) {
 	// ----------------------------------------------------------------------------
 	server.AddRouter(dny_protocol.CmdDeviceVersion, &DeviceVersionHandler{}) // 0x35 上传分机版本号与设备类型
 
-	// 八、暂未实现的命令（根据需要启用）
+	// 八、🔧 修复：添加缺失的命令处理器，解决"api msgID = X is not FOUND!"错误
+	// ----------------------------------------------------------------------------
+	// 根据日志分析，以下命令ID缺少对应的处理器，使用通用处理器临时处理
+	server.AddRouter(0x07, &GenericCommandHandler{})                             // 0x07 未定义命令
+	server.AddRouter(0x0F, &GenericCommandHandler{})                             // 0x0F 未定义命令
+	server.AddRouter(0x10, &GenericCommandHandler{})                             // 0x10 未定义命令
+	server.AddRouter(0x13, &GenericCommandHandler{})                             // 0x13 未定义命令
+	server.AddRouter(0x14, &GenericCommandHandler{})                             // 0x14 未定义命令
+	server.AddRouter(dny_protocol.CmdUpgradeOldReq, &GenericCommandHandler{})    // 0x15 主机请求固件升级（老版本）
+	server.AddRouter(0x16, &GenericCommandHandler{})                             // 0x16 未定义命令
+	server.AddRouter(dny_protocol.CmdMainStatusReport, &GenericCommandHandler{}) // 0x17 主机状态包上报
+	server.AddRouter(0x18, &GenericCommandHandler{})                             // 0x18 未定义命令
+
+	// 九、暂未实现的命令（根据需要启用）
 	// ----------------------------------------------------------------------------
 	// server.AddRouter(dny_protocol.CmdPoll, &PollHandler{})                    // 0x00 主机轮询完整指令
 	// server.AddRouter(dny_protocol.CmdOrderConfirm, &OrderConfirmHandler{})    // 0x04 充电端口订单确认
@@ -66,7 +79,7 @@ func RegisterRouters(server ziface.IServer) {
 	// server.AddRouter(dny_protocol.CmdModifyCharge, &ModifyChargeHandler{})     // 0x8A 服务器修改充电时长/电量
 	// server.AddRouter(dny_protocol.CmdAlarm, &AlarmHandler{})                  // 0x42 报警推送
 
-	// 九、固件升级相关（复杂功能，暂未实现）
+	// 十、固件升级相关（复杂功能，暂未实现）
 	// ----------------------------------------------------------------------------
 	// server.AddRouter(dny_protocol.CmdUpgradeSlave, &UpgradeSlaveHandler{})     // 0xE0 设备固件升级(分机)
 	// server.AddRouter(dny_protocol.CmdUpgradePower, &UpgradePowerHandler{})     // 0xE1 设备固件升级(电源板)

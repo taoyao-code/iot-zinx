@@ -134,10 +134,20 @@ func (d *DNY_Decoder) Intercept(chain ziface.IChain) ziface.IcResp {
 			return chain.ProceedWithIMessage(iMessage, nil)
 		}
 
-		// 设置消息属性
-		iMessage.SetMsgID(uint32(parsedMsg.MessageId))
+		// 🔧 修复：使用CommandId而不是MessageId进行路由
+		// DNY协议中：
+		// - MessageId 是流水号，用于请求响应匹配
+		// - CommandId 是命令类型，用于路由分发
+		iMessage.SetMsgID(uint32(parsedMsg.CommandId)) // CommandId用于路由分发
 		iMessage.SetData(result)
 		iMessage.SetDataLen(uint32(len(result)))
+
+		logger.WithFields(logrus.Fields{
+			"connID":    connID,
+			"commandID": fmt.Sprintf("0x%02X", parsedMsg.CommandId),
+			"messageID": fmt.Sprintf("0x%04X", parsedMsg.MessageId),
+			"routeID":   fmt.Sprintf("0x%02X", parsedMsg.CommandId),
+		}).Debug("解码器：DNY协议帧路由信息 - 使用CommandId进行路由")
 
 		return chain.ProceedWithIMessage(iMessage, parsedMsg)
 	}

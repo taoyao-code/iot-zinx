@@ -55,6 +55,24 @@ func (h *MainHeartbeatHandler) Handle(request ziface.IRequest) {
 	h.processMainHeartbeat(decodedFrame, conn, deviceSession)
 }
 
+// ValidateFrame 验证主机心跳帧数据有效性 - 🔧 修复：放宽验证条件
+func (h *MainHeartbeatHandler) ValidateFrame(decodedFrame *protocol.DecodedDNYFrame) error {
+	if decodedFrame == nil {
+		return fmt.Errorf("解码帧为空")
+	}
+
+	// 🔧 修复：放宽数据长度验证 - 允许不同长度的心跳数据
+	// 根据日志分析，实际心跳数据长度可能为7字节，而不是期望的更长数据
+	if len(decodedFrame.Payload) < 1 {
+		logger.WithFields(logrus.Fields{
+			"command":    fmt.Sprintf("0x%02X", decodedFrame.Command),
+			"payloadLen": len(decodedFrame.Payload),
+		}).Warn("主机心跳数据长度较短，但继续处理")
+	}
+
+	return nil
+}
+
 // processMainHeartbeat 处理主机心跳业务逻辑
 func (h *MainHeartbeatHandler) processMainHeartbeat(decodedFrame *protocol.DecodedDNYFrame, conn ziface.IConnection, deviceSession *session.DeviceSession) {
 	// 从解码帧获取设备信息
@@ -71,12 +89,15 @@ func (h *MainHeartbeatHandler) processMainHeartbeat(decodedFrame *protocol.Decod
 	// 更新心跳时间
 	h.updateMainHeartbeatTime(conn, deviceSession)
 
-	// 解析心跳数据 (如果有)
+	// 🔧 修复：增强数据解析的边界检查
 	var heartbeatInfo string
 	if len(data) >= 4 {
 		// 解析状态字
 		status := binary.LittleEndian.Uint32(data[0:4])
 		heartbeatInfo = fmt.Sprintf("主机状态: 0x%08X", status)
+	} else if len(data) > 0 {
+		// 数据长度不足4字节，但有数据，记录原始数据
+		heartbeatInfo = fmt.Sprintf("主机心跳 (数据长度%d字节，原始数据: %x)", len(data), data)
 	} else {
 		heartbeatInfo = "主机心跳 (无数据)"
 	}
