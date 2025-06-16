@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/binary"
 	"fmt"
+	"strings"
 
 	"github.com/aceld/zinx/ziface"
 	"github.com/aceld/zinx/znet"
@@ -24,12 +25,34 @@ const (
 )
 
 // -----------------------------------------------------------------------------
-// DNY_Decoder - DNY协议解码器实现（基于TLV简洁设计模式）
+// 协议解析常量 - 根据AP3000协议文档精确定义
+// -----------------------------------------------------------------------------
+const (
+	// ICCID相关常量 - 根据文档：SIM卡号长度固定为20字节，38 39 38 36开头部分是固定的
+	ICCID_FIXED_LENGTH = 20     // ICCID固定长度
+	ICCID_PREFIX       = "3839" // ICCID固定前缀（十六进制字符串形式）
+
+	// Link心跳相关常量 - 根据文档：{6C 69 6E 6B }link是模块心跳包，长度固定为4字节
+	LINK_HEARTBEAT_LENGTH  = 4      // link心跳包固定长度
+	LINK_HEARTBEAT_CONTENT = "link" // link心跳包内容
+
+	// DNY标准协议相关常量 - 根据文档：包头为"DNY"，即16进制字节为0x44 0x4E 0x59
+	DNY_HEADER_LENGTH     = 3                                         // DNY包头长度
+	DNY_HEADER_MAGIC      = "DNY"                                     // DNY包头魔数
+	DNY_LENGTH_FIELD_SIZE = 2                                         // 长度字段大小
+	DNY_MIN_HEADER_SIZE   = DNY_HEADER_LENGTH + DNY_LENGTH_FIELD_SIZE // DNY最小头部大小(5字节)
+
+	// 数据同步和恢复常量
+	MAX_DISCARD_BYTES = 1024 // 单次最大丢弃字节数，防止恶意数据攻击
+)
+
+// -----------------------------------------------------------------------------
+// DNY_Decoder - DNY协议解码器实现（基于AP3000协议文档）
 // -----------------------------------------------------------------------------
 
 // DNY_Decoder DNY协议解码器
 // 根据AP3000协议文档实现的解码器，符合Zinx框架的IDecoder接口
-// 采用TLV模式的简洁设计，专注于数据转换，保持解码器的纯函数特性
+// 实现对ICCID、link心跳、DNY标准协议的精确分界和解析
 type DNY_Decoder struct{}
 
 // NewDNYDecoder 创建DNY协议解码器
@@ -49,8 +72,9 @@ func (d *DNY_Decoder) GetLengthField() *ziface.LengthField {
 
 // Intercept 拦截器方法，实现基于缓冲的多协议解析
 // 当 GetLengthField() 返回 nil 时，此方法负责处理原始字节流的缓冲、解析和路由
+// 根据AP3000协议文档，精确处理ICCID、link心跳、DNY标准协议的分界和解析
 func (d *DNY_Decoder) Intercept(chain ziface.IChain) ziface.IcResp {
-	// 1. 获取基础对象
+	// 1. 获取基础对象和连接信息
 	iMessage := chain.GetIMessage()
 	if iMessage == nil {
 		logger.Error(LOG_MSG_NIL)
@@ -58,276 +82,357 @@ func (d *DNY_Decoder) Intercept(chain ziface.IChain) ziface.IcResp {
 	}
 
 	rawData := iMessage.GetData()
-
-	// 打印日志，便于分析数据问题，完整日志数据，包括空数据，无效数据，任何数据都保存！！！！
-
-	fmt.Println("拦截器：原始数据打印开始")
-	fmt.Println("拦截器：原始数据类型:", fmt.Sprintf("%T", rawData))
-	fmt.Println("拦截器：原始数据是否为nil:", rawData == nil)
-
-	if rawData != nil {
-		fmt.Println("拦截器：原始数据长度:", len(rawData))
-		fmt.Println("拦截器：原始数据内容(前50字节 hex):", fmt.Sprintf("%.50x", rawData))
-		fmt.Println("拦截器：原始数据内容(string):", string(rawData))
-		fmt.Println("拦截器：原始数据内容(十六进制):", fmt.Sprintf("%x", rawData))
-	}
-
 	conn := d.getConnection(chain)
-	// if conn == nil 在 getOrCreateBuffer 和 getConnID 中处理或提前返回
+	connID := d.getConnID(conn)
 
-	// 2. 获取或创建连接缓冲区
+	// 2. 详细的原始数据日志记录（用于调试和问题分析）
+	logger.WithFields(logrus.Fields{
+		"connID":     connID,
+		"dataType":   fmt.Sprintf("%T", rawData),
+		"dataIsNil":  rawData == nil,
+		"dataLen":    len(rawData),
+		"dataHex":    fmt.Sprintf("%.100x", rawData), // 显示前100字节的十六进制
+		"dataString": d.safeStringConvert(rawData),   // 安全的字符串转换
+	}).Debug("拦截器：接收到原始数据")
+
+	// 3. 获取或创建连接缓冲区
 	buffer := d.getOrCreateBuffer(conn)
-	if buffer == nil { // 如果conn为nil, getOrCreateBuffer可能返回nil或panic，取决于实现
-		logger.Error("拦截器：无法获取或创建连接缓冲区")
-		// 如果 iMessage 是 nil, 传递 nil 可能导致后续问题，但这是基于原始代码的假设
+	if buffer == nil {
+		logger.WithFields(logrus.Fields{
+			"connID": connID,
+		}).Error("拦截器：无法获取或创建连接缓冲区")
 		return chain.ProceedWithIMessage(iMessage, nil)
 	}
 
-	// 3. 将新数据追加到缓冲区
-	if len(rawData) > 0 { // 只有当有新数据时才追加和记录日志
+	// 4. 将新数据追加到缓冲区
+	if len(rawData) > 0 {
 		if _, err := buffer.Write(rawData); err != nil {
 			logger.WithFields(logrus.Fields{
-				"connID": d.getConnID(conn),
+				"connID": connID,
 				"error":  err.Error(),
 			}).Error("拦截器：写入缓冲区失败")
 			return chain.ProceedWithIMessage(iMessage, nil)
 		}
+
 		logger.WithFields(logrus.Fields{
-			"connID":     d.getConnID(conn),
-			"newDataLen": len(rawData),
-			"bufferLen":  buffer.Len(),
-			"newDataHex": fmt.Sprintf("%.50x", rawData),
+			"connID":        connID,
+			"newDataLen":    len(rawData),
+			"bufferLen":     buffer.Len(),
+			"newDataHex":    fmt.Sprintf("%.50x", rawData),
+			"bufferHeadHex": fmt.Sprintf("%.50x", buffer.Bytes()),
 		}).Debug("拦截器：数据已追加到缓冲区")
 	}
 
-	// 4. 循环解析缓冲区中的完整消息
+	// 5. 循环解析缓冲区中的完整消息
+	// 按照协议优先级：ICCID -> link心跳 -> DNY标准协议
 	for buffer.Len() > 0 {
 		parsedMessage := false
-		currentConnID := d.getConnID(conn)
 
 		logger.WithFields(logrus.Fields{
-			"connID":    currentConnID,
+			"connID":    connID,
 			"bufferLen": buffer.Len(),
 			"bufferHex": fmt.Sprintf("%.50x", buffer.Bytes()),
-		}).Trace("拦截器：循环解析开始，当前缓冲区状态")
+		}).Trace("拦截器：开始新一轮解析循环")
 
-		// 4.1 尝试解析 "link" 心跳包
-		if buffer.Len() >= constants.LinkMessageLength {
-			idx := bytes.Index(buffer.Bytes(), []byte(constants.IOT_LINK_HEARTBEAT))
-			if idx >= 0 && buffer.Len() >= idx+constants.LinkMessageLength {
-				if idx > 0 {
-					logger.WithFields(logrus.Fields{
-						"connID": currentConnID,
-						"prefix": fmt.Sprintf("%x", buffer.Bytes()[:idx]),
-					}).Debug("拦截器：link心跳包前有脏数据，已跳过")
-					buffer.Next(idx) // 丢弃前缀脏数据
-				}
-				linkBytes := buffer.Next(constants.LinkMessageLength)
-				iMessage.SetMsgID(constants.MsgIDLinkHeartbeat)
-				iMessage.SetData(linkBytes)
-				iMessage.SetDataLen(uint32(len(linkBytes)))
-				heartbeatMsg, _ := ParseDNYProtocolData(linkBytes)
-				return chain.ProceedWithIMessage(iMessage, heartbeatMsg)
+		// 5.1 尝试解析ICCID消息（最高优先级）
+		// 根据文档：SIM卡号长度固定为20字节，38 39 38 36开头部分是固定的
+		if buffer.Len() >= ICCID_FIXED_LENGTH {
+			if d.tryParseICCID(buffer, iMessage, chain, connID) {
+				return chain.ProceedWithIMessage(iMessage, nil) // ICCID解析成功，直接返回
 			}
 		}
 
-		// 4.2 尝试解析 ICCID 消息 (固定20字节, constants.IOT_SIM_CARD_LENGTH)
-		if buffer.Len() >= constants.IOT_SIM_CARD_LENGTH { // 使用精确的、已定义的常量
-			peekedBytes := buffer.Bytes()[:constants.IOT_SIM_CARD_LENGTH]
-			if d.isValidICCID(peekedBytes) { // d.isValidICCID 只做内容校验 (是否为十六进制字符)
-				buffer.Next(constants.IOT_SIM_CARD_LENGTH) // 消耗掉已解析的ICCID字节
-				logger.WithFields(logrus.Fields{
-					"connID": currentConnID,
-					"iccid":  string(peekedBytes),
-				}).Info("拦截器：解析到ICCID消息")
-				iMessage.SetMsgID(constants.MsgIDICCID) // 使用 pkg/constants 中定义的 MsgIDICCID
-				iMessage.SetData(peekedBytes)
-				iMessage.SetDataLen(uint32(len(peekedBytes)))
-				// ParseDNYProtocolData 内部也会对ICCID进行一次判断和封装，这里直接用 peekedBytes
-				// 但为了统一消息结构体，仍然调用它，它会识别出这是ICCID并填充相应字段
-				iccidMsg, _ := ParseDNYProtocolData(peekedBytes)
-				return chain.ProceedWithIMessage(iMessage, iccidMsg)
+		// 5.2 尝试解析link心跳包（第二优先级）
+		// 根据文档：{6C 69 6E 6B }link是模块心跳包，长度固定为4字节
+		if buffer.Len() >= LINK_HEARTBEAT_LENGTH {
+			if d.tryParseLinkHeartbeat(buffer, iMessage, chain, connID) {
+				return chain.ProceedWithIMessage(iMessage, nil) // link心跳解析成功，直接返回
 			}
 		}
 
-		// 4.3 尝试解析 DNY 标准协议帧
-		if buffer.Len() >= constants.DNYMinHeaderLength {
-			headerBytes := buffer.Bytes()[:constants.DNYMinHeaderLength]
+		// 5.3 尝试解析DNY标准协议帧（第三优先级）
+		// 根据文档：包头为"DNY"，即16进制字节为0x44 0x4E 0x59
+		if buffer.Len() >= DNY_MIN_HEADER_SIZE {
+			parseResult := d.tryParseDNYFrame(buffer, iMessage, chain, connID)
+			if parseResult == 1 { // 解析成功
+				return chain.ProceedWithIMessage(iMessage, nil)
+			} else if parseResult == 0 { // 数据不完整，等待更多数据
+				break
+			}
+			// parseResult == -1 表示解析失败，继续尝试数据恢复
+			parsedMessage = true
+		}
 
-			logger.WithFields(logrus.Fields{
-				"connID":      currentConnID,
-				"headerBytes": fmt.Sprintf("%x", headerBytes),
-			}).Trace("拦截器：尝试解析DNY帧，读取头部字节")
-
-			if string(headerBytes[:3]) == constants.DNYHeaderMagic {
-				contentLength := binary.LittleEndian.Uint16(headerBytes[3:5])
-				// 修正 totalFrameLen 的计算，根据协议，contentLength 包含了校验和的长度
-				// totalFrameLen := constants.DNYMinHeaderLength + int(contentLength) + constants.DNYChecksumLength // 错误行
-				totalFrameLen := constants.DNYMinHeaderLength + int(contentLength) // 正确行
-
-				logger.WithFields(logrus.Fields{
-					"connID":           currentConnID,
-					"contentLength":    contentLength,
-					"totalFrameLen":    totalFrameLen,
-					"currentBufferLen": buffer.Len(),
-				}).Trace("拦截器：识别到DNY帧头部，计算帧总长")
-
-				if buffer.Len() >= totalFrameLen {
-					dnyFrameData := make([]byte, totalFrameLen)
-					n, readErr := buffer.Read(dnyFrameData)
-					if readErr != nil {
-						logger.WithFields(logrus.Fields{
-							"connID": currentConnID,
-							"error":  readErr.Error(),
-						}).Error("拦截器：从缓冲区读取DNY帧失败 (Read error)")
-						if conn != nil {
-							conn.Stop()
-						}
-						return chain.ProceedWithIMessage(iMessage, nil)
-					}
-					if n != totalFrameLen {
-						logger.WithFields(logrus.Fields{
-							"connID":       currentConnID,
-							"expectedRead": totalFrameLen,
-							"actualRead":   n,
-						}).Error("拦截器：从缓冲区读取DNY帧字节数与预期不匹配")
-						parsedMessage = true
-						continue
-					}
-
-					logger.WithFields(logrus.Fields{
-						"connID":          currentConnID,
-						"dnyFrameDataLen": len(dnyFrameData),
-						"dnyFrameDataHex": fmt.Sprintf("%x", dnyFrameData),
-					}).Trace("拦截器：成功从缓冲区读取DNY帧数据")
-
-					parsedMsg, pErr := ParseDNYProtocolData(dnyFrameData)
-					if pErr != nil {
-						logger.WithFields(logrus.Fields{
-							"connID":   currentConnID,
-							"error":    pErr.Error(),
-							"frameHex": fmt.Sprintf("%x", dnyFrameData),
-						}).Warn("拦截器：DNY帧解析失败(ParseDNYProtocolData)，丢弃当前帧并继续")
-						parsedMessage = true
-						continue
-					}
-
-					// ValidateDNYFrame is called inside ParseDNYProtocolData implicitly or explicitly by its logic
-					// No need to call it again here if ParseDNYProtocolData is comprehensive
-
-					// iMessage.SetMsgID(parsedMsg.GetMsgID())
-					iMessage.SetMsgID(uint32(parsedMsg.MessageId))
-					iMessage.SetData(dnyFrameData)
-					iMessage.SetDataLen(uint32(len(dnyFrameData)))
-
-					logger.WithFields(logrus.Fields{
-						"connID":    currentConnID,
-						"msgID":     fmt.Sprintf("0x%04X", parsedMsg.GetMsgID()),
-						"commandID": fmt.Sprintf("0x%02X", parsedMsg.CommandId),
-						"frameLen":  len(dnyFrameData),
-					}).Debug("拦截器：DNY帧解析成功，返回给框架路由")
-					return chain.ProceedWithIMessage(iMessage, parsedMsg)
-				} else {
-					logger.WithFields(logrus.Fields{
-						"connID":      currentConnID,
-						"bufferLen":   buffer.Len(),
-						"expectedLen": totalFrameLen,
-					}).Debug("拦截器：DNY帧数据不完整，等待更多数据")
-					parsedMessage = false // Explicitly false as we are breaking to wait
-					break
-				}
-			} else {
-				logger.WithFields(logrus.Fields{
-					"connID":     currentConnID,
-					"bufferHead": fmt.Sprintf("%.20x", buffer.Bytes()),
-				}).Warn("拦截器：发现未知数据前缀，尝试恢复同步")
-
-				dnyMagicBytes := []byte(constants.DNYHeaderMagic)
-				idx := bytes.Index(buffer.Bytes(), dnyMagicBytes)
-
-				if idx > 0 {
-					discardedBytes := buffer.Next(idx)
-					logger.WithFields(logrus.Fields{
-						"connID":              currentConnID,
-						"discardedCount":      idx,
-						"discardedHex":        fmt.Sprintf("%.20x", discardedBytes),
-						"remainingBufferHead": fmt.Sprintf("%.20x", buffer.Bytes()),
-					}).Warn("拦截器：丢弃未知前缀直到下一个DNY标识")
-				} else if idx == -1 {
-					discardCount := buffer.Len()
-					logDiscardHex := buffer.Bytes()
-					if len(logDiscardHex) > 50 {
-						logDiscardHex = logDiscardHex[:50]
-					}
-
-					buffer.Reset()
-					logger.WithFields(logrus.Fields{
-						"connID":             currentConnID,
-						"discardedCount":     discardCount,
-						"discardedHexSample": fmt.Sprintf("%x", logDiscardHex),
-					}).Warn("拦截器：未在缓冲区找到DNY标识，已清空整个缓冲区以尝试恢复")
-					parsedMessage = true
-					break
-				}
-				// If idx == 0, it means DNY is at the start, which should be handled by the 'if' block above.
-				// This path (else of DNYHeaderMagic check) implies it wasn't DNY at the start.
+		// 5.4 数据恢复和同步逻辑
+		// 如果所有协议解析都失败，尝试恢复数据同步
+		if !parsedMessage {
+			if d.tryDataRecovery(buffer, connID) {
 				parsedMessage = true
 				continue
-			}
-		} else { // buffer.Len() < constants.DNYMinHeaderLength
-			logger.WithFields(logrus.Fields{
-				"connID":         currentConnID,
-				"bufferLen":      buffer.Len(),
-				"minRequiredDNY": constants.DNYMinHeaderLength,
-			}).Trace("拦截器：缓冲区数据不足以构成DNY最小头部，尝试其他解析或等待")
-			// This else block is for when buffer is too short for DNYMinHeaderLength
-			// If it's also too short for Link or ICCID, the outer loop condition or specific checks will handle it.
-			// We might need to break here if no other protocol matches and buffer is too short for DNY.
-			// The logic below handles breaking if nothing was parsed.
-		}
-
-		if !parsedMessage && buffer.Len() > 0 {
-			minRequiredForAny := constants.DNYMinHeaderLength // Default to DNY
-			if constants.LinkMessageLength < minRequiredForAny {
-				minRequiredForAny = constants.LinkMessageLength
-			}
-			if constants.ICCIDMinLength < minRequiredForAny {
-				minRequiredForAny = constants.ICCIDMinLength
-			}
-
-			if buffer.Len() < minRequiredForAny {
+			} else {
+				// 如果无法恢复，等待更多数据
 				logger.WithFields(logrus.Fields{
-					"connID":         currentConnID,
-					"bufferLen":      buffer.Len(),
-					"minRequiredAny": minRequiredForAny,
-				}).Debug("拦截器：缓冲区数据不足以构成任何已知消息的最小长度，等待更多数据")
-				break // Not enough data for any known type
+					"connID":    connID,
+					"bufferLen": buffer.Len(),
+				}).Debug("拦截器：无法解析当前数据，等待更多数据")
+				break
 			}
-			// If we are here, it means buffer.Len() >= minRequiredForAny,
-			// but none of the specific parsers (link, iccid, dny) succeeded AND parsedMessage is still false.
-			// This could be an unknown protocol or a partial DNY frame that didn't trigger the "DNY data incomplete" break.
-			// To prevent potential infinite loops if DNY parser logic has a subtle bug not breaking correctly for partial data:
-			logger.WithFields(logrus.Fields{
-				"connID":    currentConnID,
-				"bufferHex": fmt.Sprintf("%.50x", buffer.Bytes()),
-			}).Warn("拦截器：无法解析当前缓冲区数据为任何已知类型，但数据仍存在。为避免潜在死循环，将尝试丢弃1字节。")
-			buffer.Next(1)       // Fallback: discard 1 byte and retry loop.
-			parsedMessage = true // Mark as "handled" to ensure loop continues or exits correctly.
-			continue
-		}
-
-		if buffer.Len() == 0 {
-			logger.WithFields(logrus.Fields{"connID": currentConnID}).Trace("拦截器：缓冲区已空，结束当前轮次解析")
-			break
 		}
 	}
 
+	// 6. 解析完成，返回等待状态
 	logger.WithFields(logrus.Fields{
-		"connID":    d.getConnID(conn),
+		"connID":    connID,
 		"bufferLen": buffer.Len(),
-	}).Debug("拦截器：当前无完整消息或缓冲区已处理完毕，等待更多数据")
+	}).Debug("拦截器：当前轮次解析完成，等待更多数据")
 	return chain.ProceedWithIMessage(nil, nil)
 }
+
+// -----------------------------------------------------------------------------
+// 协议解析方法 - 根据AP3000协议文档实现的精确解析逻辑
+// -----------------------------------------------------------------------------
+
+// tryParseICCID 尝试解析ICCID消息
+// 根据文档：SIM卡号长度固定为20字节，38 39 38 36开头部分是固定的
+func (d *DNY_Decoder) tryParseICCID(buffer *bytes.Buffer, iMessage ziface.IMessage, chain ziface.IChain, connID uint64) bool {
+	if buffer.Len() < ICCID_FIXED_LENGTH {
+		return false
+	}
+
+	// 检查前20字节是否符合ICCID格式
+	peekedBytes := buffer.Bytes()[:ICCID_FIXED_LENGTH]
+
+	// 严格验证ICCID格式：必须以"3839"开头且全部为十六进制字符
+	if !d.isValidICCIDStrict(peekedBytes) {
+		return false
+	}
+
+	// 消费ICCID数据
+	iccidBytes := buffer.Next(ICCID_FIXED_LENGTH)
+	iccidValue := string(iccidBytes)
+
+	logger.WithFields(logrus.Fields{
+		"connID": connID,
+		"iccid":  iccidValue,
+		"hex":    fmt.Sprintf("%x", iccidBytes),
+	}).Info("拦截器：成功解析ICCID消息")
+
+	// 设置消息属性
+	iMessage.SetMsgID(constants.MsgIDICCID)
+	iMessage.SetData(iccidBytes)
+	iMessage.SetDataLen(uint32(len(iccidBytes)))
+
+	// 解析为统一消息格式
+	parsedMsg, _ := ParseDNYProtocolData(iccidBytes)
+	chain.ProceedWithIMessage(iMessage, parsedMsg)
+
+	return true
+}
+
+// tryParseLinkHeartbeat 尝试解析link心跳包
+// 根据文档：{6C 69 6E 6B }link是模块心跳包，长度固定为4字节
+func (d *DNY_Decoder) tryParseLinkHeartbeat(buffer *bytes.Buffer, iMessage ziface.IMessage, chain ziface.IChain, connID uint64) bool {
+	if buffer.Len() < LINK_HEARTBEAT_LENGTH {
+		return false
+	}
+
+	// 查找link心跳包的位置
+	linkBytes := []byte(LINK_HEARTBEAT_CONTENT)
+	idx := bytes.Index(buffer.Bytes(), linkBytes)
+
+	if idx == -1 {
+		return false // 未找到link心跳包
+	}
+
+	// 如果link不在开头，丢弃前面的脏数据
+	if idx > 0 {
+		discardedBytes := buffer.Next(idx)
+		logger.WithFields(logrus.Fields{
+			"connID":       connID,
+			"discardedLen": idx,
+			"discardedHex": fmt.Sprintf("%.50x", discardedBytes),
+		}).Debug("拦截器：link心跳包前有脏数据，已丢弃")
+	}
+
+	// 检查剩余数据是否足够
+	if buffer.Len() < LINK_HEARTBEAT_LENGTH {
+		return false
+	}
+
+	// 消费link心跳数据
+	heartbeatBytes := buffer.Next(LINK_HEARTBEAT_LENGTH)
+
+	logger.WithFields(logrus.Fields{
+		"connID":  connID,
+		"content": string(heartbeatBytes),
+		"hex":     fmt.Sprintf("%x", heartbeatBytes),
+	}).Info("拦截器：成功解析link心跳包")
+
+	// 设置消息属性
+	iMessage.SetMsgID(constants.MsgIDLinkHeartbeat)
+	iMessage.SetData(heartbeatBytes)
+	iMessage.SetDataLen(uint32(len(heartbeatBytes)))
+
+	// 解析为统一消息格式
+	parsedMsg, _ := ParseDNYProtocolData(heartbeatBytes)
+	chain.ProceedWithIMessage(iMessage, parsedMsg)
+
+	return true
+}
+
+// tryParseDNYFrame 尝试解析DNY标准协议帧
+// 根据文档：包头为"DNY"，即16进制字节为0x44 0x4E 0x59
+// 返回值：1=解析成功，0=数据不完整，-1=解析失败
+func (d *DNY_Decoder) tryParseDNYFrame(buffer *bytes.Buffer, iMessage ziface.IMessage, chain ziface.IChain, connID uint64) int {
+	if buffer.Len() < DNY_MIN_HEADER_SIZE {
+		return 0 // 数据不完整
+	}
+
+	// 检查DNY包头
+	headerBytes := buffer.Bytes()[:DNY_MIN_HEADER_SIZE]
+	if string(headerBytes[:DNY_HEADER_LENGTH]) != DNY_HEADER_MAGIC {
+		return -1 // 不是DNY协议
+	}
+
+	// 解析长度字段
+	contentLength := binary.LittleEndian.Uint16(headerBytes[DNY_HEADER_LENGTH:])
+	totalFrameLen := DNY_MIN_HEADER_SIZE + int(contentLength)
+
+	logger.WithFields(logrus.Fields{
+		"connID":        connID,
+		"contentLength": contentLength,
+		"totalFrameLen": totalFrameLen,
+		"bufferLen":     buffer.Len(),
+	}).Trace("拦截器：识别到DNY帧头部，计算帧总长")
+
+	// 检查数据是否完整
+	if buffer.Len() < totalFrameLen {
+		logger.WithFields(logrus.Fields{
+			"connID":      connID,
+			"bufferLen":   buffer.Len(),
+			"expectedLen": totalFrameLen,
+		}).Debug("拦截器：DNY帧数据不完整，等待更多数据")
+		return 0 // 数据不完整，等待更多数据
+	}
+
+	// 读取完整的DNY帧数据
+	dnyFrameData := make([]byte, totalFrameLen)
+	n, readErr := buffer.Read(dnyFrameData)
+	if readErr != nil || n != totalFrameLen {
+		logger.WithFields(logrus.Fields{
+			"connID":       connID,
+			"error":        readErr,
+			"expectedRead": totalFrameLen,
+			"actualRead":   n,
+		}).Error("拦截器：从缓冲区读取DNY帧失败")
+		return -1 // 读取失败
+	}
+
+	// 解析DNY协议数据
+	parsedMsg, parseErr := ParseDNYProtocolData(dnyFrameData)
+	if parseErr != nil {
+		logger.WithFields(logrus.Fields{
+			"connID":   connID,
+			"error":    parseErr.Error(),
+			"frameHex": fmt.Sprintf("%.100x", dnyFrameData),
+		}).Warn("拦截器：DNY帧解析失败，丢弃当前帧")
+		return -1 // 解析失败
+	}
+
+	logger.WithFields(logrus.Fields{
+		"connID":    connID,
+		"msgID":     fmt.Sprintf("0x%04X", parsedMsg.GetMsgID()),
+		"commandID": fmt.Sprintf("0x%02X", parsedMsg.CommandId),
+		"frameLen":  len(dnyFrameData),
+	}).Debug("拦截器：DNY帧解析成功")
+
+	// 设置消息属性
+	iMessage.SetMsgID(uint32(parsedMsg.MessageId))
+	iMessage.SetData(dnyFrameData)
+	iMessage.SetDataLen(uint32(len(dnyFrameData)))
+
+	// 返回解析结果
+	chain.ProceedWithIMessage(iMessage, parsedMsg)
+	return 1 // 解析成功
+}
+
+// tryDataRecovery 尝试数据恢复和同步
+// 当所有协议解析都失败时，尝试恢复数据同步
+func (d *DNY_Decoder) tryDataRecovery(buffer *bytes.Buffer, connID uint64) bool {
+	if buffer.Len() == 0 {
+		return false
+	}
+
+	bufferData := buffer.Bytes()
+	recovered := false
+
+	// 1. 尝试查找ICCID模式（以"3839"开头的20字节数据）
+	for i := 0; i < len(bufferData)-ICCID_FIXED_LENGTH+1; i++ {
+		if i+len(ICCID_PREFIX)/2 < len(bufferData) {
+			// 检查是否以"3839"开头（十六进制）
+			if bufferData[i] == 0x38 && bufferData[i+1] == 0x39 {
+				if i > 0 {
+					discarded := buffer.Next(i)
+					logger.WithFields(logrus.Fields{
+						"connID":       connID,
+						"discardedLen": i,
+						"discardedHex": fmt.Sprintf("%.50x", discarded),
+					}).Debug("拦截器：数据恢复 - 找到ICCID模式，丢弃前缀数据")
+					recovered = true
+					break
+				}
+			}
+		}
+	}
+
+	// 2. 尝试查找link心跳包
+	if !recovered {
+		linkBytes := []byte(LINK_HEARTBEAT_CONTENT)
+		idx := bytes.Index(bufferData, linkBytes)
+		if idx > 0 {
+			discarded := buffer.Next(idx)
+			logger.WithFields(logrus.Fields{
+				"connID":       connID,
+				"discardedLen": idx,
+				"discardedHex": fmt.Sprintf("%.50x", discarded),
+			}).Debug("拦截器：数据恢复 - 找到link心跳包，丢弃前缀数据")
+			recovered = true
+		}
+	}
+
+	// 3. 尝试查找DNY协议头
+	if !recovered {
+		dnyBytes := []byte(DNY_HEADER_MAGIC)
+		idx := bytes.Index(bufferData, dnyBytes)
+		if idx > 0 {
+			discarded := buffer.Next(idx)
+			logger.WithFields(logrus.Fields{
+				"connID":       connID,
+				"discardedLen": idx,
+				"discardedHex": fmt.Sprintf("%.50x", discarded),
+			}).Debug("拦截器：数据恢复 - 找到DNY协议头，丢弃前缀数据")
+			recovered = true
+		}
+	}
+
+	// 4. 如果都没找到，丢弃少量数据避免死循环
+	if !recovered && buffer.Len() > 0 {
+		discardLen := minInt(buffer.Len(), MAX_DISCARD_BYTES)
+		discarded := buffer.Next(discardLen)
+		logger.WithFields(logrus.Fields{
+			"connID":       connID,
+			"discardedLen": discardLen,
+			"discardedHex": fmt.Sprintf("%.50x", discarded),
+		}).Warn("拦截器：数据恢复 - 未找到任何已知协议模式，丢弃部分数据")
+		recovered = true
+	}
+
+	return recovered
+}
+
+// -----------------------------------------------------------------------------
+// 辅助方法 - 连接管理和数据验证
+// -----------------------------------------------------------------------------
 
 // getConnection 从链中获取连接 (辅助函数)
 func (d *DNY_Decoder) getConnection(chain ziface.IChain) ziface.IConnection {
@@ -359,6 +464,10 @@ func (d *DNY_Decoder) getConnID(conn ziface.IConnection) uint64 {
 
 // getOrCreateBuffer 获取或创建连接缓冲区
 func (d *DNY_Decoder) getOrCreateBuffer(conn ziface.IConnection) *bytes.Buffer {
+	if conn == nil {
+		return nil
+	}
+
 	if prop, err := conn.GetProperty(constants.ConnectionBufferKey); err == nil && prop != nil {
 		if buffer, ok := prop.(*bytes.Buffer); ok {
 			return buffer
@@ -376,15 +485,52 @@ func (d *DNY_Decoder) getOrCreateBuffer(conn ziface.IConnection) *bytes.Buffer {
 	return buffer
 }
 
-// isValidICCID 验证数据是否为有效的ICCID
-// 根据文档要求实现严格的ICCID验证逻辑
-func (d *DNY_Decoder) isValidICCID(data []byte) bool {
-	if len(data) < constants.ICCIDMinLength || len(data) > constants.ICCIDMaxLength {
+// isValidICCIDStrict 严格验证ICCID格式
+// 根据文档：SIM卡号长度固定为20字节，38 39 38 36开头部分是固定的
+func (d *DNY_Decoder) isValidICCIDStrict(data []byte) bool {
+	if len(data) != ICCID_FIXED_LENGTH {
 		return false
 	}
 
-	// 使用dny_protocol_parser.go中的统一验证函数
-	return IsValidICCIDPrefix(data)
+	// 检查是否以"3839"开头（十六进制字符形式）
+	dataStr := string(data)
+	if !strings.HasPrefix(dataStr, ICCID_PREFIX) {
+		return false
+	}
+
+	// 检查是否全部为十六进制字符
+	for _, b := range data {
+		if !((b >= '0' && b <= '9') || (b >= 'A' && b <= 'F') || (b >= 'a' && b <= 'f')) {
+			return false
+		}
+	}
+
+	return true
+}
+
+// safeStringConvert 安全地将字节数组转换为可打印字符串
+func (d *DNY_Decoder) safeStringConvert(data []byte) string {
+	if len(data) == 0 {
+		return ""
+	}
+
+	// 限制显示长度，避免日志过长
+	maxLen := 100
+	if len(data) > maxLen {
+		data = data[:maxLen]
+	}
+
+	// 将不可打印字符替换为点号
+	result := make([]byte, len(data))
+	for i, b := range data {
+		if b >= 32 && b <= 126 { // 可打印ASCII字符
+			result[i] = b
+		} else {
+			result[i] = '.'
+		}
+	}
+
+	return string(result)
 }
 
 // minInt 辅助函数，返回两个整数中的较小值
@@ -393,18 +539,6 @@ func minInt(a, b int) int {
 		return a
 	}
 	return b
-}
-
-// minInt3 辅助函数，返回三个整数中的最小值
-func minInt3(a, b, c int) int {
-	result := a
-	if b < result {
-		result = b
-	}
-	if c < result {
-		result = c
-	}
-	return result
 }
 
 /*
