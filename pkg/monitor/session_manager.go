@@ -115,12 +115,13 @@ func (m *SessionManager) CreateSession(deviceID string, conn ziface.IConnection)
 	// 🔧 新增：将设备添加到设备组
 	if iccid != "" {
 		m.deviceGroupManager.AddDeviceToGroup(iccid, deviceID, sessionData)
+		// 注意：设备组添加的日志由DeviceGroup.AddDevice统一记录，避免重复日志
 		logger.WithFields(logrus.Fields{
 			"sessionID": sessionID,
 			"deviceID":  deviceID,
 			"iccid":     iccid,
 			"connID":    conn.GetConnID(),
-		}).Info("设备已添加到设备组")
+		}).Debug("设备会话已创建并添加到设备组")
 	}
 
 	// 设置连接属性 - 使用DeviceSession统一管理

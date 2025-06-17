@@ -79,14 +79,35 @@ func (dg *DeviceGroup) AddDevice(deviceID string, session *DeviceSession) {
 	dg.mutex.Lock()
 	defer dg.mutex.Unlock()
 
+	// 检查设备是否已存在
+	_, exists := dg.Devices[deviceID]
+
 	dg.Devices[deviceID] = session
 	dg.UpdatedAt = time.Now()
 
-	logger.WithFields(logrus.Fields{
-		"iccid":    dg.ICCID,
-		"deviceID": deviceID,
-		"total":    len(dg.Devices),
-	}).Info("设备已添加到设备组")
+	// 根据是否为新设备记录不同级别的日志
+	if exists {
+		logger.WithFields(logrus.Fields{
+			"iccid":    dg.ICCID,
+			"deviceID": deviceID,
+			"total":    len(dg.Devices),
+		}).Debug("设备会话已更新")
+	} else {
+		logger.WithFields(logrus.Fields{
+			"iccid":    dg.ICCID,
+			"deviceID": deviceID,
+			"total":    len(dg.Devices),
+		}).Info("设备已添加到设备组")
+	}
+}
+
+// HasDevice 检查设备是否存在于设备组中
+func (dg *DeviceGroup) HasDevice(deviceID string) bool {
+	dg.mutex.RLock()
+	defer dg.mutex.RUnlock()
+
+	_, exists := dg.Devices[deviceID]
+	return exists
 }
 
 // RemoveDevice 从设备组移除设备

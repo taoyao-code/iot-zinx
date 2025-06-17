@@ -312,8 +312,41 @@ func buildDNYPacket(physicalID uint32, messageID uint16, command uint8, data []b
 }
 
 // NeedConfirmation 判断命令是否需要确认回复
+// 根据协议文档 docs/AP3000-设备与服务器通信协议.md 的规范
 func NeedConfirmation(command uint8) bool {
-	// 心跳类命令不需要确认
+	// 明确不需要确认的指令（根据协议文档"无须应答"标注）
+	noConfirmationCommands := []uint8{
+		// 时间同步类指令
+		0x22, // 获取服务器时间 - 协议明确：设备收到应答后停止发送
+
+		// 查询类指令
+		0x81,                   // 查询设备联网状态 - 协议标注：设备应答：无须应答
+		0x90, 0x91, 0x92, 0x93, // 查询参数指令 - 设备直接应答参数内容
+
+		// 心跳和状态上报指令
+		0x06, // 端口充电时功率心跳包 - 协议标注：服务器应答：无须应答
+		0x41, // 充电柜专有心跳包 - 协议标注：服务器应答：无须应答
+		0x42, // 报警推送指令 - 协议标注：服务器应答：无须应答
+		0x43, // 充电完成通知 - 协议标注：服务器应答：无需应答
+		0x44, // 端口推送指令 - 协议标注：服务器应答：无须应答
+
+		// 设备主动请求指令
+		0x05, // 设备主动请求升级 - 协议标注：服务器应答：无须应答
+		0x09, // 分机测试模式 - 协议标注：服务器无需处理
+		0x0A, // 分机设置主机模块地址 - 协议标注：服务器无需处理
+
+		// 心跳类指令（传统定义）
+		0x01, 0x11, 0x21, // 各种心跳包
+	}
+
+	// 检查是否在不需要确认的指令列表中
+	for _, cmd := range noConfirmationCommands {
+		if command == cmd {
+			return false
+		}
+	}
+
+	// 心跳类命令不需要确认（兼容性检查）
 	if command == dny_protocol.CmdHeartbeat ||
 		command == uint8(dny_protocol.CmdDeviceHeart) ||
 		command == dny_protocol.CmdMainHeartbeat ||
@@ -321,7 +354,7 @@ func NeedConfirmation(command uint8) bool {
 		return false
 	}
 
-	// 根据协议规范，以下命令服务器不需要应答
+	// 根据协议规范，以下命令服务器不需要应答（兼容性检查）
 	if command == dny_protocol.CmdMainHeartbeat || // 0x11 主机状态心跳包
 		command == dny_protocol.CmdDeviceVersion || // 0x35 上传分机版本号与设备类型
 		command == dny_protocol.CmdNetworkStatus { // 0x81 查询设备联网状态
