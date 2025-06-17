@@ -86,14 +86,28 @@ func (h *DeviceRegisterHandler) processDeviceRegistration(decodedFrame *protocol
 		return
 	}
 
-	// 🔧 添加重复注册保护：检查设备是否已经处于Active状态
+	// 🔧 增强重复注册保护：检查设备是否已经处于Active状态
 	if deviceSession != nil && deviceSession.State == constants.ConnStateActive {
-		logger.WithFields(logrus.Fields{
-			"connID":       conn.GetConnID(),
-			"physicalId":   fmt.Sprintf("0x%08X", physicalId),
-			"deviceId":     deviceId,
-			"currentState": deviceSession.State,
-		}).Info("设备已处于Active状态，跳过重复注册处理")
+		// 检查是否在同一连接上重复注册
+		currentConnID := conn.GetConnID()
+		if deviceSession.ConnID == currentConnID {
+			logger.WithFields(logrus.Fields{
+				"connID":       currentConnID,
+				"physicalId":   fmt.Sprintf("0x%08X", physicalId),
+				"deviceId":     deviceId,
+				"currentState": deviceSession.State,
+				"reason":       "DUPLICATE_REGISTRATION_SAME_CONNECTION",
+			}).Warn("设备在同一连接上重复注册，可能存在客户端逻辑问题")
+		} else {
+			logger.WithFields(logrus.Fields{
+				"connID":       currentConnID,
+				"oldConnID":    deviceSession.ConnID,
+				"physicalId":   fmt.Sprintf("0x%08X", physicalId),
+				"deviceId":     deviceId,
+				"currentState": deviceSession.State,
+				"reason":       "DUPLICATE_REGISTRATION_DIFFERENT_CONNECTION",
+			}).Info("设备从不同连接重复注册，可能是连接迁移")
+		}
 
 		// 仍然发送注册响应，保证协议完整性
 		h.sendRegisterResponse(deviceId, physicalId, messageID, conn)
@@ -210,15 +224,27 @@ func (h *DeviceRegisterHandler) handleDeviceRegister(deviceId string, physicalId
 		logger.Warnf("DeviceRegisterHandler: DefaultReadDeadlineSeconds 配置错误或未配置，使用默认值: %ds", defaultReadDeadlineSeconds)
 	}
 	defaultReadDeadline := time.Duration(defaultReadDeadlineSeconds) * time.Second
-	if tcpConn, ok := conn.GetTCPConnection().(*net.TCPConn); ok {
+	if tcpConn, ok := conn.GetConnection().(*net.TCPConn); ok {
 		if err := tcpConn.SetReadDeadline(now.Add(defaultReadDeadline)); err != nil {
 			logger.WithFields(logrus.Fields{
-				"connID":   conn.GetConnID(),
-				"deviceId": deviceId,      // 使用deviceId，因为iccidFromProp可能为空
-				"iccid":    iccidFromProp, // 添加iccidFromProp以供调试
-				"error":    err,
+				"connID":              conn.GetConnID(),
+				"deviceId":            deviceId,      // 使用deviceId，因为iccidFromProp可能为空
+				"iccid":               iccidFromProp, // 添加iccidFromProp以供调试
+				"error":               err,
+				"readDeadlineSeconds": defaultReadDeadlineSeconds,
 			}).Error("DeviceRegisterHandler: 设置ReadDeadline失败")
+		} else {
+			logger.WithFields(logrus.Fields{
+				"connID":              conn.GetConnID(),
+				"deviceId":            deviceId,
+				"readDeadlineSeconds": defaultReadDeadlineSeconds,
+			}).Debug("DeviceRegisterHandler: 成功更新ReadDeadline")
 		}
+	} else {
+		logger.WithFields(logrus.Fields{
+			"connID":   conn.GetConnID(),
+			"deviceId": deviceId,
+		}).Warn("DeviceRegisterHandler: 无法获取TCP连接以设置ReadDeadline")
 	}
 
 	// 记录设备注册信息

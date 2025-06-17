@@ -194,6 +194,9 @@ func (m *TCPMonitor) BindDeviceIdToConnection(deviceID string, conn ziface.IConn
 				// 如果旧连接的设备集合为空，则删除该连接的条目
 				delete(m.connIdToDeviceIdsMap, oldConnID)
 				logger.WithFields(logFields).WithField("oldConnID", oldConnID).Info("TCPMonitor: Removed empty device set for old connection.")
+
+				// 🔧 主动关闭空置连接：当旧连接没有任何设备时，主动关闭该连接
+				m.closeEmptyConnection(oldConnID, logFields)
 			} else {
 				// 否则更新旧连接的设备集合
 				m.connIdToDeviceIdsMap[oldConnID] = oldDeviceSet
@@ -319,6 +322,26 @@ func (m *TCPMonitor) cleanupInvalidDeviceMapping(deviceID string, connID uint64)
 		"deviceID": deviceID,
 		"connID":   connID,
 	}).Info("TCPMonitor: Cleaned up invalid device mapping due to connection not found")
+}
+
+// closeEmptyConnection 主动关闭空置连接
+// 当连接上没有任何设备时，主动关闭该连接以释放资源
+func (m *TCPMonitor) closeEmptyConnection(connID uint64, logFields logrus.Fields) {
+	// 通过连接管理器获取连接实例
+	if m.connManager != nil {
+		conn, err := m.connManager.Get(connID)
+		if err == nil && conn != nil {
+			logger.WithFields(logFields).WithField("oldConnID", connID).Info("TCPMonitor: Actively closing empty connection to free resources.")
+
+			// 主动关闭连接
+			// 这会触发OnConnectionClosed回调，完成清理工作
+			conn.Stop()
+		} else {
+			logger.WithFields(logFields).WithField("oldConnID", connID).WithField("error", err).Warn("TCPMonitor: Cannot find connection to close, may already be closed.")
+		}
+	} else {
+		logger.WithFields(logFields).WithField("oldConnID", connID).Warn("TCPMonitor: ConnManager is nil, cannot actively close empty connection.")
+	}
 }
 
 // GetDeviceIdsByConnId 根据连接ID获取其上所有设备的ID列表。

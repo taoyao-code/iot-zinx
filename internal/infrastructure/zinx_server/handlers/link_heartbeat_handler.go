@@ -75,7 +75,7 @@ func (h *LinkHeartbeatHandler) Handle(request ziface.IRequest) {
 	// 1. 调用 HeartbeatManager.UpdateConnectionActivity(conn)
 	network.UpdateConnectionActivity(conn)
 
-	// 2. 重置TCP ReadDeadline
+	// 2. 重置TCP ReadDeadline - 使用优化后的配置
 	defaultReadDeadlineSeconds := config.GetConfig().TCPServer.DefaultReadDeadlineSeconds
 	if defaultReadDeadlineSeconds <= 0 {
 		defaultReadDeadlineSeconds = 90 // 默认值，以防配置错误
@@ -83,13 +83,19 @@ func (h *LinkHeartbeatHandler) Handle(request ziface.IRequest) {
 	}
 	heartbeatReadDeadline := time.Duration(defaultReadDeadlineSeconds) * time.Second
 
-	tcpConn := conn.GetTCPConnection()
+	tcpConn := conn.GetConnection()
 	if tcpConn != nil {
 		if err := tcpConn.SetReadDeadline(time.Now().Add(heartbeatReadDeadline)); err != nil {
 			logger.WithFields(logrus.Fields{
-				"connID": conn.GetConnID(),
-				"error":  err,
+				"connID":              conn.GetConnID(),
+				"error":               err,
+				"readDeadlineSeconds": defaultReadDeadlineSeconds,
 			}).Error("LinkHeartbeatHandler: 设置ReadDeadline失败")
+		} else {
+			logger.WithFields(logrus.Fields{
+				"connID":              conn.GetConnID(),
+				"readDeadlineSeconds": defaultReadDeadlineSeconds,
+			}).Debug("LinkHeartbeatHandler: 成功更新ReadDeadline")
 		}
 	} else {
 		logger.WithField("connID", conn.GetConnID()).Warn("LinkHeartbeatHandler: 无法获取TCP连接以设置ReadDeadline")
