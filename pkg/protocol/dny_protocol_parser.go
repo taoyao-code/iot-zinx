@@ -242,13 +242,9 @@ func ParseDevicePhysicalID(physicalIDStr string) (dny_protocol.PhysicalIdInfo, e
 	return info, nil
 }
 
-// FormatDNYCommandData 格式化DNY命令和数据用于日志记录 (复用之前的逻辑)
+// FormatDNYCommandData 格式化DNY命令和数据用于日志记录 - 使用统一的命令注册表
 func FormatDNYCommandData(commandID byte, data []byte, direction string, physicalID uint32, messageID uint16) string {
-	cmdInfo, exists := constants.DNYCommandMap[commandID]
-	cmdName := "Unknown"
-	if exists {
-		cmdName = cmdInfo.Name
-	}
+	cmdName := constants.GetCommandName(uint8(commandID))
 	dataHex := ""
 	if len(data) > 0 {
 		dataHex = hex.EncodeToString(data)
@@ -272,11 +268,7 @@ func LogDNYMessage(msg *dny_protocol.Message, direction string, connectionID uin
 
 	switch msg.MessageType {
 	case "standard":
-		cmdInfo, exists := constants.DNYCommandMap[byte(msg.CommandId)]
-		cmdName := "Unknown"
-		if exists {
-			cmdName = cmdInfo.Name
-		}
+		cmdName := constants.GetCommandName(uint8(msg.CommandId))
 		fmt.Fprintf(&logMsg, ", PhysicalID: %d, DNYMsgID: %d, DNYCmd: 0x%02X (%s)", msg.PhysicalId, msg.MessageId, byte(msg.CommandId), cmdName)
 		if msg.DataLen > 0 {
 			fmt.Fprintf(&logMsg, ", DataLen: %d, Data: %s", msg.DataLen, hex.EncodeToString(msg.Data))

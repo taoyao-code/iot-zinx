@@ -181,56 +181,9 @@ func ParseDNYHexString(hexStr string) (*DNYParseResult, error) {
 	return ParseDNYData(data)
 }
 
-// GetCommandName 获取命令名称
+// GetCommandName 获取命令名称 - 使用统一的命令注册表
 func GetCommandName(command uint8) string {
-	switch command {
-	case 0x00:
-		return "主机轮询完整指令"
-	case 0x01:
-		return "设备心跳包(旧版)"
-	case 0x02:
-		return "刷卡操作"
-	case 0x03:
-		return "结算消费信息上传"
-	case 0x04:
-		return "充电端口订单确认"
-	case 0x05:
-		return "设备主动请求升级"
-	case 0x06:
-		return "端口充电时功率心跳包"
-	case 0x11:
-		return "主机状态心跳包"
-	case 0x12:
-		return "主机获取服务器时间"
-	case 0x20:
-		return "设备注册包"
-	case 0x21:
-		return "设备心跳包"
-	case 0x22:
-		return "设备获取服务器时间"
-	case 0x81:
-		return "查询设备联网状态"
-	case 0x82:
-		return "服务器开始、停止充电操作"
-	case 0x83:
-		return "设置运行参数1.1"
-	case 0x84:
-		return "设置运行参数1.2"
-	case 0x85:
-		return "设置最大充电时长、过载功率"
-	case 0x8A:
-		return "服务器修改充电时长/电量"
-	case 0xE0:
-		return "设备固件升级(分机)"
-	case 0xE1:
-		return "设备固件升级(电源板)"
-	case 0xE2:
-		return "设备固件升级(主机统一)"
-	case 0xF8:
-		return "设备固件升级(旧版)"
-	default:
-		return fmt.Sprintf("未知命令(0x%02X)", command)
-	}
+	return constants.GetCommandName(command)
 }
 
 // String 返回解析后的可读信息

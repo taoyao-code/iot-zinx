@@ -343,27 +343,10 @@ var GetTCPMonitor func() interface {
 	OnRawDataSent(conn ziface.IConnection, data []byte)
 }
 
-// GetCommandDescription 获取命令描述
+// GetCommandDescription 获取命令描述 - 使用统一的命令注册表
 // 提供命令的可读描述，便于调试和日志记录
 func GetCommandDescription(command uint8) string {
-	switch command {
-	case dny_protocol.CmdHeartbeat:
-		return "设备心跳包(旧版)"
-	case dny_protocol.CmdDeviceHeart:
-		return "设备心跳包/分机心跳"
-	case dny_protocol.CmdGetServerTime:
-		return "主机获取服务器时间"
-	case dny_protocol.CmdMainHeartbeat:
-		return "主机状态心跳包"
-	case dny_protocol.CmdDeviceRegister:
-		return "设备注册包"
-	case dny_protocol.CmdNetworkStatus:
-		return "查询设备联网状态"
-	case dny_protocol.CmdChargeControl:
-		return "服务器开始/停止充电操作"
-	default:
-		return "未知命令"
-	}
+	return constants.GetCommandDescription(command)
 }
 
 // 🔧 主从设备架构支持函数

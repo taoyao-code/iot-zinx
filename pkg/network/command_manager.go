@@ -237,27 +237,9 @@ func (cm *CommandManager) RegisterCommand(conn ziface.IConnection, physicalID ui
 
 // getCommandPriority 根据命令类型获取优先级
 // 优先级值越小优先级越高，0为最高优先级
+// 使用统一的命令注册表获取优先级
 func getCommandPriority(command uint8) int {
-	switch command {
-	case 0x20: // 设备注册 - 最高优先级
-		return 0
-	case 0x25: // 充电控制 - 高优先级
-		return 1
-	case 0x21: // 刷卡 - 高优先级
-		return 1
-	case 0x23: // 结算 - 中高优先级
-		return 2
-	case 0x22: // 参数设置 - 中等优先级
-		return 3
-	case 0x26: // 获取服务器时间 - 中等优先级
-		return 3
-	case 0x01: // 心跳 - 低优先级
-		return 5
-	case 0x24: // 功率心跳 - 低优先级
-		return 5
-	default: // 未知命令 - 中等优先级
-		return 3
-	}
+	return constants.GetCommandPriority(command)
 }
 
 // ConfirmCommand 确认命令已完成
@@ -762,29 +744,7 @@ func SetSendCommandFunc(fn SendCommandFuncType) {
 	SendCommandFunc = fn
 }
 
-// GetCommandDescription 获取命令描述
+// GetCommandDescription 获取命令描述 - 使用统一的命令注册表
 func GetCommandDescription(command uint8) string {
-	// 根据命令码返回对应的描述信息
-	switch command {
-	case 0x01:
-		return "心跳"
-	case 0x12:
-		return "主机获取服务器时间"
-	case 0x20:
-		return "设备注册"
-	case 0x21:
-		return "刷卡"
-	case 0x22:
-		return "参数设置"
-	case 0x23:
-		return "结算"
-	case 0x24:
-		return "功率心跳"
-	case 0x25:
-		return "充电控制"
-	case 0x26:
-		return "获取服务器时间"
-	default:
-		return fmt.Sprintf("未知命令(0x%02X)", command)
-	}
+	return constants.GetCommandDescription(command)
 }

@@ -118,29 +118,7 @@ func (h *GenericCommandHandler) buildGenericResponse(request ziface.IRequest) []
 	return nil
 }
 
-// GetCommandName 获取命令名称（用于日志记录）
+// GetCommandName 获取命令名称（用于日志记录）- 使用统一的命令注册表
 func (h *GenericCommandHandler) GetCommandName(commandID uint8) string {
-	// 根据命令ID返回可读的命令名称
-	switch commandID {
-	case 0x07:
-		return "未定义命令0x07"
-	case 0x0F:
-		return "未定义命令0x0F"
-	case 0x10:
-		return "未定义命令0x10"
-	case 0x13:
-		return "未定义命令0x13"
-	case 0x14:
-		return "未定义命令0x14"
-	case 0x15:
-		return "主机请求固件升级(老版本)"
-	case 0x16:
-		return "未定义命令0x16"
-	case 0x17:
-		return "主机状态包上报"
-	case 0x18:
-		return "未定义命令0x18"
-	default:
-		return fmt.Sprintf("通用命令0x%02X", commandID)
-	}
+	return constants.GetCommandName(commandID)
 }
