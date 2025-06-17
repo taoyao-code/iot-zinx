@@ -385,8 +385,9 @@ func (sm *SessionManager) GetAllSessions() map[string]*DeviceSession {
 
 	sm.sessions.Range(func(key, value interface{}) bool {
 		deviceID := key.(string)
-		session := value.(DeviceSession)
-		result[deviceID] = &session
+		// 修复类型转换错误：sync.Map中存储的是指针类型
+		session := value.(*DeviceSession)
+		result[deviceID] = session
 		return true
 	})
 
