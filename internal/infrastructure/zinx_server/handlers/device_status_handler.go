@@ -7,6 +7,7 @@ import (
 	"github.com/aceld/zinx/ziface"
 	"github.com/bujia-iot/iot-zinx/internal/infrastructure/logger"
 	"github.com/bujia-iot/iot-zinx/pkg/constants"
+	"github.com/bujia-iot/iot-zinx/pkg/network"
 	"github.com/bujia-iot/iot-zinx/pkg/protocol"
 	"github.com/sirupsen/logrus"
 )
@@ -53,6 +54,10 @@ func (h *DeviceStatusHandler) Handle(request ziface.IRequest) {
 	if len(decodedFrame.Payload) > 0 {
 		statusInfo = fmt.Sprintf("设备状态: 0x%02X", decodedFrame.Payload[0])
 	}
+
+	// 🔧 修复：更新自定义心跳管理器的连接活动时间
+	// 这是解决连接超时问题的关键修复
+	network.UpdateConnectionActivity(conn)
 
 	// 按照协议规范，服务器不需要对 0x81 查询设备联网状态 进行应答
 	// 记录设备状态查询日志

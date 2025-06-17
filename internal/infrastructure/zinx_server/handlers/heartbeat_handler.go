@@ -10,6 +10,7 @@ import (
 	"github.com/bujia-iot/iot-zinx/internal/infrastructure/logger"
 	"github.com/bujia-iot/iot-zinx/pkg/constants"
 	"github.com/bujia-iot/iot-zinx/pkg/monitor"
+	"github.com/bujia-iot/iot-zinx/pkg/network"
 	"github.com/bujia-iot/iot-zinx/pkg/protocol"
 	"github.com/bujia-iot/iot-zinx/pkg/session"
 	"github.com/sirupsen/logrus"
@@ -133,6 +134,10 @@ func (h *HeartbeatHandler) updateHeartbeatTime(conn ziface.IConnection, deviceSe
 
 	// 使用监控器更新设备状态
 	monitor.GetGlobalConnectionMonitor().UpdateLastHeartbeatTime(conn)
+
+	// 🔧 修复：更新自定义心跳管理器的连接活动时间
+	// 这是解决连接超时问题的关键修复
+	network.UpdateConnectionActivity(conn)
 
 	// 更新设备状态为在线
 	if deviceSession != nil && deviceSession.DeviceID != "" {

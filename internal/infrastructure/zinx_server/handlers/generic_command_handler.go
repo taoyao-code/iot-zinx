@@ -7,6 +7,7 @@ import (
 	"github.com/aceld/zinx/ziface"
 	"github.com/bujia-iot/iot-zinx/internal/infrastructure/logger"
 	"github.com/bujia-iot/iot-zinx/pkg/constants"
+	"github.com/bujia-iot/iot-zinx/pkg/network"
 	"github.com/bujia-iot/iot-zinx/pkg/protocol"
 	"github.com/bujia-iot/iot-zinx/pkg/session"
 	"github.com/sirupsen/logrus"
@@ -84,6 +85,10 @@ func (h *GenericCommandHandler) updateConnectionActivity(conn ziface.IConnection
 		deviceSession.UpdateStatus(constants.ConnStatusActive)
 		deviceSession.SyncToConnection(conn)
 	}
+
+	// 🔧 修复：更新自定义心跳管理器的连接活动时间
+	// 这是解决连接超时问题的关键修复
+	network.UpdateConnectionActivity(conn)
 
 	logger.WithFields(logrus.Fields{
 		"connID":    conn.GetConnID(),

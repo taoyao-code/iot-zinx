@@ -9,6 +9,7 @@ import (
 	"github.com/bujia-iot/iot-zinx/internal/infrastructure/logger"
 	"github.com/bujia-iot/iot-zinx/pkg/constants"
 	"github.com/bujia-iot/iot-zinx/pkg/monitor"
+	"github.com/bujia-iot/iot-zinx/pkg/network"
 	"github.com/bujia-iot/iot-zinx/pkg/protocol"
 	"github.com/bujia-iot/iot-zinx/pkg/session"
 	"github.com/sirupsen/logrus"
@@ -102,4 +103,8 @@ func (h *PowerHeartbeatHandler) processPowerHeartbeat(decodedFrame *protocol.Dec
 
 	// 更新心跳时间
 	monitor.GetGlobalConnectionMonitor().UpdateLastHeartbeatTime(conn)
+
+	// 🔧 修复：更新自定义心跳管理器的连接活动时间
+	// 这是解决连接超时问题的关键修复
+	network.UpdateConnectionActivity(conn)
 }
