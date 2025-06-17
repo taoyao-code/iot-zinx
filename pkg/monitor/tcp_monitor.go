@@ -222,31 +222,103 @@ func (m *TCPMonitor) BindDeviceIdToConnection(deviceID string, conn ziface.IConn
 
 // GetConnectionByDeviceId 根据设备ID获取连接对象。
 // 如果设备未绑定或连接不存在，则返回 (nil, false)。
+// 🔧 第一阶段修复：增强错误信息和状态检查
 func (m *TCPMonitor) GetConnectionByDeviceId(deviceID string) (ziface.IConnection, bool) {
 	m.mapMutex.RLock()
 	connID, exists := m.deviceIdToConnMap[deviceID]
+	totalRegisteredDevices := len(m.deviceIdToConnMap)
 	m.mapMutex.RUnlock()
 
 	if !exists {
-		logger.WithField("deviceID", deviceID).Warn("TCPMonitor: GetConnectionByDeviceId - DeviceID not found in map.")
+		// 🔧 提供更详细的诊断信息
+		logger.WithFields(logrus.Fields{
+			"deviceID":               deviceID,
+			"totalRegisteredDevices": totalRegisteredDevices,
+			"registrationStatus":     "NOT_REGISTERED",
+		}).Warn("TCPMonitor: GetConnectionByDeviceId - DeviceID not found in map. Device may not be registered yet.")
+
+		// 记录当前已注册的设备列表（仅在调试模式下）
+		if logrus.GetLevel() <= logrus.DebugLevel {
+			m.logRegisteredDevices("Device lookup failed")
+		}
 		return nil, false
 	}
 
 	if m.connManager == nil {
-		logger.WithField("deviceID", deviceID).Error("TCPMonitor: GetConnectionByDeviceId - ConnManager is not initialized.")
+		logger.WithFields(logrus.Fields{
+			"deviceID": deviceID,
+			"connID":   connID,
+		}).Error("TCPMonitor: GetConnectionByDeviceId - ConnManager is not initialized.")
 		return nil, false
 	}
 
 	conn, err := m.connManager.Get(connID)
 	if err != nil {
 		logger.WithFields(logrus.Fields{
-			"deviceID": deviceID,
-			"connID":   connID,
-			"error":    err,
-		}).Warn("TCPMonitor: GetConnectionByDeviceId - Connection not found in Zinx ConnManager or error occurred.")
+			"deviceID":           deviceID,
+			"connID":             connID,
+			"error":              err,
+			"connectionStatus":   "CONNECTION_NOT_FOUND",
+			"registrationStatus": "REGISTERED_BUT_DISCONNECTED",
+		}).Warn("TCPMonitor: GetConnectionByDeviceId - Connection not found in Zinx ConnManager. Device registered but connection may be closed.")
+
+		// 清理无效的映射关系
+		m.cleanupInvalidDeviceMapping(deviceID, connID)
 		return nil, false
 	}
+
+	logger.WithFields(logrus.Fields{
+		"deviceID":           deviceID,
+		"connID":             connID,
+		"registrationStatus": "REGISTERED_AND_CONNECTED",
+	}).Debug("TCPMonitor: GetConnectionByDeviceId - Device found and connection is active.")
+
 	return conn, true
+}
+
+// logRegisteredDevices 记录当前已注册的设备列表（调试用）
+func (m *TCPMonitor) logRegisteredDevices(context string) {
+	m.mapMutex.RLock()
+	defer m.mapMutex.RUnlock()
+
+	if len(m.deviceIdToConnMap) == 0 {
+		logger.WithField("context", context).Debug("TCPMonitor: No devices currently registered")
+		return
+	}
+
+	registeredDevices := make([]string, 0, len(m.deviceIdToConnMap))
+	for deviceID := range m.deviceIdToConnMap {
+		registeredDevices = append(registeredDevices, deviceID)
+	}
+
+	logger.WithFields(logrus.Fields{
+		"context":           context,
+		"registeredDevices": registeredDevices,
+		"totalCount":        len(registeredDevices),
+	}).Debug("TCPMonitor: Currently registered devices")
+}
+
+// cleanupInvalidDeviceMapping 清理无效的设备映射关系
+func (m *TCPMonitor) cleanupInvalidDeviceMapping(deviceID string, connID uint64) {
+	m.mapMutex.Lock()
+	defer m.mapMutex.Unlock()
+
+	// 从设备到连接的映射中删除
+	delete(m.deviceIdToConnMap, deviceID)
+
+	// 从连接到设备集合的映射中删除
+	if deviceSet, exists := m.connIdToDeviceIdsMap[connID]; exists {
+		delete(deviceSet, deviceID)
+		// 如果设备集合为空，删除整个连接映射
+		if len(deviceSet) == 0 {
+			delete(m.connIdToDeviceIdsMap, connID)
+		}
+	}
+
+	logger.WithFields(logrus.Fields{
+		"deviceID": deviceID,
+		"connID":   connID,
+	}).Info("TCPMonitor: Cleaned up invalid device mapping due to connection not found")
 }
 
 // GetDeviceIdsByConnId 根据连接ID获取其上所有设备的ID列表。

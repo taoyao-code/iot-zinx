@@ -84,6 +84,15 @@ func InitPackagesWithDependencies(sessionManager monitor.ISessionManager, connMa
 		return protocol.SendDNYResponse(conn, physicalID, messageID, command, data)
 	})
 
+	// 🔧 第三阶段修复：设置设备注册检查函数
+	network.SetDeviceRegistrationChecker(func(deviceId string) bool {
+		if globalConnectionMonitor != nil {
+			_, exists := globalConnectionMonitor.GetConnectionByDeviceId(deviceId)
+			return exists
+		}
+		return true // 如果监控器未初始化，保守处理
+	})
+
 	// 启动全局设备监控器
 	deviceMonitor := monitor.GetGlobalDeviceMonitor()
 	if deviceMonitor != nil {

@@ -619,6 +619,7 @@ func (cm *CommandManager) processBatchTimeoutCommands(commands []*CommandEntry) 
 			continue
 		}
 
+		// 🔧 第三阶段修复：增强重试前的前置条件检查
 		// 检查连接是否仍然有效
 		if !isConnectionActive(existingCmd.Connection) {
 			// 更新状态为失败
@@ -634,7 +635,30 @@ func (cm *CommandManager) processBatchTimeoutCommands(commands []*CommandEntry) 
 				"connID":      existingCmd.Connection.GetConnID(),
 				"reason":      existingCmd.LastError,
 				"status":      existingCmd.Status,
-			}).Warn("命令重试失败，放弃重试")
+			}).Warn("命令重试失败：连接已关闭，放弃重试")
+			delete(cm.commands, cmdKey)
+			cm.lock.Unlock()
+			continue
+		}
+
+		// 🔧 检查设备是否已注册（避免向未注册设备发送命令）
+		deviceId := fmt.Sprintf("%08X", existingCmd.PhysicalID)
+		if !isDeviceRegistered(deviceId) {
+			// 更新状态为失败
+			existingCmd.Status = CmdStatusFailed
+			existingCmd.LastError = "设备未注册"
+
+			logger.WithFields(logrus.Fields{
+				"cmdKey":      cmdKey,
+				"physicalID":  fmt.Sprintf("0x%08X", existingCmd.PhysicalID),
+				"deviceId":    deviceId,
+				"messageID":   fmt.Sprintf("0x%04X (%d)", existingCmd.MessageID, existingCmd.MessageID),
+				"command":     fmt.Sprintf("0x%02X", existingCmd.Command),
+				"commandDesc": GetCommandDescription(existingCmd.Command),
+				"connID":      existingCmd.Connection.GetConnID(),
+				"reason":      existingCmd.LastError,
+				"status":      existingCmd.Status,
+			}).Warn("命令重试失败：设备未注册，放弃重试")
 			delete(cm.commands, cmdKey)
 			cm.lock.Unlock()
 			continue
@@ -733,15 +757,42 @@ func isConnectionActive(conn ziface.IConnection) bool {
 	return true
 }
 
+// isDeviceRegistered 检查设备是否已注册
+// 🔧 第三阶段修复：设备注册状态检查函数
+func isDeviceRegistered(deviceId string) bool {
+	// 为了避免循环导入，这里使用接口方式检查设备注册状态
+	// 如果设置了设备注册检查函数，则使用它
+	if DeviceRegistrationChecker != nil {
+		return DeviceRegistrationChecker(deviceId)
+	}
+
+	// 如果没有设置检查函数，保守处理，认为设备已注册
+	// 这样可以避免在系统初始化阶段阻止命令发送
+	return true
+}
+
 // 命令发送函数类型定义
 type SendCommandFuncType func(conn ziface.IConnection, physicalID uint32, messageID uint16, command uint8, data []byte) error
+
+// 设备注册检查函数类型定义
+// 🔧 第三阶段修复：设备注册状态检查函数类型
+type DeviceRegistrationCheckerType func(deviceId string) bool
 
 // 命令发送函数
 var SendCommandFunc SendCommandFuncType
 
+// 设备注册检查函数
+var DeviceRegistrationChecker DeviceRegistrationCheckerType
+
 // SetSendCommandFunc 设置命令发送函数
 func SetSendCommandFunc(fn SendCommandFuncType) {
 	SendCommandFunc = fn
+}
+
+// SetDeviceRegistrationChecker 设置设备注册检查函数
+// 🔧 第三阶段修复：设置设备注册状态检查函数
+func SetDeviceRegistrationChecker(fn DeviceRegistrationCheckerType) {
+	DeviceRegistrationChecker = fn
 }
 
 // GetCommandDescription 获取命令描述 - 使用统一的命令注册表

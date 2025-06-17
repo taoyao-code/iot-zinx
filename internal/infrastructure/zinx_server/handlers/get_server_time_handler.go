@@ -60,12 +60,30 @@ func (h *GetServerTimeHandler) processGetServerTime(decodedFrame *protocol.Decod
 	// 从RawPhysicalID提取uint32值
 	physicalId := binary.LittleEndian.Uint32(decodedFrame.RawPhysicalID)
 	messageId := decodedFrame.MessageID
+	deviceId := fmt.Sprintf("%08X", physicalId)
 
 	logger.WithFields(logrus.Fields{
 		"connID":     conn.GetConnID(),
 		"physicalID": fmt.Sprintf("0x%08X", physicalId),
+		"deviceId":   deviceId,
 		"messageID":  fmt.Sprintf("0x%04X", messageId),
 	}).Info("获取服务器时间处理器：处理请求")
+
+	// 🔧 第一阶段修复：增强设备注册状态检查
+	// 检查设备是否已注册到系统中
+	tcpMonitor := monitor.GetGlobalConnectionMonitor()
+	if _, exists := tcpMonitor.GetConnectionByDeviceId(deviceId); !exists {
+		logger.WithFields(logrus.Fields{
+			"connID":     conn.GetConnID(),
+			"physicalID": fmt.Sprintf("0x%08X", physicalId),
+			"deviceId":   deviceId,
+			"messageID":  fmt.Sprintf("0x%04X", messageId),
+		}).Warn("⚠️ 获取服务器时间处理器：设备未注册，拒绝处理时间请求")
+
+		// 发送错误响应或引导设备注册
+		h.sendRegistrationRequiredResponse(conn, physicalId, messageId, decodedFrame.Command)
+		return
+	}
 
 	// 获取当前时间戳
 	currentTime := time.Now().Unix()
@@ -93,8 +111,20 @@ func (h *GetServerTimeHandler) processGetServerTime(decodedFrame *protocol.Decod
 		"messageId":   fmt.Sprintf("0x%04X", messageId),
 		"currentTime": currentTime,
 		"timeStr":     time.Unix(currentTime, 0).Format(constants.TimeFormatDefault),
-	}).Debug("获取服务器时间响应发送成功")
+	}).Info("✅ 获取服务器时间响应发送成功")
 
 	// 更新心跳时间
 	monitor.GetGlobalConnectionMonitor().UpdateLastHeartbeatTime(conn)
+}
+
+// sendRegistrationRequiredResponse 发送需要注册的响应
+func (h *GetServerTimeHandler) sendRegistrationRequiredResponse(conn ziface.IConnection, physicalId uint32, messageId uint16, command uint8) {
+	// 根据协议，可以发送一个特殊的响应码或者不响应
+	// 这里选择记录日志并不发送响应，让设备超时后重新尝试注册流程
+	logger.WithFields(logrus.Fields{
+		"connID":     conn.GetConnID(),
+		"physicalId": fmt.Sprintf("0x%08X", physicalId),
+		"messageId":  fmt.Sprintf("0x%04X", messageId),
+		"command":    fmt.Sprintf("0x%02X", command),
+	}).Info("📋 设备需要先完成注册流程才能获取服务器时间")
 }
