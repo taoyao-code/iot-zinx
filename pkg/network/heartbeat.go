@@ -64,6 +64,11 @@ var (
 	NewHeartbeatListener func(connMonitor interface {
 		GetConnectionByConnID(connID uint64) (ziface.IConnection, bool)
 	}) interface{}
+
+	// SetGlobalConnectionMonitorFunc 设置全局连接管理器函数
+	SetGlobalConnectionMonitorFunc func(monitor interface {
+		GetConnectionByConnID(connID uint64) (ziface.IConnection, bool)
+	})
 )
 
 // RegisterHeartbeatAdapter 注册心跳服务适配器
@@ -228,6 +233,11 @@ func InitHeartbeatService(monitorAdapter interface {
 	if HeartbeatServiceFactory == nil || HeartbeatListenerFactory == nil {
 		logger.Warn("心跳服务工厂未注册，使用内置心跳管理器")
 		return nil
+	}
+
+	// 设置全局连接管理器到心跳包
+	if SetGlobalConnectionMonitorFunc != nil {
+		SetGlobalConnectionMonitorFunc(monitorAdapter)
 	}
 
 	// 创建心跳服务实例

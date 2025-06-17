@@ -6,6 +6,11 @@ import (
 	"github.com/bujia-iot/iot-zinx/pkg/network"
 )
 
+// 全局连接管理器，在InitHeartbeatService中设置
+var globalConnectionMonitor interface {
+	GetConnectionByConnID(connID uint64) (ziface.IConnection, bool)
+}
+
 // RegisterHeartbeatToNetwork 向network包注册心跳服务适配器
 // 该函数应当在pkg包初始化过程中调用
 func RegisterHeartbeatToNetwork() {
@@ -14,7 +19,8 @@ func RegisterHeartbeatToNetwork() {
 		// 心跳服务工厂函数
 		func() network.HeartbeatServiceAdapter {
 			return &heartbeatServiceAdapter{
-				service: GetGlobalHeartbeatService(),
+				service:           GetGlobalHeartbeatService(),
+				connectionMonitor: globalConnectionMonitor,
 			}
 		},
 		// 心跳监听器工厂函数
@@ -32,7 +38,10 @@ func RegisterHeartbeatToNetwork() {
 // heartbeatServiceAdapter 心跳服务适配器
 // 用于将HeartbeatService适配到network.HeartbeatServiceAdapter接口
 type heartbeatServiceAdapter struct {
-	service HeartbeatService
+	service           HeartbeatService
+	connectionMonitor interface {
+		GetConnectionByConnID(connID uint64) (ziface.IConnection, bool)
+	}
 }
 
 // UpdateActivity 更新连接活动时间
@@ -67,4 +76,22 @@ func (a *heartbeatServiceAdapter) Stop() {
 	if a.service != nil {
 		a.service.Stop()
 	}
+}
+
+// GetConnectionByConnID 根据连接ID获取连接实例
+func (a *heartbeatServiceAdapter) GetConnectionByConnID(connID uint64) (ziface.IConnection, bool) {
+	if a.connectionMonitor != nil {
+		return a.connectionMonitor.GetConnectionByConnID(connID)
+	}
+	return nil, false
+}
+
+// SetGlobalConnectionMonitor 设置全局连接管理器
+// 该函数由network包的InitHeartbeatService调用
+func SetGlobalConnectionMonitor(monitor interface {
+	GetConnectionByConnID(connID uint64) (ziface.IConnection, bool)
+},
+) {
+	globalConnectionMonitor = monitor
+	logger.Info("全局连接管理器已设置到心跳包")
 }

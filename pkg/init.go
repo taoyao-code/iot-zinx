@@ -63,6 +63,9 @@ func InitPackagesWithDependencies(sessionManager monitor.ISessionManager, connMa
 	// 这将允许心跳包和网络包之间协同工作，而不产生循环依赖
 	heartbeat.RegisterHeartbeatToNetwork()
 
+	// 设置全局连接管理器设置函数
+	network.SetGlobalConnectionMonitorFunc = heartbeat.SetGlobalConnectionMonitor
+
 	// 设置monitor包的DNY协议发送器
 	// 这里通过适配器模式解决循环依赖问题
 	monitor.SetDNYProtocolSender(&dnyProtocolSenderAdapter{})
