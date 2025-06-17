@@ -8,6 +8,7 @@ import (
 	"github.com/aceld/zinx/ziface"
 	"github.com/bujia-iot/iot-zinx/internal/infrastructure/logger"
 	"github.com/bujia-iot/iot-zinx/pkg/constants"
+	"github.com/bujia-iot/iot-zinx/pkg/network"
 	"github.com/bujia-iot/iot-zinx/pkg/protocol"
 	"github.com/bujia-iot/iot-zinx/pkg/session"
 	"github.com/sirupsen/logrus"
@@ -125,4 +126,8 @@ func (h *MainHeartbeatHandler) updateMainHeartbeatTime(conn ziface.IConnection, 
 		deviceSession.SetProperty(constants.ConnPropertyMainHeartbeatTime, now.Unix())
 		deviceSession.SyncToConnection(conn)
 	}
+
+	// 关键修复：调用统一的连接活动更新函数
+	// 这会通知HeartbeatManager，防止连接因不活动而超时
+	network.UpdateConnectionActivity(conn)
 }

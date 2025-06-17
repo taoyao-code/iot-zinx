@@ -8,6 +8,15 @@ import (
 	"github.com/sirupsen/logrus"
 )
 
+// ActivityUpdater is an interface for objects that can update connection activity.
+type ActivityUpdater interface {
+	UpdateConnectionActivity(conn ziface.IConnection)
+}
+
+// GlobalActivityUpdater is a global instance of ActivityUpdater.
+// It must be set during application startup.
+var GlobalActivityUpdater ActivityUpdater
+
 // HeartbeatServiceAdapter 心跳服务适配器接口
 // 该接口用于在不同服务实现之间进行适配
 type HeartbeatServiceAdapter interface {
@@ -22,6 +31,8 @@ type HeartbeatServiceAdapter interface {
 
 	// 停止服务
 	Stop()
+
+	GetConnectionByConnID(connID uint64) (ziface.IConnection, bool)
 }
 
 // HeartbeatListenerAdapter 心跳监听器适配器接口
@@ -81,23 +92,13 @@ func SetGlobalHeartbeatManager(manager HeartbeatManagerInterface) {
 	GlobalHeartbeatManager = manager
 }
 
-// UpdateConnectionActivity 更新连接活动时间的全局方法
-// 该方法需要在接收到客户端任何有效数据包时调用
+// UpdateConnectionActivity 更新连接活动时间
+// 此函数通过全局接口调用实际的心跳管理器
 func UpdateConnectionActivity(conn ziface.IConnection) {
-	// 优先使用新版心跳服务
-	if GlobalHeartbeatService != nil {
-		GlobalHeartbeatService.UpdateActivity(conn)
-	} else if HeartbeatServiceFactory != nil {
-		// 延迟初始化
-		GlobalHeartbeatService = HeartbeatServiceFactory()
-		if GlobalHeartbeatService != nil {
-			GlobalHeartbeatService.UpdateActivity(conn)
-		}
-	}
-
-	// 同时保持对旧系统的兼容
-	if GlobalHeartbeatManager != nil {
-		GlobalHeartbeatManager.UpdateConnectionActivity(conn)
+	if GlobalActivityUpdater != nil {
+		GlobalActivityUpdater.UpdateConnectionActivity(conn)
+	} else {
+		logger.Warn("GlobalActivityUpdater not set, activity time not updated.")
 	}
 }
 

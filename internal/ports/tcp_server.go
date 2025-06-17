@@ -11,6 +11,7 @@ import (
 	"github.com/bujia-iot/iot-zinx/internal/infrastructure/logger"
 	"github.com/bujia-iot/iot-zinx/internal/infrastructure/zinx_server/handlers"
 	"github.com/bujia-iot/iot-zinx/pkg"
+	"github.com/bujia-iot/iot-zinx/pkg/network"
 	"github.com/sirupsen/logrus"
 )
 
@@ -161,6 +162,7 @@ func (s *TCPServer) startHeartbeatManager() {
 
 	// 初始化自定义心跳管理器
 	s.heartbeatManager = NewHeartbeatManager(heartbeatInterval, heartbeatTimeout) // NewHeartbeatManager 来自新的 heartbeat_manager.go
+	network.GlobalActivityUpdater = s.heartbeatManager                            // 注入心跳管理器实例
 	s.heartbeatManager.Start()
 
 	logger.WithFields(logrus.Fields{

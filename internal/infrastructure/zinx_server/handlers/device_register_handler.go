@@ -56,11 +56,11 @@ func (h *DeviceRegisterHandler) Handle(request ziface.IRequest) {
 	h.LogFrameProcessing("DeviceRegisterHandler", decodedFrame, conn)
 
 	// 6. 执行设备注册业务逻辑
-	h.processDeviceRegistration(decodedFrame, conn, deviceSession)
+	h.processDeviceRegistration(decodedFrame, conn)
 }
 
 // processDeviceRegistration 处理设备注册业务逻辑
-func (h *DeviceRegisterHandler) processDeviceRegistration(decodedFrame *protocol.DecodedDNYFrame, conn ziface.IConnection, deviceSession *session.DeviceSession) {
+func (h *DeviceRegisterHandler) processDeviceRegistration(decodedFrame *protocol.DecodedDNYFrame, conn ziface.IConnection) {
 	// 🔧 修复PhysicalID解析错误：使用统一的4字节转换方法，避免字符串解析溢出
 	physicalId, err := decodedFrame.GetPhysicalIDAsUint32()
 	if err != nil {
@@ -86,35 +86,8 @@ func (h *DeviceRegisterHandler) processDeviceRegistration(decodedFrame *protocol
 		return
 	}
 
-	// 🔧 增强重复注册保护：检查设备是否已经处于Active状态
-	if deviceSession != nil && deviceSession.State == constants.ConnStateActive {
-		// 检查是否在同一连接上重复注册
-		currentConnID := conn.GetConnID()
-		if deviceSession.ConnID == currentConnID {
-			logger.WithFields(logrus.Fields{
-				"connID":       currentConnID,
-				"physicalId":   fmt.Sprintf("0x%08X", physicalId),
-				"deviceId":     deviceId,
-				"currentState": deviceSession.State,
-				"reason":       "DUPLICATE_REGISTRATION_SAME_CONNECTION",
-			}).Warn("设备在同一连接上重复注册，可能存在客户端逻辑问题")
-		} else {
-			logger.WithFields(logrus.Fields{
-				"connID":       currentConnID,
-				"oldConnID":    deviceSession.ConnID,
-				"physicalId":   fmt.Sprintf("0x%08X", physicalId),
-				"deviceId":     deviceId,
-				"currentState": deviceSession.State,
-				"reason":       "DUPLICATE_REGISTRATION_DIFFERENT_CONNECTION",
-			}).Info("设备从不同连接重复注册，可能是连接迁移")
-		}
-
-		// 仍然发送注册响应，保证协议完整性
-		h.sendRegisterResponse(deviceId, physicalId, messageID, conn)
-		return
-	}
-
-	// 🔧 统一设备注册处理
+	// 🔧 统一设备注册处理，不再需要重复注册保护逻辑，
+	// SessionManager.GetOrCreateSession 和 TCPMonitor.BindDeviceIdToConnection 会处理好
 	h.handleDeviceRegister(deviceId, uint32(physicalId), messageID, conn, data)
 }
 
@@ -154,11 +127,9 @@ func (h *DeviceRegisterHandler) handleDeviceRegister(deviceId string, physicalId
 		// 为了演示，我们继续，但实际项目中应有更严格的错误处理
 	}
 
-	// 1. 为当前设备创建/更新 monitor.DeviceSession
-	// deviceId 是从 decodedFrame.PhysicalID (string) 获取的，作为会话的唯一键
-	// conn 用于 SessionManager 内部提取 ConnID，并应包含 ICCID 属性供 SessionManager 使用
+	// 1. 为当前设备获取或创建 monitor.DeviceSession
 	sessionManager := monitor.GetSessionManager()
-	devSession := sessionManager.CreateSession(deviceId, conn) // conn 应包含ICCID属性
+	devSession, isExisting := sessionManager.GetOrCreateSession(deviceId, conn)
 
 	// 确保 devSession 非 nil
 	if devSession == nil {
@@ -182,22 +153,19 @@ func (h *DeviceRegisterHandler) handleDeviceRegister(deviceId string, physicalId
 			"iccidFromProp": iccidFromProp,
 		}).Warn("DeviceRegisterHandler: ICCID 来源不一致警告")
 		// 如果需要强制设置，可以考虑:
-		// devSession.ICCID = iccidFromProp
-		// sessionManager.UpdateSession(deviceId, func(s *monitor.DeviceSession) { s.ICCID = iccidFromProp })
-		// 但这暗示 SessionManager.CreateSession 的逻辑不完整
+		devSession.ICCID = iccidFromProp
+		sessionManager.UpdateSession(deviceId, func(s *monitor.DeviceSession) { s.ICCID = iccidFromProp })
 	}
 
-	// 更新会话状态和最后心跳时间等。
-	// CreateSession 内部已设置初始状态和时间。
-	// 对于注册操作，我们确保状态是Online，并更新心跳时间。
-	sessionManager.UpdateSession(deviceId, func(s *monitor.DeviceSession) {
-		s.Status = constants.DeviceStatusOnline
-		s.LastHeartbeatTime = time.Now() // 注册视为一次有效心跳
-		s.LastConnID = conn.GetConnID()  // 确保使用当前连接ID
-		// 如果需要从0x20的data payload中解析额外信息并存入会话:
-		// s.DeviceType = parsedDeviceType // (需要解析data)
-		// s.Context["registerPayload"] = data // 示例
-	})
+	// 如果是新会话，则初始化
+	if !isExisting {
+		// 对于新会话，可能需要执行一些特定的初始化逻辑
+		// 例如，从注册数据包中解析设备类型等信息
+		sessionManager.UpdateSession(deviceId, func(s *monitor.DeviceSession) {
+			// s.DeviceType = parsedDeviceType // (需要解析data)
+			s.Context["registerPayload"] = data // 示例
+		})
+	}
 
 	// 2. 设备连接绑定到TCPMonitor
 	// deviceId 是唯一的字符串标识，conn 是共享的连接

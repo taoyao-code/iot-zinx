@@ -84,19 +84,48 @@ func GetSessionManager() *SessionManager {
 	return globalSessionManager
 }
 
-// CreateSession 创建设备会话
-func (m *SessionManager) CreateSession(deviceID string, conn ziface.IConnection) *DeviceSession {
-	// 生成会话ID
-	sessionID := uuid.New().String()
+// GetOrCreateSession 获取或创建设备会话。
+// 返回会话和一个布尔值，该布尔值在会话是新创建时为false，在恢复现有会话时为true。
+func (m *SessionManager) GetOrCreateSession(deviceID string, conn ziface.IConnection) (*DeviceSession, bool) {
+	// 尝试加载现有会话
+	if existing, ok := m.sessions.Load(deviceID); ok {
+		session := existing.(*DeviceSession)
 
-	// 提取ICCID
+		// 会话存在，更新其状态
+		session.Status = constants.DeviceStatusOnline
+		session.LastHeartbeatTime = time.Now()
+		session.LastConnID = conn.GetConnID()
+		if session.Status != constants.DeviceStatusOnline {
+			session.ReconnectCount++ // 仅当从非在线状态恢复时才增加重连计数
+		}
+
+		// 确保ICCID被正确关联，以防第一次注册时ICCID还未就绪
+		if session.ICCID == "" {
+			if val, err := conn.GetProperty(constants.PropKeyICCID); err == nil && val != nil {
+				session.ICCID = val.(string)
+				// 同步更新到设备组
+				m.deviceGroupManager.AddDeviceToGroup(session.ICCID, deviceID, session)
+			}
+		}
+
+		m.sessions.Store(deviceID, session) // 更新会话
+
+		logger.WithFields(logrus.Fields{
+			"sessionID": session.SessionID,
+			"deviceID":  deviceID,
+			"connID":    conn.GetConnID(),
+		}).Info("恢复设备会话")
+		return session, true // true表示是恢复的会话
+	}
+
+	// 会话不存在，创建新会话
+	sessionID := uuid.New().String()
 	iccid := ""
 	if val, err := conn.GetProperty(constants.PropKeyICCID); err == nil && val != nil {
 		iccid = val.(string)
 	}
 
-	// 创建会话
-	sessionData := &DeviceSession{
+	newSession := &DeviceSession{
 		SessionID:         sessionID,
 		DeviceID:          deviceID,
 		ICCID:             iccid,
@@ -109,37 +138,27 @@ func (m *SessionManager) CreateSession(deviceID string, conn ziface.IConnection)
 		LastConnID:        conn.GetConnID(),
 	}
 
-	// 保存会话
-	m.sessions.Store(deviceID, sessionData)
+	m.sessions.Store(deviceID, newSession)
 
-	// 🔧 新增：将设备添加到设备组
+	// 添加到设备组
 	if iccid != "" {
-		m.deviceGroupManager.AddDeviceToGroup(iccid, deviceID, sessionData)
-		// 注意：设备组添加的日志由DeviceGroup.AddDevice统一记录，避免重复日志
-		logger.WithFields(logrus.Fields{
-			"sessionID": sessionID,
-			"deviceID":  deviceID,
-			"iccid":     iccid,
-			"connID":    conn.GetConnID(),
-		}).Debug("设备会话已创建并添加到设备组")
-	}
-
-	// 设置连接属性 - 使用DeviceSession统一管理
-	deviceSession := session.GetDeviceSession(conn)
-	if deviceSession != nil {
-		deviceSession.SessionID = sessionID
-		deviceSession.ReconnectCount = 0
-		deviceSession.SyncToConnection(conn)
+		m.deviceGroupManager.AddDeviceToGroup(iccid, deviceID, newSession)
 	}
 
 	logger.WithFields(logrus.Fields{
-		"sessionID": sessionID,
+		"sessionID": newSession.SessionID,
 		"deviceID":  deviceID,
 		"iccid":     iccid,
 		"connID":    conn.GetConnID(),
-	}).Info("创建设备会话")
+	}).Info("创建新设备会话")
 
-	return sessionData
+	return newSession, false // false表示是新创建的会话
+}
+
+// CreateSession 创建设备会话
+func (m *SessionManager) CreateSession(deviceID string, conn ziface.IConnection) *DeviceSession {
+	session, _ := m.GetOrCreateSession(deviceID, conn)
+	return session
 }
 
 // GetSession 获取设备会话
