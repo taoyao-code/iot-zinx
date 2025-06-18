@@ -1,6 +1,7 @@
 package monitor
 
 import (
+	"fmt"
 	"sync"
 	"time"
 
@@ -57,6 +58,9 @@ type SessionManager struct {
 
 	// 🔧 集成设备组管理器
 	deviceGroupManager *DeviceGroupManager
+
+	// 🔧 新增：全局会话管理锁，确保会话操作的原子性
+	globalSessionMutex sync.Mutex
 }
 
 // 全局会话管理器
@@ -85,19 +89,40 @@ func GetSessionManager() *SessionManager {
 }
 
 // GetOrCreateSession 获取或创建设备会话。
+// 🔧 重构：使用全局锁确保会话创建/恢复的原子性
 // 返回会话和一个布尔值，该布尔值在会话是新创建时为false，在恢复现有会话时为true。
 func (m *SessionManager) GetOrCreateSession(deviceID string, conn ziface.IConnection) (*DeviceSession, bool) {
+	// 🔧 使用全局会话锁，确保整个操作的原子性
+	m.globalSessionMutex.Lock()
+	defer m.globalSessionMutex.Unlock()
+
+	connID := conn.GetConnID()
+	logFields := logrus.Fields{
+		"deviceID":  deviceID,
+		"connID":    connID,
+		"operation": "GetOrCreateSession",
+	}
+
+	logger.WithFields(logFields).Info("SessionManager: 开始获取或创建设备会话")
+
 	// 尝试加载现有会话
 	if existing, ok := m.sessions.Load(deviceID); ok {
 		session := existing.(*DeviceSession)
+		oldStatus := session.Status
+		oldConnID := session.LastConnID
 
-		// 会话存在，更新其状态
+		// 🔧 会话存在，原子性更新其状态
 		session.Status = constants.DeviceStatusOnline
 		session.LastHeartbeatTime = time.Now()
-		session.LastConnID = conn.GetConnID()
-		if session.Status != constants.DeviceStatusOnline {
-			session.ReconnectCount++ // 仅当从非在线状态恢复时才增加重连计数
+		session.LastConnID = connID
+
+		// 仅当从非在线状态恢复时才增加重连计数
+		if oldStatus != constants.DeviceStatusOnline {
+			session.ReconnectCount++
 		}
+
+		// 重置会话过期时间
+		session.ExpiresAt = time.Now().Add(m.sessionTimeout)
 
 		// 确保ICCID被正确关联，以防第一次注册时ICCID还未就绪
 		if session.ICCID == "" {
@@ -110,15 +135,17 @@ func (m *SessionManager) GetOrCreateSession(deviceID string, conn ziface.IConnec
 
 		m.sessions.Store(deviceID, session) // 更新会话
 
-		logger.WithFields(logrus.Fields{
-			"sessionID": session.SessionID,
-			"deviceID":  deviceID,
-			"connID":    conn.GetConnID(),
-		}).Info("恢复设备会话")
+		logger.WithFields(logFields).WithFields(logrus.Fields{
+			"sessionID":  session.SessionID,
+			"oldStatus":  oldStatus,
+			"oldConnID":  oldConnID,
+			"reconnects": session.ReconnectCount,
+		}).Info("SessionManager: 恢复设备会话")
+
 		return session, true // true表示是恢复的会话
 	}
 
-	// 会话不存在，创建新会话
+	// 🔧 会话不存在，原子性创建新会话
 	sessionID := uuid.New().String()
 	iccid := ""
 	if val, err := conn.GetProperty(constants.PropKeyICCID); err == nil && val != nil {
@@ -135,9 +162,10 @@ func (m *SessionManager) GetOrCreateSession(deviceID string, conn ziface.IConnec
 		LastHeartbeatTime: time.Now(),
 		ExpiresAt:         time.Now().Add(m.sessionTimeout),
 		ConnectCount:      1,
-		LastConnID:        conn.GetConnID(),
+		LastConnID:        connID,
 	}
 
+	// 原子性存储会话
 	m.sessions.Store(deviceID, newSession)
 
 	// 添加到设备组
@@ -145,12 +173,10 @@ func (m *SessionManager) GetOrCreateSession(deviceID string, conn ziface.IConnec
 		m.deviceGroupManager.AddDeviceToGroup(iccid, deviceID, newSession)
 	}
 
-	logger.WithFields(logrus.Fields{
+	logger.WithFields(logFields).WithFields(logrus.Fields{
 		"sessionID": newSession.SessionID,
-		"deviceID":  deviceID,
 		"iccid":     iccid,
-		"connID":    conn.GetConnID(),
-	}).Info("创建新设备会话")
+	}).Info("SessionManager: 创建新设备会话")
 
 	return newSession, false // false表示是新创建的会话
 }
@@ -428,4 +454,59 @@ func (sm *SessionManager) HandleDeviceDisconnect(deviceID string) {
 		// 🔧 新增：设置较长的过期时间用于离线会话保留
 		session.ExpiresAt = time.Now().Add(24 * time.Hour) // 离线状态保留24小时
 	})
+}
+
+// 🔧 新增：会话数据完整性检查
+func (m *SessionManager) CheckSessionIntegrity(context string) []string {
+	m.globalSessionMutex.Lock()
+	defer m.globalSessionMutex.Unlock()
+
+	var issues []string
+	sessionDeviceMap := make(map[string]string) // sessionID -> deviceID
+	deviceSessionMap := make(map[string]string) // deviceID -> sessionID
+
+	// 收集所有会话信息
+	m.sessions.Range(func(key, value interface{}) bool {
+		deviceID := key.(string)
+		session := value.(*DeviceSession)
+
+		// 检查会话ID重复
+		if existingDeviceID, exists := sessionDeviceMap[session.SessionID]; exists {
+			issues = append(issues, fmt.Sprintf("会话ID %s 被多个设备使用: %s 和 %s", session.SessionID, existingDeviceID, deviceID))
+		} else {
+			sessionDeviceMap[session.SessionID] = deviceID
+		}
+
+		// 检查设备ID重复
+		if existingSessionID, exists := deviceSessionMap[deviceID]; exists {
+			issues = append(issues, fmt.Sprintf("设备ID %s 有多个会话: %s 和 %s", deviceID, existingSessionID, session.SessionID))
+		} else {
+			deviceSessionMap[deviceID] = session.SessionID
+		}
+
+		// 检查会话与设备组的一致性
+		if session.ICCID != "" {
+			if groupSession, exists := m.deviceGroupManager.GetDeviceFromGroup(session.ICCID, deviceID); exists {
+				if groupSession.SessionID != session.SessionID {
+					issues = append(issues, fmt.Sprintf("设备 %s 在设备组中的会话ID (%s) 与SessionManager中的不一致 (%s)", deviceID, groupSession.SessionID, session.SessionID))
+				}
+			} else {
+				issues = append(issues, fmt.Sprintf("设备 %s 有ICCID %s 但不在对应的设备组中", deviceID, session.ICCID))
+			}
+		}
+
+		return true
+	})
+
+	if len(issues) > 0 {
+		logger.WithFields(logrus.Fields{
+			"context":    context,
+			"issueCount": len(issues),
+			"issues":     issues,
+		}).Error("SessionManager: 会话数据完整性检查发现问题")
+	} else {
+		logger.WithField("context", context).Debug("SessionManager: 会话数据完整性检查通过")
+	}
+
+	return issues
 }

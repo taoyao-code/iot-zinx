@@ -23,8 +23,29 @@ func GetGlobalMonitor(sm ISessionManager, cm ziface.IConnManager) IConnectionMon
 			sessionManager:       sm,
 			connManager:          cm,
 		}
-		fmt.Println("TCP数据监视器已初始化 (重构版)")
-		
+
+		// 🔧 初始化数据完整性检查器
+		globalMonitor.integrityChecker = NewDataIntegrityChecker(globalMonitor)
+
+		// 🔧 初始化并启动全局数据完整性检查调度器
+		scheduler := GetGlobalIntegrityScheduler()
+		if sessionManager, ok := sm.(*SessionManager); ok {
+			scheduler.SetDependencies(
+				globalMonitor,
+				sessionManager,
+				sessionManager.deviceGroupManager,
+			)
+
+			// 启动调度器
+			if err := scheduler.Start(); err != nil {
+				fmt.Printf("启动数据完整性检查调度器失败: %v\n", err)
+			} else {
+				fmt.Println("数据完整性检查调度器已启动")
+			}
+		}
+
+		fmt.Println("TCP数据监视器已初始化 (重构版，包含数据完整性检查和定期自检)")
+
 		// 设置全局变量引用
 		globalConnectionMonitor = globalMonitor
 	})

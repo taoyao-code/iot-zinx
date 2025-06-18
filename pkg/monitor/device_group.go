@@ -1,6 +1,7 @@
 package monitor
 
 import (
+	"fmt"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -47,6 +48,9 @@ type DeviceGroup struct {
 // DeviceGroupManager 设备组管理器
 type DeviceGroupManager struct {
 	groups sync.Map // ICCID -> *DeviceGroup
+
+	// 🔧 新增：全局设备组管理锁，确保设备组操作的原子性
+	globalGroupMutex sync.Mutex
 }
 
 // 全局设备组管理器
@@ -181,21 +185,91 @@ func (dgm *DeviceGroupManager) GetGroup(iccid string) (*DeviceGroup, bool) {
 }
 
 // AddDeviceToGroup 将设备添加到设备组
+// 🔧 重构：使用全局锁确保设备组操作的原子性
 func (dgm *DeviceGroupManager) AddDeviceToGroup(iccid, deviceID string, session *DeviceSession) {
+	// 🔧 使用全局设备组锁，确保整个操作的原子性
+	dgm.globalGroupMutex.Lock()
+	defer dgm.globalGroupMutex.Unlock()
+
+	logFields := logrus.Fields{
+		"iccid":     iccid,
+		"deviceID":  deviceID,
+		"operation": "AddDeviceToGroup",
+	}
+
 	// 判断ICCID是否有效
 	if iccid == "" {
-		logger.WithFields(logrus.Fields{
-			"deviceID": deviceID,
-		}).Warn("添加设备到组失败：ICCID为空")
+		logger.WithFields(logFields).Warn("DeviceGroupManager: 添加设备到组失败：ICCID为空")
 		return
 	}
 
+	if session == nil {
+		logger.WithFields(logFields).Warn("DeviceGroupManager: 添加设备到组失败：会话为空")
+		return
+	}
+
+	logger.WithFields(logFields).Info("DeviceGroupManager: 开始添加设备到组")
+
+	// 🔧 彻底清理设备的旧组关联
+	dgm.cleanupDeviceOldGroupAssociations(deviceID, iccid, logFields)
+
+	// 🔧 原子性添加设备到新组
 	group := dgm.GetOrCreateGroup(iccid)
 	group.AddDevice(deviceID, session)
 
 	// 设置设备的ICCID属性
-	if session != nil {
-		session.ICCID = iccid
+	session.ICCID = iccid
+
+	logger.WithFields(logFields).WithField("groupSize", group.GetDeviceCount()).Info("DeviceGroupManager: 设备已添加到组")
+}
+
+// 🔧 新增：清理设备的旧组关联
+func (dgm *DeviceGroupManager) cleanupDeviceOldGroupAssociations(deviceID, newICCID string, logFields logrus.Fields) {
+	// 注意：此方法在全局锁保护下调用，无需额外加锁
+
+	// 遍历所有设备组，查找设备的旧关联
+	var oldGroups []string
+
+	dgm.groups.Range(func(key, value interface{}) bool {
+		iccid := key.(string)
+		group := value.(*DeviceGroup)
+
+		// 跳过目标组
+		if iccid == newICCID {
+			return true
+		}
+
+		// 检查设备是否在此组中
+		if _, exists := group.GetDevice(deviceID); exists {
+			oldGroups = append(oldGroups, iccid)
+		}
+
+		return true
+	})
+
+	// 从旧组中移除设备
+	for _, oldICCID := range oldGroups {
+		if group, exists := dgm.GetGroup(oldICCID); exists {
+			group.RemoveDevice(deviceID)
+
+			logger.WithFields(logFields).WithFields(logrus.Fields{
+				"oldICCID":     oldICCID,
+				"oldGroupSize": group.GetDeviceCount(),
+			}).Info("DeviceGroupManager: 已从旧组中移除设备")
+
+			// 如果旧组为空，删除该组
+			if group.GetDeviceCount() == 0 {
+				dgm.groups.Delete(oldICCID)
+				logger.WithFields(logFields).WithField("deletedICCID", oldICCID).Info("DeviceGroupManager: 已删除空的旧设备组")
+			}
+		}
+	}
+
+	if len(oldGroups) > 0 {
+		logger.WithFields(logFields).WithFields(logrus.Fields{
+			"cleanedGroups": oldGroups,
+			"cleanedCount":  len(oldGroups),
+		}).Info("DeviceGroupManager: 设备旧组关联清理完成")
 	}
 }
 
@@ -411,4 +485,98 @@ func (dgm *DeviceGroupManager) GetGroupStatistics() map[string]interface{} {
 		"totalGroups":  totalGroups,
 		"totalDevices": totalDevices,
 	}
+}
+
+// 🔧 新增：设备组数据完整性检查
+func (dgm *DeviceGroupManager) CheckGroupIntegrity(context string) []string {
+	dgm.globalGroupMutex.Lock()
+	defer dgm.globalGroupMutex.Unlock()
+
+	var issues []string
+	deviceGroupMap := make(map[string]string) // deviceID -> iccid
+
+	// 遍历所有设备组，检查数据一致性
+	dgm.groups.Range(func(key, value interface{}) bool {
+		iccid := key.(string)
+		group := value.(*DeviceGroup)
+
+		// 检查设备组内部一致性
+		devices := group.GetAllDevices()
+		for deviceID, session := range devices {
+			// 检查设备是否在多个组中
+			if existingICCID, exists := deviceGroupMap[deviceID]; exists {
+				issues = append(issues, fmt.Sprintf("设备 %s 同时存在于多个设备组: %s 和 %s", deviceID, existingICCID, iccid))
+			} else {
+				deviceGroupMap[deviceID] = iccid
+			}
+
+			// 检查设备会话的ICCID是否与组ICCID一致
+			if session.ICCID != iccid {
+				issues = append(issues, fmt.Sprintf("设备 %s 在组 %s 中，但会话ICCID为 %s", deviceID, iccid, session.ICCID))
+			}
+
+			// 检查设备会话是否为空
+			if session == nil {
+				issues = append(issues, fmt.Sprintf("设备 %s 在组 %s 中的会话为空", deviceID, iccid))
+			}
+		}
+
+		// 检查空设备组
+		if len(devices) == 0 {
+			issues = append(issues, fmt.Sprintf("发现空设备组: %s", iccid))
+		}
+
+		return true
+	})
+
+	if len(issues) > 0 {
+		logger.WithFields(logrus.Fields{
+			"context":    context,
+			"issueCount": len(issues),
+			"issues":     issues,
+		}).Error("DeviceGroupManager: 设备组数据完整性检查发现问题")
+	} else {
+		logger.WithField("context", context).Debug("DeviceGroupManager: 设备组数据完整性检查通过")
+	}
+
+	return issues
+}
+
+// 🔧 新增：清理僵尸设备组
+func (dgm *DeviceGroupManager) CleanupZombieGroups(context string) int {
+	dgm.globalGroupMutex.Lock()
+	defer dgm.globalGroupMutex.Unlock()
+
+	var zombieGroups []string
+
+	// 查找空的设备组
+	dgm.groups.Range(func(key, value interface{}) bool {
+		iccid := key.(string)
+		group := value.(*DeviceGroup)
+
+		if group.GetDeviceCount() == 0 {
+			zombieGroups = append(zombieGroups, iccid)
+		}
+
+		return true
+	})
+
+	// 删除僵尸设备组
+	for _, iccid := range zombieGroups {
+		dgm.groups.Delete(iccid)
+		logger.WithFields(logrus.Fields{
+			"context": context,
+			"iccid":   iccid,
+		}).Info("DeviceGroupManager: 已清理僵尸设备组")
+	}
+
+	if len(zombieGroups) > 0 {
+		logger.WithFields(logrus.Fields{
+			"context":       context,
+			"cleanedCount":  len(zombieGroups),
+			"cleanedGroups": zombieGroups,
+		}).Info("DeviceGroupManager: 僵尸设备组清理完成")
+	}
+
+	return len(zombieGroups)
 }
