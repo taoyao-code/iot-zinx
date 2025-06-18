@@ -106,6 +106,20 @@ func InitPackagesWithDependencies(sessionManager monitor.ISessionManager, connMa
 		}
 	}
 
+	// 🔧 修复：启动监控管理器，完善业务流程
+	monitoringManager := network.GetGlobalMonitoringManager()
+	if monitoringManager != nil {
+		// 设置连接监控器
+		network.SetGlobalConnectionMonitor(globalConnectionMonitor)
+
+		// 启动监控管理器
+		if err := monitoringManager.Start(); err != nil {
+			logger.Errorf("启动监控管理器失败: %v", err)
+		} else {
+			logger.Info("全局监控管理器已启动")
+		}
+	}
+
 	logger.Info("pkg包依赖关系初始化完成")
 }
 
@@ -123,6 +137,13 @@ func CleanupPackages() {
 	cmdMgr := network.GetCommandManager()
 	cmdMgr.Stop()
 	logger.Info("命令管理器已停止")
+
+	// 🔧 修复：停止监控管理器
+	monitoringManager := network.GetGlobalMonitoringManager()
+	if monitoringManager != nil {
+		monitoringManager.Stop()
+		logger.Info("全局监控管理器已停止")
+	}
 
 	// 其他清理工作
 	logger.Info("pkg包资源清理完成")

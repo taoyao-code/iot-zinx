@@ -44,13 +44,25 @@ func (h *SimCardHandler) Handle(request ziface.IRequest) {
 		iccidStr := string(data)
 		now := time.Now()
 
-		// 通过DeviceSession管理ICCID和连接状态
+		// 🔧 修复：使用原子性ICCID设置方法，确保时序正确性
 		deviceSession := session.GetDeviceSession(conn)
 		if deviceSession != nil {
-			deviceSession.ICCID = iccidStr    // 更新DeviceSession中的ICCID
-			deviceSession.DeviceID = iccidStr // 将ICCID也作为临时的DeviceId
-			deviceSession.UpdateState(constants.ConnStateICCIDReceived)
-			deviceSession.SyncToConnection(conn)
+			if err := deviceSession.SetICCIDAndSync(conn, iccidStr); err != nil {
+				logger.WithFields(logrus.Fields{
+					"connID":     conn.GetConnID(),
+					"remoteAddr": conn.RemoteAddr().String(),
+					"iccid":      iccidStr,
+					"error":      err,
+				}).Error("SimCardHandler: 原子性设置ICCID失败")
+				return
+			}
+		} else {
+			logger.WithFields(logrus.Fields{
+				"connID":     conn.GetConnID(),
+				"remoteAddr": conn.RemoteAddr().String(),
+				"iccid":      iccidStr,
+			}).Error("SimCardHandler: 无法获取DeviceSession")
+			return
 		}
 
 		// 计划 3.b.3: 调用 network.UpdateConnectionActivity(conn)

@@ -27,10 +27,10 @@ func RegisterRouters(server ziface.IServer) {
 
 	// 二、心跳类消息处理器
 	// ----------------------------------------------------------------------------
-	server.AddRouter(dny_protocol.CmdHeartbeat, &HeartbeatHandler{})           // 0x01 设备心跳包(旧版)
-	server.AddRouter(dny_protocol.CmdDeviceHeart, &HeartbeatHandler{})         // 0x21 设备心跳包/分机心跳
-	server.AddRouter(dny_protocol.CmdMainHeartbeat, &MainHeartbeatHandler{})   // 0x11 主机心跳
-	server.AddRouter(dny_protocol.CmdPowerHeartbeat, &PowerHeartbeatHandler{}) // 0x06 功率心跳
+	server.AddRouter(dny_protocol.CmdHeartbeat, &HeartbeatHandler{})             // 0x01 设备心跳包(旧版)
+	server.AddRouter(dny_protocol.CmdDeviceHeart, &HeartbeatHandler{})           // 0x21 设备心跳包/分机心跳
+	server.AddRouter(dny_protocol.CmdMainHeartbeat, &MainHeartbeatHandler{})     // 0x11 主机心跳
+	server.AddRouter(dny_protocol.CmdPowerHeartbeat, NewPowerHeartbeatHandler()) // 0x06 功率心跳
 
 	// 三、设备注册与状态查询
 	// ----------------------------------------------------------------------------
@@ -39,8 +39,8 @@ func RegisterRouters(server ziface.IServer) {
 
 	// 四、时间同步
 	// ----------------------------------------------------------------------------
-	server.AddRouter(dny_protocol.CmdDeviceTime, &GetServerTimeHandler{})    // 0x22 设备获取服务器时间
-	server.AddRouter(dny_protocol.CmdGetServerTime, &GetServerTimeHandler{}) // 0x12 主机获取服务器时间
+	server.AddRouter(dny_protocol.CmdDeviceTime, NewGetServerTimeHandler())    // 0x22 设备获取服务器时间
+	server.AddRouter(dny_protocol.CmdGetServerTime, NewGetServerTimeHandler()) // 0x12 主机获取服务器时间
 
 	// 五、业务逻辑
 	// ----------------------------------------------------------------------------
@@ -69,15 +69,23 @@ func RegisterRouters(server ziface.IServer) {
 	server.AddRouter(dny_protocol.CmdMainStatusReport, &GenericCommandHandler{}) // 0x17 主机状态包上报
 	server.AddRouter(0x18, &GenericCommandHandler{})                             // 0x18 未定义命令
 
-	// 九、暂未实现的命令（根据需要启用）
+	// 九、🔧 修复：启用缺失的命令处理器，解决msgID = 0错误
 	// ----------------------------------------------------------------------------
-	// server.AddRouter(dny_protocol.CmdPoll, &PollHandler{})                    // 0x00 主机轮询完整指令
-	// server.AddRouter(dny_protocol.CmdOrderConfirm, &OrderConfirmHandler{})    // 0x04 充电端口订单确认
-	// server.AddRouter(dny_protocol.CmdUpgradeRequest, &UpgradeRequestHandler{}) // 0x05 设备主动请求升级
-	// server.AddRouter(dny_protocol.CmdParamSetting2, &ParameterSetting2Handler{}) // 0x84 设置运行参数1.2
-	// server.AddRouter(dny_protocol.CmdMaxTimeAndPower, &MaxTimeAndPowerHandler{}) // 0x85 设置最大充电时长、过载功率
-	// server.AddRouter(dny_protocol.CmdModifyCharge, &ModifyChargeHandler{})     // 0x8A 服务器修改充电时长/电量
-	// server.AddRouter(dny_protocol.CmdAlarm, &AlarmHandler{})                  // 0x42 报警推送
+	server.AddRouter(dny_protocol.CmdPoll, &GenericCommandHandler{})            // 0x00 主机轮询完整指令
+	server.AddRouter(dny_protocol.CmdOrderConfirm, &GenericCommandHandler{})    // 0x04 充电端口订单确认
+	server.AddRouter(dny_protocol.CmdUpgradeRequest, &GenericCommandHandler{})  // 0x05 设备主动请求升级
+	server.AddRouter(dny_protocol.CmdParamSetting2, &GenericCommandHandler{})   // 0x84 设置运行参数1.2
+	server.AddRouter(dny_protocol.CmdMaxTimeAndPower, &GenericCommandHandler{}) // 0x85 设置最大充电时长、过载功率
+	server.AddRouter(dny_protocol.CmdModifyCharge, &GenericCommandHandler{})    // 0x8A 服务器修改充电时长/电量
+	server.AddRouter(dny_protocol.CmdRebootMain, &GenericCommandHandler{})      // 0x31 重启主机指令
+	server.AddRouter(dny_protocol.CmdRebootComm, &GenericCommandHandler{})      // 0x32 重启通讯模块
+	server.AddRouter(dny_protocol.CmdClearUpgrade, &GenericCommandHandler{})    // 0x33 清空升级分机数据
+	server.AddRouter(dny_protocol.CmdChangeIP, &GenericCommandHandler{})        // 0x34 更改IP地址
+	// 🔧 修复：移除重复的CmdDeviceVersion注册，已在第57行注册
+	// server.AddRouter(dny_protocol.CmdDeviceVersion, &GenericCommandHandler{})   // 0x35 上传分机版本号与设备类型
+	server.AddRouter(dny_protocol.CmdSetFSKParam, &GenericCommandHandler{})     // 0x3A 设置FSK主机参数及分机号
+	server.AddRouter(dny_protocol.CmdRequestFSKParam, &GenericCommandHandler{}) // 0x3B 请求服务器FSK主机参数
+	server.AddRouter(uint32(dny_protocol.CmdAlarm), &GenericCommandHandler{})   // 0x42 报警推送
 
 	// 十、固件升级相关（复杂功能，暂未实现）
 	// ----------------------------------------------------------------------------

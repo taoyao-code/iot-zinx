@@ -3,6 +3,7 @@ package handlers
 import (
 	"encoding/binary"
 	"fmt"
+	"sync"
 	"time"
 
 	"github.com/aceld/zinx/ziface"
@@ -18,6 +19,43 @@ import (
 // PowerHeartbeatHandler 处理功率心跳 (命令ID: 0x06)
 type PowerHeartbeatHandler struct {
 	protocol.DNYFrameHandlerBase
+	// 🔧 修复：添加心跳去重机制，解决重复请求导致的写缓冲区堆积
+	lastHeartbeatTime    map[string]time.Time // deviceID -> 最后心跳时间
+	heartbeatMutex       sync.RWMutex         // 保护心跳时间映射
+	minHeartbeatInterval time.Duration        // 最小心跳间隔，用于去重
+}
+
+// NewPowerHeartbeatHandler 创建功率心跳处理器
+func NewPowerHeartbeatHandler() *PowerHeartbeatHandler {
+	return &PowerHeartbeatHandler{
+		lastHeartbeatTime:    make(map[string]time.Time),
+		minHeartbeatInterval: 5 * time.Second, // 最小5秒间隔，防止频繁心跳
+	}
+}
+
+// shouldProcessHeartbeat 检查是否应该处理心跳（去重机制）
+func (h *PowerHeartbeatHandler) shouldProcessHeartbeat(deviceID string) bool {
+	h.heartbeatMutex.Lock()
+	defer h.heartbeatMutex.Unlock()
+
+	now := time.Now()
+	lastTime, exists := h.lastHeartbeatTime[deviceID]
+
+	if !exists || now.Sub(lastTime) >= h.minHeartbeatInterval {
+		h.lastHeartbeatTime[deviceID] = now
+		return true
+	}
+
+	// 记录被去重的心跳
+	logger.WithFields(logrus.Fields{
+		"deviceID":    deviceID,
+		"lastTime":    lastTime.Format(constants.TimeFormatDefault),
+		"currentTime": now.Format(constants.TimeFormatDefault),
+		"interval":    now.Sub(lastTime).String(),
+		"minInterval": h.minHeartbeatInterval.String(),
+	}).Debug("心跳被去重，间隔过短")
+
+	return false
 }
 
 // Handle 处理功率心跳包
@@ -52,7 +90,17 @@ func (h *PowerHeartbeatHandler) Handle(request ziface.IRequest) {
 	// 3. 从帧数据更新设备会话
 	h.UpdateDeviceSessionFromFrame(deviceSession, decodedFrame)
 
-	// 4. 处理功率心跳业务逻辑
+	// 4. 🔧 修复：心跳去重检查，避免频繁处理
+	physicalId := binary.LittleEndian.Uint32(decodedFrame.RawPhysicalID)
+	deviceID := fmt.Sprintf("%08X", physicalId)
+
+	if !h.shouldProcessHeartbeat(deviceID) {
+		// 心跳被去重，但仍需更新活动时间
+		network.UpdateConnectionActivity(conn)
+		return
+	}
+
+	// 5. 处理功率心跳业务逻辑
 	h.processPowerHeartbeat(decodedFrame, conn, deviceSession)
 }
 

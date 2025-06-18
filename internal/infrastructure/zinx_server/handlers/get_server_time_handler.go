@@ -3,6 +3,7 @@ package handlers
 import (
 	"encoding/binary"
 	"fmt"
+	"sync"
 	"time"
 
 	"github.com/aceld/zinx/ziface"
@@ -17,6 +18,43 @@ import (
 // GetServerTimeHandler 处理设备获取服务器时间请求 (命令ID: 0x22)
 type GetServerTimeHandler struct {
 	protocol.DNYFrameHandlerBase
+	// 🔧 修复：添加时间同步流控机制，解决频繁请求导致的写缓冲区堆积
+	lastSyncTime    map[string]time.Time // deviceID -> 最后同步时间
+	syncMutex       sync.RWMutex         // 保护同步时间映射
+	minSyncInterval time.Duration        // 最小同步间隔，用于流控
+}
+
+// NewGetServerTimeHandler 创建获取服务器时间处理器
+func NewGetServerTimeHandler() *GetServerTimeHandler {
+	return &GetServerTimeHandler{
+		lastSyncTime:    make(map[string]time.Time),
+		minSyncInterval: 30 * time.Second, // 最小30秒间隔，防止频繁时间同步
+	}
+}
+
+// shouldProcessTimeSync 检查是否应该处理时间同步（流控机制）
+func (h *GetServerTimeHandler) shouldProcessTimeSync(deviceID string) bool {
+	h.syncMutex.Lock()
+	defer h.syncMutex.Unlock()
+
+	now := time.Now()
+	lastTime, exists := h.lastSyncTime[deviceID]
+
+	if !exists || now.Sub(lastTime) >= h.minSyncInterval {
+		h.lastSyncTime[deviceID] = now
+		return true
+	}
+
+	// 记录被流控的时间同步请求
+	logger.WithFields(logrus.Fields{
+		"deviceID":    deviceID,
+		"lastTime":    lastTime.Format(constants.TimeFormatDefault),
+		"currentTime": now.Format(constants.TimeFormatDefault),
+		"interval":    now.Sub(lastTime).String(),
+		"minInterval": h.minSyncInterval.String(),
+	}).Debug("时间同步被流控，间隔过短")
+
+	return false
 }
 
 // Handle 处理获取服务器时间请求
@@ -51,7 +89,21 @@ func (h *GetServerTimeHandler) Handle(request ziface.IRequest) {
 	// 3. 从帧数据更新设备会话
 	h.UpdateDeviceSessionFromFrame(deviceSession, decodedFrame)
 
-	// 4. 处理获取服务器时间业务逻辑
+	// 4. 🔧 修复：时间同步流控检查，避免频繁处理
+	physicalId := binary.LittleEndian.Uint32(decodedFrame.RawPhysicalID)
+	deviceID := fmt.Sprintf("%08X", physicalId)
+
+	if !h.shouldProcessTimeSync(deviceID) {
+		// 时间同步被流控，发送上次缓存的时间或拒绝响应
+		logger.WithFields(logrus.Fields{
+			"connID":     conn.GetConnID(),
+			"deviceID":   deviceID,
+			"physicalID": fmt.Sprintf("0x%08X", physicalId),
+		}).Debug("时间同步请求被流控，跳过处理")
+		return
+	}
+
+	// 5. 处理获取服务器时间业务逻辑
 	h.processGetServerTime(decodedFrame, conn, deviceSession)
 }
 

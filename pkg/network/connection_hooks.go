@@ -81,19 +81,26 @@ func (ch *ConnectionHooks) OnConnectionStart(conn ziface.IConnection) {
 	now := time.Now()
 	ch.setConnectionInitialProperties(conn, now, remoteAddr) // 保留现有属性设置
 
-	// 初始化设备会话，统一管理连接状态
+	// 🔧 修复：使用统一状态管理，确保状态一致性
 	deviceSession := session.GetDeviceSession(conn)
 	if deviceSession != nil {
-		// 设置初始连接状态
-		deviceSession.UpdateState(constants.ConnStateAwaitingICCID)
-		deviceSession.UpdateStatus(constants.ConnStatusActive)
+		// 使用原子性状态更新方法
+		if err := deviceSession.UpdateStateAndSync(conn, constants.ConnStateAwaitingICCID, constants.ConnStatusActive); err != nil {
+			logger.WithFields(logrus.Fields{
+				"connID":     connID,
+				"remoteAddr": remoteAddr,
+				"error":      err,
+			}).Error("初始化设备会话状态失败")
+		}
+
+		// 更新心跳时间
 		deviceSession.UpdateHeartbeat()
 
 		// 直接设置会话字段（需要加锁访问）
 		deviceSession.SessionID = fmt.Sprintf("%d_%s", connID, remoteAddr)
 		deviceSession.ReconnectCount = 0
 
-		// 同步到连接属性（为了兼容性）
+		// 最终同步到连接属性（为了兼容性）
 		deviceSession.SyncToConnection(conn)
 	} else {
 		logger.WithFields(logrus.Fields{
@@ -120,6 +127,7 @@ func (ch *ConnectionHooks) OnConnectionStart(conn ziface.IConnection) {
 	ch.setupTCPParametersWithInitialDeadline(conn, now, initialReadDeadline)
 
 	// 记录连接信息
+	// 🔧 修复：增强连接建立日志，添加更多监控信息
 	logger.WithFields(logrus.Fields{
 		"connID":             connID,
 		"remoteAddr":         remoteAddr,
@@ -127,7 +135,11 @@ func (ch *ConnectionHooks) OnConnectionStart(conn ziface.IConnection) {
 		"connStatus":         constants.ConnStatusActive, // Zinx 连接层面是 active
 		"connState":          constants.ConnStateAwaitingICCID,
 		"initialReadTimeout": initialReadDeadline.String(),
-	}).Info("新连接已建立，设置初始读取超时，等待ICCID")
+		"writeTimeout":       ch.writeDeadLine.String(),
+		"keepAliveTimeout":   ch.keepAlivePeriod.String(),
+		"event":              "connection_established",
+		"phase":              "tcp_handshake_complete",
+	}).Info("🔗 新连接已建立，设置初始读取超时，等待ICCID")
 
 	// 调用自定义连接建立回调
 	if ch.onConnectionEstablished != nil {
@@ -306,14 +318,22 @@ func (ch *ConnectionHooks) OnConnectionStop(conn ziface.IConnection) {
 	connID := conn.GetConnID()
 	remoteAddr := conn.RemoteAddr().String()
 
-	// 通过DeviceSession管理连接状态
+	// 🔧 修复：使用统一状态管理处理连接断开
 	deviceSession := session.GetDeviceSession(conn)
 	if deviceSession != nil {
-		// 更新会话状态
-		deviceSession.UpdateStatus(constants.ConnStatusClosed)
+		// 使用原子性状态更新方法
+		if err := deviceSession.UpdateStateAndSync(conn, "", constants.ConnStatusClosed); err != nil {
+			logger.WithFields(logrus.Fields{
+				"connID":     connID,
+				"remoteAddr": remoteAddr,
+				"error":      err,
+			}).Error("更新连接断开状态失败")
+		}
+
+		// 更新断开时间
 		deviceSession.LastDisconnect = time.Now()
 
-		// 同步到连接属性（为了兼容性）
+		// 最终同步到连接属性（为了兼容性）
 		deviceSession.SyncToConnection(conn)
 	}
 
@@ -360,7 +380,7 @@ func (ch *ConnectionHooks) OnConnectionStop(conn ziface.IConnection) {
 		}
 	}
 
-	// 记录连接断开日志
+	// 🔧 修复：增强连接断开日志，添加更多诊断信息
 	logFields := logrus.Fields{
 		"deviceId":       deviceIdStr,
 		"remoteAddr":     remoteAddr,
@@ -368,6 +388,21 @@ func (ch *ConnectionHooks) OnConnectionStop(conn ziface.IConnection) {
 		"lastHeartbeat":  lastHeartbeatStr,
 		"timeSinceHeart": timeSinceHeart,
 		"connStatus":     constants.ConnStatusClosed,
+		"event":          "connection_disconnected",
+		"timestamp":      time.Now().Format(constants.TimeFormatDefault),
+	}
+
+	// 添加设备会话诊断信息
+	if deviceSession != nil {
+		logFields["sessionID"] = deviceSession.SessionID
+		logFields["deviceState"] = deviceSession.State
+		logFields["deviceStatus"] = deviceSession.Status
+		logFields["reconnectCount"] = deviceSession.ReconnectCount
+		logFields["sessionDuration"] = time.Since(deviceSession.ConnectedAt).String()
+
+		if !deviceSession.LastDisconnect.IsZero() {
+			logFields["lastDisconnect"] = deviceSession.LastDisconnect.Format(constants.TimeFormatDefault)
+		}
 	}
 
 	// 如果有物理ID，添加到日志字段

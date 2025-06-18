@@ -3,11 +3,14 @@ package session
 import (
 	"encoding/json"
 	"fmt"
+	"net"
 	"sync"
 	"time"
 
 	"github.com/aceld/zinx/ziface"
+	"github.com/bujia-iot/iot-zinx/internal/infrastructure/logger"
 	"github.com/bujia-iot/iot-zinx/pkg/constants"
+	"github.com/sirupsen/logrus"
 )
 
 // DeviceSession 设备会话管理器 - 替代散乱的SetProperty/GetProperty
@@ -159,12 +162,179 @@ func (s *DeviceSession) UpdateState(state string) {
 	s.LastActivityAt = time.Now()
 }
 
+// SetICCIDAndSync 原子性设置ICCID并同步到连接属性
+// 解决ICCID属性管理时序问题，确保设置和同步的原子性
+func (s *DeviceSession) SetICCIDAndSync(conn ziface.IConnection, iccid string) error {
+	if conn == nil {
+		return fmt.Errorf("连接为空")
+	}
+	if iccid == "" {
+		return fmt.Errorf("ICCID为空")
+	}
+
+	s.mutex.Lock()
+	defer s.mutex.Unlock()
+
+	// 原子性设置ICCID和相关状态
+	s.ICCID = iccid
+	s.DeviceID = iccid // 将ICCID也作为临时的DeviceId
+	s.State = constants.ConnStateICCIDReceived
+	s.LastActivityAt = time.Now()
+
+	// 立即同步到连接属性（Zinx的SetProperty不返回错误）
+	conn.SetProperty(constants.PropKeyICCID, s.ICCID)
+	conn.SetProperty(constants.PropKeyDeviceId, s.DeviceID)
+	conn.SetProperty(constants.PropKeyConnectionState, s.State)
+	conn.SetProperty(constants.PropKeyLastHeartbeat, s.LastActivityAt.Unix())
+	conn.SetProperty(constants.PropKeyLastHeartbeatStr, s.LastActivityAt.Format(constants.TimeFormatDefault))
+
+	// 验证ICCID是否成功写入
+	prop, err := conn.GetProperty(constants.PropKeyICCID)
+	if err != nil || prop == nil {
+		// 如果验证失败，回滚状态
+		s.ICCID = ""
+		s.DeviceID = ""
+		s.State = constants.ConnStateAwaitingICCID
+		return fmt.Errorf("验证ICCID属性写入失败: %v", err)
+	}
+
+	// 验证写入的值是否正确
+	if propValue, ok := prop.(string); !ok || propValue != iccid {
+		// 如果值不正确，回滚状态
+		s.ICCID = ""
+		s.DeviceID = ""
+		s.State = constants.ConnStateAwaitingICCID
+		return fmt.Errorf("ICCID属性值验证失败: 期望=%s, 实际=%v", iccid, prop)
+	}
+
+	return nil
+}
+
 // UpdateStatus 更新设备状态
 func (s *DeviceSession) UpdateStatus(status string) {
 	s.mutex.Lock()
 	defer s.mutex.Unlock()
 
 	s.Status = status
+}
+
+// UpdateStateAndSync 原子性更新状态并同步到所有相关管理器
+// 解决状态管理不一致问题，确保状态变更在所有管理器中同步
+func (s *DeviceSession) UpdateStateAndSync(conn ziface.IConnection, state string, status string) error {
+	if conn == nil {
+		return fmt.Errorf("连接为空")
+	}
+
+	s.mutex.Lock()
+	defer s.mutex.Unlock()
+
+	// 记录旧状态用于日志
+	oldState := s.State
+	oldStatus := s.Status
+
+	// 原子性更新状态
+	if state != "" {
+		s.State = state
+	}
+	if status != "" {
+		s.Status = status
+	}
+	s.LastActivityAt = time.Now()
+
+	// 立即同步到连接属性
+	if s.State != "" {
+		conn.SetProperty(constants.PropKeyConnectionState, s.State)
+	}
+	if s.Status != "" {
+		conn.SetProperty(constants.PropKeyConnStatus, s.Status)
+	}
+	conn.SetProperty(constants.PropKeyLastHeartbeat, s.LastActivityAt.Unix())
+	conn.SetProperty(constants.PropKeyLastHeartbeatStr, s.LastActivityAt.Format(constants.TimeFormatDefault))
+
+	// 记录状态变更日志
+	logger.WithFields(logrus.Fields{
+		"connID":    conn.GetConnID(),
+		"deviceID":  s.DeviceID,
+		"oldState":  oldState,
+		"newState":  s.State,
+		"oldStatus": oldStatus,
+		"newStatus": s.Status,
+	}).Debug("DeviceSession: 状态已原子性更新并同步")
+
+	return nil
+}
+
+// CheckWriteBufferHealth 检查写缓冲区健康状态
+// 解决写缓冲区堆积导致的写超时问题
+func (s *DeviceSession) CheckWriteBufferHealth(conn ziface.IConnection) (bool, error) {
+	if conn == nil {
+		return false, fmt.Errorf("连接为空")
+	}
+
+	s.mutex.RLock()
+	defer s.mutex.RUnlock()
+
+	// 检查连接是否仍然有效
+	if s.connection != conn {
+		return false, fmt.Errorf("连接不匹配")
+	}
+
+	// 获取TCP连接进行缓冲区检查
+	_, ok := conn.GetTCPConnection().(*net.TCPConn)
+	if !ok {
+		return false, fmt.Errorf("无法获取TCP连接")
+	}
+
+	// 检查连接状态
+	if s.Status != constants.DeviceStatusOnline {
+		return false, fmt.Errorf("设备不在线")
+	}
+
+	// 检查最后活动时间，如果太久没有活动可能表示写缓冲区有问题
+	now := time.Now()
+	if now.Sub(s.LastActivityAt) > 5*time.Minute {
+		logger.WithFields(logrus.Fields{
+			"connID":       conn.GetConnID(),
+			"deviceID":     s.DeviceID,
+			"lastActivity": s.LastActivityAt.Format(constants.TimeFormatDefault),
+			"inactiveTime": now.Sub(s.LastActivityAt).String(),
+		}).Warn("设备长时间无活动，可能存在写缓冲区问题")
+		return false, fmt.Errorf("设备长时间无活动")
+	}
+
+	return true, nil
+}
+
+// ForceDisconnectIfUnhealthy 如果连接不健康则强制断开
+// 用于处理写缓冲区堆积等问题
+func (s *DeviceSession) ForceDisconnectIfUnhealthy(conn ziface.IConnection, reason string) error {
+	if conn == nil {
+		return fmt.Errorf("连接为空")
+	}
+
+	s.mutex.Lock()
+	defer s.mutex.Unlock()
+
+	// 更新状态为强制断开
+	s.Status = constants.ConnStatusClosed
+	s.LastDisconnect = time.Now()
+
+	// 记录强制断开日志
+	logger.WithFields(logrus.Fields{
+		"connID":     conn.GetConnID(),
+		"deviceID":   s.DeviceID,
+		"reason":     reason,
+		"remoteAddr": conn.RemoteAddr().String(),
+	}).Warn("强制断开不健康连接")
+
+	// 同步状态到连接属性
+	conn.SetProperty(constants.PropKeyConnStatus, s.Status)
+	conn.SetProperty(constants.PropKeyLastHeartbeat, s.LastDisconnect.Unix())
+
+	// 强制关闭连接
+	conn.Stop()
+
+	return nil
 }
 
 // SetPhysicalID 设置物理ID
