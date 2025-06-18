@@ -285,8 +285,8 @@ func (s *DeviceSession) CheckWriteBufferHealth(conn ziface.IConnection) (bool, e
 		return false, fmt.Errorf("无法获取TCP连接")
 	}
 
-	// 检查连接状态
-	if s.Status != constants.DeviceStatusOnline {
+	// 检查连接状态 - 支持online和active_registered状态
+	if s.Status != constants.DeviceStatusOnline && s.Status != constants.ConnStateActive {
 		return false, fmt.Errorf("设备不在线")
 	}
 

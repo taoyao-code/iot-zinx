@@ -28,7 +28,7 @@ const (
 // 连接状态常量
 const (
 	// ConnStatusActive 连接活跃状态 - 与设备在线状态对应
-	ConnStatusActive = "active" // 对应 DeviceStatusOnline
+	ConnStatusActive = "active_registered" // 设备注册后的活跃状态
 	// ConnStatusInactive 连接非活跃状态
 	ConnStatusInactive = "inactive"
 	// ConnStatusClosed 连接已关闭状态 - 与设备离线状态对应
