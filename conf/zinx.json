@@ -8,5 +8,16 @@
   "LogDir": "./logs",
   "LogFile": "zinx.log",
   "LogIsolationLevel": 0,
-  "Mode": "tcp"
+  "Mode": "tcp",
+  "TCPWriteTimeout": "60s",
+  "TCPReadTimeout": "300s",
+  "SendBufferSize": 131072,
+  "ReceiveBufferSize": 131072,
+  "KeepAlive": true,
+  "KeepAlivePeriod": "30s",
+  "TCPNoDelay": true,
+  "SendQueueSize": 1024,
+  "ReadQueueSize": 1024,
+  "WriteChannelBuffer": 512,
+  "ReadChannelBuffer": 512
 }
