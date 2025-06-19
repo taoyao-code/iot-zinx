@@ -132,11 +132,11 @@ func (s *DeviceService) GetAllDevices() []DeviceInfo {
 
 	s.deviceStatus.Range(func(key, value interface{}) bool {
 		deviceId := key.(string)
-		status := value.(string)
+		status := value.(constants.DeviceStatus)
 
 		device := DeviceInfo{
 			DeviceID: deviceId,
-			Status:   status,
+			Status:   string(status),
 		}
 
 		// 获取最后更新时间
