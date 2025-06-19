@@ -1,8 +1,6 @@
 package http
 
-import (
-	"github.com/bujia-iot/iot-zinx/internal/app/service"
-)
+import "github.com/bujia-iot/iot-zinx/internal/app/service"
 
 // HandlerContext HTTP处理器上下文
 // 包含处理器需要的所有依赖，通过依赖注入提供

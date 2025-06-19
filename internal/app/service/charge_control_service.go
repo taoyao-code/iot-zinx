@@ -3,6 +3,7 @@ package service
 import (
 	"fmt"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/aceld/zinx/ziface"
@@ -52,20 +53,39 @@ func (s *ChargeControlService) SendChargeControlCommand(req *dto.ChargeControlRe
 		return fmt.Errorf("请求参数验证失败: %w", err)
 	}
 
+	// 🔧 设备ID格式转换：将简单十六进制格式转换为内部格式
+	internalDeviceID := s.convertToInternalDeviceID(req.DeviceID)
+
 	// 🔧 使用设备状态检查器检查设备是否在线
 	if s.deviceChecker != nil {
-		if !s.deviceChecker.IsDeviceOnline(req.DeviceID) {
+		isOnline := s.deviceChecker.IsDeviceOnline(internalDeviceID)
+		logger.WithFields(logrus.Fields{
+			"originalDeviceId": req.DeviceID,
+			"internalDeviceId": internalDeviceID,
+			"isOnline":         isOnline,
+			"method":           "deviceChecker",
+		}).Info("设备在线状态检查")
+
+		if !isOnline {
 			return fmt.Errorf("设备 %s 不在线", req.DeviceID)
 		}
 	} else {
 		// 备选方案：使用TCP监控器检查连接
-		if _, exists := s.monitor.GetConnectionByDeviceId(req.DeviceID); !exists {
+		_, exists := s.monitor.GetConnectionByDeviceId(internalDeviceID)
+		logger.WithFields(logrus.Fields{
+			"originalDeviceId": req.DeviceID,
+			"internalDeviceId": internalDeviceID,
+			"exists":           exists,
+			"method":           "monitor",
+		}).Info("设备连接状态检查")
+
+		if !exists {
 			return fmt.Errorf("设备 %s 不在线", req.DeviceID)
 		}
 	}
 
 	// 获取设备连接进行命令发送
-	conn, exists := s.monitor.GetConnectionByDeviceId(req.DeviceID)
+	conn, exists := s.monitor.GetConnectionByDeviceId(internalDeviceID)
 	if !exists {
 		return fmt.Errorf("设备 %s 连接不可用", req.DeviceID)
 	}
@@ -826,4 +846,51 @@ func (s *ChargeControlService) initiateRefund(response *dto.ChargeControlRespons
 	// return s.refundService.ProcessRefund(refundRequest)
 
 	return nil
+}
+
+// convertToInternalDeviceID 将API使用的简单十六进制设备ID转换为内部使用的格式
+// 输入格式：04A228CD (8位十六进制)
+// 输出格式：04-13544000 (设备识别码-设备编号十进制)
+func (s *ChargeControlService) convertToInternalDeviceID(apiDeviceID string) string {
+	// 如果已经是内部格式（包含连字符），直接返回
+	if strings.Contains(apiDeviceID, "-") {
+		return apiDeviceID
+	}
+
+	// 解析十六进制设备ID
+	if len(apiDeviceID) != 8 {
+		logger.WithField("deviceId", apiDeviceID).Warn("设备ID格式不正确，长度应为8位十六进制")
+		return apiDeviceID
+	}
+
+	physicalID, err := strconv.ParseUint(apiDeviceID, 16, 32)
+	if err != nil {
+		logger.WithFields(logrus.Fields{
+			"deviceId": apiDeviceID,
+			"error":    err.Error(),
+		}).Warn("设备ID十六进制解析失败")
+		return apiDeviceID
+	}
+
+	// 转换为小端字节序（模拟原始数据格式）
+	rawBytes := make([]byte, 4)
+	rawBytes[0] = byte(physicalID)
+	rawBytes[1] = byte(physicalID >> 8)
+	rawBytes[2] = byte(physicalID >> 16)
+	rawBytes[3] = byte(physicalID >> 24)
+
+	// 应用与formatPhysicalID相同的转换逻辑
+	deviceCode := rawBytes[3] // 设备识别码
+	deviceNumber := uint32(rawBytes[0]) | uint32(rawBytes[1])<<8 | uint32(rawBytes[2])<<16
+
+	internalID := fmt.Sprintf("%02X-%d", deviceCode, deviceNumber)
+
+	logger.WithFields(logrus.Fields{
+		"apiDeviceId":      apiDeviceID,
+		"internalDeviceId": internalID,
+		"deviceCode":       fmt.Sprintf("%02X", deviceCode),
+		"deviceNumber":     deviceNumber,
+	}).Debug("设备ID格式转换")
+
+	return internalID
 }

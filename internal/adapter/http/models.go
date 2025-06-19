@@ -59,19 +59,6 @@ type DNYCommandResponse struct {
 	ReplyLength int    `json:"replyLength,omitempty" example:"1"` // 回复数据长度
 }
 
-// ChargingStartRequest 开始充电请求
-// @Description 开始充电的请求参数
-type ChargingStartRequest struct {
-	DeviceID    string  `json:"deviceId" binding:"required" example:"04ceaa40"` // 设备ID
-	PortNumber  int     `json:"portNumber" binding:"required" example:"1"`      // 端口号
-	Duration    int     `json:"duration" example:"3600"`                        // 充电时长(秒)
-	Amount      float64 `json:"amount" example:"10.00"`                         // 充电金额
-	OrderNumber string  `json:"orderNumber" example:"ORDER123456789"`           // 订单号
-	PaymentType int     `json:"paymentType" example:"1"`                        // 支付方式
-	RateMode    int     `json:"rateMode" example:"1"`                           // 费率模式
-	MaxPower    int     `json:"maxPower" example:"2200"`                        // 最大功率(W)
-}
-
 // ChargingStopRequest 停止充电请求
 // @Description 停止充电的请求参数
 type ChargingStopRequest struct {

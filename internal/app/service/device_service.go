@@ -232,12 +232,23 @@ func (s *DeviceService) GetDeviceConnection(deviceID string) (ziface.IConnection
 func (s *DeviceService) IsDeviceOnline(deviceID string) bool {
 	// 🔧 优先使用设备服务的业务状态（准确状态）
 	status, exists := s.GetDeviceStatus(deviceID)
+	logger.WithFields(logrus.Fields{
+		"deviceId":       deviceID,
+		"businessStatus": status,
+		"businessExists": exists,
+	}).Info("检查设备业务状态")
+
 	if exists && status == string(constants.DeviceStatusOnline) {
 		return true
 	}
 
 	// 如果业务状态不存在或为离线，再检查TCP连接状态作为备选
 	_, connExists := s.GetDeviceConnection(deviceID)
+	logger.WithFields(logrus.Fields{
+		"deviceId":   deviceID,
+		"connExists": connExists,
+	}).Info("检查设备TCP连接状态")
+
 	return connExists
 }
 
