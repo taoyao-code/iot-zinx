@@ -1,148 +1,65 @@
 // Package constants 定义了项目中使用的各种常量
 package constants
 
-// 设备状态常量
+// ConnStatus 定义了 TCP 连接本身的状态
+type ConnStatus string
+
+// DeviceStatus 定义了逻辑设备的状态
+type DeviceStatus string
+
+// 🔧 新增：连接属性键，用于在 Zinx 的 IConnection 中安全地存取属性
 const (
-	// DeviceStatusOnline 设备在线状态
-	DeviceStatusOnline = "online"
-	// DeviceStatusOffline 设备离线状态
-	DeviceStatusOffline = "offline"
-	// DeviceStatusReconnecting 设备重连中状态
-	DeviceStatusReconnecting = "reconnecting"
-	// DeviceStatusUnknown 设备未知状态
-	DeviceStatusUnknown = "unknown"
+	PropKeyConnStatus          = "connState"        // 连接状态 (建议使用 PropKeyConnectionState)
+	PropKeyDeviceStatus        = "deviceStatus"     // 设备状态
+	PropKeyDeviceId            = "deviceId"         // 设备ID
+	PropKeyICCID               = "iccid"            // ICCID
+	PropKeyPhysicalId          = "physicalId"       // 物理ID
+	PropKeyConnectionState     = "connState"        // 连接状态
+	PropKeyLastHeartbeat       = "lastHeartbeat"    // 最后心跳时间 (Unix timestamp)
+	PropKeyLastHeartbeatStr    = "lastHeartbeatStr" // 最后心跳时间 (字符串格式)
+	PropKeyReconnectCount      = "reconnectCount"   // 重连次数
+	PropKeySessionID           = "sessionID"        // 会话ID
+	PropKeyDeviceSession       = "deviceSession"    // 设备会话对象
+	PropKeyDeviceSessionPrefix = "session:"         // 设备会话在Redis中的存储前缀
 )
 
-// 会话状态常量 - 用于 DeviceSession.Status 字段
+// 🔧 新增：函数类型定义，用于回调和依赖注入
+type UpdateDeviceStatusFuncType func(deviceID string, status DeviceStatus) error
+
+// 🔧 新增：连接状态常量（补充）
 const (
-	// SessionStatusActive 会话活跃状态（等同于设备在线）
-	SessionStatusActive = DeviceStatusOnline
-	// SessionStatusSuspended 会话挂起状态（设备断开但允许重连）
-	SessionStatusSuspended = DeviceStatusReconnecting
-	// SessionStatusExpired 会话过期状态（设备离线）
-	SessionStatusExpired = DeviceStatusOffline
-	// SessionStatusUnknown 会话未知状态
-	SessionStatusUnknown = DeviceStatusUnknown
+	ConnStatusInactive     ConnStatus = "inactive"       // 连接不活跃
+	ConnStatusActive       ConnStatus = "active"         // 通用活跃状态
+	ConnStateAwaitingICCID ConnStatus = "awaiting_iccid" // 等待ICCID（别名）
 )
 
-// 连接状态常量
+// 🔧 新增：时间格式化常量
 const (
-	// ConnStatusActive 连接活跃状态 - 与设备在线状态对应
-	ConnStatusActive = "active_registered" // 设备注册后的活跃状态
-	// ConnStatusInactive 连接非活跃状态
-	ConnStatusInactive = "inactive"
-	// ConnStatusClosed 连接已关闭状态 - 与设备离线状态对应
-	ConnStatusClosed = "closed" // 对应 DeviceStatusOffline
-	// ConnStatusSuspended 连接挂起状态(用于连接恢复)
-	ConnStatusSuspended = "suspended"
+	TimeFormatDefault = "2006-01-02 15:04:05"
 )
 
-// 连接属性键常量
 const (
-	// PropKeyDeviceId 设备ID属性键
-	PropKeyDeviceId = "device_id"
-	// PropKeyICCID ICCID属性键
-	PropKeyICCID = "iccid"
-	// PropKeySimCardNumber SIM卡号属性键
-	PropKeySimCardNumber = "sim_card_number"
-	// PropKeyLastHeartbeat 最后心跳时间属性键
-	PropKeyLastHeartbeat = "last_heartbeat"
-	// PropKeyLastHeartbeatStr 最后心跳时间字符串属性键
-	PropKeyLastHeartbeatStr = "last_heartbeat_str"
-	// PropKeyConnStatus 连接状态属性键
-	PropKeyConnStatus = "conn_status"
-	// PropKeyConnectionState 连接的详细状态，用于更精细的控制
-	PropKeyConnectionState = "connection_state"
-	// PropKeyPhysicalId 设备物理ID属性键（例如DNY协议中的设备ID）
-	PropKeyPhysicalId = "physical_id"
-	// PropKeyDNYMessageID DNY消息ID属性键
-	PropKeyDNYMessageID = "dny_message_id"
-	// PropKeyDNYChecksumValid DNY校验和有效性属性键
-	PropKeyDNYChecksumValid = "dny_checksum_valid"
-	// PropKeyDNYRawData DNY原始数据属性键
-	PropKeyDNYRawData = "dny_raw_data"
-	// PropKeyDNYParseError DNY解析错误信息属性键
-	PropKeyDNYParseError = "dny_parse_error"
-	// PropKeyNotDNYMessage 非DNY消息标识属性键
-	PropKeyNotDNYMessage = "not_dny_message"
-	// PropKeyLastLink 最后链接时间属性键
-	PropKeyLastLink = "last_link"
-	// PropKeySessionID 会话ID属性键
-	PropKeySessionID = "session_id"
-	// PropKeyReconnectCount 重连次数属性键
-	PropKeyReconnectCount = "reconnect_count"
-	// PropKeyLastDisconnectTime 上次断开时间属性键
-	PropKeyLastDisconnectTime = "last_disconnect_time"
-	// PropKeyStatus 设备状态属性键
-	PropKeyStatus = "status"
-	// PropKeyDirectMode 直连模式属性键
-	PropKeyDirectMode = "direct_mode"
-	// PropKeyDeviceType 设备类型属性键
-	PropKeyDeviceType = "device_type"
-	// PropKeyDeviceVersion 设备版本属性键
-	PropKeyDeviceVersion = "device_version"
-	// PropKeyDeviceSessionPrefix 设备会话存储键前缀
-	PropKeyDeviceSessionPrefix = "device_session_"
+	// 连接状态 (ConnStatus)
+	ConnStatusConnected        ConnStatus = "connected"         // TCP 连接已建立，等待设备发送任何数据
+	ConnStatusAwaitingICCID    ConnStatus = "awaiting_iccid"    // 已收到数据，但不是注册包，等待 ICCID
+	ConnStatusICCIDReceived    ConnStatus = "iccid_received"    // 已收到 ICCID，等待设备注册
+	ConnStatusActiveRegistered ConnStatus = "active_registered" // 设备已注册，但尚未收到首次心跳
+	ConnStatusOnline           ConnStatus = "online"            // 设备已注册且心跳正常，完全在线
+	ConnStatusClosed           ConnStatus = "closed"            // 连接已关闭
 
-	// ConnectionPropertyKeys 连接属性键 - 用于conn.SetProperty/GetProperty
-	// ConnPropertyDeviceCode 设备识别码属性键
-	ConnPropertyDeviceCode = "device_code"
-	// ConnPropertyDeviceNumber 设备编号属性键
-	ConnPropertyDeviceNumber = "device_number"
-	// ConnPropertyICCIDReceived ICCID接收状态属性键
-	ConnPropertyICCIDReceived = "iccid_received"
-	// ConnPropertyLastHeartbeatType 最后心跳类型属性键
-	ConnPropertyLastHeartbeatType = "last_heartbeat_type"
-	// ConnPropertyLastParseError 最后解析错误属性键
-	ConnPropertyLastParseError = "last_parse_error"
-	// ConnPropertyMainHeartbeatTime 主心跳时间属性键
-	ConnPropertyMainHeartbeatTime = "main_heartbeat_time"
-	// ConnPropertyDisconnectReason 断开连接原因属性键
-	ConnPropertyDisconnectReason = "disconnect_reason"
-	// ConnPropertyCloseReason 关闭原因属性键
-	ConnPropertyCloseReason = "close_reason"
+	// 设备状态 (DeviceStatus) - 通常与会话关联
+	DeviceStatusOffline      DeviceStatus = "offline"      // 设备离线
+	DeviceStatusOnline       DeviceStatus = "online"       // 设备在线 (通常在首次心跳后设置)
+	DeviceStatusReconnecting DeviceStatus = "reconnecting" // 设备正在重连过程中
+	DeviceStatusUnknown      DeviceStatus = "unknown"      // 设备状态未知
 )
 
-// 连接详细状态常量
-const (
-	// ConnStateAwaitingICCID 连接已建立，等待设备发送ICCID
-	ConnStateAwaitingICCID = "awaiting_iccid"
-	// ConnStateICCIDReceived 已收到ICCID，等待设备发送DNY注册包或其他业务包
-	ConnStateICCIDReceived = "iccid_received"
-	// ConnStateActive 连接活跃，设备已完成ICCID识别和DNY注册（如果适用）
-	ConnStateActive = "active_registered"
-)
-
-// 时间格式常量
-const (
-	// TimeFormatDefault 默认时间格式 (2006-01-02 15:04:05.000)
-	TimeFormatDefault = "2006-01-02 15:04:05.000"
-	// TimeFormatDate 日期格式 (2006-01-02)
-	TimeFormatDate = "2006-01-02"
-	// TimeFormatTime 时间格式 (15:04:05)
-	TimeFormatTime = "15:04:05"
-	// TimeFormatDateTime 日期时间格式 (2006-01-02 15:04:05)
-	TimeFormatDateTime = "2006-01-02 15:04:05"
-)
-
-// 设备状态与连接状态映射
-var (
-	// DeviceStatusToConnStatus 设备状态到连接状态的映射
-	DeviceStatusToConnStatus = map[string]string{
-		DeviceStatusOnline:       ConnStatusActive,
-		DeviceStatusOffline:      ConnStatusClosed,
-		DeviceStatusReconnecting: ConnStatusSuspended,
-		DeviceStatusUnknown:      ConnStatusInactive,
+// IsConsideredActive 检查一个连接状态是否被认为是“活跃”的（即已注册或在线）
+func (cs ConnStatus) IsConsideredActive() bool {
+	switch cs {
+	case ConnStatusActiveRegistered, ConnStatusOnline:
+		return true
+	default:
+		return false
 	}
-
-	// ConnStatusToDeviceStatus 连接状态到设备状态的映射
-	ConnStatusToDeviceStatus = map[string]string{
-		ConnStatusActive:    DeviceStatusOnline,
-		ConnStatusClosed:    DeviceStatusOffline,
-		ConnStatusSuspended: DeviceStatusReconnecting,
-		ConnStatusInactive:  DeviceStatusUnknown,
-	}
-)
-
-// 设备状态更新函数类型
-type UpdateDeviceStatusFuncType func(deviceID string, status string)
+}

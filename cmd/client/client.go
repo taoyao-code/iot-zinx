@@ -134,9 +134,9 @@ func (c *TestClient) ConnectOnly() error {
 			c.logger.GetLogger().WithError(err).Warn("⚠️ 分机发送ICCID失败，但将继续")
 		} else {
 			c.logger.GetLogger().WithFields(logrus.Fields{
-				"iccid":                     c.config.ICCID,
-				"deviceId":                  fmt.Sprintf("0x%08X", c.config.PhysicalID),
-				constants.PropKeyDirectMode: true,
+				"iccid":      c.config.ICCID,
+				"deviceId":   fmt.Sprintf("0x%08X", c.config.PhysicalID),
+				"directMode": true,
 			}).Info("✅ 分机发送ICCID成功（直连模式）")
 		}
 		time.Sleep(1 * time.Second)

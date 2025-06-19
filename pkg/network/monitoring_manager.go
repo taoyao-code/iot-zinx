@@ -187,7 +187,8 @@ func (mm *MonitoringManager) CheckConnectionHealth(conn ziface.IConnection, devi
 		}
 	}
 
-	return mm.healthChecker.CheckConnectionHealth(conn, deviceID)
+	result := mm.healthChecker.checkConnection(conn, deviceID)
+	return &result
 }
 
 // GetStats 获取监控统计信息

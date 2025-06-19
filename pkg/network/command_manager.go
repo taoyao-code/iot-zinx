@@ -749,8 +749,15 @@ func isConnectionActive(conn ziface.IConnection) bool {
 
 	// 检查连接状态
 	if val, err := conn.GetProperty(constants.PropKeyConnStatus); err == nil && val != nil {
-		status := val.(string)
-		return status != constants.ConnStatusClosed && status != constants.ConnStatusInactive
+		var connStatus constants.ConnStatus
+		if s, ok := val.(constants.ConnStatus); ok {
+			connStatus = s
+		} else if s, ok := val.(string); ok {
+			connStatus = constants.ConnStatus(s) // 兼容旧的字符串类型
+		} else {
+			return false // 状态类型不正确，认为连接无效
+		}
+		return connStatus != constants.ConnStatusClosed && connStatus != constants.ConnStatusInactive
 	}
 
 	// 无法确定状态时保守处理，认为连接有效

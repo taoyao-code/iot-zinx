@@ -1,13 +1,13 @@
 package network
 
 import (
+	"fmt"
 	"sync"
 	"time"
 
 	"github.com/aceld/zinx/ziface"
 	"github.com/bujia-iot/iot-zinx/internal/infrastructure/logger"
 	"github.com/bujia-iot/iot-zinx/pkg/constants"
-	"github.com/bujia-iot/iot-zinx/pkg/session"
 	"github.com/sirupsen/logrus"
 )
 
@@ -118,8 +118,7 @@ func (chc *ConnectionHealthChecker) healthCheckLoop() {
 	}
 }
 
-// performHealthCheck 执行健康检查
-// 🔧 修复：实现完整的健康检查逻辑，通过回调函数获取连接列表
+// performHealthCheck 执行所有连接的健康检查
 func (chc *ConnectionHealthChecker) performHealthCheck() {
 	if !chc.enabled {
 		return
@@ -166,62 +165,72 @@ func (chc *ConnectionHealthChecker) performHealthCheck() {
 	}
 }
 
-// CheckConnectionHealth 检查单个连接的健康状态
-func (chc *ConnectionHealthChecker) CheckConnectionHealth(conn ziface.IConnection, deviceID string) *HealthCheckResult {
-	if conn == nil {
-		return &HealthCheckResult{
-			IsHealthy: false,
-			Issues:    []string{"连接为空"},
+// checkConnection 检查单个连接的健康状态
+// 🔧 状态重构：移除对 session 包的依赖，直接操作连接属性
+func (chc *ConnectionHealthChecker) checkConnection(conn ziface.IConnection, deviceID string) HealthCheckResult {
+	result := HealthCheckResult{
+		ConnID:    conn.GetConnID(),
+		DeviceID:  deviceID,
+		IsHealthy: true,
+	}
+	if conn.RemoteAddr() != nil {
+		result.RemoteAddr = conn.RemoteAddr().String()
+	}
+
+	// 1. 检查连接状态
+	var connState constants.ConnStatus
+	state, err := conn.GetProperty(constants.PropKeyConnectionState)
+	if err != nil {
+		result.IsHealthy = false
+		result.Issues = append(result.Issues, "获取连接状态失败")
+	} else {
+		if s, ok := state.(constants.ConnStatus); ok {
+			connState = s
+		} else if s, ok := state.(string); ok {
+			connState = constants.ConnStatus(s) // 兼容旧的字符串类型
+		} else {
+			result.IsHealthy = false
+			result.Issues = append(result.Issues, fmt.Sprintf("连接状态类型不正确: %T", state))
+		}
+
+		// 核心判断：使用辅助函数检查状态是否活跃
+		if result.IsHealthy && !connState.IsConsideredActive() {
+			result.IsHealthy = false
+			result.Issues = append(result.Issues, fmt.Sprintf("设备状态异常: %s", connState))
+			result.Recommendations = append(result.Recommendations, "检查设备连接状态")
 		}
 	}
 
-	result := &HealthCheckResult{
-		ConnID:          conn.GetConnID(),
-		DeviceID:        deviceID,
-		RemoteAddr:      conn.RemoteAddr().String(),
-		IsHealthy:       true,
-		Issues:          make([]string, 0),
-		Recommendations: make([]string, 0),
-	}
-
-	// 获取设备会话
-	deviceSession := session.GetDeviceSession(conn)
-	if deviceSession == nil {
+	// 2. 检查最后活动时间
+	lastActivity, err := conn.GetProperty(constants.PropKeyLastHeartbeat)
+	if err != nil {
 		result.IsHealthy = false
-		result.Issues = append(result.Issues, "无法获取设备会话")
-		result.Recommendations = append(result.Recommendations, "检查设备会话管理器")
-		return result
+		result.Issues = append(result.Issues, "获取最后活动时间失败")
+	} else {
+		if t, ok := lastActivity.(time.Time); ok {
+			result.LastActivity = t
+			result.InactiveTime = time.Since(t)
+
+			if result.InactiveTime > chc.unhealthyThreshold {
+				result.IsHealthy = false
+				result.Issues = append(result.Issues, "长时间无活动")
+				result.Recommendations = append(result.Recommendations, "检查设备心跳机制")
+			}
+		} else {
+			result.IsHealthy = false
+			result.Issues = append(result.Issues, "最后活动时间格式不正确")
+		}
 	}
 
-	// 检查最后活动时间
-	result.LastActivity = deviceSession.LastActivityAt
-	result.InactiveTime = time.Since(result.LastActivity)
-
-	if result.InactiveTime > chc.unhealthyThreshold {
-		result.IsHealthy = false
-		result.Issues = append(result.Issues, "长时间无活动")
-		result.Recommendations = append(result.Recommendations, "检查设备心跳机制")
+	// 3. 检查ICCID是否存在（仅在设备注册后）
+	if connState.IsConsideredActive() {
+		if iccid, err := conn.GetProperty(constants.PropKeyICCID); err != nil || iccid == "" {
+			result.Issues = append(result.Issues, "ICCID未设置")
+			result.Recommendations = append(result.Recommendations, "等待设备发送ICCID")
+		}
 	}
 
-	// 检查连接状态
-	if deviceSession.Status != constants.DeviceStatusOnline {
-		result.IsHealthy = false
-		result.Issues = append(result.Issues, "设备状态异常: "+deviceSession.Status)
-		result.Recommendations = append(result.Recommendations, "检查设备连接状态")
-	}
-
-	// 检查写缓冲区健康状态
-	if healthy, err := deviceSession.CheckWriteBufferHealth(conn); !healthy {
-		result.IsHealthy = false
-		result.Issues = append(result.Issues, "写缓冲区不健康: "+err.Error())
-		result.Recommendations = append(result.Recommendations, "检查网络连接质量")
-	}
-
-	// 检查ICCID是否存在
-	if deviceSession.ICCID == "" {
-		result.Issues = append(result.Issues, "ICCID未设置")
-		result.Recommendations = append(result.Recommendations, "等待设备发送ICCID")
-	}
+	// 4. 写缓冲区健康状态由独立的 writeBufferMonitor 负责，这里不再重复检查
 
 	return result
 }
@@ -240,8 +249,8 @@ func (chc *ConnectionHealthChecker) CheckConnections(connections map[string]zifa
 			continue
 		}
 
-		result := chc.CheckConnectionHealth(conn, deviceID)
-		results = append(results, result)
+		result := chc.checkConnection(conn, deviceID) // 🔧 修复：调用正确的内部方法
+		results = append(results, &result)            // 🔧 修复：追加指针类型
 
 		if !result.IsHealthy {
 			unhealthyCount++

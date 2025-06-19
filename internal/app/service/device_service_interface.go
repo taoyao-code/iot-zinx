@@ -3,6 +3,7 @@ package service
 import (
 	"github.com/aceld/zinx/ziface"
 	"github.com/bujia-iot/iot-zinx/internal/domain/dny_protocol"
+	"github.com/bujia-iot/iot-zinx/pkg/constants"
 )
 
 // DeviceServiceInterface 设备服务接口
@@ -19,7 +20,7 @@ type DeviceServiceInterface interface {
 	GetAllDevices() []DeviceInfo
 
 	// HandleDeviceStatusUpdate 处理设备状态更新
-	HandleDeviceStatusUpdate(deviceId string, status string)
+	HandleDeviceStatusUpdate(deviceId string, status constants.DeviceStatus)
 
 	// ===============================
 	// 设备连接管理接口

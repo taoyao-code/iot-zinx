@@ -11,7 +11,6 @@ import (
 
 	"github.com/bujia-iot/iot-zinx/internal/domain/dny_protocol" // 引入统一消息结构
 	"github.com/bujia-iot/iot-zinx/internal/infrastructure/logger"
-	"github.com/bujia-iot/iot-zinx/pkg/constants"
 	"github.com/bujia-iot/iot-zinx/pkg/session"
 )
 
@@ -90,7 +89,7 @@ func (h *DNYFrameHandlerBase) UpdateDeviceSessionFromUnifiedMessage(deviceSessio
 		// 更新ICCID信息
 		if msg.ICCIDValue != "" {
 			deviceSession.ICCID = msg.ICCIDValue
-			deviceSession.SetProperty(constants.ConnPropertyICCIDReceived, true)
+			// ICCID已存储在deviceSession中，无需额外标志位
 		}
 		// ICCID消息也可能意味着设备活动
 		deviceSession.UpdateHeartbeat()
@@ -98,7 +97,7 @@ func (h *DNYFrameHandlerBase) UpdateDeviceSessionFromUnifiedMessage(deviceSessio
 	case "heartbeat_link":
 		// 更新心跳信息
 		deviceSession.UpdateHeartbeat()
-		deviceSession.SetProperty(constants.ConnPropertyLastHeartbeatType, "link")
+		// 心跳类型信息已通过UpdateHeartbeat记录
 
 	case "error":
 		// 错误帧通常不直接更新会话的业务信息，但可以记录或更新最后活动时间
@@ -189,12 +188,12 @@ func (h *DNYFrameHandlerBase) UpdateDeviceSessionFromFrame(deviceSession *sessio
 	case FrameTypeICCID:
 		if frame.ICCIDValue != "" {
 			deviceSession.ICCID = frame.ICCIDValue
-			deviceSession.SetProperty(constants.ConnPropertyICCIDReceived, true)
+			// ICCID已存储在deviceSession中，无需额外标志位
 		}
 		deviceSession.UpdateHeartbeat()
 	case FrameTypeLinkHeartbeat:
 		deviceSession.UpdateHeartbeat()
-		deviceSession.SetProperty(constants.ConnPropertyLastHeartbeatType, "link")
+		// 心跳类型信息已通过UpdateHeartbeat记录
 	case FrameTypeParseError:
 		deviceSession.UpdateHeartbeat()
 		logger.WithField("error", frame.ErrorMessage).Warn("处理解析错误帧")

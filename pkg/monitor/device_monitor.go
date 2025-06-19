@@ -2,6 +2,7 @@ package monitor
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"sync"
 	"time"
@@ -561,7 +562,7 @@ func StopGlobalDeviceMonitor() {
 
 // CheckAndUpdateDeviceStatus 检查并更新设备状态
 // 如果设备当前状态与期望状态不一致，执行状态更新并触发相应事件
-func (dm *DeviceMonitor) CheckAndUpdateDeviceStatus(deviceID string, targetStatus string) bool {
+func (dm *DeviceMonitor) CheckAndUpdateDeviceStatus(deviceID string, targetStatus constants.DeviceStatus) bool {
 	if !dm.enabled || !dm.running {
 		return false
 	}
@@ -592,17 +593,19 @@ func (dm *DeviceMonitor) CheckAndUpdateDeviceStatus(deviceID string, targetStatu
 	})
 
 	// 记录状态变更日志
+
 	logger.WithFields(logrus.Fields{
 		"deviceID":  deviceID,
 		"oldStatus": oldStatus,
 		"newStatus": targetStatus,
-	}).Info("设备状态变更通知: 设备ID=" + deviceID + ", 状态=" + targetStatus)
+		// }).Info("设备状态变更通知")
+	}).Info(fmt.Printf("设备状态变更通知: %s -> %s", oldStatus, targetStatus))
 
 	return true
 }
 
 // GetDeviceStatus 获取设备当前状态
-func (dm *DeviceMonitor) GetDeviceStatus(deviceID string) (string, bool) {
+func (dm *DeviceMonitor) GetDeviceStatus(deviceID string) (constants.DeviceStatus, bool) {
 	if !dm.enabled {
 		return constants.DeviceStatusUnknown, false
 	}
@@ -630,12 +633,12 @@ func (dm *DeviceMonitor) GetDeviceLastHeartbeat(deviceID string) (time.Time, boo
 }
 
 // GetAllDeviceStatuses 获取所有设备状态
-func (dm *DeviceMonitor) GetAllDeviceStatuses() map[string]string {
+func (dm *DeviceMonitor) GetAllDeviceStatuses() map[string]constants.DeviceStatus {
 	if !dm.enabled {
-		return make(map[string]string)
+		return make(map[string]constants.DeviceStatus)
 	}
 
-	statuses := make(map[string]string)
+	statuses := make(map[string]constants.DeviceStatus)
 	dm.sessionManager.ForEachSession(func(deviceID string, session *DeviceSession) bool {
 		statuses[deviceID] = session.Status
 		return true

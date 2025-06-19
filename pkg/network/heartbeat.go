@@ -152,7 +152,7 @@ func OnDeviceNotAlive(conn ziface.IConnection) {
 		// 未注册设备超时，通过DeviceSession管理状态
 		deviceSession := session.GetDeviceSession(conn)
 		if deviceSession != nil {
-			deviceSession.UpdateStatus(constants.ConnStatusInactive)
+			deviceSession.UpdateStatus(constants.DeviceStatusOffline)
 			deviceSession.SyncToConnection(conn)
 		}
 		conn.Stop()
@@ -198,7 +198,7 @@ func OnDeviceNotAlive(conn ziface.IConnection) {
 	// 通过DeviceSession管理连接状态
 	deviceSession := session.GetDeviceSession(conn)
 	if deviceSession != nil {
-		deviceSession.UpdateStatus(constants.ConnStatusInactive)
+		deviceSession.UpdateStatus(constants.DeviceStatusOffline)
 		deviceSession.SyncToConnection(conn)
 	}
 

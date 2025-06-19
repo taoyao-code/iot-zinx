@@ -82,7 +82,7 @@ func (h *GenericCommandHandler) updateConnectionActivity(conn ziface.IConnection
 	deviceSession := session.GetDeviceSession(conn)
 	if deviceSession != nil {
 		deviceSession.UpdateHeartbeat()
-		deviceSession.UpdateStatus(constants.ConnStatusActive)
+		deviceSession.UpdateStatus(constants.DeviceStatusOnline)
 		deviceSession.SyncToConnection(conn)
 	}
 

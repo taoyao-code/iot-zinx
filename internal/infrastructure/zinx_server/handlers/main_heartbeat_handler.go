@@ -117,13 +117,11 @@ func (h *MainHeartbeatHandler) processMainHeartbeat(decodedFrame *protocol.Decod
 
 // updateMainHeartbeatTime 更新主机心跳时间
 func (h *MainHeartbeatHandler) updateMainHeartbeatTime(conn ziface.IConnection, deviceSession *session.DeviceSession) {
-	now := time.Now()
-
 	// 通过DeviceSession管理心跳时间
 	if deviceSession != nil {
 		deviceSession.UpdateHeartbeat()
-		deviceSession.UpdateStatus(constants.ConnStatusActive)
-		deviceSession.SetProperty(constants.ConnPropertyMainHeartbeatTime, now.Unix())
+		deviceSession.UpdateStatus(constants.DeviceStatusOnline)
+		// 主机心跳时间已通过UpdateHeartbeat记录
 		deviceSession.SyncToConnection(conn)
 	}
 

@@ -177,7 +177,7 @@ func (h *DeviceRegisterHandler) handleDeviceRegister(deviceId string, physicalId
 	if linkedSession != nil {
 		// 对于共享连接，linkedSession.PhysicalID 不再代表单个逻辑设备。
 		// 主要确保其ICCID正确（应由SimCardHandler设置）并更新连接活动状态。
-		linkedSession.UpdateStatus(constants.ConnStateActive)
+		linkedSession.UpdateStatus(constants.DeviceStatusOnline)
 		linkedSession.SyncToConnection(conn)
 	}
 
@@ -221,7 +221,7 @@ func (h *DeviceRegisterHandler) handleDeviceRegister(deviceId string, physicalId
 		"physicalIdHex":     fmt.Sprintf("0x%08X", physicalId),
 		"physicalIdStr":     deviceId,
 		"iccid":             iccidFromProp, // 使用 iccidFromProp
-		"connState":         constants.ConnStateActive,
+		"connState":         constants.ConnStatusActiveRegistered,
 		"readDeadlineSetTo": now.Add(defaultReadDeadline).Format(time.RFC3339),
 		"remoteAddr":        conn.RemoteAddr().String(),
 		"timestamp":         now.Format(constants.TimeFormatDefault),

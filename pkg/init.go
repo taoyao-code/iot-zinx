@@ -5,6 +5,7 @@ import (
 
 	"github.com/aceld/zinx/ziface"
 	"github.com/bujia-iot/iot-zinx/internal/infrastructure/logger"
+	"github.com/bujia-iot/iot-zinx/pkg/constants"
 	"github.com/bujia-iot/iot-zinx/pkg/heartbeat"
 	"github.com/bujia-iot/iot-zinx/pkg/monitor"
 	"github.com/bujia-iot/iot-zinx/pkg/network"
@@ -71,10 +72,12 @@ func InitPackagesWithDependencies(sessionManager monitor.ISessionManager, connMa
 	monitor.SetDNYProtocolSender(&dnyProtocolSenderAdapter{})
 
 	// 设置network包访问monitor包的函数
-	network.SetUpdateDeviceStatusFunc(func(deviceID string, status string) {
+	network.SetUpdateDeviceStatusFunc(func(deviceID string, status constants.DeviceStatus) error {
 		if globalConnectionMonitor != nil {
-			globalConnectionMonitor.UpdateDeviceStatus(deviceID, status)
+			globalConnectionMonitor.UpdateDeviceStatus(deviceID, string(status))
+			return nil
 		}
+		return fmt.Errorf("global connection monitor not initialized")
 	})
 
 	// 启动命令管理器

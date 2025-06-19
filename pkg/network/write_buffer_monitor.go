@@ -179,7 +179,7 @@ func (wbm *WriteBufferMonitor) checkConnectionHealth(conn ziface.IConnection, de
 	}
 
 	// 检查写缓冲区健康状态
-	healthy, err := deviceSession.CheckWriteBufferHealth(conn)
+	healthy, err := deviceSession.CheckWriteBufferHealth()
 	if err != nil {
 		logger.WithFields(logrus.Fields{
 			"connID":   conn.GetConnID(),

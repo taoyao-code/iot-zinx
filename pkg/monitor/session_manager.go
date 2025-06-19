@@ -27,8 +27,8 @@ type DeviceSession struct {
 	// 上下文数据，用于存储设备的状态信息
 	Context map[string]interface{}
 
-	// 连接状态
-	Status string
+	// 连接状态 - 🔧 状态重构：使用类型安全的状态
+	Status constants.DeviceStatus
 
 	// 时间信息
 	CreatedAt          time.Time

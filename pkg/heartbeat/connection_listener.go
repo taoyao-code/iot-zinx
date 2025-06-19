@@ -69,7 +69,8 @@ func (d *ConnectionDisconnector) OnHeartbeatTimeout(event HeartbeatTimeoutEvent)
 	// 通过DeviceSession管理连接状态
 	deviceSession := session.GetDeviceSession(conn)
 	if deviceSession != nil {
-		deviceSession.UpdateStatus(constants.ConnStatusInactive)
+		// 更新设备状态为离线
+		deviceSession.UpdateStatus(constants.DeviceStatusOffline)
 		deviceSession.SyncToConnection(conn)
 	}
 

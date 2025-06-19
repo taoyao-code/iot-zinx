@@ -407,12 +407,11 @@ func getActualConnectionForDevice(conn ziface.IConnection, physicalID uint32) (z
 		return conn, deviceId, nil
 	}
 
-	// 检查连接属性，判断是否为直连模式
+	// 检查连接的设备会话，判断是否为直连模式
 	directMode := false
-	if directModeVal, err := conn.GetProperty(constants.PropKeyDirectMode); err == nil && directModeVal != nil {
-		if mode, ok := directModeVal.(bool); ok && mode {
-			directMode = true
-		}
+	deviceSession := session.GetDeviceSession(conn)
+	if deviceSession != nil {
+		directMode = deviceSession.DirectMode
 	}
 
 	// 如果已知是直连模式，直接使用当前连接，无需查找主机连接
@@ -451,10 +450,10 @@ func getActualConnectionForDevice(conn ziface.IConnection, physicalID uint32) (z
 		"physicalID": fmt.Sprintf("0x%08X", physicalID),
 	}).Debug("分机设备未找到主机连接，使用原连接发送")
 
-	// 使用DeviceSession统一管理连接属性
-	deviceSession := session.GetDeviceSession(conn)
+	// 使用DeviceSession统一管理直连模式设置
+	deviceSession = session.GetDeviceSession(conn)
 	if deviceSession != nil {
-		deviceSession.SetProperty(constants.PropKeyDirectMode, true)
+		deviceSession.DirectMode = true
 		deviceSession.SyncToConnection(conn)
 	}
 

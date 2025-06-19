@@ -62,12 +62,8 @@ func (h *DNYHandlerBase) PreHandle(request ziface.IRequest) {
 			logger.WithField("error", err.Error()).Warn("无法获取PhysicalID")
 		}
 
-		// 从连接属性获取消息ID
-		if prop, err := conn.GetProperty(constants.PropKeyDNYMessageID); err == nil {
-			if mid, ok := prop.(uint16); ok {
-				messageID = mid
-			}
-		}
+		// 消息ID可以从DNY消息结构中直接获取，不需要从连接属性中读取
+		// 这样可以避免依赖额外的属性键
 
 		// 从连接属性获取命令
 		command = uint8(msg.GetMsgID())
@@ -96,10 +92,9 @@ func (h *DNYHandlerBase) PreHandle(request ziface.IRequest) {
 	command := uint8(msg.GetMsgID()) // msg.GetMsgID() 实际是DNY的Command
 
 	// 从连接属性获取真正的DNY MessageID
+	// 对于命令确认，messageID可以从消息结构中获取，不需要从连接属性中读取
 	var messageID uint16
-	if val, err := conn.GetProperty(constants.PropKeyDNYMessageID); err == nil && val != nil {
-		messageID = val.(uint16)
-	}
+	// messageID 应该从具体的消息解析中获取
 
 	// 尝试确认命令 - 修复参数顺序：physicalID, messageID, command
 	if network.GetCommandManager().ConfirmCommand(physicalID, messageID, command) {

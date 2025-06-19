@@ -94,7 +94,7 @@ func (h *SimCardHandler) Handle(request ziface.IRequest) {
 			"connID":            conn.GetConnID(),
 			"remoteAddr":        conn.RemoteAddr().String(),
 			"iccid":             iccidStr,
-			"connState":         constants.ConnStateICCIDReceived,
+			"connState":         constants.ConnStatusICCIDReceived,
 			"readDeadlineSetTo": now.Add(defaultReadDeadline).Format(time.RFC3339),
 			"dataLen":           len(data),
 		}).Info("SimCardHandler: 收到有效ICCID，更新连接状态并重置ReadDeadline")
@@ -123,7 +123,7 @@ func (h *SimCardHandler) Handle(request ziface.IRequest) {
 func (h *SimCardHandler) triggerDeviceRegistration(conn ziface.IConnection, iccid string) {
 	// 防重复触发检查：检查设备连接状态是否已经是Active
 	deviceSession := session.GetDeviceSession(conn)
-	if deviceSession != nil && deviceSession.State == constants.ConnStateActive {
+	if deviceSession != nil && deviceSession.State == constants.ConnStatusActive {
 		logger.WithFields(logrus.Fields{
 			"connID": conn.GetConnID(),
 			"iccid":  iccid,

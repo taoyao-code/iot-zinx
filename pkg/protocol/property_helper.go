@@ -9,7 +9,6 @@ import (
 	"github.com/bujia-iot/iot-zinx/internal/infrastructure/logger"
 	"github.com/bujia-iot/iot-zinx/pkg/constants"
 	"github.com/bujia-iot/iot-zinx/pkg/session"
-	"github.com/bujia-iot/iot-zinx/pkg/utils"
 	"github.com/sirupsen/logrus"
 )
 
@@ -23,39 +22,19 @@ func SetDNYConnectionProperties(conn ziface.IConnection, dnyMsg *dny_protocol.Me
 	// 使用DeviceSession统一管理连接属性
 	deviceSession := session.GetDeviceSession(conn)
 	if deviceSession != nil {
-		deviceSession.SetProperty(constants.PropKeyDNYRawData, rawData)
-		deviceSession.SyncToConnection(conn)
-	}
-
-	// 设置物理ID属性
-	physicalID := dnyMsg.GetPhysicalId()
-	utils.SetPhysicalIDToConnection(conn, physicalID)
-
-	// 设置消息ID和命令属性
-	messageID := dnyMsg.MessageId
-	command := uint8(dnyMsg.GetMsgID())
-
-	// 使用DeviceSession统一管理连接属性
-	if deviceSession != nil {
-		deviceSession.SetProperty(constants.PropKeyDNYMessageID, messageID)
-
+		// 设置物理ID属性
+		physicalID := dnyMsg.GetPhysicalId()
 		deviceSession.PhysicalID = strconv.FormatUint(uint64(physicalID), 10)
 
+		// 同步到连接属性
 		deviceSession.SyncToConnection(conn)
+
+		logger.WithFields(logrus.Fields{
+			"physicalID": physicalID,
+			"messageID":  fmt.Sprintf("0x%04X", dnyMsg.MessageId),
+			"command":    fmt.Sprintf("0x%02X", dnyMsg.GetMsgID()),
+		}).Debug("已设置DNY连接属性")
 	}
-
-	// 设置校验和属性
-	setChecksumProperties(conn, dnyMsg, rawData)
-
-	// 清除错误标记
-	conn.RemoveProperty(constants.PropKeyNotDNYMessage)
-	conn.RemoveProperty(constants.PropKeyDNYParseError)
-
-	logger.WithFields(logrus.Fields{
-		constants.PropKeyPhysicalId:   physicalID,
-		constants.PropKeyDNYMessageID: fmt.Sprintf("0x%04X", messageID),
-		"command":                     fmt.Sprintf("0x%02X", command),
-	}).Debug("已设置DNY连接属性")
 }
 
 // SetSpecialMessageProperties 设置特殊消息属性
@@ -66,29 +45,22 @@ func SetSpecialMessageProperties(conn ziface.IConnection, dnyMsg *dny_protocol.M
 
 	// 使用DeviceSession统一管理连接属性
 	deviceSession := session.GetDeviceSession(conn)
-	if deviceSession != nil {
-		deviceSession.SetProperty(constants.PropKeyDNYRawData, rawData)
-		deviceSession.SyncToConnection(conn)
+	if deviceSession == nil {
+		return
 	}
 
 	switch dnyMsg.GetMsgID() {
 	case constants.MsgIDICCID:
 		iccid := string(dnyMsg.GetData())
 		// ICCID通过DeviceSession管理
-		deviceSession := session.GetDeviceSession(conn)
-		if deviceSession != nil {
-			deviceSession.ICCID = iccid
-			deviceSession.SyncToConnection(conn)
-		}
+		deviceSession.ICCID = iccid
+		deviceSession.SyncToConnection(conn)
 		logger.WithField("iccid", iccid).Info("已设置ICCID连接属性")
 
 	case constants.MsgIDLinkHeartbeat:
 		// 心跳信息通过DeviceSession管理
-		deviceSession := session.GetDeviceSession(conn)
-		if deviceSession != nil {
-			deviceSession.UpdateHeartbeat()
-			deviceSession.SyncToConnection(conn)
-		}
+		deviceSession.UpdateHeartbeat()
+		deviceSession.SyncToConnection(conn)
 		logger.Info("已设置link心跳连接属性")
 
 	default:
@@ -102,19 +74,11 @@ func SetErrorProperties(conn ziface.IConnection, rawData []byte, err error) {
 		return
 	}
 
-	// 使用DeviceSession统一管理连接属性
-	deviceSession := session.GetDeviceSession(conn)
-	if deviceSession != nil {
-		deviceSession.SetProperty(constants.PropKeyDNYRawData, rawData)
-		deviceSession.SetProperty(constants.PropKeyDNYParseError, err.Error())
-		deviceSession.SetProperty(constants.PropKeyNotDNYMessage, true)
-		deviceSession.SyncToConnection(conn)
-	}
-
+	// 错误信息通过日志记录，不需要存储在连接属性中
 	logger.WithFields(logrus.Fields{
 		"dataLen": len(rawData),
 		"error":   err.Error(),
-	}).Debug("已设置错误连接属性")
+	}).Debug("协议解析错误")
 }
 
 // setChecksumProperties 设置校验和属性（内部函数）
@@ -135,13 +99,6 @@ func setChecksumProperties(conn ziface.IConnection, dnyMsg *dny_protocol.Message
 	calculatedChecksum := CalculatePacketChecksum(rawData[:checksumPos])
 	checksumValid := (calculatedChecksum == checksum)
 
-	// 使用DeviceSession统一管理连接属性
-	deviceSession := session.GetDeviceSession(conn)
-	if deviceSession != nil {
-		deviceSession.SetProperty(constants.PropKeyDNYChecksumValid, checksumValid)
-		deviceSession.SyncToConnection(conn)
-	}
-
 	// 如果校验和无效，记录详细信息
 	if !checksumValid {
 		logger.WithFields(logrus.Fields{
@@ -149,6 +106,6 @@ func setChecksumProperties(conn ziface.IConnection, dnyMsg *dny_protocol.Message
 			"expectedChecksum":   fmt.Sprintf("0x%04X", checksum),
 			"calculatedChecksum": fmt.Sprintf("0x%04X", calculatedChecksum),
 			"checksumValid":      checksumValid,
-		}).Debug("校验和验证详情")
+		}).Warn("DNY协议校验和验证失败")
 	}
 }

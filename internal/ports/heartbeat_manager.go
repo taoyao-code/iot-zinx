@@ -105,10 +105,10 @@ func (h *HeartbeatManager) checkConnectionActivity() {
 	monitor.ForEachConnection(func(deviceId string, conn ziface.IConnection) bool {
 		connID := conn.GetConnID()
 
-		var connStatus string
+		// var connStatus string
 		if status, err := conn.GetProperty(constants.PropKeyConnStatus); err == nil && status != nil {
-			connStatus = status.(string)
-			if connStatus != constants.ConnStatusActive {
+			// connStatus = status.(string)
+			if status != constants.ConnStatusActive {
 				return true
 			}
 		}

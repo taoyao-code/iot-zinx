@@ -17,8 +17,8 @@ import (
 // 通过去重、延迟更新、批量处理等方式优化设备状态更新性能
 type StatusUpdateOptimizer struct {
 	// 去重机制：防止短时间内重复更新同一设备状态
-	lastUpdateStatus map[string]string    // deviceID -> 最后状态
-	lastUpdateTime   map[string]time.Time // deviceID -> 最后更新时间
+	lastUpdateStatus map[string]constants.DeviceStatus // deviceID -> 最后状态
+	lastUpdateTime   map[string]time.Time              // deviceID -> 最后更新时间
 	mutex            sync.RWMutex
 
 	// 批量更新机制
@@ -51,7 +51,7 @@ type OptimizerStats struct {
 // StatusUpdate 状态更新信息
 type StatusUpdate struct {
 	DeviceID  string
-	Status    string
+	Status    constants.DeviceStatus // 🔧 状态重构：使用类型安全的设备状态
 	Timestamp time.Time
 	Source    string // 更新来源：heartbeat, register, disconnect等
 }
@@ -59,7 +59,7 @@ type StatusUpdate struct {
 // NewStatusUpdateOptimizer 创建状态更新优化器
 func NewStatusUpdateOptimizer(updateFunc constants.UpdateDeviceStatusFuncType) *StatusUpdateOptimizer {
 	optimizer := &StatusUpdateOptimizer{
-		lastUpdateStatus: make(map[string]string),
+		lastUpdateStatus: make(map[string]constants.DeviceStatus),
 		lastUpdateTime:   make(map[string]time.Time),
 		pendingUpdates:   make(map[string]*StatusUpdate),
 		dedupInterval:    1 * time.Second,        // 1秒内重复状态更新会被去重
@@ -76,7 +76,7 @@ func NewStatusUpdateOptimizer(updateFunc constants.UpdateDeviceStatusFuncType) *
 
 // UpdateDeviceStatus 优化的设备状态更新方法
 // source: 更新来源，用于调试和统计（如：heartbeat, register, disconnect等）
-func (o *StatusUpdateOptimizer) UpdateDeviceStatus(deviceID, status, source string) {
+func (o *StatusUpdateOptimizer) UpdateDeviceStatus(deviceID string, status constants.DeviceStatus, source string) {
 	if deviceID == "" {
 		return
 	}
@@ -105,7 +105,7 @@ func (o *StatusUpdateOptimizer) UpdateDeviceStatus(deviceID, status, source stri
 }
 
 // shouldDeduplicate 检查是否应该去重
-func (o *StatusUpdateOptimizer) shouldDeduplicate(deviceID, status string, now time.Time) bool {
+func (o *StatusUpdateOptimizer) shouldDeduplicate(deviceID string, status constants.DeviceStatus, now time.Time) bool {
 	o.mutex.RLock()
 	defer o.mutex.RUnlock()
 
@@ -123,7 +123,7 @@ func (o *StatusUpdateOptimizer) shouldDeduplicate(deviceID, status string, now t
 }
 
 // addToPendingUpdates 添加到待更新队列
-func (o *StatusUpdateOptimizer) addToPendingUpdates(deviceID, status, source string, timestamp time.Time) {
+func (o *StatusUpdateOptimizer) addToPendingUpdates(deviceID string, status constants.DeviceStatus, source string, timestamp time.Time) {
 	o.batchMutex.Lock()
 	defer o.batchMutex.Unlock()
 

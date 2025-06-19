@@ -86,7 +86,7 @@ func (s *DeviceService) HandleDeviceOffline(deviceId string, iccid string) {
 	}).Info("设备离线")
 
 	// 更新设备状态为离线
-	s.HandleDeviceStatusUpdate(deviceId, pkg.DeviceStatusOffline)
+	s.HandleDeviceStatusUpdate(deviceId, constants.DeviceStatusOffline)
 
 	// 🔧 实现业务平台API调用
 	s.notifyBusinessPlatform("device_offline", map[string]interface{}{
@@ -97,7 +97,7 @@ func (s *DeviceService) HandleDeviceOffline(deviceId string, iccid string) {
 }
 
 // HandleDeviceStatusUpdate 处理设备状态更新
-func (s *DeviceService) HandleDeviceStatusUpdate(deviceId string, status string) {
+func (s *DeviceService) HandleDeviceStatusUpdate(deviceId string, status constants.DeviceStatus) {
 	// 记录设备状态更新
 	logger.WithFields(logrus.Fields{
 		"deviceId": deviceId,
@@ -200,11 +200,15 @@ func (s *DeviceService) GetDeviceConnectionInfo(deviceID string) (*DeviceConnect
 	}
 
 	// 获取连接状态
-	info.Status = pkg.ConnStatusInactive
+	info.Status = string(constants.ConnStatusInactive)
 	if statusVal, err := conn.GetProperty(pkg.PropKeyConnStatus); err == nil && statusVal != nil {
-		info.Status = statusVal.(string)
+		if connStatus, ok := statusVal.(constants.ConnStatus); ok {
+			info.Status = string(connStatus)
+		} else if statusStr, ok := statusVal.(string); ok {
+			info.Status = statusStr // 兼容旧的字符串类型
+		}
 	}
-	info.IsOnline = info.Status == pkg.ConnStatusActive
+	info.IsOnline = info.Status == string(constants.ConnStatusActive)
 
 	// 获取远程地址
 	info.RemoteAddr = conn.RemoteAddr().String()
@@ -309,7 +313,7 @@ func (s *DeviceService) GetEnhancedDeviceList() []map[string]interface{} {
 	for _, device := range allDevices {
 		deviceInfo := map[string]interface{}{
 			"deviceId": device.DeviceID,
-			"isOnline": device.Status == pkg.DeviceStatusOnline,
+			"isOnline": device.Status == string(constants.DeviceStatusOnline),
 			"status":   device.Status,
 		}
 
@@ -329,7 +333,7 @@ func (s *DeviceService) GetEnhancedDeviceList() []map[string]interface{} {
 			// 获取连接状态
 			connStatus := pkg.ConnStatusInactive
 			if statusVal, err := conn.GetProperty(pkg.PropKeyConnStatus); err == nil && statusVal != nil {
-				connStatus = statusVal.(string)
+				connStatus = statusVal.(constants.ConnStatus)
 			}
 			deviceInfo["connectionStatus"] = connStatus
 

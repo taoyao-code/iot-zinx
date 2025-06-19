@@ -22,23 +22,20 @@ const (
 
 // 连接状态常量
 const (
-	ConnStatusActive    = constants.ConnStatusActive
-	ConnStatusInactive  = constants.ConnStatusInactive
-	ConnStatusClosed    = constants.ConnStatusClosed
-	ConnStatusSuspended = constants.ConnStatusSuspended
+	ConnStatusActive   = constants.ConnStatusActive
+	ConnStatusInactive = constants.ConnStatusInactive
+	ConnStatusClosed   = constants.ConnStatusClosed
 )
 
 // 连接属性键常量
 const (
-	PropKeyDeviceId           = constants.PropKeyDeviceId
-	PropKeyICCID              = constants.PropKeyICCID
-	PropKeyLastHeartbeat      = constants.PropKeyLastHeartbeat
-	PropKeyLastHeartbeatStr   = constants.PropKeyLastHeartbeatStr
-	PropKeyConnStatus         = constants.PropKeyConnStatus
-	PropKeyLastLink           = constants.PropKeyLastLink
-	PropKeySessionID          = constants.PropKeySessionID
-	PropKeyReconnectCount     = constants.PropKeyReconnectCount
-	PropKeyLastDisconnectTime = constants.PropKeyLastDisconnectTime
+	PropKeyDeviceId         = constants.PropKeyDeviceId
+	PropKeyICCID            = constants.PropKeyICCID
+	PropKeyLastHeartbeat    = constants.PropKeyLastHeartbeat
+	PropKeyLastHeartbeatStr = constants.PropKeyLastHeartbeatStr
+	PropKeyConnStatus       = constants.PropKeyConnStatus
+	PropKeySessionID        = constants.PropKeySessionID
+	PropKeyReconnectCount   = constants.PropKeyReconnectCount
 )
 
 // Protocol 协议相关功能导出

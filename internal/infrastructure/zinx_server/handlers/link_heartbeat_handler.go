@@ -68,11 +68,8 @@ func (h *LinkHeartbeatHandler) Handle(request ziface.IRequest) {
 		return
 	}
 
-	// 设置连接属性 (向后兼容)
-	now := time.Now()
-	h.SetConnectionAttribute(conn, constants.PropKeyLastLink, now.Unix())
-
-	// 1. 调用 HeartbeatManager.UpdateConnectionActivity(conn)
+	// Link心跳信息已通过network.UpdateConnectionActivity处理，无需额外属性
+	// 调用统一的连接活动更新函数
 	network.UpdateConnectionActivity(conn)
 
 	// 2. 重置TCP ReadDeadline - 使用优化后的配置
@@ -116,7 +113,7 @@ func (h *LinkHeartbeatHandler) Handle(request ziface.IRequest) {
 		"heartbeat":         "link",
 		"deviceID":          deviceID,
 		"readDeadlineReset": fmt.Sprintf("%ds", defaultReadDeadlineSeconds),
-		"timestamp":         now.Format(constants.TimeFormatDefault),
+		"timestamp":         time.Now().Format(constants.TimeFormatDefault),
 	}).Debug("link心跳处理完成")
 }
 

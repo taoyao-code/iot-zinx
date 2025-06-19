@@ -84,14 +84,10 @@ func (ch *ConnectionHooks) OnConnectionStart(conn ziface.IConnection) {
 	// 🔧 修复：使用统一状态管理，确保状态一致性
 	deviceSession := session.GetDeviceSession(conn)
 	if deviceSession != nil {
-		// 使用原子性状态更新方法
-		if err := deviceSession.UpdateStateAndSync(conn, constants.ConnStateAwaitingICCID, constants.ConnStatusActive); err != nil {
-			logger.WithFields(logrus.Fields{
-				"connID":     connID,
-				"remoteAddr": remoteAddr,
-				"error":      err,
-			}).Error("初始化设备会话状态失败")
-		}
+		// 更新连接状态为等待ICCID
+		deviceSession.UpdateState(constants.ConnStatusAwaitingICCID)
+		// 同步到连接属性
+		deviceSession.SyncToConnection(conn)
 
 		// 更新心跳时间
 		deviceSession.UpdateHeartbeat()
@@ -162,7 +158,7 @@ func (ch *ConnectionHooks) setConnectionInitialProperties(conn ziface.IConnectio
 	}
 
 	// 使用DeviceSession统一管理
-	deviceSession.UpdateStatus(constants.ConnStatusActive)
+	deviceSession.UpdateStatus(constants.DeviceStatusOnline)
 	deviceSession.SessionID = fmt.Sprintf("%d_%s", conn.GetConnID(), remoteAddr)
 	deviceSession.ReconnectCount = 0
 	deviceSession.SyncToConnection(conn)
@@ -321,14 +317,10 @@ func (ch *ConnectionHooks) OnConnectionStop(conn ziface.IConnection) {
 	// 🔧 修复：使用统一状态管理处理连接断开
 	deviceSession := session.GetDeviceSession(conn)
 	if deviceSession != nil {
-		// 使用原子性状态更新方法
-		if err := deviceSession.UpdateStateAndSync(conn, "", constants.ConnStatusClosed); err != nil {
-			logger.WithFields(logrus.Fields{
-				"connID":     connID,
-				"remoteAddr": remoteAddr,
-				"error":      err,
-			}).Error("更新连接断开状态失败")
-		}
+		// 调用断开处理方法
+		deviceSession.OnDisconnect()
+		// 同步到连接属性
+		deviceSession.SyncToConnection(conn)
 
 		// 更新断开时间
 		deviceSession.LastDisconnect = time.Now()
@@ -488,7 +480,7 @@ func (ch *ConnectionHooks) OnConnectionLost(conn ziface.IConnection) {
 
 	// 获取断开原因
 	disconnectReason := "未知原因"
-	if prop, err := conn.GetProperty(constants.ConnPropertyCloseReason); err == nil && prop != nil {
+	if prop, err := conn.GetProperty("closeReason"); err == nil && prop != nil {
 		disconnectReason = prop.(string)
 	}
 	fields["reason"] = disconnectReason

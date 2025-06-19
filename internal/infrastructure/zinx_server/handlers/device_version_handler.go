@@ -71,9 +71,9 @@ func (h *DeviceVersionHandler) Handle(request ziface.IRequest) {
 		return
 	}
 
-	// 更新设备类型和版本号属性
-	deviceSession.SetProperty(constants.PropKeyDeviceType, deviceType)
-	deviceSession.SetProperty(constants.PropKeyDeviceVersion, versionStr)
+	// 更新设备类型和版本号到DeviceSession
+	deviceSession.DeviceType = uint16(deviceType)
+	// 版本信息可以通过日志记录，不需要存储在连接属性中
 
 	// 获取设备ID（从会话中获取已设置的物理ID作为设备ID）
 	deviceID := deviceSession.PhysicalID

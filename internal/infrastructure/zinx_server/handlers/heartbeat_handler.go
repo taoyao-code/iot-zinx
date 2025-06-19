@@ -128,7 +128,7 @@ func (h *HeartbeatHandler) updateHeartbeatTime(conn ziface.IConnection, deviceSe
 	// 通过DeviceSession管理心跳时间
 	if deviceSession != nil {
 		deviceSession.UpdateHeartbeat()
-		deviceSession.UpdateStatus(constants.ConnStatusActive)
+		deviceSession.UpdateStatus(constants.DeviceStatusOnline)
 		deviceSession.SyncToConnection(conn)
 	}
 
@@ -141,7 +141,7 @@ func (h *HeartbeatHandler) updateHeartbeatTime(conn ziface.IConnection, deviceSe
 
 	// 更新设备状态为在线
 	if deviceSession != nil && deviceSession.DeviceID != "" {
-		monitor.GetGlobalConnectionMonitor().UpdateDeviceStatus(deviceSession.DeviceID, constants.DeviceStatusOnline)
+		monitor.GetGlobalConnectionMonitor().UpdateDeviceStatus(deviceSession.DeviceID, string(constants.DeviceStatusOnline))
 	}
 }
 
