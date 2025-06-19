@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/aceld/zinx/ziface"
+	"github.com/bujia-iot/iot-zinx/internal/adapter/http"
 	"github.com/bujia-iot/iot-zinx/internal/domain/dny_protocol"
 	"github.com/bujia-iot/iot-zinx/internal/infrastructure/config" // 新增导入
 	"github.com/bujia-iot/iot-zinx/internal/infrastructure/logger"
@@ -226,6 +227,11 @@ func (h *DeviceRegisterHandler) handleDeviceRegister(deviceId string, physicalId
 		"remoteAddr":        conn.RemoteAddr().String(),
 		"timestamp":         now.Format(constants.TimeFormatDefault),
 	}).Info("设备注册成功，连接状态更新为Active，ReadDeadline已重置")
+
+	// 🔧 修复：通知设备服务设备上线，更新状态存储
+	if ctx := http.GetGlobalHandlerContext(); ctx != nil && ctx.DeviceService != nil {
+		ctx.DeviceService.HandleDeviceOnline(deviceId, iccidFromProp)
+	}
 
 	// 发送注册响应
 	h.sendRegisterResponse(deviceId, physicalId, messageID, conn)

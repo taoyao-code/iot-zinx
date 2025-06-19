@@ -239,10 +239,6 @@ func (s *DeviceService) SendCommandToDevice(deviceID string, command byte, data 
 
 	// 解析设备ID为物理ID
 	physicalID, err := strconv.ParseUint(deviceID, 16, 32)
-	if err != nil {
-		return fmt.Errorf("设备ID格式错误: %v", err)
-	}
-
 	// 生成消息ID - 使用全局消息ID管理器
 	messageID := pkg.Protocol.GetNextMessageID()
 
@@ -305,48 +301,30 @@ func (s *DeviceService) SendDNYCommandToDevice(deviceID string, command byte, da
 // GetEnhancedDeviceList 获取增强的设备列表（包含连接信息）
 func (s *DeviceService) GetEnhancedDeviceList() []map[string]interface{} {
 	var devices []map[string]interface{}
+	allDeviceInfos := s.GetAllDevices()
 
-	// 从设备服务获取所有设备状态
-	allDevices := s.GetAllDevices()
-
-	// 处理每个设备信息
-	for _, device := range allDevices {
-		deviceInfo := map[string]interface{}{
-			"deviceId": device.DeviceID,
-			"isOnline": device.Status == string(constants.DeviceStatusOnline),
-			"status":   device.Status,
+	for _, deviceInfo := range allDeviceInfos {
+		detailedInfo, err := s.GetDeviceConnectionInfo(deviceInfo.DeviceID)
+		if err != nil {
+			// 设备离线或获取信息失败
+			devices = append(devices, map[string]interface{}{
+				"deviceId": deviceInfo.DeviceID,
+				"isOnline": false,
+				"status":   "offline",
+			})
+		} else {
+			// 设备在线
+			devices = append(devices, map[string]interface{}{
+				"deviceId":       detailedInfo.DeviceID,
+				"iccid":          detailedInfo.ICCID,
+				"isOnline":       detailedInfo.IsOnline,
+				"status":         detailedInfo.Status,
+				"lastHeartbeat":  detailedInfo.LastHeartbeat,
+				"heartbeatTime":  detailedInfo.HeartbeatTime,
+				"timeSinceHeart": detailedInfo.TimeSinceHeart,
+				"remoteAddr":     detailedInfo.RemoteAddr,
+			})
 		}
-
-		// 添加ICCID（如果有）
-		if device.ICCID != "" {
-			deviceInfo["iccid"] = device.ICCID
-		}
-
-		// 添加最后更新时间
-		if device.LastSeen > 0 {
-			deviceInfo["lastUpdate"] = device.LastSeen
-			deviceInfo["lastUpdateTime"] = time.Unix(device.LastSeen, 0).Format(constants.TimeFormatDefault)
-		}
-
-		// 获取设备连接，补充更多信息
-		if conn, exists := s.GetDeviceConnection(device.DeviceID); exists {
-			// 获取连接状态
-			connStatus := pkg.ConnStatusInactive
-			if statusVal, err := conn.GetProperty(pkg.PropKeyConnStatus); err == nil && statusVal != nil {
-				connStatus = statusVal.(constants.ConnStatus)
-			}
-			deviceInfo["connectionStatus"] = connStatus
-
-			// 获取远程地址
-			deviceInfo["remoteAddr"] = conn.RemoteAddr().String()
-
-			// 获取最后心跳时间
-			if val, err := conn.GetProperty(pkg.PropKeyLastHeartbeatStr); err == nil && val != nil {
-				deviceInfo["heartbeatTime"] = val.(string)
-			}
-		}
-
-		devices = append(devices, deviceInfo)
 	}
 
 	return devices
