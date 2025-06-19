@@ -67,7 +67,7 @@ func (s *DeviceService) HandleDeviceOnline(deviceId string, iccid string) {
 	}).Info("设备上线")
 
 	// 更新设备状态为在线
-	s.HandleDeviceStatusUpdate(deviceId, pkg.DeviceStatusOnline)
+	s.HandleDeviceStatusUpdate(deviceId, constants.DeviceStatusOnline)
 
 	// 🔧 实现业务平台API调用
 	s.notifyBusinessPlatform("device_online", map[string]interface{}{
@@ -461,7 +461,7 @@ func (s *DeviceService) HandlePowerHeartbeat(deviceId string, power *dny_protoco
 	}).Debug("处理功率心跳数据")
 
 	// 更新设备状态为在线
-	s.HandleDeviceStatusUpdate(deviceId, pkg.DeviceStatusOnline)
+	s.HandleDeviceStatusUpdate(deviceId, constants.DeviceStatusOnline)
 
 	// 🔧 实现业务平台API调用
 	s.notifyBusinessPlatform("power_heartbeat", map[string]interface{}{
