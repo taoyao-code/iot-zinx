@@ -15,10 +15,16 @@ import (
 	"github.com/sirupsen/logrus"
 )
 
+// DeviceStatusChecker 设备状态检查接口
+type DeviceStatusChecker interface {
+	IsDeviceOnline(deviceID string) bool
+}
+
 // ChargeControlService 充电控制业务服务
 type ChargeControlService struct {
 	monitor         monitor.IConnectionMonitor
 	responseTracker *CommandResponseTracker
+	deviceChecker   DeviceStatusChecker // 设备状态检查器
 }
 
 // NewChargeControlService 创建充电控制服务
@@ -26,6 +32,16 @@ func NewChargeControlService(monitor monitor.IConnectionMonitor) *ChargeControlS
 	return &ChargeControlService{
 		monitor:         monitor,
 		responseTracker: GetGlobalCommandTracker(),
+		deviceChecker:   nil, // 默认为nil，将使用TCP监控器
+	}
+}
+
+// NewChargeControlServiceWithDeviceChecker 创建充电控制服务（带设备状态检查器）
+func NewChargeControlServiceWithDeviceChecker(monitor monitor.IConnectionMonitor, deviceChecker DeviceStatusChecker) *ChargeControlService {
+	return &ChargeControlService{
+		monitor:         monitor,
+		responseTracker: GetGlobalCommandTracker(),
+		deviceChecker:   deviceChecker,
 	}
 }
 
@@ -36,10 +52,22 @@ func (s *ChargeControlService) SendChargeControlCommand(req *dto.ChargeControlRe
 		return fmt.Errorf("请求参数验证失败: %w", err)
 	}
 
-	// 获取设备连接
+	// 🔧 使用设备状态检查器检查设备是否在线
+	if s.deviceChecker != nil {
+		if !s.deviceChecker.IsDeviceOnline(req.DeviceID) {
+			return fmt.Errorf("设备 %s 不在线", req.DeviceID)
+		}
+	} else {
+		// 备选方案：使用TCP监控器检查连接
+		if _, exists := s.monitor.GetConnectionByDeviceId(req.DeviceID); !exists {
+			return fmt.Errorf("设备 %s 不在线", req.DeviceID)
+		}
+	}
+
+	// 获取设备连接进行命令发送
 	conn, exists := s.monitor.GetConnectionByDeviceId(req.DeviceID)
 	if !exists {
-		return fmt.Errorf("设备 %s 不在线", req.DeviceID)
+		return fmt.Errorf("设备 %s 连接不可用", req.DeviceID)
 	}
 
 	// 解析设备ID为物理ID

@@ -86,25 +86,43 @@ func HandleDeviceStatus(c *gin.Context) {
 		return
 	}
 
-	// 通过设备服务获取设备连接信息
-	deviceInfo, err := ctx.DeviceService.GetDeviceConnectionInfo(deviceID)
-	if err != nil {
+	// 🔧 优先查询设备服务的业务状态
+	businessStatus, exists := ctx.DeviceService.GetDeviceStatus(deviceID)
+	if !exists {
 		c.JSON(http.StatusNotFound, APIResponse{
 			Code:    404,
-			Message: "设备不在线",
+			Message: "设备不存在",
 		})
 		return
 	}
 
-	// 返回设备状态信息
+	// 尝试获取TCP连接详细信息作为补充
+	deviceInfo, err := ctx.DeviceService.GetDeviceConnectionInfo(deviceID)
+	if err != nil {
+		// 连接信息获取失败，但设备存在，返回基础状态
+		isOnline := businessStatus == "online"
+		c.JSON(http.StatusOK, APIResponse{
+			Code:    0,
+			Message: "成功",
+			Data: gin.H{
+				"deviceId": deviceID,
+				"isOnline": isOnline,
+				"status":   businessStatus, // 使用准确的业务状态
+			},
+		})
+		return
+	}
+
+	// 成功获取连接信息，返回完整信息（但状态以业务状态为准）
+	isOnline := businessStatus == "online"
 	c.JSON(http.StatusOK, APIResponse{
 		Code:    0,
 		Message: "成功",
 		Data: gin.H{
 			"deviceId":       deviceInfo.DeviceID,
 			"iccid":          deviceInfo.ICCID,
-			"isOnline":       deviceInfo.IsOnline,
-			"status":         deviceInfo.Status,
+			"isOnline":       isOnline,       // 🔧 优先使用业务状态
+			"status":         businessStatus, // 🔧 优先使用业务状态
 			"lastHeartbeat":  deviceInfo.LastHeartbeat,
 			"heartbeatTime":  deviceInfo.HeartbeatTime,
 			"timeSinceHeart": deviceInfo.TimeSinceHeart,
@@ -327,22 +345,69 @@ func HandleQueryDeviceStatus(c *gin.Context) {
 		return
 	}
 
-	// 发送查询状态命令
-	req := struct {
-		DeviceID  string `json:"deviceId"`
-		Command   byte   `json:"command"`
-		Data      string `json:"data"`
-		MessageID uint16 `json:"messageId"`
-	}{
-		DeviceID:  deviceID,
-		Command:   0x81, // 查询设备联网状态命令
-		Data:      "",   // 无数据
-		MessageID: pkg.Protocol.GetNextMessageID(),
+	// 获取设备服务
+	ctx := GetGlobalHandlerContext()
+	if ctx == nil || ctx.DeviceService == nil {
+		c.JSON(http.StatusInternalServerError, APIResponse{
+			Code:    500,
+			Message: "系统错误: 设备服务未初始化",
+		})
+		return
 	}
 
-	// 复用发送DNY命令的逻辑
-	c.Set("json_body", req)
-	HandleSendDNYCommand(c)
+	// 检查设备连接
+	conn, exists := ctx.DeviceService.GetDeviceConnection(deviceID)
+	if !exists {
+		c.JSON(http.StatusNotFound, APIResponse{
+			Code:    404,
+			Message: "设备不在线",
+		})
+		return
+	}
+
+	// 解析设备ID为物理ID
+	physicalID, err := strconv.ParseUint(deviceID, 16, 32)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, APIResponse{
+			Code:    400,
+			Message: "设备ID格式错误",
+		})
+		return
+	}
+
+	// 生成消息ID
+	messageID := pkg.Protocol.GetNextMessageID()
+
+	// 发送查询状态命令(0x81)
+	err = pkg.Protocol.SendDNYResponse(conn, uint32(physicalID), messageID, 0x81, []byte{})
+	if err != nil {
+		logger.WithFields(logrus.Fields{
+			"deviceId": deviceID,
+			"command":  "0x81",
+			"error":    err.Error(),
+		}).Error("发送查询命令失败")
+		c.JSON(http.StatusInternalServerError, APIResponse{
+			Code:    500,
+			Message: "发送查询命令失败: " + err.Error(),
+		})
+		return
+	}
+
+	logger.WithFields(logrus.Fields{
+		"deviceId":  deviceID,
+		"command":   "0x81",
+		"messageId": messageID,
+	}).Info("查询设备状态命令发送成功")
+
+	c.JSON(http.StatusOK, APIResponse{
+		Code:    0,
+		Message: "查询命令发送成功",
+		Data: gin.H{
+			"deviceId":  deviceID,
+			"command":   "0x81",
+			"messageId": messageID,
+		},
+	})
 }
 
 // HandleStartCharging 开始充电（使用统一的充电控制服务）
@@ -374,8 +439,17 @@ func HandleStartCharging(c *gin.Context) {
 		return
 	}
 
-	// 使用统一的充电控制服务
-	chargeService := service.NewChargeControlService(pkg.Monitor.GetGlobalMonitor())
+	// 使用统一的充电控制服务（带设备状态检查器）
+	ctx := GetGlobalHandlerContext()
+	if ctx == nil || ctx.DeviceService == nil {
+		c.JSON(http.StatusInternalServerError, APIResponse{
+			Code:    500,
+			Message: "系统错误: 设备服务未初始化",
+		})
+		return
+	}
+
+	chargeService := service.NewChargeControlServiceWithDeviceChecker(pkg.Monitor.GetGlobalMonitor(), ctx.DeviceService)
 
 	// 构建统一的充电控制请求
 	chargeReq := &dto.ChargeControlRequest{
