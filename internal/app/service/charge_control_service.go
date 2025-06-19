@@ -3,7 +3,6 @@ package service
 import (
 	"fmt"
 	"strconv"
-	"strings"
 	"time"
 
 	"github.com/aceld/zinx/ziface"
@@ -849,48 +848,14 @@ func (s *ChargeControlService) initiateRefund(response *dto.ChargeControlRespons
 }
 
 // convertToInternalDeviceID 将API使用的简单十六进制设备ID转换为内部使用的格式
-// 输入格式：04A228CD (8位十六进制)
-// 输出格式：04-13544000 (设备识别码-设备编号十进制)
+// 从日志可以看出，系统内部实际使用的就是简单的十六进制格式，不是格式化字符串
 func (s *ChargeControlService) convertToInternalDeviceID(apiDeviceID string) string {
-	// 如果已经是内部格式（包含连字符），直接返回
-	if strings.Contains(apiDeviceID, "-") {
-		return apiDeviceID
-	}
-
-	// 解析十六进制设备ID
-	if len(apiDeviceID) != 8 {
-		logger.WithField("deviceId", apiDeviceID).Warn("设备ID格式不正确，长度应为8位十六进制")
-		return apiDeviceID
-	}
-
-	physicalID, err := strconv.ParseUint(apiDeviceID, 16, 32)
-	if err != nil {
-		logger.WithFields(logrus.Fields{
-			"deviceId": apiDeviceID,
-			"error":    err.Error(),
-		}).Warn("设备ID十六进制解析失败")
-		return apiDeviceID
-	}
-
-	// 转换为小端字节序（模拟原始数据格式）
-	rawBytes := make([]byte, 4)
-	rawBytes[0] = byte(physicalID)
-	rawBytes[1] = byte(physicalID >> 8)
-	rawBytes[2] = byte(physicalID >> 16)
-	rawBytes[3] = byte(physicalID >> 24)
-
-	// 应用与formatPhysicalID相同的转换逻辑
-	deviceCode := rawBytes[3] // 设备识别码
-	deviceNumber := uint32(rawBytes[0]) | uint32(rawBytes[1])<<8 | uint32(rawBytes[2])<<16
-
-	internalID := fmt.Sprintf("%02X-%d", deviceCode, deviceNumber)
-
+	// 根据日志分析，系统内部使用的设备ID格式就是简单的十六进制，如 "04A228CD"
+	// 不需要转换，直接返回
 	logger.WithFields(logrus.Fields{
 		"apiDeviceId":      apiDeviceID,
-		"internalDeviceId": internalID,
-		"deviceCode":       fmt.Sprintf("%02X", deviceCode),
-		"deviceNumber":     deviceNumber,
-	}).Debug("设备ID格式转换")
+		"internalDeviceId": apiDeviceID, // 直接使用原始格式
+	}).Debug("设备ID格式检查（无需转换）")
 
-	return internalID
+	return apiDeviceID
 }
