@@ -204,11 +204,15 @@ func (s *DeviceService) GetDeviceConnectionInfo(deviceID string) (*DeviceConnect
 	if statusVal, err := conn.GetProperty(pkg.PropKeyConnStatus); err == nil && statusVal != nil {
 		if connStatus, ok := statusVal.(constants.ConnStatus); ok {
 			info.Status = string(connStatus)
+			// 使用 IsConsideredActive 方法判断设备是否在线
+			info.IsOnline = connStatus.IsConsideredActive()
 		} else if statusStr, ok := statusVal.(string); ok {
 			info.Status = statusStr // 兼容旧的字符串类型
+			// 对于字符串类型，检查是否为活跃状态
+			connStatus := constants.ConnStatus(statusStr)
+			info.IsOnline = connStatus.IsConsideredActive()
 		}
 	}
-	info.IsOnline = info.Status == string(constants.ConnStatusActive)
 
 	// 获取远程地址
 	info.RemoteAddr = conn.RemoteAddr().String()
