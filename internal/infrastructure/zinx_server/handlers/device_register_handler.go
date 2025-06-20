@@ -187,8 +187,8 @@ func (h *DeviceRegisterHandler) handleDeviceRegister(deviceId string, physicalId
 	// 这个session主要用于Zinx框架层面的连接属性管理，例如存储共享的ICCID。
 	linkedSession := session.GetDeviceSession(conn)
 	if linkedSession != nil {
-		// 对于共享连接，linkedSession.PhysicalID 不再代表单个逻辑设备。
-		// 主要确保其ICCID正确（应由SimCardHandler设置）并更新连接活动状态。
+		// 🔧 修复：注册设备时，需要设置DeviceID到DeviceSession，确保心跳处理时能正确识别设备
+		linkedSession.RegisterDevice(deviceId, fmt.Sprintf("0x%08X", uint32(physicalId)), "", 0, false)
 		linkedSession.UpdateStatus(constants.DeviceStatusOnline)
 		linkedSession.SyncToConnection(conn)
 	}
