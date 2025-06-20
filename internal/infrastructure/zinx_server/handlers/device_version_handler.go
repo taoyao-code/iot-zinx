@@ -49,9 +49,9 @@ func (h *DeviceVersionHandler) Handle(request ziface.IRequest) {
 	// 解析设备版本数据
 	if len(data) < 3 {
 		logger.WithFields(logrus.Fields{
-			"connID":     conn.GetConnID(),
-			"physicalID": decodedFrame.PhysicalID,
-			"dataLen":    len(data),
+			"connID":   conn.GetConnID(),
+			"DeviceID": decodedFrame.DeviceID,
+			"dataLen":  len(data),
 		}).Error("❌ 设备版本数据不完整，无法解析")
 		return
 	}
@@ -78,14 +78,13 @@ func (h *DeviceVersionHandler) Handle(request ziface.IRequest) {
 	// 获取设备ID（从会话中获取已设置的物理ID作为设备ID）
 	deviceID := deviceSession.PhysicalID
 	if deviceID == "" {
-		deviceID = decodedFrame.PhysicalID
+		deviceID = decodedFrame.DeviceID
 	}
 
 	// 按照协议规范，服务器不需要对 0x35 上传分机版本号与设备类型 进行应答
 	// 记录设备版本信息
 	logger.WithFields(logrus.Fields{
 		"connID":     conn.GetConnID(),
-		"physicalID": decodedFrame.PhysicalID,
 		"deviceID":   deviceID,
 		"deviceType": fmt.Sprintf("0x%02X", deviceType),
 		"versionStr": versionStr,

@@ -52,17 +52,16 @@ func (s *ChargeControlService) SendChargeControlCommand(req *dto.ChargeControlRe
 		return fmt.Errorf("请求参数验证失败: %w", err)
 	}
 
-	// 🔧 设备ID格式转换：将简单十六进制格式转换为内部格式
-	internalDeviceID := s.convertToInternalDeviceID(req.DeviceID)
+	// 🔧 修复：严格按照文档要求，直接使用标准格式的DeviceID，无需转换
+	// 文档要求：所有服务层和API层的deviceId参数，都应视为标准格式的DeviceID，直接使用
 
 	// 🔧 使用设备状态检查器检查设备是否在线
 	if s.deviceChecker != nil {
-		isOnline := s.deviceChecker.IsDeviceOnline(internalDeviceID)
+		isOnline := s.deviceChecker.IsDeviceOnline(req.DeviceID)
 		logger.WithFields(logrus.Fields{
-			"originalDeviceId": req.DeviceID,
-			"internalDeviceId": internalDeviceID,
-			"isOnline":         isOnline,
-			"method":           "deviceChecker",
+			"deviceId": req.DeviceID,
+			"isOnline": isOnline,
+			"method":   "deviceChecker",
 		}).Info("设备在线状态检查")
 
 		if !isOnline {
@@ -70,12 +69,11 @@ func (s *ChargeControlService) SendChargeControlCommand(req *dto.ChargeControlRe
 		}
 	} else {
 		// 备选方案：使用TCP监控器检查连接
-		_, exists := s.monitor.GetConnectionByDeviceId(internalDeviceID)
+		_, exists := s.monitor.GetConnectionByDeviceId(req.DeviceID)
 		logger.WithFields(logrus.Fields{
-			"originalDeviceId": req.DeviceID,
-			"internalDeviceId": internalDeviceID,
-			"exists":           exists,
-			"method":           "monitor",
+			"deviceId": req.DeviceID,
+			"exists":   exists,
+			"method":   "monitor",
 		}).Info("设备连接状态检查")
 
 		if !exists {
@@ -84,7 +82,7 @@ func (s *ChargeControlService) SendChargeControlCommand(req *dto.ChargeControlRe
 	}
 
 	// 获取设备连接进行命令发送
-	conn, exists := s.monitor.GetConnectionByDeviceId(internalDeviceID)
+	conn, exists := s.monitor.GetConnectionByDeviceId(req.DeviceID)
 	if !exists {
 		return fmt.Errorf("设备 %s 连接不可用", req.DeviceID)
 	}
@@ -847,15 +845,6 @@ func (s *ChargeControlService) initiateRefund(response *dto.ChargeControlRespons
 	return nil
 }
 
-// convertToInternalDeviceID 将API使用的简单十六进制设备ID转换为内部使用的格式
-// 从日志可以看出，系统内部实际使用的就是简单的十六进制格式，不是格式化字符串
-func (s *ChargeControlService) convertToInternalDeviceID(apiDeviceID string) string {
-	// 根据日志分析，系统内部使用的设备ID格式就是简单的十六进制，如 "04A228CD"
-	// 不需要转换，直接返回
-	logger.WithFields(logrus.Fields{
-		"apiDeviceId":      apiDeviceID,
-		"internalDeviceId": apiDeviceID, // 直接使用原始格式
-	}).Debug("设备ID格式检查（无需转换）")
-
-	return apiDeviceID
-}
+// 🔧 修复：严格按照文档要求，删除convertToInternalDeviceID函数
+// 文档要求：彻底删除charge_control_service.go中的convertToInternalDeviceID函数
+// 所有服务层和API层的deviceId参数，都应视为标准格式的DeviceID，直接使用

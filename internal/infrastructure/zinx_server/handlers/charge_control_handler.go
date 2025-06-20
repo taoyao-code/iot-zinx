@@ -96,25 +96,25 @@ func (h *ChargeControlHandler) Handle(request ziface.IRequest) {
 // processChargeControl 处理充电控制业务逻辑
 func (h *ChargeControlHandler) processChargeControl(decodedFrame *protocol.DecodedDNYFrame, conn ziface.IConnection, deviceSession *session.DeviceSession) {
 	data := decodedFrame.Payload
-	physicalID := decodedFrame.PhysicalID
+	deviceID := decodedFrame.DeviceID
 	messageID := decodedFrame.MessageID
 
 	logger.WithFields(logrus.Fields{
-		"connID":     conn.GetConnID(),
-		"physicalId": fmt.Sprintf("0x%08X", physicalID),
-		"messageID":  fmt.Sprintf("0x%04X", messageID),
-		"deviceId":   deviceSession.DeviceID,
-		"dataLen":    len(data),
-		"timestamp":  time.Now().Format(constants.TimeFormatDefault),
+		"connID":    conn.GetConnID(),
+		"deviceId":  deviceID,
+		"messageID": fmt.Sprintf("0x%04X", messageID),
+		"sessionId": deviceSession.DeviceID,
+		"dataLen":   len(data),
+		"timestamp": time.Now().Format(constants.TimeFormatDefault),
 	}).Info("收到充电控制请求")
 
 	// 解析控制参数
 	if len(data) < 4 {
 		logger.WithFields(logrus.Fields{
-			"connID":     conn.GetConnID(),
-			"physicalId": fmt.Sprintf("0x%08X", physicalID),
-			"messageID":  fmt.Sprintf("0x%04X", messageID),
-			"dataLen":    len(data),
+			"connID":    conn.GetConnID(),
+			"deviceId":  deviceID,
+			"messageID": fmt.Sprintf("0x%04X", messageID),
+			"dataLen":   len(data),
 		}).Error("充电控制数据长度不足")
 		// 发送错误响应
 		responseData := []byte{dny_protocol.ResponseFailed}
@@ -128,9 +128,9 @@ func (h *ChargeControlHandler) processChargeControl(decodedFrame *protocol.Decod
 
 	logger.WithFields(logrus.Fields{
 		"connID":         conn.GetConnID(),
-		"physicalId":     fmt.Sprintf("0x%08X", physicalID),
+		"deviceId":       deviceID,
 		"messageID":      fmt.Sprintf("0x%04X", messageID),
-		"deviceId":       deviceSession.DeviceID,
+		"sessionId":      deviceSession.DeviceID,
 		"gunNumber":      gunNumber,
 		"controlCommand": fmt.Sprintf("0x%02X", controlCommand),
 		"timestamp":      time.Now().Format(constants.TimeFormatDefault),
@@ -142,10 +142,10 @@ func (h *ChargeControlHandler) processChargeControl(decodedFrame *protocol.Decod
 	// 发送响应
 	if err := h.SendResponse(conn, responseData); err != nil {
 		logger.WithFields(logrus.Fields{
-			"connID":     conn.GetConnID(),
-			"physicalId": fmt.Sprintf("0x%08X", physicalID),
-			"messageID":  fmt.Sprintf("0x%04X", messageID),
-			"error":      err.Error(),
+			"connID":    conn.GetConnID(),
+			"deviceId":  deviceID,
+			"messageID": fmt.Sprintf("0x%04X", messageID),
+			"error":     err.Error(),
 		}).Error("发送充电控制响应失败")
 		return
 	}

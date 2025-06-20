@@ -61,13 +61,13 @@ func (h *HeartbeatHandler) Handle(request ziface.IRequest) {
 // processHeartbeat 处理心跳业务逻辑 - 🔧 修复：添加数组边界检查
 func (h *HeartbeatHandler) processHeartbeat(decodedFrame *protocol.DecodedDNYFrame, conn ziface.IConnection, deviceSession *session.DeviceSession) {
 	// 从解码帧获取设备信息
-	physicalId := decodedFrame.PhysicalID
+	deviceId := decodedFrame.DeviceID
 	data := decodedFrame.Payload
 
 	logger.WithFields(logrus.Fields{
 		"connID":     conn.GetConnID(),
 		"remoteAddr": conn.RemoteAddr().String(),
-		"physicalID": physicalId,
+		"deviceID":   deviceId,
 		"dataLen":    len(data),
 	}).Debug("收到心跳请求")
 
@@ -85,8 +85,8 @@ func (h *HeartbeatHandler) processHeartbeat(decodedFrame *protocol.DecodedDNYFra
 		// 记录简化的设备心跳日志
 		logger.WithFields(logrus.Fields{
 			"connID":     conn.GetConnID(),
-			"physicalId": physicalId,
-			"deviceId":   deviceSession.DeviceID,
+			"deviceId":   deviceId,
+			"sessionId":  deviceSession.DeviceID,
 			"remoteAddr": conn.RemoteAddr().String(),
 			"timestamp":  time.Now().Format(constants.TimeFormatDefault),
 			"dataLen":    len(data),
@@ -115,8 +115,8 @@ func (h *HeartbeatHandler) processHeartbeat(decodedFrame *protocol.DecodedDNYFra
 	nowStr := now.Format(constants.TimeFormatDefault)
 	logger.WithFields(logrus.Fields{
 		"connID":     conn.GetConnID(),
-		"physicalId": physicalId,
-		"deviceId":   deviceSession.DeviceID,
+		"deviceId":   deviceId,
+		"sessionId":  deviceSession.DeviceID,
 		"iccid":      iccid,
 		"remoteAddr": conn.RemoteAddr().String(),
 		"timestamp":  nowStr,

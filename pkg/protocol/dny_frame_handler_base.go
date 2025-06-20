@@ -141,7 +141,7 @@ func (h *DNYFrameHandlerBase) ExtractDecodedFrame(request ziface.IRequest) (*Dec
 	case "standard":
 		decodedFrame.FrameType = FrameTypeStandard
 		decodedFrame.Header = []byte(unifiedMsg.PacketHeader)
-		decodedFrame.PhysicalID = fmt.Sprintf("%08X", unifiedMsg.PhysicalId)
+		decodedFrame.DeviceID = fmt.Sprintf("%08X", unifiedMsg.PhysicalId)
 		decodedFrame.MessageID = unifiedMsg.MessageId
 		decodedFrame.Command = byte(unifiedMsg.CommandId)
 		decodedFrame.Payload = unifiedMsg.Data
@@ -183,7 +183,7 @@ func (h *DNYFrameHandlerBase) UpdateDeviceSessionFromFrame(deviceSession *sessio
 	switch frame.FrameType {
 	case FrameTypeStandard:
 		// 更新标准帧信息
-		deviceSession.SetPhysicalID(frame.PhysicalID)
+		deviceSession.SetPhysicalID(frame.DeviceID)
 		deviceSession.UpdateHeartbeat()
 	case FrameTypeICCID:
 		if frame.ICCIDValue != "" {
@@ -233,9 +233,9 @@ func (h *DNYFrameHandlerBase) ValidateFrame(frame *DecodedDNYFrame) error {
 		// 🔧 修复：如果校验和无效，记录警告但不阻止处理
 		if !frame.IsChecksumValid {
 			logger.WithFields(logrus.Fields{
-				"command":    fmt.Sprintf("0x%02X", frame.Command),
-				"physicalID": frame.PhysicalID,
-				"messageID":  fmt.Sprintf("0x%04X", frame.MessageID),
+				"command":   fmt.Sprintf("0x%02X", frame.Command),
+				"deviceID":  frame.DeviceID,
+				"messageID": fmt.Sprintf("0x%04X", frame.MessageID),
 			}).Warn("DNY帧校验和验证失败，但继续处理以提高兼容性")
 		}
 
@@ -263,12 +263,12 @@ func (h *DNYFrameHandlerBase) ValidateFrame(frame *DecodedDNYFrame) error {
 // LogFrameProcessing 记录帧处理日志
 func (h *DNYFrameHandlerBase) LogFrameProcessing(handlerName string, frame *DecodedDNYFrame, conn ziface.IConnection) {
 	logger.WithFields(logrus.Fields{
-		"handler":    handlerName,
-		"connID":     getConnID(conn),
-		"frameType":  frame.FrameType.String(),
-		"physicalID": frame.PhysicalID,
-		"messageID":  fmt.Sprintf("0x%04X", frame.MessageID),
-		"command":    fmt.Sprintf("0x%02X", frame.Command),
+		"handler":   handlerName,
+		"connID":    getConnID(conn),
+		"frameType": frame.FrameType.String(),
+		"deviceID":  frame.DeviceID,
+		"messageID": fmt.Sprintf("0x%04X", frame.MessageID),
+		"command":   fmt.Sprintf("0x%02X", frame.Command),
 	}).Info("处理DNY帧")
 }
 

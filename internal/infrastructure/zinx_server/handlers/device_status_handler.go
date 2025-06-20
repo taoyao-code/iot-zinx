@@ -63,7 +63,7 @@ func (h *DeviceStatusHandler) Handle(request ziface.IRequest) {
 	// 记录设备状态查询日志
 	logger.WithFields(logrus.Fields{
 		"connID":     conn.GetConnID(),
-		"physicalId": fmt.Sprintf("0x%08X", decodedFrame.PhysicalID),
+		"physicalId": fmt.Sprintf("0x%08X", decodedFrame.DeviceID),
 		"deviceId":   deviceSession.DeviceID,
 		"statusInfo": statusInfo,
 		"remoteAddr": conn.RemoteAddr().String(),

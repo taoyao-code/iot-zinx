@@ -77,13 +77,13 @@ func (h *MainHeartbeatHandler) ValidateFrame(decodedFrame *protocol.DecodedDNYFr
 // processMainHeartbeat 处理主机心跳业务逻辑
 func (h *MainHeartbeatHandler) processMainHeartbeat(decodedFrame *protocol.DecodedDNYFrame, conn ziface.IConnection, deviceSession *session.DeviceSession) {
 	// 从解码帧获取设备信息
-	physicalId := decodedFrame.PhysicalID
+	deviceId := decodedFrame.DeviceID
 	data := decodedFrame.Payload
 
 	logger.WithFields(logrus.Fields{
 		"connID":     conn.GetConnID(),
 		"remoteAddr": conn.RemoteAddr().String(),
-		"physicalID": physicalId,
+		"deviceID":   deviceId,
 		"dataLen":    len(data),
 	}).Debug("收到主机心跳请求")
 
@@ -107,8 +107,8 @@ func (h *MainHeartbeatHandler) processMainHeartbeat(decodedFrame *protocol.Decod
 	// 记录主机心跳日志
 	logger.WithFields(logrus.Fields{
 		"connID":        conn.GetConnID(),
-		"deviceId":      deviceSession.DeviceID,
-		"physicalId":    physicalId,
+		"deviceId":      deviceId,
+		"sessionId":     deviceSession.DeviceID,
 		"heartbeatInfo": heartbeatInfo,
 		"remoteAddr":    conn.RemoteAddr().String(),
 		"timestamp":     time.Now().Format(constants.TimeFormatDefault),

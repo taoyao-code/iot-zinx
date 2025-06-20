@@ -71,7 +71,7 @@ func (h *DeviceRegisterHandler) processDeviceRegistration(decodedFrame *protocol
 		}).Error("获取PhysicalID失败")
 		return
 	}
-	deviceId := decodedFrame.PhysicalID
+	deviceId := decodedFrame.DeviceID
 	messageID := decodedFrame.MessageID
 	data := decodedFrame.Payload
 

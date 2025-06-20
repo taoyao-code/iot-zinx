@@ -7,13 +7,11 @@ import (
 
 	"github.com/aceld/zinx/ziface"
 	"github.com/aceld/zinx/znet"
-	"github.com/bujia-iot/iot-zinx/internal/domain/dny_protocol"
 	"github.com/bujia-iot/iot-zinx/internal/infrastructure/config" // 新增导入
 	"github.com/bujia-iot/iot-zinx/internal/infrastructure/logger"
 	"github.com/bujia-iot/iot-zinx/pkg/constants"
 	"github.com/bujia-iot/iot-zinx/pkg/network" // 引入 network 包
 	"github.com/bujia-iot/iot-zinx/pkg/protocol"
-	"github.com/bujia-iot/iot-zinx/pkg/session"
 	"github.com/sirupsen/logrus"
 )
 
@@ -44,26 +42,9 @@ func (h *SimCardHandler) Handle(request ziface.IRequest) {
 		iccidStr := string(data)
 		now := time.Now()
 
-		// 🔧 修复：使用原子性ICCID设置方法，确保时序正确性
-		deviceSession := session.GetDeviceSession(conn)
-		if deviceSession != nil {
-			if err := deviceSession.SetICCIDAndSync(conn, iccidStr); err != nil {
-				logger.WithFields(logrus.Fields{
-					"connID":     conn.GetConnID(),
-					"remoteAddr": conn.RemoteAddr().String(),
-					"iccid":      iccidStr,
-					"error":      err,
-				}).Error("SimCardHandler: 原子性设置ICCID失败")
-				return
-			}
-		} else {
-			logger.WithFields(logrus.Fields{
-				"connID":     conn.GetConnID(),
-				"remoteAddr": conn.RemoteAddr().String(),
-				"iccid":      iccidStr,
-			}).Error("SimCardHandler: 无法获取DeviceSession")
-			return
-		}
+		// 🔧 修复：严格按照文档要求，仅将ICCID存入连接属性中
+		// 文档要求：收到ICCID后，仅将ICCID存入连接的属性中 (conn.SetProperty("iccid", ...))
+		conn.SetProperty(constants.PropKeyICCID, iccidStr)
 
 		// 计划 3.b.3: 调用 network.UpdateConnectionActivity(conn)
 		network.UpdateConnectionActivity(conn) // 更新连接活动（例如更新HeartbeatManager中的记录）
@@ -103,9 +84,9 @@ func (h *SimCardHandler) Handle(request ziface.IRequest) {
 		// 如果 network.UpdateConnectionActivity 内部没有更新 Zinx Monitor 的心跳时间，且业务仍依赖 Zinx Monitor，则需保留或调整
 		// 根据当前 HeartbeatManager 的设计，它独立于 Zinx Monitor，因此 network.UpdateConnectionActivity 已足够
 
-		// 🔧 主动触发设备注册：在ICCID处理完成后发送0x81网络状态查询命令
-		// 遵循单一责任原则：SimCardHandler负责ICCID处理，通过标准协议命令触发注册
-		h.triggerDeviceRegistration(conn, iccidStr)
+		// 🔧 修复：严格按照文档要求，SimCardHandler严禁创建会话或绑定任何形式的deviceId
+		// 文档要求：严禁在此阶段创建会话或绑定任何形式的deviceId
+		// 设备注册应该由DeviceRegisterHandler在收到0x20命令时处理
 
 	} else {
 		logger.WithFields(logrus.Fields{
@@ -117,54 +98,6 @@ func (h *SimCardHandler) Handle(request ziface.IRequest) {
 	}
 }
 
-// triggerDeviceRegistration 主动触发设备注册
-// 通过发送0x81网络状态查询命令，根据协议规范触发设备发送0x20注册包
-// 遵循单一责任原则和低耦合设计
-func (h *SimCardHandler) triggerDeviceRegistration(conn ziface.IConnection, iccid string) {
-	// 防重复触发检查：检查设备连接状态是否已经是Active
-	deviceSession := session.GetDeviceSession(conn)
-	if deviceSession != nil && deviceSession.State == constants.ConnStatusActive {
-		logger.WithFields(logrus.Fields{
-			"connID": conn.GetConnID(),
-			"iccid":  iccid,
-			"state":  deviceSession.State,
-		}).Debug("SimCardHandler: 设备已处于Active状态，跳过注册触发")
-		return
-	}
-
-	// 从DeviceSession获取物理ID，如果没有则使用0（让协议层处理）
-	var physicalID uint32 = 0
-	if deviceSession != nil && deviceSession.PhysicalID != "" {
-		// 尝试解析PhysicalID字符串为uint32
-		if _, err := fmt.Sscanf(deviceSession.PhysicalID, "0x%08X", &physicalID); err != nil {
-			logger.WithFields(logrus.Fields{
-				"connID":           conn.GetConnID(),
-				"physicalIDString": deviceSession.PhysicalID,
-				"error":            err,
-			}).Debug("SimCardHandler: 解析PhysicalID字符串失败，使用0")
-			physicalID = 0
-		}
-	}
-
-	// 生成消息ID - 使用全局消息ID管理器
-	messageID := protocol.GetNextMessageID()
-
-	// 发送0x81网络状态查询命令（空数据载荷）
-	// 根据协议文档，此命令会触发设备发送注册包、心跳包等
-	if err := protocol.SendDNYRequest(conn, physicalID, messageID, dny_protocol.CmdNetworkStatus, []byte{}); err != nil {
-		logger.WithFields(logrus.Fields{
-			"connID":     conn.GetConnID(),
-			"iccid":      iccid,
-			"physicalID": fmt.Sprintf("0x%08X", physicalID),
-			"messageID":  fmt.Sprintf("0x%04X", messageID),
-			"error":      err,
-		}).Error("SimCardHandler: 发送网络状态查询命令失败")
-	} else {
-		logger.WithFields(logrus.Fields{
-			"connID":     conn.GetConnID(),
-			"iccid":      iccid,
-			"physicalID": fmt.Sprintf("0x%08X", physicalID),
-			"messageID":  fmt.Sprintf("0x%04X", messageID),
-		}).Info("SimCardHandler: 发送网络状态查询命令成功，等待设备注册响应")
-	}
-}
+// 🔧 修复：删除违反文档要求的triggerDeviceRegistration方法
+// 文档明确要求：SimCardHandler严禁在此阶段创建会话或绑定任何形式的deviceId
+// 设备注册应该完全由DeviceRegisterHandler处理

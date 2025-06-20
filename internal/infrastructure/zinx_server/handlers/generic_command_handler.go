@@ -56,13 +56,13 @@ func (h *GenericCommandHandler) Handle(request ziface.IRequest) {
 
 	// 4. 记录处理日志
 	logger.WithFields(logrus.Fields{
-		"connID":     conn.GetConnID(),
-		"msgID":      fmt.Sprintf("0x%02X", msg.GetMsgID()),
-		"command":    fmt.Sprintf("0x%02X", decodedFrame.Command),
-		"physicalID": decodedFrame.PhysicalID,
-		"messageID":  fmt.Sprintf("0x%04X", decodedFrame.MessageID),
-		"dataLen":    len(msg.GetData()),
-		"dataHex":    fmt.Sprintf("%x", msg.GetData()),
+		"connID":    conn.GetConnID(),
+		"msgID":     fmt.Sprintf("0x%02X", msg.GetMsgID()),
+		"command":   fmt.Sprintf("0x%02X", decodedFrame.Command),
+		"DeviceID":  decodedFrame.DeviceID,
+		"messageID": fmt.Sprintf("0x%04X", decodedFrame.MessageID),
+		"dataLen":   len(msg.GetData()),
+		"dataHex":   fmt.Sprintf("%x", msg.GetData()),
 	}).Info("通用命令处理器：接收到未实现的命令")
 
 	// 5. 更新连接活动时间

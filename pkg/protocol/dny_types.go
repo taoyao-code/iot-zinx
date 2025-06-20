@@ -56,8 +56,8 @@ type DecodedDNYFrame struct {
 	Header        []byte // 3字节包头，应为 "DNY"。
 	LengthField   uint16 // 从协议中读取的2字节长度字段的原始值。
 	RawPhysicalID []byte // 原始的4字节物理ID数据。
-	PhysicalID    string // 经过特殊编码规则转换后的可读物理ID字符串 (例如："04-13544000")。
-	// 转换规则：原始4字节小端 -> 大端，最高字节为设备识别码，后3字节为设备编号（十进制）。
+	DeviceID      string // 由硬件PhysicalID格式化成的8位大写十六进制字符串（例如："04A228CD"）。
+	// 转换规则：原始4字节小端转换为大端，格式化为8位大写十六进制字符串作为系统内唯一且不变的设备主键。
 	MessageID       uint16 // 2字节消息ID，用于命令-响应匹配和重发机制。
 	Command         byte   // 1字节命令字，指示具体操作。
 	Payload         []byte // 可变长度的数据载荷，其具体含义由 Command 决定。
@@ -144,8 +144,8 @@ func CreateStandardFrame(conn ziface.IConnection, data []byte,
 	header []byte, lengthField uint16, physicalID []byte, messageID uint16,
 	command byte, payload []byte, checksum []byte, isValid bool,
 ) *DecodedDNYFrame {
-	// 格式化物理ID字符串
-	physicalIDStr := formatPhysicalID(physicalID)
+	// 格式化设备ID字符串
+	deviceIDStr := formatDeviceID(physicalID)
 
 	return &DecodedDNYFrame{
 		FrameType:       FrameTypeStandard,
@@ -154,7 +154,7 @@ func CreateStandardFrame(conn ziface.IConnection, data []byte,
 		Header:          header,
 		LengthField:     lengthField,
 		RawPhysicalID:   physicalID,
-		PhysicalID:      physicalIDStr,
+		DeviceID:        deviceIDStr,
 		MessageID:       messageID,
 		Command:         command,
 		Payload:         payload,
@@ -163,18 +163,18 @@ func CreateStandardFrame(conn ziface.IConnection, data []byte,
 	}
 }
 
-// formatPhysicalID 将原始4字节物理ID转换为可读字符串格式
-// 转换规则：小端转大端，设备识别码-设备编号（十进制）
-func formatPhysicalID(rawData []byte) string {
+// formatDeviceID 将原始4字节物理ID转换为8位大写十六进制字符串格式
+// 转换规则：小端转大端，格式化为8位大写十六进制字符串（例如："04A228CD"）
+func formatDeviceID(rawData []byte) string {
 	if len(rawData) != 4 {
-		return "无效物理ID"
+		return "00000000" // 返回默认的8位十六进制格式
 	}
 
 	// 小端转大端：40 aa ce 04 -> 04 ce aa 40
-	deviceCode := rawData[3] // 设备识别码
-	deviceNumber := uint32(rawData[0]) | uint32(rawData[1])<<8 | uint32(rawData[2])<<16
+	// 直接将4字节转换为uint32，然后格式化为8位大写十六进制
+	physicalID := binary.LittleEndian.Uint32(rawData)
 
-	return fmt.Sprintf("%02X-%d", deviceCode, deviceNumber)
+	return fmt.Sprintf("%08X", physicalID)
 }
 
 // ParseDNYFrames 批量解析DNY数据帧

@@ -2,7 +2,6 @@ package handlers
 
 import (
 	"encoding/binary"
-	"fmt"
 
 	"github.com/aceld/zinx/ziface"
 	"github.com/bujia-iot/iot-zinx/internal/app"
@@ -91,10 +90,10 @@ func (h *SwipeCardHandler) Handle(request ziface.IRequest) {
 	}
 
 	logger.WithFields(logrus.Fields{
-		"connID":     conn.GetConnID(),
-		"physicalID": fmt.Sprintf("0x%08X", decodedFrame.PhysicalID),
-		"deviceId":   deviceSession.DeviceID,
-		"dataLen":    len(decodedFrame.Payload),
+		"connID":    conn.GetConnID(),
+		"deviceId":  decodedFrame.DeviceID,
+		"sessionId": deviceSession.DeviceID,
+		"dataLen":   len(decodedFrame.Payload),
 	}).Info("刷卡处理器：处理数据")
 
 	// 4. 解析刷卡请求数据
