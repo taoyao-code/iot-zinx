@@ -167,16 +167,29 @@ type DeviceConnectionInfo struct {
 	RemoteAddr     string  `json:"remoteAddr"`
 }
 
-// GetDeviceConnectionInfo 获取设备连接详细信息
+// GetDeviceConnectionInfo 获取设备连接详细信息 - 🔧 修复：使用精细化错误处理
 func (s *DeviceService) GetDeviceConnectionInfo(deviceID string) (*DeviceConnectionInfo, error) {
 	if s.tcpMonitor == nil {
-		return nil, errors.New("TCP监控器未初始化")
+		return nil, constants.NewDeviceError(constants.ErrCodeInternalError, deviceID, "TCP监控器未初始化")
+	}
+
+	// 🔧 修复：首先检查设备是否存在于状态管理器中
+	stateManager := monitor.GetGlobalStateManager()
+	deviceState, deviceExists := stateManager.GetDeviceState(deviceID)
+
+	if !deviceExists {
+		return nil, constants.NewDeviceError(constants.ErrCodeDeviceNotFound, deviceID, "设备不存在")
 	}
 
 	// 查询设备连接状态
-	conn, exists := s.tcpMonitor.GetConnectionByDeviceId(deviceID)
-	if !exists {
-		return nil, errors.New("设备不在线")
+	conn, connExists := s.tcpMonitor.GetConnectionByDeviceId(deviceID)
+	if !connExists {
+		// 设备存在但连接不可用
+		if deviceState == constants.StateOffline {
+			return nil, constants.NewDeviceError(constants.ErrCodeDeviceOffline, deviceID, "设备离线")
+		} else {
+			return nil, constants.NewDeviceError(constants.ErrCodeConnectionLost, deviceID, "连接丢失")
+		}
 	}
 
 	// 构建设备连接信息

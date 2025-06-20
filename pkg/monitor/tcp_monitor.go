@@ -95,12 +95,14 @@ var _ IConnectionMonitor = (*TCPMonitor)(nil)
 
 // OnConnectionEstablished 当连接建立时通知TCP监视器
 func (m *TCPMonitor) OnConnectionEstablished(conn ziface.IConnection) {
-	conn.SetProperty("connState", constants.ConnStatusConnected)
+	// 🔧 修复：使用统一状态常量
+	conn.SetProperty("connState", constants.StateConnected)
+
 	logger.WithFields(logrus.Fields{
 		"connID":       conn.GetConnID(),
 		"remoteAddr":   conn.RemoteAddr().String(),
 		"timestamp":    time.Now().Format(constants.TimeFormatDefault),
-		"initialState": constants.ConnStatusConnected,
+		"initialState": constants.StateConnected,
 	}).Info("TCPMonitor: Connection established.")
 }
 

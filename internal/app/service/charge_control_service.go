@@ -55,29 +55,24 @@ func (s *ChargeControlService) SendChargeControlCommand(req *dto.ChargeControlRe
 	// 🔧 修复：严格按照文档要求，直接使用标准格式的DeviceID，无需转换
 	// 文档要求：所有服务层和API层的deviceId参数，都应视为标准格式的DeviceID，直接使用
 
-	// 🔧 使用设备状态检查器检查设备是否在线
-	if s.deviceChecker != nil {
-		isOnline := s.deviceChecker.IsDeviceOnline(req.DeviceID)
-		logger.WithFields(logrus.Fields{
-			"deviceId": req.DeviceID,
-			"isOnline": isOnline,
-			"method":   "deviceChecker",
-		}).Info("设备在线状态检查")
+	// 🔧 修复：使用精细化错误处理和中心化状态管理
+	stateManager := monitor.GetGlobalStateManager()
+	deviceState, deviceExists := stateManager.GetDeviceState(req.DeviceID)
 
-		if !isOnline {
-			return fmt.Errorf("设备 %s 不在线", req.DeviceID)
-		}
-	} else {
-		// 备选方案：使用TCP监控器检查连接
-		_, exists := s.monitor.GetConnectionByDeviceId(req.DeviceID)
-		logger.WithFields(logrus.Fields{
-			"deviceId": req.DeviceID,
-			"exists":   exists,
-			"method":   "monitor",
-		}).Info("设备连接状态检查")
+	if !deviceExists {
+		return constants.NewDeviceError(constants.ErrCodeDeviceNotFound, req.DeviceID, "设备不存在")
+	}
 
-		if !exists {
-			return fmt.Errorf("设备 %s 不在线", req.DeviceID)
+	if !deviceState.CanReceiveCommands() {
+		switch deviceState {
+		case constants.StateOffline:
+			return constants.NewDeviceError(constants.ErrCodeDeviceOffline, req.DeviceID, "设备离线")
+		case constants.StateDisconnected:
+			return constants.NewDeviceError(constants.ErrCodeConnectionLost, req.DeviceID, "连接已断开")
+		case constants.StateError:
+			return constants.NewDeviceError(constants.ErrCodeInvalidState, req.DeviceID, "设备状态异常")
+		default:
+			return constants.NewDeviceError(constants.ErrCodeInvalidState, req.DeviceID, fmt.Sprintf("设备状态不支持命令执行: %s", deviceState))
 		}
 	}
 

@@ -10,6 +10,7 @@ import (
 	"github.com/bujia-iot/iot-zinx/internal/infrastructure/config" // 新增导入
 	"github.com/bujia-iot/iot-zinx/internal/infrastructure/logger"
 	"github.com/bujia-iot/iot-zinx/pkg/constants"
+	"github.com/bujia-iot/iot-zinx/pkg/monitor"
 	"github.com/bujia-iot/iot-zinx/pkg/network" // 引入 network 包
 	"github.com/bujia-iot/iot-zinx/pkg/protocol"
 	"github.com/sirupsen/logrus"
@@ -45,6 +46,19 @@ func (h *SimCardHandler) Handle(request ziface.IRequest) {
 		// 🔧 修复：严格按照文档要求，仅将ICCID存入连接属性中
 		// 文档要求：收到ICCID后，仅将ICCID存入连接的属性中 (conn.SetProperty("iccid", ...))
 		conn.SetProperty(constants.PropKeyICCID, iccidStr)
+
+		// 🔧 修复：使用中心化状态管理器更新ICCID接收状态
+		// 注意：这里不能使用deviceID，因为还没有注册，使用连接ID作为临时标识
+		stateManager := monitor.GetGlobalStateManager()
+		tempDeviceID := fmt.Sprintf("conn_%d", conn.GetConnID())
+		err := stateManager.MarkDeviceICCIDReceived(tempDeviceID, conn)
+		if err != nil {
+			logger.WithFields(logrus.Fields{
+				"connID": conn.GetConnID(),
+				"iccid":  iccidStr,
+				"error":  err,
+			}).Error("更新ICCID接收状态失败")
+		}
 
 		// 计划 3.b.3: 调用 network.UpdateConnectionActivity(conn)
 		network.UpdateConnectionActivity(conn) // 更新连接活动（例如更新HeartbeatManager中的记录）

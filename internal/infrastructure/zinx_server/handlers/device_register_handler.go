@@ -172,6 +172,17 @@ func (h *DeviceRegisterHandler) handleDeviceRegister(deviceId string, physicalId
 	// deviceId 是唯一的字符串标识，conn 是共享的连接
 	monitor.GetGlobalConnectionMonitor().BindDeviceIdToConnection(deviceId, conn)
 
+	// 🔧 修复：使用中心化状态管理器更新设备注册状态
+	stateManager := monitor.GetGlobalStateManager()
+	err = stateManager.MarkDeviceRegistered(deviceId, conn)
+	if err != nil {
+		logger.WithFields(logrus.Fields{
+			"deviceId": deviceId,
+			"connID":   conn.GetConnID(),
+			"error":    err,
+		}).Error("更新设备注册状态失败")
+	}
+
 	// 3. 更新与连接直接关联的 zinx原生的session.DeviceSession 的状态
 	// 这个session主要用于Zinx框架层面的连接属性管理，例如存储共享的ICCID。
 	linkedSession := session.GetDeviceSession(conn)

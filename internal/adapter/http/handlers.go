@@ -12,6 +12,8 @@ import (
 	"github.com/bujia-iot/iot-zinx/internal/domain/dny_protocol"
 	"github.com/bujia-iot/iot-zinx/internal/infrastructure/logger"
 	"github.com/bujia-iot/iot-zinx/pkg"
+	"github.com/bujia-iot/iot-zinx/pkg/constants"
+	"github.com/bujia-iot/iot-zinx/pkg/monitor"
 	"github.com/gin-gonic/gin"
 	"github.com/sirupsen/logrus"
 )
@@ -86,12 +88,15 @@ func HandleDeviceStatus(c *gin.Context) {
 		return
 	}
 
-	// 🔧 优先查询设备服务的业务状态
-	businessStatus, exists := ctx.DeviceService.GetDeviceStatus(deviceID)
+	// 🔧 修复：使用精细化错误处理
+	stateManager := monitor.GetGlobalStateManager()
+	deviceState, exists := stateManager.GetDeviceState(deviceID)
+
 	if !exists {
 		c.JSON(http.StatusNotFound, APIResponse{
-			Code:    404,
+			Code:    int(constants.ErrCodeDeviceNotFound),
 			Message: "设备不存在",
+			Data:    nil,
 		})
 		return
 	}
@@ -99,30 +104,57 @@ func HandleDeviceStatus(c *gin.Context) {
 	// 尝试获取TCP连接详细信息作为补充
 	deviceInfo, err := ctx.DeviceService.GetDeviceConnectionInfo(deviceID)
 	if err != nil {
-		// 连接信息获取失败，但设备存在，返回基础状态
-		isOnline := businessStatus == "online"
-		c.JSON(http.StatusOK, APIResponse{
-			Code:    0,
-			Message: "成功",
-			Data: gin.H{
-				"deviceId": deviceID,
-				"isOnline": isOnline,
-				"status":   businessStatus, // 使用准确的业务状态
-			},
-		})
+		// 🔧 修复：处理不同类型的错误
+		if deviceErr, ok := err.(*constants.DeviceError); ok {
+			switch deviceErr.Code {
+			case constants.ErrCodeDeviceOffline:
+				c.JSON(http.StatusOK, APIResponse{
+					Code:    int(constants.ErrCodeDeviceOffline),
+					Message: "设备离线",
+					Data: gin.H{
+						"deviceId": deviceID,
+						"isOnline": false,
+						"status":   deviceState.String(),
+					},
+				})
+			case constants.ErrCodeConnectionLost:
+				c.JSON(http.StatusOK, APIResponse{
+					Code:    int(constants.ErrCodeConnectionLost),
+					Message: "连接丢失",
+					Data: gin.H{
+						"deviceId": deviceID,
+						"isOnline": false,
+						"status":   deviceState.String(),
+					},
+				})
+			default:
+				c.JSON(http.StatusInternalServerError, APIResponse{
+					Code:    int(deviceErr.Code),
+					Message: deviceErr.Message,
+					Data:    nil,
+				})
+			}
+		} else {
+			// 其他类型错误
+			c.JSON(http.StatusInternalServerError, APIResponse{
+				Code:    int(constants.ErrCodeInternalError),
+				Message: "获取设备信息失败",
+				Data:    nil,
+			})
+		}
 		return
 	}
 
-	// 成功获取连接信息，返回完整信息（但状态以业务状态为准）
-	isOnline := businessStatus == "online"
+	// 成功获取连接信息，返回完整信息
+	isOnline := deviceState.IsActive()
 	c.JSON(http.StatusOK, APIResponse{
 		Code:    0,
 		Message: "成功",
 		Data: gin.H{
 			"deviceId":       deviceInfo.DeviceID,
 			"iccid":          deviceInfo.ICCID,
-			"isOnline":       isOnline,       // 🔧 优先使用业务状态
-			"status":         businessStatus, // 🔧 优先使用业务状态
+			"isOnline":       isOnline,
+			"status":         deviceState.String(),
 			"lastHeartbeat":  deviceInfo.LastHeartbeat,
 			"heartbeatTime":  deviceInfo.HeartbeatTime,
 			"timeSinceHeart": deviceInfo.TimeSinceHeart,
@@ -465,12 +497,44 @@ func HandleStartCharging(c *gin.Context) {
 		OrderNumber:    req.OrderNo,
 	}
 
-	// 发送充电控制命令
+	// 发送充电控制命令 - 🔧 修复：使用精细化错误处理
 	if err := chargeService.SendChargeControlCommand(chargeReq); err != nil {
-		c.JSON(http.StatusInternalServerError, APIResponse{
-			Code:    500,
-			Message: "发送充电控制命令失败: " + err.Error(),
-		})
+		// 🔧 修复：根据错误类型返回不同的HTTP状态码和错误信息
+		if deviceErr, ok := err.(*constants.DeviceError); ok {
+			switch deviceErr.Code {
+			case constants.ErrCodeDeviceNotFound:
+				c.JSON(http.StatusNotFound, APIResponse{
+					Code:    int(constants.ErrCodeDeviceNotFound),
+					Message: "设备不存在",
+				})
+			case constants.ErrCodeDeviceOffline:
+				c.JSON(http.StatusBadRequest, APIResponse{
+					Code:    int(constants.ErrCodeDeviceOffline),
+					Message: "设备离线，无法执行充电操作",
+				})
+			case constants.ErrCodeConnectionLost:
+				c.JSON(http.StatusBadRequest, APIResponse{
+					Code:    int(constants.ErrCodeConnectionLost),
+					Message: "设备连接丢失，请稍后重试",
+				})
+			case constants.ErrCodeInvalidState:
+				c.JSON(http.StatusBadRequest, APIResponse{
+					Code:    int(constants.ErrCodeInvalidState),
+					Message: deviceErr.Message,
+				})
+			default:
+				c.JSON(http.StatusInternalServerError, APIResponse{
+					Code:    int(deviceErr.Code),
+					Message: deviceErr.Message,
+				})
+			}
+		} else {
+			// 其他类型错误
+			c.JSON(http.StatusInternalServerError, APIResponse{
+				Code:    int(constants.ErrCodeInternalError),
+				Message: "发送充电控制命令失败: " + err.Error(),
+			})
+		}
 		return
 	}
 

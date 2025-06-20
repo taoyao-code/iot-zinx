@@ -123,25 +123,32 @@ func (h *HeartbeatHandler) processHeartbeat(decodedFrame *protocol.DecodedDNYFra
 	}).Info("设备心跳处理完成")
 }
 
-// updateHeartbeatTime 更新心跳时间
+// updateHeartbeatTime 更新心跳时间 - 🔧 修复：使用中心化状态管理，消除重复更新
 func (h *HeartbeatHandler) updateHeartbeatTime(conn ziface.IConnection, deviceSession *session.DeviceSession) {
-	// 通过DeviceSession管理心跳时间
-	if deviceSession != nil {
-		deviceSession.UpdateHeartbeat()
-		deviceSession.UpdateStatus(constants.DeviceStatusOnline)
-		deviceSession.SyncToConnection(conn)
-	}
+	// 🔧 修复：使用中心化状态管理器，替代多处重复的状态更新
+	stateManager := monitor.GetGlobalStateManager()
 
-	// 使用监控器更新设备状态
-	monitor.GetGlobalConnectionMonitor().UpdateLastHeartbeatTime(conn)
-
-	// 🔧 修复：更新自定义心跳管理器的连接活动时间
-	// 这是解决连接超时问题的关键修复
-	network.UpdateConnectionActivity(conn)
-
-	// 更新设备状态为在线
 	if deviceSession != nil && deviceSession.DeviceID != "" {
-		monitor.GetGlobalConnectionMonitor().UpdateDeviceStatus(deviceSession.DeviceID, string(constants.DeviceStatusOnline))
+		// 统一通过状态管理器更新设备在线状态
+		// 这会自动处理：连接属性更新、活动时间更新、监听器通知等
+		err := stateManager.MarkDeviceOnline(deviceSession.DeviceID, conn)
+		if err != nil {
+			logger.WithFields(logrus.Fields{
+				"deviceId": deviceSession.DeviceID,
+				"connID":   conn.GetConnID(),
+				"error":    err,
+			}).Error("更新设备在线状态失败")
+		}
+
+		// 更新DeviceSession的心跳时间
+		deviceSession.UpdateHeartbeat()
+	} else {
+		// 如果没有设备ID，只更新连接活动时间
+		network.UpdateConnectionActivity(conn)
+
+		logger.WithFields(logrus.Fields{
+			"connID": conn.GetConnID(),
+		}).Warn("心跳处理：设备ID为空，无法更新设备状态")
 	}
 }
 
