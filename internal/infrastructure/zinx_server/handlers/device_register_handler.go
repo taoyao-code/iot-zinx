@@ -187,28 +187,23 @@ func (h *DeviceRegisterHandler) handleDeviceRegister(deviceId string, physicalId
 	// 这个session主要用于Zinx框架层面的连接属性管理，例如存储共享的ICCID。
 	linkedSession := session.GetDeviceSession(conn)
 	if linkedSession != nil {
-		// 🔧 修复：注册设备时，需要设置DeviceID到DeviceSession，确保心跳处理时能正确识别设备
-		logger.WithFields(logrus.Fields{
-			"connID":   conn.GetConnID(),
-			"deviceId": deviceId,
-		}).Info("🔧 开始调用RegisterDevice设置DeviceSession.DeviceID")
+		// 🔧 修复：只设置DeviceID，保持原有所有其他逻辑不变
+		linkedSession.DeviceID = deviceId
+		linkedSession.PhysicalID = fmt.Sprintf("0x%08X", uint32(physicalId))
+		linkedSession.LastActivityAt = time.Now()
 
-		linkedSession.RegisterDevice(deviceId, fmt.Sprintf("0x%08X", uint32(physicalId)), "", 0, false)
-		linkedSession.UpdateStatus(constants.DeviceStatusOnline)
+		// 🔧 只同步必要的属性，不改变状态
 		linkedSession.SyncToConnection(conn)
 
 		logger.WithFields(logrus.Fields{
-			"connID":          conn.GetConnID(),
-			"deviceId":        deviceId,
-			"sessionDeviceID": linkedSession.DeviceID,
-			"sessionState":    linkedSession.State,
-			"sessionStatus":   linkedSession.Status,
-		}).Info("🔧 RegisterDevice调用完成，DeviceSession状态已更新")
+			"connID":   conn.GetConnID(),
+			"deviceId": deviceId,
+		}).Debug("🔧 DeviceSession.DeviceID已设置并同步")
 	} else {
 		logger.WithFields(logrus.Fields{
 			"connID":   conn.GetConnID(),
 			"deviceId": deviceId,
-		}).Error("🔧 无法获取DeviceSession，RegisterDevice调用失败")
+		}).Error("🔧 无法获取DeviceSession")
 	}
 
 	// 调用连接活动更新
