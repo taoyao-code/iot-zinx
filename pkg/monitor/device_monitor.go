@@ -227,6 +227,42 @@ func (dm *DeviceMonitor) OnDeviceDisconnect(deviceID string, conn ziface.IConnec
 		return
 	}
 
+	// 🔧 重要修复：设备断开时立即清理绑定和会话，防止重复注册
+	// 1. 清理TCPMonitor中的设备绑定
+	if tcpMonitor, ok := dm.connectionMonitor.(*TCPMonitor); ok {
+		tcpMonitor.UnbindDeviceIDFromConnection(deviceID)
+	}
+
+	// 2. 判断是否需要立即清理会话
+	shouldRemoveSession := false
+
+	// 如果是异常断开或超时断开，立即清理会话
+	if strings.Contains(reason, "abnormal") ||
+		strings.Contains(reason, "timeout") ||
+		strings.Contains(reason, "connection reset") {
+		shouldRemoveSession = true
+	}
+
+	// 如果是正常断开但设备长时间未重连，也清理会话
+	if strings.Contains(reason, "normal") && session.LastHeartbeatTime.Before(time.Now().Add(-5*time.Minute)) {
+		shouldRemoveSession = true
+	}
+
+	if shouldRemoveSession {
+		dm.sessionManager.RemoveSession(deviceID)
+		logger.WithFields(logrus.Fields{
+			"deviceID": deviceID,
+			"connID":   conn.GetConnID(),
+			"reason":   reason,
+		}).Info("设备会话已立即清理，防止重复注册")
+	} else {
+		// 仅更新会话状态为离线，保留会话以便快速重连
+		dm.sessionManager.UpdateSession(deviceID, func(s *DeviceSession) {
+			s.Status = constants.DeviceStatusOffline
+			s.LastDisconnectTime = time.Now()
+		})
+	}
+
 	// 🔧 优化：DeviceMonitor不直接管理会话状态，避免与TCPMonitor重复调用
 	// 会话状态管理由TCPMonitor统一处理，这里只更新监控相关的统计信息
 

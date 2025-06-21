@@ -207,7 +207,9 @@ func (chc *ConnectionHealthChecker) checkConnection(conn ziface.IConnection, dev
 		result.IsHealthy = false
 		result.Issues = append(result.Issues, "获取最后活动时间失败")
 	} else {
-		if t, ok := lastActivity.(time.Time); ok {
+		// 🔧 修复：正确处理Unix时间戳格式，与connection_hooks.go保持一致
+		if timestamp, ok := lastActivity.(int64); ok {
+			t := time.Unix(timestamp, 0)
 			result.LastActivity = t
 			result.InactiveTime = time.Since(t)
 
@@ -218,7 +220,7 @@ func (chc *ConnectionHealthChecker) checkConnection(conn ziface.IConnection, dev
 			}
 		} else {
 			result.IsHealthy = false
-			result.Issues = append(result.Issues, "最后活动时间格式不正确")
+			result.Issues = append(result.Issues, fmt.Sprintf("最后活动时间格式不正确，期望int64，实际类型: %T", lastActivity))
 		}
 	}
 

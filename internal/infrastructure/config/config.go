@@ -99,8 +99,17 @@ type DeviceConnectionConfig struct {
 	HeartbeatTimeoutSeconds  int `mapstructure:"heartbeatTimeoutSeconds" yaml:"heartbeatTimeoutSeconds"` // HeartbeatManager 的超时时间
 	HeartbeatIntervalSeconds int `mapstructure:"heartbeatIntervalSeconds" yaml:"heartbeatIntervalSeconds"`
 	// 生产环境建议设置为 7 分钟 (420 秒)
-	HeartbeatWarningThreshold int `mapstructure:"heartbeatWarningThreshold" yaml:"heartbeatWarningThreshold"`
-	SessionTimeoutMinutes     int `mapstructure:"sessionTimeoutMinutes" yaml:"sessionTimeoutMinutes"`
+	HeartbeatWarningThreshold int                    `mapstructure:"heartbeatWarningThreshold" yaml:"heartbeatWarningThreshold"`
+	SessionTimeoutMinutes     int                    `mapstructure:"sessionTimeoutMinutes" yaml:"sessionTimeoutMinutes"`
+	Timeouts                  DifferentiatedTimeouts `mapstructure:"timeouts" yaml:"timeouts"` // 🔧 新增：差异化超时配置
+}
+
+// DifferentiatedTimeouts 差异化超时配置
+type DifferentiatedTimeouts struct {
+	RegisterTimeoutSeconds          int `mapstructure:"registerTimeoutSeconds" yaml:"registerTimeoutSeconds"`                   // 注册响应超时
+	HeartbeatResponseTimeoutSeconds int `mapstructure:"heartbeatResponseTimeoutSeconds" yaml:"heartbeatResponseTimeoutSeconds"` // 心跳响应超时
+	DataTransferTimeoutSeconds      int `mapstructure:"dataTransferTimeoutSeconds" yaml:"dataTransferTimeoutSeconds"`           // 数据传输超时
+	DefaultWriteTimeoutSeconds      int `mapstructure:"defaultWriteTimeoutSeconds" yaml:"defaultWriteTimeoutSeconds"`           // 默认写操作超时
 }
 
 // 全局配置实例

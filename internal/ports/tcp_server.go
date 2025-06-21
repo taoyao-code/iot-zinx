@@ -119,13 +119,21 @@ func (s *TCPServer) initializePackageDependencies() {
 func (s *TCPServer) setupConnectionHooks() {
 	deviceCfg := s.cfg.DeviceConnection
 	readTimeout := time.Duration(deviceCfg.HeartbeatTimeoutSeconds) * time.Second
-	writeTimeout := readTimeout
+
+	// 🔧 修复：使用差异化写超时策略，而非直接等于读超时
+	var writeTimeout time.Duration
+	if deviceCfg.Timeouts.DefaultWriteTimeoutSeconds > 0 {
+		writeTimeout = time.Duration(deviceCfg.Timeouts.DefaultWriteTimeoutSeconds) * time.Second
+	} else {
+		writeTimeout = readTimeout // 向后兼容，如果未配置则使用读超时
+	}
+
 	keepAliveTimeout := time.Duration(deviceCfg.HeartbeatIntervalSeconds) * time.Second
 
 	// 使用pkg包中的连接钩子
 	connectionHooks := pkg.Network.NewConnectionHooks(
 		readTimeout,      // 读超时
-		writeTimeout,     // 写超时
+		writeTimeout,     // 写超时 🔧 修复：不再直接等于读超时
 		keepAliveTimeout, // KeepAlive周期
 	)
 
