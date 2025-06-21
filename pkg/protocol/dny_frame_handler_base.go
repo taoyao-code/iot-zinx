@@ -51,10 +51,11 @@ func (h *DNYFrameHandlerBase) GetOrCreateDeviceSession(conn ziface.IConnection) 
 
 	deviceSession := session.GetDeviceSession(conn)
 	if deviceSession == nil {
-		deviceSession = session.NewDeviceSession(conn)
+		// GetDeviceSession 内部已经会自动创建并保存新session，不应该再手动创建
 		logger.WithFields(logrus.Fields{
 			"connID": getConnID(conn),
-		}).Debug("创建新的设备会话")
+		}).Error("GetDeviceSession 返回 nil，这不应该发生")
+		return nil, errors.New("无法获取或创建设备会话")
 	}
 
 	return deviceSession, nil

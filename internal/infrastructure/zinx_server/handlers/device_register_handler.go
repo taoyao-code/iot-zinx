@@ -187,23 +187,23 @@ func (h *DeviceRegisterHandler) handleDeviceRegister(deviceId string, physicalId
 	// 这个session主要用于Zinx框架层面的连接属性管理，例如存储共享的ICCID。
 	linkedSession := session.GetDeviceSession(conn)
 	if linkedSession != nil {
-		// 🔧 修复：只设置DeviceID，保持原有所有其他逻辑不变
+		// 🔧 修复：设置DeviceID，确保心跳处理时能正确识别设备
 		linkedSession.DeviceID = deviceId
 		linkedSession.PhysicalID = fmt.Sprintf("0x%08X", uint32(physicalId))
 		linkedSession.LastActivityAt = time.Now()
 
-		// 🔧 只同步必要的属性，不改变状态
+		// 同步属性到连接，GetDeviceSession已确保session被正确保存
 		linkedSession.SyncToConnection(conn)
 
 		logger.WithFields(logrus.Fields{
 			"connID":   conn.GetConnID(),
 			"deviceId": deviceId,
-		}).Debug("🔧 DeviceSession.DeviceID已设置并同步")
+		}).Debug("DeviceSession.DeviceID已设置并同步")
 	} else {
 		logger.WithFields(logrus.Fields{
 			"connID":   conn.GetConnID(),
 			"deviceId": deviceId,
-		}).Error("🔧 无法获取DeviceSession")
+		}).Error("无法获取DeviceSession")
 	}
 
 	// 调用连接活动更新
