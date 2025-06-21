@@ -110,6 +110,14 @@ func (h *HeartbeatHandler) processHeartbeat(decodedFrame *protocol.DecodedDNYFra
 	// 根据协议规范，心跳包不需要服务器应答，只需更新心跳时间
 	h.updateHeartbeatTime(conn, deviceSession)
 
+	// 🔧 调试：添加详细调试信息
+	logger.WithFields(logrus.Fields{
+		"connID":            conn.GetConnID(),
+		"heartbeatDeviceId": deviceId,               // 从心跳包解析的设备ID
+		"sessionDeviceId":   deviceSession.DeviceID, // 从session获取的设备ID
+		"match":             deviceId == deviceSession.DeviceID,
+	}).Debug("🔧 心跳设备ID匹配检查")
+
 	// 记录设备心跳
 	now := time.Now()
 	nowStr := now.Format(constants.TimeFormatDefault)

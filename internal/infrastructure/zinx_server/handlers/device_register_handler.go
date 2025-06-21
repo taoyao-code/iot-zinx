@@ -183,22 +183,23 @@ func (h *DeviceRegisterHandler) handleDeviceRegister(deviceId string, physicalId
 		}).Error("更新设备注册状态失败")
 	}
 
-	// 3. 更新与连接直接关联的 zinx原生的session.DeviceSession 的状态
-	// 这个session主要用于Zinx框架层面的连接属性管理，例如存储共享的ICCID。
+	// 3. 设置Zinx框架层的session，确保心跳处理时能正确识别设备
 	linkedSession := session.GetDeviceSession(conn)
 	if linkedSession != nil {
-		// 🔧 修复：设置DeviceID，确保心跳处理时能正确识别设备
+		// 设置DeviceID，确保心跳处理时能正确识别设备
 		linkedSession.DeviceID = deviceId
 		linkedSession.PhysicalID = fmt.Sprintf("0x%08X", uint32(physicalId))
 		linkedSession.LastActivityAt = time.Now()
 
-		// 同步属性到连接，GetDeviceSession已确保session被正确保存
+		// 同步属性到连接
 		linkedSession.SyncToConnection(conn)
 
 		logger.WithFields(logrus.Fields{
-			"connID":   conn.GetConnID(),
-			"deviceId": deviceId,
-		}).Debug("DeviceSession.DeviceID已设置并同步")
+			"connID":            conn.GetConnID(),
+			"deviceId":          deviceId,
+			"sessionDeviceID":   linkedSession.DeviceID,
+			"sessionPhysicalID": linkedSession.PhysicalID,
+		}).Debug("🔧 DeviceSession.DeviceID已设置并同步")
 	} else {
 		logger.WithFields(logrus.Fields{
 			"connID":   conn.GetConnID(),
