@@ -146,8 +146,18 @@ func (h *HeartbeatHandler) updateHeartbeatTime(conn ziface.IConnection, deviceSe
 		// 如果没有设备ID，只更新连接活动时间
 		network.UpdateConnectionActivity(conn)
 
+		// 🔧 添加更详细的调试信息
+		var debugInfo string
+		if deviceSession == nil {
+			debugInfo = "deviceSession为null"
+		} else {
+			debugInfo = fmt.Sprintf("deviceSession.DeviceID为空(sessionID=%s, state=%s, status=%s)",
+				deviceSession.SessionID, deviceSession.State, deviceSession.Status)
+		}
+
 		logger.WithFields(logrus.Fields{
-			"connID": conn.GetConnID(),
+			"connID":    conn.GetConnID(),
+			"debugInfo": debugInfo,
 		}).Warn("心跳处理：设备ID为空，无法更新设备状态")
 	}
 }

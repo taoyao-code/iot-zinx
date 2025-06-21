@@ -188,9 +188,27 @@ func (h *DeviceRegisterHandler) handleDeviceRegister(deviceId string, physicalId
 	linkedSession := session.GetDeviceSession(conn)
 	if linkedSession != nil {
 		// 🔧 修复：注册设备时，需要设置DeviceID到DeviceSession，确保心跳处理时能正确识别设备
+		logger.WithFields(logrus.Fields{
+			"connID":   conn.GetConnID(),
+			"deviceId": deviceId,
+		}).Info("🔧 开始调用RegisterDevice设置DeviceSession.DeviceID")
+
 		linkedSession.RegisterDevice(deviceId, fmt.Sprintf("0x%08X", uint32(physicalId)), "", 0, false)
 		linkedSession.UpdateStatus(constants.DeviceStatusOnline)
 		linkedSession.SyncToConnection(conn)
+
+		logger.WithFields(logrus.Fields{
+			"connID":          conn.GetConnID(),
+			"deviceId":        deviceId,
+			"sessionDeviceID": linkedSession.DeviceID,
+			"sessionState":    linkedSession.State,
+			"sessionStatus":   linkedSession.Status,
+		}).Info("🔧 RegisterDevice调用完成，DeviceSession状态已更新")
+	} else {
+		logger.WithFields(logrus.Fields{
+			"connID":   conn.GetConnID(),
+			"deviceId": deviceId,
+		}).Error("🔧 无法获取DeviceSession，RegisterDevice调用失败")
 	}
 
 	// 调用连接活动更新
