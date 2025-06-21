@@ -148,6 +148,12 @@ func (h *HeartbeatHandler) updateHeartbeatTime(conn ziface.IConnection, deviceSe
 			}).Error("更新设备在线状态失败")
 		}
 
+		logger.WithFields(logrus.Fields{
+			"connID":    conn.GetConnID(),
+			"deviceId":  deviceSession.DeviceID,
+			"timestamp": time.Now().Format(constants.TimeFormatDefault),
+		}).Debug("心跳处理：已更新设备在线状态")
+
 		// 更新DeviceSession的心跳时间
 		deviceSession.UpdateHeartbeat()
 	} else {

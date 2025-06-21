@@ -106,7 +106,8 @@ func (s DeviceConnectionState) IsConnected() bool {
 
 // CanReceiveCommands 判断是否可以接收命令
 func (s DeviceConnectionState) CanReceiveCommands() bool {
-	return s == StateOnline
+	// 🔧 修复：设备注册后就应该能接收命令，不需要等到在线状态
+	return s == StateRegistered || s == StateOnline
 }
 
 // String 返回状态的字符串表示
