@@ -116,22 +116,30 @@ func (h *HeartbeatHandler) processHeartbeat(decodedFrame *protocol.DecodedDNYFra
 		"heartbeatDeviceId": deviceId,               // 从心跳包解析的设备ID
 		"sessionDeviceId":   deviceSession.DeviceID, // 从session获取的设备ID
 		"match":             deviceId == deviceSession.DeviceID,
+		"isRegistered":      deviceSession.DeviceID != "",
 	}).Debug("🔧 心跳设备ID匹配检查")
+
+	// 🔧 优化：使用心跳包中的设备ID临时标识设备（用于日志记录）
+	effectiveDeviceId := deviceSession.DeviceID
+	if effectiveDeviceId == "" && deviceId != "" {
+		effectiveDeviceId = deviceId + "(未注册)"
+	}
 
 	// 记录设备心跳
 	now := time.Now()
 	nowStr := now.Format(constants.TimeFormatDefault)
 	logger.WithFields(logrus.Fields{
-		"connID":     conn.GetConnID(),
-		"deviceId":   deviceId,
-		"sessionId":  deviceSession.DeviceID,
-		"iccid":      iccid,
-		"remoteAddr": conn.RemoteAddr().String(),
-		"timestamp":  nowStr,
+		"connID":            conn.GetConnID(),
+		"effectiveDeviceId": effectiveDeviceId,
+		"sessionId":         deviceSession.DeviceID,
+		"iccid":             iccid,
+		"remoteAddr":        conn.RemoteAddr().String(),
+		"timestamp":         nowStr,
+		"isRegistered":      deviceSession.DeviceID != "",
 	}).Info("设备心跳处理完成")
 }
 
-// updateHeartbeatTime 更新心跳时间 - 🔧 修复：使用中心化状态管理，消除重复更新
+// updateHeartbeatTime 更新心跳时间 - 🔧 修复：优化未注册设备的心跳处理逻辑
 func (h *HeartbeatHandler) updateHeartbeatTime(conn ziface.IConnection, deviceSession *session.DeviceSession) {
 	// 🔧 修复：使用中心化状态管理器，替代多处重复的状态更新
 	stateManager := monitor.GetGlobalStateManager()
@@ -157,22 +165,29 @@ func (h *HeartbeatHandler) updateHeartbeatTime(conn ziface.IConnection, deviceSe
 		// 更新DeviceSession的心跳时间
 		deviceSession.UpdateHeartbeat()
 	} else {
-		// 如果没有设备ID，只更新连接活动时间
+		// 🔧 优化：未注册设备的心跳处理 - 这是正常的业务流程
+		// 设备在注册前发送心跳包是正常的，我们仍然需要保持连接活跃
 		network.UpdateConnectionActivity(conn)
 
-		// 🔧 添加更详细的调试信息
+		// 🔧 优化：从DEBUG角度记录，而不是WARN，因为这是正常流程
 		var debugInfo string
 		if deviceSession == nil {
 			debugInfo = "deviceSession为null"
 		} else {
-			debugInfo = fmt.Sprintf("deviceSession.DeviceID为空(sessionID=%s, state=%s, status=%s)",
+			debugInfo = fmt.Sprintf("设备未注册(sessionID=%s, state=%s, status=%s)",
 				deviceSession.SessionID, deviceSession.State, deviceSession.Status)
 		}
 
 		logger.WithFields(logrus.Fields{
 			"connID":    conn.GetConnID(),
 			"debugInfo": debugInfo,
-		}).Warn("心跳处理：设备ID为空，无法更新设备状态")
+			"note":      "设备注册前的心跳包，连接保持活跃但不更新设备状态",
+		}).Debug("心跳处理：设备未注册，仅更新连接活动时间")
+
+		// 仍然更新会话的心跳时间，保持会话活跃
+		if deviceSession != nil {
+			deviceSession.UpdateHeartbeat()
+		}
 	}
 }
 
