@@ -52,8 +52,8 @@ func ParseDNYProtocolData(data []byte) (*dny_protocol.Message, error) {
 		return msg, errors.New(msg.ErrorMessage)
 	}
 
-	// 🔧 修复：统一ICCID识别逻辑 - 根据AP3000协议文档
-	// ICCID固定长度为20字节，以"3839"开头（十六进制字符串形式）
+	// 🔧 修复：统一ICCID识别逻辑 - 符合ITU-T E.118标准
+	// ICCID固定长度为20字节，十六进制字符(0-9,A-F)，以"89"开头
 	if dataLen == constants.IOT_SIM_CARD_LENGTH && isValidICCIDStrict(data) {
 		msg.MessageType = "iccid"
 		msg.ICCIDValue = string(data) // 直接使用原始数据作为ICCID，符合文档描述
@@ -324,25 +324,12 @@ func IsSpecialMessage(data []byte) bool {
 	return false
 }
 
-// isAllDigits 内部辅助函数：
-func isAllDigits(data []byte) bool {
-	if len(data) == 0 {
-		return false
-	}
-
-	for _, b := range data {
-		// 检查是否为十六进制字符：0-9, A-F, a-f
-		if !((b >= '0' && b <= '9') || (b >= 'A' && b <= 'F') || (b >= 'a' && b <= 'f')) {
-			return false
-		}
-	}
-	return true
-}
+// 🔧 已删除过时的isAllDigits函数，统一使用isValidICCIDStrict进行ICCID验证
 
 // isValidICCID 检查字节数组是否为有效的ICCID格式
-// ICCID可以包含数字和字母（十六进制字符），符合实际SIM卡ICCID格式
+// 🔧 修复：统一使用严格验证逻辑，符合ITU-T E.118标准
 func isValidICCID(data []byte) bool {
-	return isAllDigits(data)
+	return isValidICCIDStrict(data)
 }
 
 // 🔧 修复ICCID验证函数
@@ -412,8 +399,9 @@ func ValidateDNYFrame(frameData []byte) (bool, error) {
 }
 
 // IsValidICCIDPrefix 检查数据是否符合ICCID前缀格式（为兼容文档中的函数名）
+// 🔧 修复：统一使用严格验证逻辑
 func IsValidICCIDPrefix(data []byte) bool {
-	return isValidICCID(data)
+	return isValidICCIDStrict(data)
 }
 
 // 以下是旧的 BuildDNYResponsePacket 和 ParseDNYData 函数，需要移除或重构

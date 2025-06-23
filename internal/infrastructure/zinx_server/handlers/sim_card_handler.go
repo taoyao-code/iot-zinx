@@ -36,8 +36,8 @@ func (h *SimCardHandler) Handle(request ziface.IRequest) {
 		"dataHex":    fmt.Sprintf("%x", data),
 	}).Info("SimCardHandler: Handle method called")
 
-	// 🔧 修复：统一ICCID验证逻辑 - 严格按照AP3000协议文档
-	// ICCID固定长度为20字节，以"3839"开头（十六进制字符串形式）
+	// 🔧 修复：统一ICCID验证逻辑 - 符合ITU-T E.118标准
+	// ICCID固定长度为20字节，十六进制字符(0-9,A-F)，以"89"开头
 	if len(data) == constants.IOT_SIM_CARD_LENGTH && h.isValidICCIDStrict(data) {
 		iccidStr := string(data)
 		now := time.Now()
