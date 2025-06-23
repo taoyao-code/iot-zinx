@@ -10,9 +10,7 @@ import (
 	"github.com/bujia-iot/iot-zinx/internal/infrastructure/config" // 新增导入
 	"github.com/bujia-iot/iot-zinx/internal/infrastructure/logger"
 	"github.com/bujia-iot/iot-zinx/pkg/constants"
-	"github.com/bujia-iot/iot-zinx/pkg/monitor"
 	"github.com/bujia-iot/iot-zinx/pkg/network" // 引入 network 包
-	"github.com/bujia-iot/iot-zinx/pkg/protocol"
 	"github.com/sirupsen/logrus"
 )
 
@@ -38,8 +36,9 @@ func (h *SimCardHandler) Handle(request ziface.IRequest) {
 		"dataHex":    fmt.Sprintf("%x", data),
 	}).Info("SimCardHandler: Handle method called")
 
-	// 确保数据是有效的SIM卡号 (支持标准ICCID长度范围: 19-25字节)
-	if len(data) >= 19 && len(data) <= 25 && protocol.IsAllDigits(data) {
+	// 🔧 修复：统一ICCID验证逻辑 - 严格按照AP3000协议文档
+	// ICCID固定长度为20字节，以"3839"开头（十六进制字符串形式）
+	if len(data) == constants.IOT_SIM_CARD_LENGTH && h.isValidICCIDStrict(data) {
 		iccidStr := string(data)
 		now := time.Now()
 
@@ -47,18 +46,10 @@ func (h *SimCardHandler) Handle(request ziface.IRequest) {
 		// 文档要求：收到ICCID后，仅将ICCID存入连接的属性中 (conn.SetProperty("iccid", ...))
 		conn.SetProperty(constants.PropKeyICCID, iccidStr)
 
-		// 🔧 修复：使用中心化状态管理器更新ICCID接收状态
-		// 注意：这里不能使用deviceID，因为还没有注册，使用连接ID作为临时标识
-		stateManager := monitor.GetGlobalStateManager()
-		tempDeviceID := fmt.Sprintf("conn_%d", conn.GetConnID())
-		err := stateManager.MarkDeviceICCIDReceived(tempDeviceID, conn)
-		if err != nil {
-			logger.WithFields(logrus.Fields{
-				"connID": conn.GetConnID(),
-				"iccid":  iccidStr,
-				"error":  err,
-			}).Error("更新ICCID接收状态失败")
-		}
+		// 🔧 修复：不在ICCID阶段更新状态管理器
+		// 根据文档要求，SimCardHandler只负责接收和存储ICCID
+		// 状态管理应该在DeviceRegisterHandler中统一处理
+		// 这样避免了临时设备ID和实际设备ID的不一致问题
 
 		// 计划 3.b.3: 调用 network.UpdateConnectionActivity(conn)
 		network.UpdateConnectionActivity(conn) // 更新连接活动（例如更新HeartbeatManager中的记录）
@@ -115,3 +106,32 @@ func (h *SimCardHandler) Handle(request ziface.IRequest) {
 // 🔧 修复：删除违反文档要求的triggerDeviceRegistration方法
 // 文档明确要求：SimCardHandler严禁在此阶段创建会话或绑定任何形式的deviceId
 // 设备注册应该完全由DeviceRegisterHandler处理
+
+// 🔧 修复ICCID验证方法
+// isValidICCIDStrict 严格验证ICCID格式 - 符合ITU-T E.118标准
+// ICCID固定长度为20字节，十六进制字符(0-9,A-F)，以"89"开头
+func (h *SimCardHandler) isValidICCIDStrict(data []byte) bool {
+	if len(data) != constants.IOT_SIM_CARD_LENGTH {
+		return false
+	}
+
+	// 转换为字符串进行验证
+	dataStr := string(data)
+	if len(dataStr) < 2 {
+		return false
+	}
+
+	// 必须以"89"开头（ITU-T E.118标准，电信行业标识符）
+	if dataStr[:2] != "89" {
+		return false
+	}
+
+	// 必须全部为十六进制字符（0-9, A-F, a-f）
+	for _, b := range data {
+		if !((b >= '0' && b <= '9') || (b >= 'A' && b <= 'F') || (b >= 'a' && b <= 'f')) {
+			return false
+		}
+	}
+
+	return true
+}

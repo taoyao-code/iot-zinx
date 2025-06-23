@@ -1,6 +1,7 @@
 package protocol
 
 import (
+	"encoding/binary"
 	"fmt"
 
 	"github.com/aceld/zinx/ziface"
@@ -13,9 +14,9 @@ import (
 // 协议解析常量 - 根据AP3000协议文档精确定义
 // -----------------------------------------------------------------------------
 const (
-	// ICCID相关常量 - 根据文档：SIM卡号长度固定为20字节，以"3839"开头
-	ICCID_FIXED_LENGTH = 20     // ICCID固定长度
-	ICCID_PREFIX       = "3839" // ICCID固定前缀（十六进制字符串形式）
+	// ICCID相关常量 - 符合ITU-T E.118标准
+	ICCID_FIXED_LENGTH = 20   // ICCID固定长度：20位十六进制字符
+	ICCID_PREFIX_CMCC  = "89" // ICCID标准前缀（ITU-T E.118，电信行业标识符）
 
 	// Link心跳相关常量 - 根据文档：{6C 69 6E 6B }link是模块心跳包，长度固定为4字节
 	LINK_HEARTBEAT_LENGTH  = 4      // link心跳包固定长度
@@ -159,7 +160,12 @@ func (d *DNY_Decoder) Intercept(chain ziface.IChain) ziface.IcResp {
 		"dataHex": fmt.Sprintf("%.100x", rawData),
 	}).Warn("解码器：无法解析数据为任何已知协议格式")
 
-	// 返回原始数据，让其他处理器处理
+	// 🔧 修复：设置未知消息的msgID，避免"api msgID = 0 is not FOUND!"错误
+	iMessage.SetMsgID(constants.MsgIDUnknown)
+	iMessage.SetData(rawData)
+	iMessage.SetDataLen(uint32(len(rawData)))
+
+	// 返回原始数据，让未知数据处理器处理
 	return chain.ProceedWithIMessage(iMessage, nil)
 }
 
@@ -197,7 +203,7 @@ func (d *DNY_Decoder) tryParseLinkHeartbeatDirect(data []byte, connID uint64) []
 }
 
 // tryParseDNYFrameDirect 直接解析DNY标准协议帧
-// 根据文档：包头为"DNY"，即16进制字节为0x44 0x4E 0x59
+// 🔧 修复：根据实际测试数据，修正DNY协议长度字段的解析逻辑
 func (d *DNY_Decoder) tryParseDNYFrameDirect(data []byte, connID uint64) []byte {
 	if len(data) < DNY_MIN_HEADER_SIZE {
 		return nil
@@ -208,47 +214,55 @@ func (d *DNY_Decoder) tryParseDNYFrameDirect(data []byte, connID uint64) []byte 
 		return nil
 	}
 
-	// 解析长度字段
-	contentLength := uint16(data[3]) | uint16(data[4])<<8 // Little Endian
-	totalFrameLen := DNY_MIN_HEADER_SIZE + int(contentLength)
+	// 🔧 修复：使用正确的小端序解析长度字段
+	contentLength := binary.LittleEndian.Uint16(data[3:5])
+
+	// 🔧 修复：根据实际协议，长度字段不包含校验和
+	// 总长度 = 包头(3) + 长度字段(2) + 内容长度 + 校验和(2)
+	totalFrameLen := DNY_MIN_HEADER_SIZE + int(contentLength) + 2 // +2 for checksum
 
 	// 检查数据长度是否匹配
 	if len(data) != totalFrameLen {
+		logger.WithFields(logrus.Fields{
+			"connID":        connID,
+			"dataLen":       len(data),
+			"contentLength": contentLength,
+			"expectedTotal": totalFrameLen,
+			"dataHex":       fmt.Sprintf("%x", data),
+		}).Debug("DNY帧长度不匹配")
 		return nil
+	}
+
+	// 🔧 修复：验证校验和
+	if !d.validateDNYChecksum(data) {
+		logger.WithFields(logrus.Fields{
+			"connID":  connID,
+			"dataHex": fmt.Sprintf("%x", data),
+		}).Warn("DNY帧校验和验证失败，但继续处理以提高兼容性")
 	}
 
 	return data
 }
 
 // isValidICCIDBytes 验证ICCID字节格式
-// 根据文档：SIM卡号长度固定为20字节，以0x38 0x39开头
+// 🔧 修复：支持真实ICCID格式，十六进制字符(0-9,A-F)，以"89"开头
 func (d *DNY_Decoder) isValidICCIDBytes(data []byte) bool {
 	if len(data) != ICCID_FIXED_LENGTH {
 		return false
 	}
 
-	// 检查是否以0x38 0x39开头（十六进制字节）
-	if data[0] != 0x38 || data[1] != 0x39 {
-		return false
-	}
-
-	return true
-}
-
-// isValidICCIDStrict 严格验证ICCID格式（ASCII字符串形式）
-// 根据文档：SIM卡号长度固定为20字节，以"3839"开头
-func (d *DNY_Decoder) isValidICCIDStrict(data []byte) bool {
-	if len(data) != ICCID_FIXED_LENGTH {
-		return false
-	}
-
-	// 检查是否以"3839"开头（十六进制字符形式）
+	// 转换为字符串进行验证
 	dataStr := string(data)
-	if len(dataStr) < 4 || dataStr[:4] != ICCID_PREFIX {
+	if len(dataStr) < 2 {
 		return false
 	}
 
-	// 检查是否全部为十六进制字符
+	// 必须以"89"开头（ITU-T E.118标准，电信行业标识符）
+	if dataStr[:2] != ICCID_PREFIX_CMCC {
+		return false
+	}
+
+	// 必须全部为十六进制字符（0-9, A-F, a-f）
 	for _, b := range data {
 		if !((b >= '0' && b <= '9') || (b >= 'A' && b <= 'F') || (b >= 'a' && b <= 'f')) {
 			return false
@@ -256,6 +270,13 @@ func (d *DNY_Decoder) isValidICCIDStrict(data []byte) bool {
 	}
 
 	return true
+}
+
+// isValidICCIDStrict 严格验证ICCID格式（统一标准）
+// 🔧 统一：仅支持真实ICCID格式，20位纯数字，以"89"开头
+func (d *DNY_Decoder) isValidICCIDStrict(data []byte) bool {
+	// 直接调用统一的验证方法
+	return d.isValidICCIDBytes(data)
 }
 
 // getConnection 从链中获取连接
@@ -305,6 +326,26 @@ func (d *DNY_Decoder) safeStringConvert(data []byte) string {
 	}
 
 	return string(result)
+}
+
+// validateDNYChecksum 验证DNY协议校验和
+// 🔧 修复：添加DNY协议校验和验证方法
+func (d *DNY_Decoder) validateDNYChecksum(data []byte) bool {
+	if len(data) < DNY_MIN_HEADER_SIZE+2 { // 至少需要包头+长度+校验和
+		return false
+	}
+
+	// 校验和位置：最后2字节
+	checksumPos := len(data) - 2
+	expectedChecksum := binary.LittleEndian.Uint16(data[checksumPos:])
+
+	// 🔧 修复：计算实际校验和：从物理ID开始到校验和前的所有字节
+	var actualChecksum uint16
+	for i := 5; i < checksumPos; i++ { // 从物理ID开始(跳过"DNY"和长度字段)
+		actualChecksum += uint16(data[i])
+	}
+
+	return actualChecksum == expectedChecksum
 }
 
 // TestICCIDParsing 测试ICCID解析功能

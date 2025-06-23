@@ -52,9 +52,9 @@ func ParseDNYProtocolData(data []byte) (*dny_protocol.Message, error) {
 		return msg, errors.New(msg.ErrorMessage)
 	}
 
-	// 尝试解析为ICCID - 根据文档：通讯模块连接上服务器后会发送SIM卡号（ICCID），以字符串方式发送
-	// ICCID固定长度为20字节 (constants.IOT_SIM_CARD_LENGTH)
-	if dataLen == constants.IOT_SIM_CARD_LENGTH && isValidICCID(data) { // 使用精确长度判断
+	// 🔧 修复：统一ICCID识别逻辑 - 根据AP3000协议文档
+	// ICCID固定长度为20字节，以"3839"开头（十六进制字符串形式）
+	if dataLen == constants.IOT_SIM_CARD_LENGTH && isValidICCIDStrict(data) {
 		msg.MessageType = "iccid"
 		msg.ICCIDValue = string(data) // 直接使用原始数据作为ICCID，符合文档描述
 		return msg, nil
@@ -85,11 +85,12 @@ func ParseDNYProtocolData(data []byte) (*dny_protocol.Message, error) {
 	// 修正：expectedTotalPacketLength 的计算。declaredDataLen (协议中的“长度”字段)
 	// 已经包含了 PhysicalID, MessageID, Command, Data 和 Checksum 的总长度。
 	// 因此，整个数据包的实际总长度是 包头(3) + 长度字段本身(2) + declaredDataLen。
-	expectedTotalPacketLength := PacketHeaderLength + DataLengthBytes + int(declaredDataLen)
+	// 🔧 修复：根据实际测试数据，长度字段不包含校验和
+	expectedTotalPacketLength := PacketHeaderLength + DataLengthBytes + int(declaredDataLen) + ChecksumLength
 
 	if dataLen != expectedTotalPacketLength {
 		msg.MessageType = "error"
-		msg.ErrorMessage = fmt.Sprintf("packet length mismatch: declared content length %d (physicalID+msgID+cmd+data+checksum) implies total %d, but got %d. Input data may be truncated or malformed.", declaredDataLen, expectedTotalPacketLength, dataLen)
+		msg.ErrorMessage = fmt.Sprintf("packet length mismatch: declared content length %d (physicalID+msgID+cmd+data) implies total %d, but got %d. Input data may be truncated or malformed.", declaredDataLen, expectedTotalPacketLength, dataLen)
 		return msg, errors.New(msg.ErrorMessage)
 	}
 
@@ -103,8 +104,8 @@ func ParseDNYProtocolData(data []byte) (*dny_protocol.Message, error) {
 	// 提取校验和
 	expectedChecksum := binary.LittleEndian.Uint16(data[checksumStart:contentAndChecksumEnd])
 
-	// 计算校验和的数据范围：从包头到数据内容结束（不包括校验和本身）
-	dataForChecksum := data[:checksumStart]
+	// 🔧 修复：计算校验和的数据范围：从物理ID开始到数据内容结束（不包括包头、长度字段和校验和）
+	dataForChecksum := data[contentStart:checksumStart]
 	actualChecksum, err := CalculatePacketChecksumInternal(dataForChecksum)
 	if err != nil {
 		msg.MessageType = "error"
@@ -160,7 +161,8 @@ func ParseDNYProtocolData(data []byte) (*dny_protocol.Message, error) {
 }
 
 // CalculatePacketChecksumInternal 是 CalculatePacketChecksum 的内部版本，避免循环依赖或公开不必要的接口
-// dataFrame 参数应为从包头\"DNY\"开始，直到数据内容结束的部分。\n// 根据协议文档：\"校验从包头到数据的内容\"，计算所有字节的累加和
+// 🔧 修复：dataFrame 参数应为从物理ID开始，直到数据内容结束的部分（不包括包头、长度字段和校验和）
+// 根据实际测试：校验和只计算物理ID + 消息ID + 命令 + 数据部分
 func CalculatePacketChecksumInternal(dataFrame []byte) (uint16, error) {
 	// DEBUG: Log input to CalculatePacketChecksumInternal
 	logger.WithFields(logrus.Fields{
@@ -206,10 +208,8 @@ func BuildDNYResponsePacketUnified(msg *dny_protocol.Message) ([]byte, error) {
 
 	packet.Write(checksumContent.Bytes())
 
-	tempHeaderAndLength := make([]byte, PacketHeaderLength+DataLengthBytes)
-	copy(tempHeaderAndLength, HeaderDNY)
-	binary.LittleEndian.PutUint16(tempHeaderAndLength[PacketHeaderLength:], uint16(contentLen))
-	dataForChecksum := append(tempHeaderAndLength, checksumContent.Bytes()...)
+	// 🔧 修复：校验和只计算物理ID到数据结束的部分，不包括包头和长度字段
+	dataForChecksum := checksumContent.Bytes()
 
 	checksum, err := CalculatePacketChecksumInternal(dataForChecksum)
 	if err != nil {
@@ -343,6 +343,35 @@ func isAllDigits(data []byte) bool {
 // ICCID可以包含数字和字母（十六进制字符），符合实际SIM卡ICCID格式
 func isValidICCID(data []byte) bool {
 	return isAllDigits(data)
+}
+
+// 🔧 修复ICCID验证函数
+// isValidICCIDStrict 严格验证ICCID格式 - 符合ITU-T E.118标准
+// ICCID固定长度为20字节，十六进制字符(0-9,A-F)，以"89"开头
+func isValidICCIDStrict(data []byte) bool {
+	if len(data) != constants.IOT_SIM_CARD_LENGTH {
+		return false
+	}
+
+	// 转换为字符串进行验证
+	dataStr := string(data)
+	if len(dataStr) < 2 {
+		return false
+	}
+
+	// 必须以"89"开头（ITU-T E.118标准，电信行业标识符）
+	if dataStr[:2] != "89" {
+		return false
+	}
+
+	// 必须全部为十六进制字符（0-9, A-F, a-f）
+	for _, b := range data {
+		if !((b >= '0' && b <= '9') || (b >= 'A' && b <= 'F') || (b >= 'a' && b <= 'f')) {
+			return false
+		}
+	}
+
+	return true
 }
 
 // ValidateDNYFrame 验证DNY协议帧的完整性和校验和

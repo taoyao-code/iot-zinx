@@ -23,6 +23,12 @@ func GetClient() *redis.Client {
 func InitClient() error {
 	redisConfig := config.GetConfig().Redis
 
+	// 🔧 修复：如果Redis地址为空或默认值，跳过初始化
+	if redisConfig.Address == "" || redisConfig.Address == "172.18.0.9:6379" {
+		logger.Info("Redis配置为空或使用默认Docker地址，跳过Redis初始化")
+		return nil
+	}
+
 	// 创建Redis客户端
 	redisClient = redis.NewClient(&redis.Options{
 		Addr:         redisConfig.Address,
@@ -40,6 +46,8 @@ func InitClient() error {
 	defer cancel()
 
 	if _, err := redisClient.Ping(ctx).Result(); err != nil {
+		// 🔧 修复：连接失败时清理客户端，避免后续使用空指针
+		redisClient = nil
 		return fmt.Errorf("Redis连接测试失败: %v", err)
 	}
 

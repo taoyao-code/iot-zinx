@@ -172,15 +172,16 @@ func (h *DeviceRegisterHandler) handleDeviceRegister(deviceId string, physicalId
 	// deviceId 是唯一的字符串标识，conn 是共享的连接
 	monitor.GetGlobalConnectionMonitor().BindDeviceIdToConnection(deviceId, conn)
 
-	// 🔧 修复：使用中心化状态管理器更新设备注册状态
+	// 🔧 修复：使用中心化状态管理器更新设备为在线状态
+	// 设备注册成功后直接设置为在线，避免状态转换混乱
 	stateManager := monitor.GetGlobalStateManager()
-	err = stateManager.MarkDeviceRegistered(deviceId, conn)
+	err = stateManager.MarkDeviceOnline(deviceId, conn)
 	if err != nil {
 		logger.WithFields(logrus.Fields{
 			"deviceId": deviceId,
 			"connID":   conn.GetConnID(),
 			"error":    err,
-		}).Error("更新设备注册状态失败")
+		}).Error("更新设备在线状态失败")
 	}
 
 	// 3. 设置Zinx框架层的session，确保心跳处理时能正确识别设备

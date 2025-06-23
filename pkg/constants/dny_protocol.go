@@ -27,7 +27,7 @@ const (
 	ICCIDMinLength     = 19     // ICCID最小长度
 	ICCIDMaxLength     = 25     // ICCID最大长度
 	ICCIDMessageLength = 20     // ICCID标准长度（文档兼容性）
-	ICCIDValidPrefix   = "8986" // ICCID有效前缀示例
+	ICCIDValidPrefix   = "89"   // ICCID有效前缀（ITU-T E.118标准，电信行业标识符）
 	DNYMinHeaderLength = 5      // DNY协议最小头部长度("DNY" + 长度字段)
 	DNYHeaderMagic     = "DNY"  // DNY协议魔数
 	DNYChecksumLength  = 2      // DNY校验和长度
