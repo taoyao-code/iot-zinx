@@ -217,9 +217,9 @@ func (d *DNY_Decoder) tryParseDNYFrameDirect(data []byte, connID uint64) []byte 
 	// 🔧 修复：使用正确的小端序解析长度字段
 	contentLength := binary.LittleEndian.Uint16(data[3:5])
 
-	// 🔧 修复：统一长度计算逻辑，与dny_protocol_parser.go保持一致
-	// 总长度 = 包头(3) + 长度字段(2) + 内容长度 + 校验和(2)
-	totalFrameLen := 3 + 2 + int(contentLength) + 2 // DNY(3) + Length(2) + Content + Checksum(2)
+	// 🔧 修复：根据真实设备数据，长度字段包含校验和
+	// 总长度 = 包头(3) + 长度字段(2) + 内容长度(包含校验和)
+	totalFrameLen := 3 + 2 + int(contentLength) // DNY(3) + Length(2) + Content(包含校验和)
 
 	// 检查数据长度是否匹配
 	if len(data) != totalFrameLen {

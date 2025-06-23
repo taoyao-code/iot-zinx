@@ -85,8 +85,10 @@ func ParseDNYProtocolData(data []byte) (*dny_protocol.Message, error) {
 	// 修正：expectedTotalPacketLength 的计算。declaredDataLen (协议中的“长度”字段)
 	// 已经包含了 PhysicalID, MessageID, Command, Data 和 Checksum 的总长度。
 	// 因此，整个数据包的实际总长度是 包头(3) + 长度字段本身(2) + declaredDataLen。
-	// 🔧 修复：根据实际测试数据，长度字段不包含校验和
-	expectedTotalPacketLength := PacketHeaderLength + DataLengthBytes + int(declaredDataLen) + ChecksumLength
+	// 🔧 修复：根据真实设备数据分析，长度字段包含校验和
+	// 长度字段的值 = 物理ID(4) + 消息ID(2) + 命令(1) + 数据(n) + 校验和(2)
+	// 总包长度 = 包头"DNY"(3) + 长度字段(2) + 长度字段的值
+	expectedTotalPacketLength := PacketHeaderLength + DataLengthBytes + int(declaredDataLen)
 
 	if dataLen != expectedTotalPacketLength {
 		msg.MessageType = "error"
@@ -375,7 +377,8 @@ func ValidateDNYFrame(frameData []byte) (bool, error) {
 
 	// 解析长度字段
 	declaredLength := binary.LittleEndian.Uint16(frameData[3:5])
-	expectedTotalLength := 3 + 2 + int(declaredLength) // DNY(3) + Length(2) + Content(declaredLength)
+	// 🔧 修复：长度字段包含校验和
+	expectedTotalLength := 3 + 2 + int(declaredLength) // DNY(3) + Length(2) + Content(declaredLength，包含校验和)
 
 	if len(frameData) != expectedTotalLength {
 		return false, fmt.Errorf("length mismatch: declared %d, actual frame %d, expected total %d",
