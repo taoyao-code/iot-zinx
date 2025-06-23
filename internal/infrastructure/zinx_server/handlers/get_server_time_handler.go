@@ -121,21 +121,9 @@ func (h *GetServerTimeHandler) processGetServerTime(decodedFrame *protocol.Decod
 		"messageID":  fmt.Sprintf("0x%04X", messageId),
 	}).Info("获取服务器时间处理器：处理请求")
 
-	// 🔧 第一阶段修复：增强设备注册状态检查
-	// 检查设备是否已注册到系统中
-	tcpMonitor := monitor.GetGlobalConnectionMonitor()
-	if _, exists := tcpMonitor.GetConnectionByDeviceId(deviceId); !exists {
-		logger.WithFields(logrus.Fields{
-			"connID":     conn.GetConnID(),
-			"physicalID": fmt.Sprintf("0x%08X", physicalId),
-			"deviceId":   deviceId,
-			"messageID":  fmt.Sprintf("0x%04X", messageId),
-		}).Warn("⚠️ 获取服务器时间处理器：设备未注册，拒绝处理时间请求")
-
-		// 发送错误响应或引导设备注册
-		h.sendRegistrationRequiredResponse(conn, physicalId, messageId, decodedFrame.Command)
-		return
-	}
+	// 🔧 修复：根据协议文档，获取服务器时间(0x12/0x22)是基础功能，不需要设备注册
+	// 协议明确说明：设备每次上电后就会发送此命令，直至服务器应答后就停止发送
+	// 这是设备的基础通信功能，应该无条件响应
 
 	// 获取当前时间戳
 	currentTime := time.Now().Unix()

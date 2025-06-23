@@ -87,6 +87,9 @@ func (h *MainHeartbeatHandler) processMainHeartbeat(decodedFrame *protocol.Decod
 		"dataLen":    len(data),
 	}).Debug("收到主机心跳请求")
 
+	// 🔧 修复：根据协议文档，主机心跳包(0x11)是状态上报，服务器无需应答
+	// 协议明确说明：每隔30分钟发送一次，服务器无需应答，不执行注册绑定操作
+
 	// 更新心跳时间
 	h.updateMainHeartbeatTime(conn, deviceSession)
 
