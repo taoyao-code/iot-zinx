@@ -217,9 +217,9 @@ func (d *DNY_Decoder) tryParseDNYFrameDirect(data []byte, connID uint64) []byte 
 	// 🔧 修复：使用正确的小端序解析长度字段
 	contentLength := binary.LittleEndian.Uint16(data[3:5])
 
-	// 🔧 修复：根据实际协议，长度字段不包含校验和
+	// 🔧 修复：统一长度计算逻辑，与dny_protocol_parser.go保持一致
 	// 总长度 = 包头(3) + 长度字段(2) + 内容长度 + 校验和(2)
-	totalFrameLen := DNY_MIN_HEADER_SIZE + int(contentLength) + 2 // +2 for checksum
+	totalFrameLen := 3 + 2 + int(contentLength) + 2 // DNY(3) + Length(2) + Content + Checksum(2)
 
 	// 检查数据长度是否匹配
 	if len(data) != totalFrameLen {
@@ -329,7 +329,7 @@ func (d *DNY_Decoder) safeStringConvert(data []byte) string {
 }
 
 // validateDNYChecksum 验证DNY协议校验和
-// 🔧 修复：添加DNY协议校验和验证方法
+// 🔧 修复：根据真实设备数据，校验和计算从包头开始到消息ID结束
 func (d *DNY_Decoder) validateDNYChecksum(data []byte) bool {
 	if len(data) < DNY_MIN_HEADER_SIZE+2 { // 至少需要包头+长度+校验和
 		return false
@@ -339,10 +339,11 @@ func (d *DNY_Decoder) validateDNYChecksum(data []byte) bool {
 	checksumPos := len(data) - 2
 	expectedChecksum := binary.LittleEndian.Uint16(data[checksumPos:])
 
-	// 🔧 修复：计算实际校验和：从物理ID开始到校验和前的所有字节
-	var actualChecksum uint16
-	for i := 5; i < checksumPos; i++ { // 从物理ID开始(跳过"DNY"和长度字段)
-		actualChecksum += uint16(data[i])
+	// 🔧 修复：根据真实设备验证，校验和计算从包头"DNY"开始到校验和前的所有字节
+	dataForChecksum := data[0:checksumPos] // 从"DNY"开始到校验和前
+	actualChecksum, err := CalculatePacketChecksumInternal(dataForChecksum)
+	if err != nil {
+		return false
 	}
 
 	return actualChecksum == expectedChecksum

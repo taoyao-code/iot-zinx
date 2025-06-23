@@ -104,8 +104,8 @@ func ParseDNYProtocolData(data []byte) (*dny_protocol.Message, error) {
 	// 提取校验和
 	expectedChecksum := binary.LittleEndian.Uint16(data[checksumStart:contentAndChecksumEnd])
 
-	// 🔧 修复：计算校验和的数据范围：从物理ID开始到数据内容结束（不包括包头、长度字段和校验和）
-	dataForChecksum := data[contentStart:checksumStart]
+	// 🔧 修复：根据真实设备验证，校验和计算从包头"DNY"开始到校验和前的所有字节
+	dataForChecksum := data[0:checksumStart]
 	actualChecksum, err := CalculatePacketChecksumInternal(dataForChecksum)
 	if err != nil {
 		msg.MessageType = "error"
@@ -386,7 +386,7 @@ func ValidateDNYFrame(frameData []byte) (bool, error) {
 	contentEnd := len(frameData) - ChecksumLength
 	expectedChecksum := binary.LittleEndian.Uint16(frameData[contentEnd:])
 
-	actualChecksum, err := CalculatePacketChecksumInternal(frameData[:contentEnd])
+	actualChecksum, err := CalculatePacketChecksumInternal(frameData[0:contentEnd])
 	if err != nil {
 		return false, fmt.Errorf("checksum calculation failed: %v", err)
 	}
