@@ -198,15 +198,17 @@ func (ch *ConnectionHooks) setupTCPParametersWithInitialDeadline(conn ziface.ICo
 		}
 	}
 
-	if ch.writeDeadLine > 0 {
-		if err := tcpConn.SetWriteDeadline(now.Add(ch.writeDeadLine)); err != nil {
-			logger.WithFields(logrus.Fields{
-				"connID":  conn.GetConnID(),
-				"timeout": ch.writeDeadLine.String(),
-				"error":   err,
-			}).Error("设置写入超时失败")
-		}
-	}
+	// 🔧 修复：移除固定WriteDeadline设置，改为在每次写操作时动态设置
+	// 固定的WriteDeadline会导致连接建立一段时间后所有写操作都超时
+	// if ch.writeDeadLine > 0 {
+	//     if err := tcpConn.SetWriteDeadline(now.Add(ch.writeDeadLine)); err != nil {
+	//         logger.WithFields(logrus.Fields{
+	//             "connID":  conn.GetConnID(),
+	//             "timeout": ch.writeDeadLine.String(),
+	//             "error":   err,
+	//         }).Error("设置写入超时失败")
+	//     }
+	// }
 
 	if ch.keepAlivePeriod > 0 {
 		if err := tcpConn.SetKeepAlive(true); err != nil {
@@ -258,7 +260,6 @@ func (ch *ConnectionHooks) setTCPDeadlines(conn ziface.IConnection, tcpConn *net
 	connID := conn.GetConnID()
 	remoteAddr := conn.RemoteAddr().String()
 	readDeadlineStr := readDeadline.Format(constants.TimeFormatDefault)
-	writeDeadlineStr := writeDeadline.Format(constants.TimeFormatDefault)
 
 	// 设置读取超时
 	if err := tcpConn.SetReadDeadline(readDeadline); err != nil {
@@ -270,32 +271,31 @@ func (ch *ConnectionHooks) setTCPDeadlines(conn ziface.IConnection, tcpConn *net
 		}).Error("设置TCP读取超时失败")
 	}
 
-	// 设置写入超时 - 增加5秒缓冲，避免因网络延迟导致写入超时
-	if err := tcpConn.SetWriteDeadline(writeDeadline); err != nil {
-		logger.WithFields(logrus.Fields{
-			"error":      err.Error(),
-			"connID":     connID,
-			"remoteAddr": remoteAddr,
-			"deadline":   writeDeadlineStr,
-		}).Error("设置TCP写入超时失败")
-	}
+	// 🔧 修复：移除固定写入超时设置，改为在每次写操作时动态设置
+	// 固定的WriteDeadline会导致所有后续写操作都受到同一个截止时间限制
+	logger.WithFields(logrus.Fields{
+		"connID":     connID,
+		"remoteAddr": remoteAddr,
+		"strategy":   "dynamic_write_timeout",
+	}).Info("TCP连接已配置为动态写超时模式")
 
-	// 设置TCP缓冲区大小以提高性能
-	// 提高接收缓冲区大小
-	if err := tcpConn.SetReadBuffer(65536); err != nil {
+	// 🔧 优化：调整TCP缓冲区大小为256KB，与配置文件保持一致
+	bufferSize := 262144 // 256KB，与gateway.yaml中的sendBufferSize保持一致
+	if err := tcpConn.SetReadBuffer(bufferSize); err != nil {
 		logger.WithFields(logrus.Fields{
 			"error":      err.Error(),
 			"connID":     connID,
 			"remoteAddr": remoteAddr,
+			"bufferSize": bufferSize,
 		}).Warn("设置TCP读取缓冲区失败")
 	}
 
-	// 提高发送缓冲区大小
-	if err := tcpConn.SetWriteBuffer(65536); err != nil {
+	if err := tcpConn.SetWriteBuffer(bufferSize); err != nil {
 		logger.WithFields(logrus.Fields{
 			"error":      err.Error(),
 			"connID":     connID,
 			"remoteAddr": remoteAddr,
+			"bufferSize": bufferSize,
 		}).Warn("设置TCP写入缓冲区失败")
 	}
 

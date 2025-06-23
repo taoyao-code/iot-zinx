@@ -4,6 +4,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/aceld/zinx/ziface"
@@ -108,30 +109,17 @@ func sendDNYPacket(conn ziface.IConnection, packet []byte, physicalID uint32, me
 		"timestamp":  time.Now().Format(constants.TimeFormatDefault),
 	}).Debug("准备发送DNY协议数据")
 
-	// 使用原始TCP连接发送纯DNY协议数据
-	// 避免Zinx框架添加额外的头部信息
-	if tcpConn := conn.GetTCPConnection(); tcpConn != nil {
-		_, err := tcpConn.Write(packet)
-		if err != nil {
-			logger.WithFields(logrus.Fields{
-				"connID":     conn.GetConnID(),
-				"physicalID": fmt.Sprintf("0x%08X", physicalID),
-				"messageID":  fmt.Sprintf("0x%04X", messageID),
-				"command":    fmt.Sprintf("0x%02X", command),
-				"dataHex":    hex.EncodeToString(packet), // 确保错误日志中也记录原始 packet
-				"error":      err.Error(),
-			}).Error("发送DNY协议数据失败")
-			return err
-		}
-	} else {
-		err := fmt.Errorf("无法获取TCP连接")
+	// 🔧 修复：使用动态写超时机制，支持重试
+	err := sendWithDynamicTimeout(conn, packet, 60*time.Second, 3) // 60秒超时，最多重试3次
+	if err != nil {
 		logger.WithFields(logrus.Fields{
 			"connID":     conn.GetConnID(),
 			"physicalID": fmt.Sprintf("0x%08X", physicalID),
 			"messageID":  fmt.Sprintf("0x%04X", messageID),
 			"command":    fmt.Sprintf("0x%02X", command),
-			"dataHex":    hex.EncodeToString(packet), // 确保错误日志中也记录原始 packet
-		}).Error("发送DNY协议数据失败：无法获取TCP连接")
+			"dataHex":    hex.EncodeToString(packet),
+			"error":      err.Error(),
+		}).Error("发送DNY协议数据失败")
 		return err
 	}
 
@@ -468,4 +456,106 @@ var getMasterConnectionForSlaveDevice func(slaveDeviceId string) (ziface.IConnec
 // 在初始化时由主程序调用，避免循环依赖
 func SetMasterConnectionAdapter(adapter func(slaveDeviceId string) (ziface.IConnection, string, bool)) {
 	getMasterConnectionForSlaveDevice = adapter
+}
+
+// sendWithDynamicTimeout 使用动态写超时和重试机制发送数据
+// 🔧 核心修复：每次写操作前动态设置WriteDeadline，避免固定超时问题
+func sendWithDynamicTimeout(conn ziface.IConnection, data []byte, timeout time.Duration, maxRetries int) error {
+	tcpConn := conn.GetTCPConnection()
+	if tcpConn == nil {
+		return fmt.Errorf("无法获取TCP连接")
+	}
+
+	var lastErr error
+	startTime := time.Now()
+
+	for attempt := 0; attempt <= maxRetries; attempt++ {
+		// 🔧 关键修复：每次写操作前动态设置WriteDeadline
+		writeDeadline := time.Now().Add(timeout)
+		if err := tcpConn.SetWriteDeadline(writeDeadline); err != nil {
+			logger.WithFields(logrus.Fields{
+				"connID":  conn.GetConnID(),
+				"attempt": attempt + 1,
+				"timeout": timeout.String(),
+				"error":   err.Error(),
+			}).Warn("设置动态写超时失败")
+		}
+
+		// 执行写操作
+		written, err := tcpConn.Write(data)
+		if err == nil && written == len(data) {
+			// 写操作成功
+			elapsed := time.Since(startTime)
+			logger.WithFields(logrus.Fields{
+				"connID":   conn.GetConnID(),
+				"dataLen":  len(data),
+				"written":  written,
+				"attempts": attempt + 1,
+				"elapsed":  elapsed.String(),
+				"success":  true,
+			}).Debug("数据发送成功")
+			return nil
+		}
+
+		// 记录错误信息
+		lastErr = err
+		isTimeout := isTimeoutError(err)
+
+		logger.WithFields(logrus.Fields{
+			"connID":     conn.GetConnID(),
+			"attempt":    attempt + 1,
+			"maxRetries": maxRetries + 1,
+			"dataLen":    len(data),
+			"written":    written,
+			"isTimeout":  isTimeout,
+			"error":      err.Error(),
+		}).Warn("写操作失败，准备重试")
+
+		// 如果不是超时错误且不是最后一次重试，则快速重试
+		if !isTimeout && attempt < maxRetries {
+			time.Sleep(100 * time.Millisecond) // 短暂延迟
+			continue
+		}
+
+		// 如果是超时错误或到达最大重试次数，进行指数退避
+		if attempt < maxRetries {
+			backoff := time.Duration(attempt+1) * 500 * time.Millisecond
+			if backoff > 5*time.Second {
+				backoff = 5 * time.Second
+			}
+
+			logger.WithFields(logrus.Fields{
+				"connID":    conn.GetConnID(),
+				"attempt":   attempt + 1,
+				"backoff":   backoff.String(),
+				"nextRetry": attempt + 2,
+			}).Info("等待重试")
+
+			time.Sleep(backoff)
+		}
+	}
+
+	// 所有重试都失败了
+	totalElapsed := time.Since(startTime)
+	logger.WithFields(logrus.Fields{
+		"connID":        conn.GetConnID(),
+		"dataLen":       len(data),
+		"totalAttempts": maxRetries + 1,
+		"totalElapsed":  totalElapsed.String(),
+		"finalError":    lastErr.Error(),
+	}).Error("数据发送最终失败")
+
+	return fmt.Errorf("写操作失败，已重试%d次: %v", maxRetries+1, lastErr)
+}
+
+// isTimeoutError 判断是否为超时错误
+func isTimeoutError(err error) bool {
+	if err == nil {
+		return false
+	}
+
+	errStr := err.Error()
+	return strings.Contains(errStr, "timeout") ||
+		strings.Contains(errStr, "i/o timeout") ||
+		strings.Contains(errStr, "deadline exceeded")
 }
