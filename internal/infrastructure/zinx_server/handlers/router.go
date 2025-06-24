@@ -52,6 +52,10 @@ func RegisterRouters(server ziface.IServer) {
 	// ----------------------------------------------------------------------------
 	server.AddRouter(dny_protocol.CmdParamSetting, &ParameterSettingHandler{}) // 0x83 设置运行参数1.1
 
+	// 七、设备管理
+	// ----------------------------------------------------------------------------
+	server.AddRouter(dny_protocol.CmdDeviceLocate, NewDeviceLocateHandler()) // 0x96 声光寻找设备功能
+
 	// 七、设备版本信息
 	// ----------------------------------------------------------------------------
 	server.AddRouter(dny_protocol.CmdDeviceVersion, &DeviceVersionHandler{}) // 0x35 上传分机版本号与设备类型

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/bujia-iot/iot-zinx/internal/app/dto"
@@ -638,6 +639,131 @@ func HandleTestTool(c *gin.Context) {
 	c.HTML(http.StatusOK, "test_tool.html", gin.H{
 		"title": "充电设备网关测试工具",
 	})
+}
+
+// DeviceLocateRequest 设备定位请求参数
+type DeviceLocateRequest struct {
+	DeviceID   string `json:"deviceId" binding:"required" example:"04A26CF3" swaggertype:"string" description:"设备ID"`
+	LocateTime uint8  `json:"locateTime" binding:"required" example:"10" minimum:"1" maximum:"255" swaggertype:"integer" description:"定位时间(秒)，范围1-255"`
+}
+
+// HandleDeviceLocate 设备定位
+// @Summary 设备定位
+// @Description 发送声光寻找设备指令，设备收到后会播放语音并闪灯
+// @Tags device
+// @Accept json
+// @Produce json
+// @Param request body DeviceLocateRequest true "设备定位参数"
+// @Success 200 {object} APIResponse "定位命令发送成功"
+// @Failure 400 {object} ErrorResponse "参数错误"
+// @Failure 404 {object} ErrorResponse "设备不在线"
+// @Failure 500 {object} ErrorResponse "发送失败"
+// @Router /api/v1/device/locate [post]
+func HandleDeviceLocate(c *gin.Context) {
+	var req DeviceLocateRequest
+
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, APIResponse{
+			Code:    400,
+			Message: "参数错误: " + err.Error(),
+		})
+		return
+	}
+
+	// 参数验证
+	if req.DeviceID == "" {
+		c.JSON(http.StatusBadRequest, APIResponse{
+			Code:    400,
+			Message: "设备ID不能为空",
+		})
+		return
+	}
+
+	// 验证定位时间范围（1-255秒）
+	if req.LocateTime < 1 || req.LocateTime > 255 {
+		c.JSON(http.StatusBadRequest, APIResponse{
+			Code:    400,
+			Message: "定位时间必须在1-255秒之间",
+		})
+		return
+	}
+
+	// 查询设备连接
+	conn, exists := pkg.Monitor.GetGlobalMonitor().GetConnectionByDeviceId(req.DeviceID)
+	if !exists {
+		c.JSON(http.StatusNotFound, APIResponse{
+			Code:    404,
+			Message: "设备不在线",
+		})
+		return
+	}
+
+	// 解析设备ID为物理ID
+	physicalID, err := parseDeviceIDToPhysicalID(req.DeviceID)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, APIResponse{
+			Code:    400,
+			Message: "设备ID格式错误: " + err.Error(),
+		})
+		return
+	}
+
+	// 生成消息ID
+	messageID := pkg.Protocol.GetNextMessageID()
+
+	// 构造命令数据（1字节定位时间）
+	data := []byte{req.LocateTime}
+
+	// 发送设备定位命令(0x96)
+	err = pkg.Protocol.SendDNYResponse(conn, uint32(physicalID), messageID, 0x96, data)
+	if err != nil {
+		logger.WithFields(logrus.Fields{
+			"deviceID":   req.DeviceID,
+			"locateTime": req.LocateTime,
+			"error":      err,
+		}).Error("发送设备定位命令失败")
+
+		c.JSON(http.StatusInternalServerError, APIResponse{
+			Code:    500,
+			Message: "发送设备定位命令失败: " + err.Error(),
+		})
+		return
+	}
+
+	logger.WithFields(logrus.Fields{
+		"deviceID":   req.DeviceID,
+		"locateTime": req.LocateTime,
+		"messageID":  fmt.Sprintf("0x%04X", messageID),
+	}).Info("设备定位命令发送成功")
+
+	c.JSON(http.StatusOK, APIResponse{
+		Code:    0,
+		Message: "设备定位命令发送成功",
+		Data: map[string]interface{}{
+			"deviceID":   req.DeviceID,
+			"locateTime": req.LocateTime,
+			"messageID":  fmt.Sprintf("0x%04X", messageID),
+		},
+	})
+}
+
+// parseDeviceIDToPhysicalID 解析设备ID字符串为物理ID
+func parseDeviceIDToPhysicalID(deviceID string) (uint32, error) {
+	// 移除可能的前缀和后缀空格
+	deviceID = strings.TrimSpace(deviceID)
+
+	// 尝试解析为16进制
+	var physicalID uint32
+	_, err := fmt.Sscanf(deviceID, "%X", &physicalID)
+	if err != nil {
+		// 如果16进制解析失败，尝试直接解析为数字
+		_, err2 := fmt.Sscanf(deviceID, "%d", &physicalID)
+		if err2 != nil {
+			return 0, fmt.Errorf("设备ID格式错误，应为16进制或10进制数字: %s", deviceID)
+		}
+	}
+
+	return physicalID, nil
 }
 
 // 🔧 buildDNYPacket 已删除 - 使用 dny_protocol.BuildDNYPacket() 或更好的 pkg.Protocol.BuildDNYResponsePacket()

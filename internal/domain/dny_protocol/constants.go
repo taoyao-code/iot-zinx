@@ -42,6 +42,7 @@ const (
 	CmdParamSetting2    = 0x84 // 设置运行参数1.2
 	CmdMaxTimeAndPower  = 0x85 // 设置最大充电时长、过载功率
 	CmdModifyCharge     = 0x8A // 服务器修改充电时长/电量
+	CmdDeviceLocate     = 0x96 // 声光寻找设备功能
 	CmdUpgradeSlave     = 0xE0 // 设备固件升级(分机)
 	CmdUpgradePower     = 0xE1 // 设备固件升级(电源板)
 	CmdUpgradeMain      = 0xE2 // 设备固件升级(主机统一)

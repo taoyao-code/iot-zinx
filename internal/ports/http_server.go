@@ -51,6 +51,7 @@ func registerHTTPHandlers(r *gin.Engine) {
 		api.GET("/devices", http.HandleDeviceList)
 		api.GET("/device/:deviceId/status", http.HandleDeviceStatus)
 		api.POST("/device/command", http.HandleSendCommand)
+		api.POST("/device/locate", http.HandleDeviceLocate) // 设备定位功能
 		// DNY协议命令API
 		api.POST("/command/dny", http.HandleSendDNYCommand)
 		api.GET("/device/:deviceId/query", http.HandleQueryDeviceStatus)
