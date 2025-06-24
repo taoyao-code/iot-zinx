@@ -57,8 +57,11 @@ func (c *TestClient) handleNetworkStatusQuery(result *protocol.DNYParseResult) {
 func (c *TestClient) handleChargeControl(result *protocol.DNYParseResult) {
 	c.logger.GetLogger().Info("📋 收到充电控制指令，开始解析...")
 
-	if len(result.Data) < 30 {
-		c.logger.GetLogger().Error("❌ 充电控制指令数据长度不足")
+	if len(result.Data) < 37 {
+		c.logger.GetLogger().WithFields(logrus.Fields{
+			"dataLength": len(result.Data),
+			"expected":   37,
+		}).Error("❌ 充电控制指令数据长度不足")
 		return
 	}
 
