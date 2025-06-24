@@ -143,8 +143,8 @@ func BuildChargeControlPacket(
 	maxPower uint16,
 	qrCodeLight byte,
 ) []byte {
-	// 构建充电控制数据 (30字节)
-	data := make([]byte, 30)
+	// 构建充电控制数据 (37字节) - 根据AP3000协议文档完整格式
+	data := make([]byte, 37)
 
 	// 费率模式(1字节)
 	data[0] = rateMode
@@ -182,6 +182,26 @@ func BuildChargeControlPacket(
 
 	// 二维码灯(1字节)
 	data[29] = qrCodeLight
+
+	// 扩展字段（根据AP3000协议文档V8.6）
+	// 长充模式(1字节) - 0=关闭，1=打开
+	data[30] = 0
+
+	// 额外浮充时间(2字节，小端序) - 0=不开启
+	data[31] = 0
+	data[32] = 0
+
+	// 是否跳过短路检测(1字节) - 2=正常检测短路
+	data[33] = 2
+
+	// 不判断用户拔出(1字节) - 0=正常判断拔出
+	data[34] = 0
+
+	// 强制带充满自停(1字节) - 0=正常
+	data[35] = 0
+
+	// 充满功率(1字节) - 0=关闭充满功率判断
+	data[36] = 0
 
 	// 构建完整的DNY协议包
 	return buildDNYPacket(physicalID, messageID, CmdChargeControl, data)

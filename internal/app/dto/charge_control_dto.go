@@ -59,8 +59,8 @@ func (req *ChargeControlRequest) ToProtocolData() []byte {
 		copy(orderBytes, []byte(req.OrderNumber))
 	}
 
-	// 构建协议数据 (30字节)
-	data := make([]byte, 30)
+	// 构建协议数据 (37字节) - 根据AP3000协议文档完整格式
+	data := make([]byte, 37)
 
 	// 费率模式(1字节)
 	data[0] = req.RateMode
@@ -88,6 +88,25 @@ func (req *ChargeControlRequest) ToProtocolData() []byte {
 
 	// 二维码灯(1字节)
 	data[29] = req.QRCodeLight
+
+	// 扩展字段（根据AP3000协议文档V8.6）
+	// 长充模式(1字节) - 0=关闭，1=打开
+	data[30] = 0
+
+	// 额外浮充时间(2字节，小端序) - 0=不开启
+	binary.LittleEndian.PutUint16(data[31:33], 0)
+
+	// 是否跳过短路检测(1字节) - 2=正常检测短路
+	data[33] = 2
+
+	// 不判断用户拔出(1字节) - 0=正常判断拔出
+	data[34] = 0
+
+	// 强制带充满自停(1字节) - 0=正常
+	data[35] = 0
+
+	// 充满功率(1字节) - 0=关闭充满功率判断
+	data[36] = 0
 
 	return data
 }
