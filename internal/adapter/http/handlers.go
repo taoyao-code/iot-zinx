@@ -297,8 +297,8 @@ func HandleSendDNYCommand(c *gin.Context) {
 		return
 	}
 
-	// 解析物理ID
-	physicalID, err := strconv.ParseUint(req.DeviceID, 10, 32)
+	// 解析物理ID - 🔧 修复：使用16进制解析，与其他接口保持一致
+	physicalID, err := strconv.ParseUint(req.DeviceID, 16, 32)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, APIResponse{
 			Code:    400,
