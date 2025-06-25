@@ -42,8 +42,8 @@ func (s *TCPServer) Start() error {
 		return err
 	}
 
-	// 启动心跳管理器 - 在设置连接钩子之前初始化
-	s.startHeartbeatManager()
+	// 🔧 使用统一架构：不再启动旧的心跳管理器
+	// s.startHeartbeatManager() // 已被统一架构替代
 
 	// 正确初始化包依赖关系，传入必要的依赖
 	s.initializePackageDependencies()
@@ -100,19 +100,18 @@ func (s *TCPServer) registerRoutes() {
 	handlers.RegisterRouters(s.server)
 }
 
-// initializePackageDependencies 初始化包依赖关系，传入必要的依赖
+// initializePackageDependencies 初始化包依赖关系，使用统一架构
 func (s *TCPServer) initializePackageDependencies() {
-	// 获取必要的依赖
-	sessionManager := pkg.Monitor.GetSessionManager()
-	connManager := s.server.GetConnMgr()
+	// 🔧 使用统一架构：初始化统一架构组件
+	pkg.InitUnifiedArchitecture()
 
-	// 使用依赖注入初始化包
-	pkg.InitPackagesWithDependencies(sessionManager, connManager)
+	// 设置向后兼容性
+	pkg.SetupUnifiedMonitorCompatibility()
 
 	logger.WithFields(logrus.Fields{
-		"sessionManager": "initialized",
-		"connManager":    "initialized",
-	}).Info("包依赖关系已正确初始化")
+		"architecture": "unified",
+		"status":       "initialized",
+	}).Info("统一架构已正确初始化")
 }
 
 // setupConnectionHooks 设置连接钩子
@@ -137,22 +136,22 @@ func (s *TCPServer) setupConnectionHooks() {
 		keepAliveTimeout, // KeepAlive周期
 	)
 
-	// 设置连接建立回调
+	// 设置连接建立回调 - 使用统一架构
 	connectionHooks.SetOnConnectionEstablishedFunc(func(conn ziface.IConnection) {
-		pkg.Monitor.GetGlobalMonitor().OnConnectionEstablished(conn)
-		// 当连接建立时，也更新一次活动时间，确保新连接有初始活动记录
-		if s.heartbeatManager != nil {
-			s.heartbeatManager.UpdateConnectionActivity(conn)
-		}
+		// 🔧 使用统一架构：统一处理连接建立
+		pkg.GetUnifiedSystem().HandleConnectionEstablished(conn)
+
+		// 🔧 使用统一架构：连接活动时间由统一架构管理
+		// 旧的心跳管理器已被统一架构替代
 	})
 
-	// 设置连接关闭回调
+	// 设置连接关闭回调 - 使用统一架构
 	connectionHooks.SetOnConnectionClosedFunc(func(conn ziface.IConnection) {
-		pkg.Monitor.GetGlobalMonitor().OnConnectionClosed(conn)
-		// 连接关闭时，从heartbeatManager中移除记录
-		if s.heartbeatManager != nil {
-			delete(s.heartbeatManager.lastActivityTime, conn.GetConnID())
-		}
+		// 🔧 使用统一架构：统一处理连接关闭
+		pkg.GetUnifiedSystem().HandleConnectionClosed(conn)
+
+		// 🔧 使用统一架构：连接清理由统一架构管理
+		// 旧的心跳管理器已被统一架构替代
 	})
 
 	// 设置连接钩子到服务器

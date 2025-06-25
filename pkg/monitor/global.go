@@ -1,44 +1,19 @@
 package monitor
 
-import (
-	"fmt"
-	"sync"
+// 全局连接监控器变量（统一架构）
+var globalConnectionMonitor IConnectionMonitor
 
-	"github.com/aceld/zinx/ziface"
-)
-
-var (
-	globalMonitor     *TCPMonitor
-	globalMonitorOnce sync.Once
-)
-
-// GetGlobalMonitor 获取全局监视器实例（带参数版本）
-// 传入 SessionManager 和 Zinx ConnManager 的实例
-func GetGlobalMonitor(sm ISessionManager, cm ziface.IConnManager) IConnectionMonitor {
-	globalMonitorOnce.Do(func() {
-		globalMonitor = &TCPMonitor{
-			enabled:        true,
-			groupManager:   GetGlobalConnectionGroupManager(),
-			sessionManager: sm,
-			connManager:    cm,
-		}
-
-		fmt.Println("TCP数据监视器已初始化 (重构版，支持多设备共享连接架构)")
-
-		// 设置全局变量引用
-		globalConnectionMonitor = globalMonitor
-	})
-	return globalMonitor
+// SetConnectionMonitor 设置全局连接监控器（统一架构使用）
+func SetConnectionMonitor(monitor IConnectionMonitor) {
+	globalConnectionMonitor = monitor
 }
 
-// GetGlobalConnectionMonitor 获取全局连接监视器实例（向后兼容的包装器）
-// 注意：此函数仅为了向后兼容，建议使用依赖注入的方式
+// GetGlobalConnectionMonitor 获取全局连接监控器（向后兼容）
 func GetGlobalConnectionMonitor() IConnectionMonitor {
 	return globalConnectionMonitor
 }
 
-// GetTCPMonitor 向后兼容的函数名（原名为 GetGlobalMonitor）
-// 注意：此函数已弃用，建议使用 GetGlobalConnectionMonitor
+// GetTCPMonitor 向后兼容的函数名
 func GetTCPMonitor() IConnectionMonitor {
 	return globalConnectionMonitor
 }

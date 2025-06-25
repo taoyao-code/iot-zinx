@@ -10,7 +10,6 @@ import (
 	"github.com/bujia-iot/iot-zinx/internal/infrastructure/config"
 	"github.com/bujia-iot/iot-zinx/internal/infrastructure/logger"
 	"github.com/bujia-iot/iot-zinx/pkg/constants"
-	"github.com/bujia-iot/iot-zinx/pkg/monitor"
 	"github.com/bujia-iot/iot-zinx/pkg/network"
 	"github.com/sirupsen/logrus"
 )
@@ -45,19 +44,8 @@ func (h *SimCardHandler) Handle(request ziface.IRequest) {
 		// 将ICCID存入连接属性中
 		conn.SetProperty(constants.PropKeyICCID, iccidStr)
 
-		// 创建连接设备组
-		groupManager := monitor.GetGlobalConnectionGroupManager()
-		group, err := groupManager.CreateGroup(conn.GetConnID(), iccidStr, conn)
-		if err != nil {
-			logger.WithFields(logrus.Fields{
-				"connID":     conn.GetConnID(),
-				"iccid":      iccidStr,
-				"remoteAddr": conn.RemoteAddr().String(),
-				"error":      err,
-			}).Error("SimCardHandler: 创建连接设备组失败")
-			return
-		}
-
+		// 🔧 使用统一架构：设备组功能已集成，无需单独创建
+		// 统一架构会自动管理设备组
 		// 设置连接状态
 		conn.SetProperty("connState", constants.ConnStatusICCIDReceived)
 
@@ -92,7 +80,6 @@ func (h *SimCardHandler) Handle(request ziface.IRequest) {
 			"connState":         constants.ConnStatusICCIDReceived,
 			"readDeadlineSetTo": now.Add(defaultReadDeadline).Format(time.RFC3339),
 			"dataLen":           len(data),
-			"groupStatus":       group.GetStatus().String(),
 		}).Info("SimCardHandler: 收到有效ICCID，更新连接状态并重置ReadDeadline")
 
 	} else {

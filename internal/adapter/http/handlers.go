@@ -14,7 +14,6 @@ import (
 	"github.com/bujia-iot/iot-zinx/internal/infrastructure/logger"
 	"github.com/bujia-iot/iot-zinx/pkg"
 	"github.com/bujia-iot/iot-zinx/pkg/constants"
-	"github.com/bujia-iot/iot-zinx/pkg/monitor"
 	"github.com/gin-gonic/gin"
 	"github.com/sirupsen/logrus"
 )
@@ -89,9 +88,9 @@ func HandleDeviceStatus(c *gin.Context) {
 		return
 	}
 
-	// 🔧 修复：使用精细化错误处理
-	stateManager := monitor.GetGlobalStateManager()
-	deviceState, exists := stateManager.GetDeviceState(deviceID)
+	// 🔧 使用统一架构：检查设备连接状态
+	unifiedSystem := pkg.GetUnifiedSystem()
+	_, exists := unifiedSystem.Monitor.GetConnectionByDeviceId(deviceID)
 
 	if !exists {
 		c.JSON(http.StatusNotFound, APIResponse{
@@ -115,7 +114,7 @@ func HandleDeviceStatus(c *gin.Context) {
 					Data: gin.H{
 						"deviceId": deviceID,
 						"isOnline": false,
-						"status":   deviceState.String(),
+						"status":   "offline",
 					},
 				})
 			case constants.ErrCodeConnectionLost:
@@ -125,7 +124,7 @@ func HandleDeviceStatus(c *gin.Context) {
 					Data: gin.H{
 						"deviceId": deviceID,
 						"isOnline": false,
-						"status":   deviceState.String(),
+						"status":   "disconnected",
 					},
 				})
 			default:
@@ -147,7 +146,7 @@ func HandleDeviceStatus(c *gin.Context) {
 	}
 
 	// 成功获取连接信息，返回完整信息
-	isOnline := deviceState.IsActive()
+	isOnline := true // 统一架构中，能获取到连接即表示在线
 	c.JSON(http.StatusOK, APIResponse{
 		Code:    0,
 		Message: "成功",
@@ -155,7 +154,7 @@ func HandleDeviceStatus(c *gin.Context) {
 			"deviceId":       deviceInfo.DeviceID,
 			"iccid":          deviceInfo.ICCID,
 			"isOnline":       isOnline,
-			"status":         deviceState.String(),
+			"status":         "online",
 			"lastHeartbeat":  deviceInfo.LastHeartbeat,
 			"heartbeatTime":  deviceInfo.HeartbeatTime,
 			"timeSinceHeart": deviceInfo.TimeSinceHeart,

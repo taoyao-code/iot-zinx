@@ -36,63 +36,27 @@ type DeviceInfo struct {
 // NewDeviceService 创建设备服务实例
 func NewDeviceService() *DeviceService {
 	service := &DeviceService{
-		// 🔧 修复：不在初始化时获取TCP监控器，而是在使用时动态获取
-		// 这样可以避免初始化时序问题
+		// 🔧 使用统一架构：直接使用统一监控器
 		tcpMonitor: nil, // 将在getTCPMonitor()方法中动态获取
 	}
 
-	// 🔧 集成设备监控器事件处理
-	deviceMonitor := pkg.Monitor.GetGlobalDeviceMonitor()
-	if deviceMonitor != nil {
-		// 设置设备超时回调
-		deviceMonitor.SetOnDeviceTimeout(func(deviceID string, lastHeartbeat time.Time) {
-			service.HandleDeviceOffline(deviceID, "")
-		})
-
-		// 设置设备重连回调
-		deviceMonitor.SetOnDeviceReconnect(func(deviceID string, oldConnID, newConnID uint64) {
-			service.HandleDeviceOnline(deviceID, "")
-		})
-	}
-
-	logger.Info("设备服务已初始化，集成设备监控器")
+	// 🔧 使用统一架构：不再初始化旧的设备监控器
+	// 统一架构会自动处理设备超时和状态管理
+	logger.Info("设备服务已初始化，使用统一架构")
 
 	return service
 }
 
 // getTCPMonitor 动态获取TCP监控器实例
-// 🔧 修复：解决初始化时序问题，在使用时动态获取已初始化的监控器
+// 🔧 使用统一架构：直接获取统一监控器
 func (s *DeviceService) getTCPMonitor() monitor.IConnectionMonitor {
 	if s.tcpMonitor == nil {
-		// 🔧 修复：使用重试机制等待TCP监控器初始化完成
-		maxRetries := 10
-		retryInterval := 100 * time.Millisecond
-
-		for i := 0; i < maxRetries; i++ {
-			// 首先尝试从monitor包获取
-			s.tcpMonitor = monitor.GetGlobalConnectionMonitor()
-			if s.tcpMonitor != nil {
-				logger.Info("设备服务：成功获取TCP监控器")
-				break
-			}
-
-			// 如果失败，尝试从pkg包获取
-			pkgMonitor := pkg.Monitor.GetGlobalMonitor()
-			if pkgMonitor != nil {
-				logger.Info("设备服务：从pkg包成功获取TCP监控器")
-				s.tcpMonitor = pkgMonitor
-				break
-			}
-
-			// 如果都失败，等待一段时间后重试
-			if i < maxRetries-1 {
-				logger.WithField("retry", i+1).Debug("设备服务：TCP监控器未就绪，等待重试")
-				time.Sleep(retryInterval)
-			}
-		}
-
-		if s.tcpMonitor == nil {
-			logger.Error("设备服务：TCP监控器初始化超时，所有重试均失败")
+		// 🔧 使用统一架构：直接获取统一监控器
+		s.tcpMonitor = monitor.GetGlobalConnectionMonitor()
+		if s.tcpMonitor != nil {
+			logger.Info("设备服务：成功获取统一监控器")
+		} else {
+			logger.Warn("设备服务：统一监控器未初始化")
 		}
 	}
 	return s.tcpMonitor
@@ -214,23 +178,13 @@ func (s *DeviceService) GetDeviceConnectionInfo(deviceID string) (*DeviceConnect
 		return nil, constants.NewDeviceError(constants.ErrCodeInternalError, deviceID, "TCP监控器未初始化")
 	}
 
-	// 🔧 修复：首先检查设备是否存在于状态管理器中
-	stateManager := monitor.GetGlobalStateManager()
-	deviceState, deviceExists := stateManager.GetDeviceState(deviceID)
-
-	if !deviceExists {
-		return nil, constants.NewDeviceError(constants.ErrCodeDeviceNotFound, deviceID, "设备不存在")
-	}
+	// 🔧 使用统一架构：直接检查设备连接状态
+	// 统一架构中，连接存在即表示设备存在
 
 	// 查询设备连接状态
 	conn, connExists := tcpMonitor.GetConnectionByDeviceId(deviceID)
 	if !connExists {
-		// 设备存在但连接不可用
-		if deviceState == constants.StateOffline {
-			return nil, constants.NewDeviceError(constants.ErrCodeDeviceOffline, deviceID, "设备离线")
-		} else {
-			return nil, constants.NewDeviceError(constants.ErrCodeConnectionLost, deviceID, "连接丢失")
-		}
+		return nil, constants.NewDeviceError(constants.ErrCodeDeviceNotFound, deviceID, "设备未连接")
 	}
 
 	// 构建设备连接信息

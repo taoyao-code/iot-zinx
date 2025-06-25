@@ -11,8 +11,8 @@ import (
 	"github.com/bujia-iot/iot-zinx/internal/domain/dny_protocol"
 	"github.com/bujia-iot/iot-zinx/internal/infrastructure/config"
 	"github.com/bujia-iot/iot-zinx/internal/infrastructure/logger"
+	"github.com/bujia-iot/iot-zinx/pkg"
 	"github.com/bujia-iot/iot-zinx/pkg/constants"
-	"github.com/bujia-iot/iot-zinx/pkg/monitor"
 	"github.com/bujia-iot/iot-zinx/pkg/network"
 	"github.com/bujia-iot/iot-zinx/pkg/protocol"
 	"github.com/bujia-iot/iot-zinx/pkg/session"
@@ -153,24 +153,25 @@ func (h *DeviceRegisterHandler) handleDeviceRegister(deviceId string, physicalId
 		return
 	}
 
-	// 1. 获取或创建设备会话
-	sessionManager := monitor.GetSessionManager()
-	devSession, _ := sessionManager.GetOrCreateSession(deviceId, conn)
+	// 🔧 使用统一架构：统一处理设备注册
+	unifiedSystem := pkg.GetUnifiedSystem()
+	physicalIdStr := fmt.Sprintf("%d", physicalId)
+	version := "1.0"        // 默认版本
+	deviceType := uint16(1) // 默认设备类型
 
-	if devSession == nil {
+	regErr := unifiedSystem.HandleDeviceRegistration(conn, deviceId, physicalIdStr, iccidFromProp, version, deviceType)
+	if regErr != nil {
 		logger.WithFields(logrus.Fields{
 			"deviceId": deviceId,
 			"connID":   conn.GetConnID(),
-		}).Error("DeviceRegisterHandler: SessionManager.GetOrCreateSession 返回了 nil 会话")
-		h.sendRegisterErrorResponse(deviceId, physicalId, messageID, conn, "会话创建失败")
+			"error":    regErr.Error(),
+		}).Error("DeviceRegisterHandler: 统一架构设备注册失败")
+		h.sendRegisterErrorResponse(deviceId, physicalId, messageID, conn, "设备注册失败")
 		return
 	}
 
-	// 2. 设备连接绑定到TCPMonitor（这会将设备添加到连接设备组）
-	monitor.GetGlobalConnectionMonitor().BindDeviceIdToConnection(deviceId, conn)
-
-	// 验证绑定是否成功
-	if boundConn, exists := monitor.GetGlobalConnectionMonitor().GetConnectionByDeviceId(deviceId); !exists || boundConn.GetConnID() != conn.GetConnID() {
+	// 验证注册是否成功
+	if boundConn, exists := unifiedSystem.Monitor.GetConnectionByDeviceId(deviceId); !exists || boundConn.GetConnID() != conn.GetConnID() {
 		logger.WithFields(logrus.Fields{
 			"deviceId":        deviceId,
 			"connID":          conn.GetConnID(),
@@ -188,17 +189,8 @@ func (h *DeviceRegisterHandler) handleDeviceRegister(deviceId string, physicalId
 		return
 	}
 
-	// 3. 使用中心化状态管理器更新设备为在线状态
-	stateManager := monitor.GetGlobalStateManager()
-	err = stateManager.MarkDeviceOnline(deviceId, conn)
-	if err != nil {
-		logger.WithFields(logrus.Fields{
-			"deviceId": deviceId,
-			"connID":   conn.GetConnID(),
-			"error":    err,
-		}).Error("更新设备在线状态失败")
-	}
-
+	// 🔧 使用统一架构：设备状态由统一架构自动管理
+	// 设备注册成功后，状态自动设置为在线
 	// 4. 设置Zinx框架层的session
 	linkedSession := session.GetDeviceSession(conn)
 	if linkedSession != nil {

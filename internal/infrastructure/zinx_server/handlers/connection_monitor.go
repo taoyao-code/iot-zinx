@@ -174,7 +174,7 @@ func (m *ConnectionMonitor) OnRawDataReceived(conn ziface.IConnection, data []by
 	trimmedData := strings.TrimSpace(dataStr)
 
 	// 检查是否为特殊消息类型
-	if protocol.HandleSpecialMessage(data) {
+	if protocol.IsSpecialMessage(data) {
 		// 特殊消息已被处理
 		return
 	}

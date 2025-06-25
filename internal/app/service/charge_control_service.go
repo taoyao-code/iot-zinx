@@ -55,26 +55,16 @@ func (s *ChargeControlService) SendChargeControlCommand(req *dto.ChargeControlRe
 	// 🔧 修复：严格按照文档要求，直接使用标准格式的DeviceID，无需转换
 	// 文档要求：所有服务层和API层的deviceId参数，都应视为标准格式的DeviceID，直接使用
 
-	// 🔧 修复：使用精细化错误处理和中心化状态管理
-	stateManager := monitor.GetGlobalStateManager()
-	deviceState, deviceExists := stateManager.GetDeviceState(req.DeviceID)
+	// 🔧 使用统一架构：检查设备连接状态
+	unifiedSystem := pkg.GetUnifiedSystem()
+	_, deviceExists := unifiedSystem.Monitor.GetConnectionByDeviceId(req.DeviceID)
 
 	if !deviceExists {
-		return constants.NewDeviceError(constants.ErrCodeDeviceNotFound, req.DeviceID, "设备不存在")
+		return constants.NewDeviceError(constants.ErrCodeDeviceNotFound, req.DeviceID, "设备不存在或未连接")
 	}
 
-	if !deviceState.CanReceiveCommands() {
-		switch deviceState {
-		case constants.StateOffline:
-			return constants.NewDeviceError(constants.ErrCodeDeviceOffline, req.DeviceID, "设备离线")
-		case constants.StateDisconnected:
-			return constants.NewDeviceError(constants.ErrCodeConnectionLost, req.DeviceID, "连接已断开")
-		case constants.StateError:
-			return constants.NewDeviceError(constants.ErrCodeInvalidState, req.DeviceID, "设备状态异常")
-		default:
-			return constants.NewDeviceError(constants.ErrCodeInvalidState, req.DeviceID, fmt.Sprintf("设备状态不支持命令执行: %s", deviceState))
-		}
-	}
+	// 🔧 使用统一架构：设备连接存在即表示可以接收命令
+	// 统一架构中，连接状态管理更加简化和可靠
 
 	// 获取设备连接进行命令发送
 	conn, exists := s.monitor.GetConnectionByDeviceId(req.DeviceID)

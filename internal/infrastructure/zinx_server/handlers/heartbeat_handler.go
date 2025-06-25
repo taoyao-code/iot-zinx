@@ -9,9 +9,8 @@ import (
 	"github.com/aceld/zinx/ziface"
 	"github.com/bujia-iot/iot-zinx/internal/domain/dny_protocol"
 	"github.com/bujia-iot/iot-zinx/internal/infrastructure/logger"
+	"github.com/bujia-iot/iot-zinx/pkg"
 	"github.com/bujia-iot/iot-zinx/pkg/constants"
-	"github.com/bujia-iot/iot-zinx/pkg/monitor"
-	"github.com/bujia-iot/iot-zinx/pkg/network"
 	"github.com/bujia-iot/iot-zinx/pkg/protocol"
 	"github.com/bujia-iot/iot-zinx/pkg/session"
 	"github.com/sirupsen/logrus"
@@ -65,28 +64,9 @@ func (h *HeartbeatHandler) processHeartbeat(decodedFrame *protocol.DecodedDNYFra
 	deviceId := decodedFrame.DeviceID
 	data := decodedFrame.Payload
 
-	// 获取连接设备组
-	groupManager := monitor.GetGlobalConnectionGroupManager()
-	group, exists := groupManager.GetGroupByConnID(conn.GetConnID())
-	if !exists {
-		logger.WithFields(logrus.Fields{
-			"connID":            conn.GetConnID(),
-			"heartbeatDeviceID": deviceId,
-			"command":           fmt.Sprintf("0x%02X", decodedFrame.Command),
-		}).Error("连接设备组不存在，拒绝处理心跳")
-		return
-	}
-
-	// 验证设备是否在连接组中
-	if !group.HasDevice(deviceId) {
-		logger.WithFields(logrus.Fields{
-			"connID":            conn.GetConnID(),
-			"heartbeatDeviceID": deviceId,
-			"command":           fmt.Sprintf("0x%02X", decodedFrame.Command),
-			"groupDevices":      len(group.GetAllDevices()),
-		}).Error("心跳包设备ID不在连接设备组中，拒绝处理")
-		return
-	}
+	// 🔧 使用统一架构：直接处理心跳，无需设备组管理
+	// 统一架构中，设备组功能已集成
+	// 🔧 使用统一架构：直接处理心跳，无需验证设备组
 
 	logger.WithFields(logrus.Fields{
 		"connID":     conn.GetConnID(),
@@ -158,32 +138,19 @@ func (h *HeartbeatHandler) processHeartbeat(decodedFrame *protocol.DecodedDNYFra
 		"isRegistered":      deviceSession.DeviceID != "",
 	}).Debug("🔧 心跳设备ID匹配检查")
 
-	// 更新设备心跳时间
-	err := group.UpdateDeviceHeartbeat(deviceId)
-	if err != nil {
-		logger.WithFields(logrus.Fields{
-			"connID":   conn.GetConnID(),
-			"deviceID": deviceId,
-			"error":    err,
-		}).Error("更新设备心跳时间失败")
-		return
-	}
+	// 🔧 使用统一架构：心跳处理已在前面完成
+	// 统一架构自动管理设备心跳和会话状态
 
-	// 获取设备会话
-	sessionManager := monitor.GetSessionManager()
-	deviceSessionInfo, sessionExists := sessionManager.GetSession(deviceId)
-	if !sessionExists {
+	// 🔧 使用统一架构：统一处理心跳
+	unifiedSystem := pkg.GetUnifiedSystem()
+	heartbeatErr := unifiedSystem.HandleHeartbeat(deviceId, conn)
+	if heartbeatErr != nil {
 		logger.WithFields(logrus.Fields{
+			"deviceId": deviceId,
 			"connID":   conn.GetConnID(),
-			"deviceID": deviceId,
-		}).Error("未找到设备会话，拒绝处理心跳")
+			"error":    heartbeatErr.Error(),
+		}).Error("统一架构心跳处理失败")
 		return
-	}
-
-	// 更新设备会话心跳时间
-	if deviceSessionInfo != nil {
-		deviceSessionInfo.LastActivityAt = time.Now()
-		h.updateHeartbeatTime(conn, nil) // 简化调用，避免类型不匹配
 	}
 
 	// 确保设备在连接组中（通过连接组管理器验证）
@@ -202,44 +169,22 @@ func (h *HeartbeatHandler) processHeartbeat(decodedFrame *protocol.DecodedDNYFra
 	logger.WithFields(logrus.Fields{
 		"connID":            conn.GetConnID(),
 		"effectiveDeviceId": deviceId,
-		"sessionId":         deviceSessionInfo.DeviceID,
 		"iccid":             iccid,
 		"remoteAddr":        conn.RemoteAddr().String(),
 		"timestamp":         nowStr,
-		"isRegistered":      deviceSessionInfo.DeviceID != "",
 	}).Info("设备心跳处理完成")
 }
 
-// updateHeartbeatTime 更新心跳时间
+// updateHeartbeatTime 更新心跳时间 - 使用统一架构
 func (h *HeartbeatHandler) updateHeartbeatTime(conn ziface.IConnection, _ interface{}) {
-	// 获取设备ID
-	deviceID, exists := monitor.GetGlobalConnectionMonitor().GetDeviceIdByConnId(conn.GetConnID())
-	if exists {
-		// 使用中心化状态管理器更新设备在线状态
-		stateManager := monitor.GetGlobalStateManager()
-		err := stateManager.MarkDeviceOnline(deviceID, conn)
-		if err != nil {
-			logger.WithFields(logrus.Fields{
-				"deviceId": deviceID,
-				"connID":   conn.GetConnID(),
-				"error":    err,
-			}).Error("更新设备在线状态失败")
-		}
+	// 🔧 使用统一架构：统一处理心跳时间更新
+	unifiedSystem := pkg.GetUnifiedSystem()
+	unifiedSystem.Monitor.UpdateLastHeartbeatTime(conn)
 
-		logger.WithFields(logrus.Fields{
-			"connID":    conn.GetConnID(),
-			"deviceId":  deviceID,
-			"timestamp": time.Now().Format(constants.TimeFormatDefault),
-		}).Debug("心跳处理：已更新设备在线状态")
-	} else {
-		// 未注册设备的心跳处理
-		network.UpdateConnectionActivity(conn)
-
-		logger.WithFields(logrus.Fields{
-			"connID": conn.GetConnID(),
-			"note":   "设备注册前的心跳包，连接保持活跃但不更新设备状态",
-		}).Debug("心跳处理：设备未注册，仅更新连接活动时间")
-	}
+	logger.WithFields(logrus.Fields{
+		"connID":    conn.GetConnID(),
+		"timestamp": time.Now().Format(constants.TimeFormatDefault),
+	}).Debug("心跳处理：已更新连接心跳时间")
 }
 
 // parseSimplifiedHeartbeatPortStatus 解析0x21简化心跳包中的端口状态

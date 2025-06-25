@@ -6,7 +6,6 @@ import (
 	"github.com/aceld/zinx/ziface"
 	"github.com/bujia-iot/iot-zinx/internal/infrastructure/logger"
 	"github.com/bujia-iot/iot-zinx/pkg/constants"
-	"github.com/bujia-iot/iot-zinx/pkg/heartbeat"
 	"github.com/bujia-iot/iot-zinx/pkg/monitor"
 	"github.com/bujia-iot/iot-zinx/pkg/network"
 	"github.com/bujia-iot/iot-zinx/pkg/protocol"
@@ -29,17 +28,9 @@ func InitPackages() {
 func InitPackagesWithDependencies(sessionManager monitor.ISessionManager, connManager ziface.IConnManager) {
 	// 注意：移除了utils.SetupZinxLogger()调用，避免覆盖改进的日志系统
 
-	// 初始化全局连接监视器
-	if sessionManager != nil && connManager != nil {
-		globalConnectionMonitor = monitor.GetGlobalMonitor(sessionManager, connManager)
-
-		// 设置device_group中的全局连接监视器
-		monitor.SetConnectionMonitor(globalConnectionMonitor)
-
-		logger.Info("InitPackagesWithDependencies: 全局连接监视器已初始化")
-	} else {
-		logger.Warn("InitPackagesWithDependencies: sessionManager 或 connManager 为 nil，某些功能可能不可用")
-	}
+	// 🔧 注意：此函数已过时，建议使用 InitUnifiedArchitecture()
+	// 为了向后兼容，保留基本的初始化逻辑
+	logger.Warn("InitPackagesWithDependencies: 此函数已过时，建议使用统一架构")
 
 	// 设置protocol包访问monitor包的函数
 	protocol.GetTCPMonitor = func() interface {
@@ -60,12 +51,9 @@ func InitPackagesWithDependencies(sessionManager monitor.ISessionManager, connMa
 		return nil, "", false
 	})
 
-	// 注册心跳服务适配器
-	// 这将允许心跳包和网络包之间协同工作，而不产生循环依赖
-	heartbeat.RegisterHeartbeatToNetwork()
-
-	// 设置全局连接管理器设置函数
-	network.SetGlobalConnectionMonitorFunc = heartbeat.SetGlobalConnectionMonitor
+	// 🔧 注意：心跳服务已集成到统一架构中
+	// 旧的心跳服务注册已被统一架构替代
+	logger.Info("心跳功能已集成到统一架构中")
 
 	// 设置monitor包的DNY协议发送器
 	// 这里通过适配器模式解决循环依赖问题
@@ -99,15 +87,8 @@ func InitPackagesWithDependencies(sessionManager monitor.ISessionManager, connMa
 		return true // 如果监控器未初始化，保守处理
 	})
 
-	// 启动全局设备监控器
-	deviceMonitor := monitor.GetGlobalDeviceMonitor()
-	if deviceMonitor != nil {
-		if err := deviceMonitor.Start(); err != nil {
-			logger.Errorf("启动设备监控器失败: %v", err)
-		} else {
-			logger.Info("全局设备监控器已启动")
-		}
-	}
+	// 🔧 注意：设备监控器已集成到统一架构中
+	logger.Info("设备监控功能已集成到统一架构中")
 
 	// 🔧 修复：启动监控管理器，完善业务流程
 	monitoringManager := network.GetGlobalMonitoringManager()
@@ -129,12 +110,8 @@ func InitPackagesWithDependencies(sessionManager monitor.ISessionManager, connMa
 // CleanupPackages 清理包资源
 // 该函数应该在应用关闭时调用，用于清理各个包的资源
 func CleanupPackages() {
-	// 停止设备监控器
-	deviceMonitor := monitor.GetGlobalDeviceMonitor()
-	if deviceMonitor != nil {
-		deviceMonitor.Stop()
-		logger.Info("全局设备监控器已停止")
-	}
+	// 🔧 注意：设备监控器已集成到统一架构中
+	logger.Info("设备监控功能已集成到统一架构中，无需单独清理")
 
 	// 停止命令管理器
 	cmdMgr := network.GetCommandManager()

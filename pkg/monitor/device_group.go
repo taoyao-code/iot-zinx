@@ -25,19 +25,10 @@ type DNYProtocolSender interface {
 // 全局DNY发送器
 var globalDNYSender DNYProtocolSender
 
-// 全局连接监视器引用
-var globalConnectionMonitor IConnectionMonitor
-
 // SetDNYProtocolSender 设置DNY协议发送器
 // 在主程序初始化时调用，避免循环依赖
 func SetDNYProtocolSender(sender DNYProtocolSender) {
 	globalDNYSender = sender
-}
-
-// SetConnectionMonitor 设置连接监视器
-// 在主程序初始化时调用
-func SetConnectionMonitor(monitor IConnectionMonitor) {
-	globalConnectionMonitor = monitor
 }
 
 // DeviceGroup 设备组，管理同一ICCID下的多个设备
