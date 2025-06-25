@@ -44,3 +44,11 @@ curl -X POST http://localhost:7055/api/v1/charging/start \
     "port": 1,
     "orderNo": "ORDER_XXXXX"
   }'
+
+  # 发送设备定位命令
+curl -X POST http://localhost:7055/api/v1/device/locate \
+  -H "Content-Type: application/json" \
+  -d '{
+    "deviceId": "04A26CF3",
+    "locateTime": 10
+  }'
