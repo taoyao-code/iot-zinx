@@ -55,21 +55,12 @@ func (s *ChargeControlService) SendChargeControlCommand(req *dto.ChargeControlRe
 	// 🔧 修复：严格按照文档要求，直接使用标准格式的DeviceID，无需转换
 	// 文档要求：所有服务层和API层的deviceId参数，都应视为标准格式的DeviceID，直接使用
 
-	// 🔧 使用统一架构：检查设备连接状态
+	// 🔧 使用设备组管理器：检查设备连接状态
 	unifiedSystem := pkg.GetUnifiedSystem()
-	_, deviceExists := unifiedSystem.Monitor.GetConnectionByDeviceId(req.DeviceID)
+	conn, deviceExists := unifiedSystem.GroupManager.GetConnectionByDeviceID(req.DeviceID)
 
 	if !deviceExists {
 		return constants.NewDeviceError(constants.ErrCodeDeviceNotFound, req.DeviceID, "设备不存在或未连接")
-	}
-
-	// 🔧 使用统一架构：设备连接存在即表示可以接收命令
-	// 统一架构中，连接状态管理更加简化和可靠
-
-	// 获取设备连接进行命令发送
-	conn, exists := s.monitor.GetConnectionByDeviceId(req.DeviceID)
-	if !exists {
-		return fmt.Errorf("设备 %s 连接不可用", req.DeviceID)
 	}
 
 	// 解析设备ID为物理ID
