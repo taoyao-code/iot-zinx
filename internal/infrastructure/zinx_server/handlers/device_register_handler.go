@@ -3,6 +3,7 @@ package handlers
 import (
 	"fmt"
 	"net"
+	"sync"
 	"time"
 
 	"github.com/aceld/zinx/ziface"
@@ -21,6 +22,8 @@ import (
 // DeviceRegisterHandler 处理设备注册包 (命令ID: 0x20)
 type DeviceRegisterHandler struct {
 	protocol.DNYFrameHandlerBase
+	// 🔧 新增：重复注册防护
+	lastRegisterTimes sync.Map // deviceID -> time.Time
 }
 
 // Handle 处理设备注册
@@ -86,6 +89,23 @@ func (h *DeviceRegisterHandler) processDeviceRegistration(decodedFrame *protocol
 		}).Error("注册数据长度为0")
 		return
 	}
+
+	// 🔧 新增：重复注册防护
+	now := time.Now()
+	if lastRegTime, exists := h.lastRegisterTimes.Load(deviceId); exists {
+		if lastTime, ok := lastRegTime.(time.Time); ok {
+			if now.Sub(lastTime) < 5*time.Second {
+				logger.WithFields(logrus.Fields{
+					"connID":   conn.GetConnID(),
+					"deviceId": deviceId,
+					"lastReg":  lastTime.Format(constants.TimeFormatDefault),
+					"interval": now.Sub(lastTime).String(),
+				}).Warn("设备重复注册，忽略此次注册请求")
+				return
+			}
+		}
+	}
+	h.lastRegisterTimes.Store(deviceId, now)
 
 	// 🔧 统一设备注册处理，不再需要重复注册保护逻辑，
 	// SessionManager.GetOrCreateSession 和 TCPMonitor.BindDeviceIdToConnection 会处理好

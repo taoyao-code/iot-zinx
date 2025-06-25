@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"encoding/binary"
 	"fmt"
 	"strings"
 	"time"
@@ -75,12 +76,12 @@ func (h *HeartbeatHandler) processHeartbeat(decodedFrame *protocol.DecodedDNYFra
 	// 不同类型的心跳包有不同的最小长度要求
 	var minDataLen int
 	switch decodedFrame.Command {
-	case uint8(dny_protocol.CmdHeartbeat):     // 0x01 旧版心跳
+	case uint8(dny_protocol.CmdHeartbeat): // 0x01 旧版心跳
 		minDataLen = 20 // 根据协议文档，旧版心跳包固定20字节
-	case uint8(dny_protocol.CmdDeviceHeart):   // 0x21 新版心跳
-		minDataLen = 4  // 新版心跳包最少4字节
+	case uint8(dny_protocol.CmdDeviceHeart): // 0x21 新版心跳
+		minDataLen = 4 // 新版心跳包最少4字节
 	case uint8(dny_protocol.CmdMainHeartbeat): // 0x11 主机心跳
-		minDataLen = 8  // 主机心跳包最少8字节
+		minDataLen = 8 // 主机心跳包最少8字节
 	default:
 		minDataLen = 4 // 默认最小长度
 	}
@@ -111,6 +112,11 @@ func (h *HeartbeatHandler) processHeartbeat(decodedFrame *protocol.DecodedDNYFra
 	var iccid string
 	if val, err := conn.GetProperty(constants.PropKeyICCID); err == nil && val != nil {
 		iccid = val.(string)
+	}
+
+	// 🔧 新增：解析0x21简化心跳包中的端口状态数据
+	if decodedFrame.Command == uint8(dny_protocol.CmdDeviceHeart) && len(data) >= 4 {
+		h.parseSimplifiedHeartbeatPortStatus(data, deviceId, conn, deviceSession)
 	}
 
 	// 检测是否为旧格式心跳包（命令字为0x01，数据长度为20字节）
@@ -202,6 +208,126 @@ func (h *HeartbeatHandler) updateHeartbeatTime(conn ziface.IConnection, deviceSe
 			deviceSession.UpdateHeartbeat()
 		}
 	}
+}
+
+// parseSimplifiedHeartbeatPortStatus 解析0x21简化心跳包中的端口状态
+// 数据格式：电压(2字节) + 端口数量(1字节) + 各端口状态(n字节)
+func (h *HeartbeatHandler) parseSimplifiedHeartbeatPortStatus(data []byte, deviceId string, conn ziface.IConnection, deviceSession *session.DeviceSession) {
+	if len(data) < 4 {
+		logger.WithFields(logrus.Fields{
+			"connID":   conn.GetConnID(),
+			"deviceId": deviceId,
+			"dataLen":  len(data),
+		}).Debug("0x21心跳包数据长度不足，跳过端口状态解析")
+		return
+	}
+
+	// 解析基础数据
+	voltage := binary.LittleEndian.Uint16(data[0:2]) // 电压
+	portCount := data[2]                             // 端口数量
+
+	// 检查端口状态数据长度是否足够
+	expectedLen := 3 + int(portCount) // 电压(2) + 端口数量(1) + 各端口状态(n)
+	if len(data) < expectedLen {
+		logger.WithFields(logrus.Fields{
+			"connID":      conn.GetConnID(),
+			"deviceId":    deviceId,
+			"dataLen":     len(data),
+			"expectedLen": expectedLen,
+			"portCount":   portCount,
+		}).Warn("0x21心跳包端口状态数据不完整")
+		return
+	}
+
+	// 解析各端口状态
+	portStatuses := make([]uint8, portCount)
+	for i := 0; i < int(portCount); i++ {
+		portStatuses[i] = data[3+i]
+	}
+
+	// 🔧 关键修复：监控充电状态变化
+	h.monitorChargingStatusChanges(deviceId, portStatuses, conn, deviceSession)
+
+	// 记录心跳详细信息
+	logger.WithFields(logrus.Fields{
+		"connID":       conn.GetConnID(),
+		"deviceId":     deviceId,
+		"voltage":      fmt.Sprintf("%.1fV", float64(voltage)/10.0), // 电压，单位0.1V
+		"portCount":    portCount,
+		"portStatuses": h.formatPortStatuses(portStatuses),
+		"remoteAddr":   conn.RemoteAddr().String(),
+		"timestamp":    time.Now().Format(constants.TimeFormatDefault),
+	}).Info("📋 设备心跳状态详情")
+}
+
+// monitorChargingStatusChanges 监控充电状态变化
+func (h *HeartbeatHandler) monitorChargingStatusChanges(deviceId string, portStatuses []uint8, conn ziface.IConnection, deviceSession *session.DeviceSession) {
+	for portIndex, status := range portStatuses {
+		portNumber := portIndex + 1
+
+		// 判断是否为充电状态
+		isCharging := false
+		var chargingStatus string
+
+		switch status {
+		case 1:
+			chargingStatus = "充电中"
+			isCharging = true
+		case 3:
+			chargingStatus = "有充电器但未充电（已充满）"
+			isCharging = false
+		case 5:
+			chargingStatus = "浮充"
+			isCharging = true
+		default:
+			chargingStatus = getPortStatusDesc(status)
+			isCharging = false
+		}
+
+		// 🔧 重要：记录充电状态（区分不同级别的日志）
+		logFields := logrus.Fields{
+			"connID":         conn.GetConnID(),
+			"deviceId":       deviceId,
+			"portNumber":     portNumber,
+			"status":         status,
+			"chargingStatus": chargingStatus,
+			"isCharging":     isCharging,
+			"remoteAddr":     conn.RemoteAddr().String(),
+			"timestamp":      time.Now().Format(constants.TimeFormatDefault),
+		}
+
+		if isCharging {
+			// 充电状态使用INFO级别，便于监控
+			logger.WithFields(logFields).Info("⚡ 设备充电状态：正在充电")
+
+			// 重要充电事件使用WARN级别，确保被监控系统捕获
+			logger.WithFields(logrus.Fields{
+				"deviceId":       deviceId,
+				"portNumber":     portNumber,
+				"chargingStatus": chargingStatus,
+				"source":         "HeartbeatHandler-0x21",
+			}).Warn("🚨 充电状态监控：设备正在充电")
+		} else {
+			// 非充电状态使用DEBUG级别，减少日志噪音
+			logger.WithFields(logFields).Debug("🔌 设备端口状态：未充电")
+		}
+	}
+}
+
+// formatPortStatuses 格式化端口状态列表
+func (h *HeartbeatHandler) formatPortStatuses(statuses []uint8) string {
+	if len(statuses) == 0 {
+		return "无端口状态"
+	}
+
+	var result strings.Builder
+	for i, status := range statuses {
+		if i > 0 {
+			result.WriteString(", ")
+		}
+		result.WriteString(fmt.Sprintf("端口%d:%s(0x%02X)", i+1, getPortStatusDesc(status), status))
+	}
+	return result.String()
 }
 
 // formatDeviceHeartbeatInfo 格式化设备心跳状态信息

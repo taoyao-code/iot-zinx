@@ -254,6 +254,19 @@ func (m *TCPMonitor) BindDeviceIdToConnection(deviceID string, newConn ziface.IC
 
 	logger.WithFields(logFields).Info("TCPMonitor: 开始绑定设备到新连接")
 
+	// 🔧 新增：检查连接是否已绑定其他设备（防止物理ID不一致问题）
+	if existingDevices, exists := m.connIdToDeviceIdsMap[newConnID]; exists && len(existingDevices) > 0 {
+		for existingDeviceID := range existingDevices {
+			if existingDeviceID != deviceID {
+				logger.WithFields(logFields).WithFields(logrus.Fields{
+					"existingDeviceID": existingDeviceID,
+					"error":           "连接已绑定其他设备",
+				}).Error("TCPMonitor: 连接已绑定其他设备，拒绝绑定")
+				return
+			}
+		}
+	}
+
 	// 🔧 执行数据完整性检查（操作前）
 	if m.integrityChecker != nil {
 		issues := m.integrityChecker.CheckIntegrity("BindDeviceID-Before")
