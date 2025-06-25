@@ -154,6 +154,36 @@ func (h *ChargeControlHandler) processChargeControl(decodedFrame *protocol.Decod
 	// 这是解决连接超时问题的关键修复
 	network.UpdateConnectionActivity(conn)
 
+	// 🔧 重要：确认充电控制命令完成，防止超时
+	// 获取物理ID用于命令确认
+	physicalID, err := decodedFrame.GetPhysicalIDAsUint32()
+	if err != nil {
+		logger.WithFields(logrus.Fields{
+			"connID":   conn.GetConnID(),
+			"deviceID": decodedFrame.DeviceID,
+			"error":    err,
+		}).Error("ChargeControlHandler: 无法获取物理ID")
+	} else {
+		// 调用命令管理器确认命令已完成
+		cmdManager := network.GetCommandManager()
+		if cmdManager != nil {
+			confirmed := cmdManager.ConfirmCommand(physicalID, decodedFrame.MessageID, 0x82)
+			logger.WithFields(logrus.Fields{
+				"connID":     conn.GetConnID(),
+				"deviceID":   decodedFrame.DeviceID,
+				"physicalID": fmt.Sprintf("0x%08X", physicalID),
+				"messageID":  fmt.Sprintf("0x%04X", decodedFrame.MessageID),
+				"command":    "0x82",
+				"confirmed":  confirmed,
+			}).Info("ChargeControlHandler: 命令确认结果")
+		} else {
+			logger.WithFields(logrus.Fields{
+				"connID":   conn.GetConnID(),
+				"deviceID": decodedFrame.DeviceID,
+			}).Warn("ChargeControlHandler: 命令管理器不可用，无法确认命令")
+		}
+	}
+
 	logger.WithFields(logrus.Fields{
 		"connID":    conn.GetConnID(),
 		"deviceId":  deviceSession.DeviceID,
