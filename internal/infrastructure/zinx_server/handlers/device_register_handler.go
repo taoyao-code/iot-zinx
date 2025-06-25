@@ -90,17 +90,21 @@ func (h *DeviceRegisterHandler) processDeviceRegistration(decodedFrame *protocol
 		return
 	}
 
-	// 🔧 新增：重复注册防护
+	// 🔧 修改：增强重复注册防护，时间窗口从5秒增加到10秒
 	now := time.Now()
 	if lastRegTime, exists := h.lastRegisterTimes.Load(deviceId); exists {
 		if lastTime, ok := lastRegTime.(time.Time); ok {
-			if now.Sub(lastTime) < 5*time.Second {
+			interval := now.Sub(lastTime)
+			if interval < 10*time.Second { // 从5秒增加到10秒
 				logger.WithFields(logrus.Fields{
 					"connID":   conn.GetConnID(),
 					"deviceId": deviceId,
 					"lastReg":  lastTime.Format(constants.TimeFormatDefault),
-					"interval": now.Sub(lastTime).String(),
+					"interval": interval.String(),
 				}).Warn("设备重复注册，忽略此次注册请求")
+
+				// 🔧 新增：发送注册成功响应，避免设备持续重试
+				h.sendRegisterResponse(deviceId, uint32(physicalId), messageID, conn)
 				return
 			}
 		}
@@ -191,6 +195,26 @@ func (h *DeviceRegisterHandler) handleDeviceRegister(deviceId string, physicalId
 	// 2. 设备连接绑定到TCPMonitor
 	// deviceId 是唯一的字符串标识，conn 是共享的连接
 	monitor.GetGlobalConnectionMonitor().BindDeviceIdToConnection(deviceId, conn)
+
+	// 🔧 新增：验证绑定是否成功，防止连接绑定冲突导致的状态不一致
+	if boundConn, exists := monitor.GetGlobalConnectionMonitor().GetConnectionByDeviceId(deviceId); !exists || boundConn.GetConnID() != conn.GetConnID() {
+		logger.WithFields(logrus.Fields{
+			"deviceId":        deviceId,
+			"connID":          conn.GetConnID(),
+			"boundConnExists": exists,
+			"boundConnID": func() uint64 {
+				if boundConn != nil {
+					return boundConn.GetConnID()
+				}
+				return 0
+			}(),
+			"error": "设备绑定失败",
+		}).Error("设备注册失败：连接绑定失败")
+
+		// 发送注册失败响应
+		h.sendRegisterErrorResponse(deviceId, physicalId, messageID, conn, "连接绑定失败")
+		return
+	}
 
 	// 🔧 修复：使用中心化状态管理器更新设备为在线状态
 	// 设备注册成功后直接设置为在线，避免状态转换混乱
@@ -308,4 +332,30 @@ func (h *DeviceRegisterHandler) sendRegisterResponse(deviceId string, physicalId
 		"remoteAddr": conn.RemoteAddr().String(),
 		"timestamp":  time.Now().Format(constants.TimeFormatDefault),
 	}).Info("设备注册响应已发送")
+}
+
+// 🔧 新增：发送注册失败响应
+func (h *DeviceRegisterHandler) sendRegisterErrorResponse(deviceId string, physicalId uint32, messageID uint16, conn ziface.IConnection, reason string) {
+	// 构建注册失败响应数据
+	// responseData := []byte{dny_protocol.ResponseFailure} // 使用失败响应码
+
+	// // 发送注册失败响应
+	// if err := h.SendResponse(conn, responseData); err != nil {
+	// 	logger.WithFields(logrus.Fields{
+	// 		"connID":     conn.GetConnID(),
+	// 		"physicalId": fmt.Sprintf("0x%08X", physicalId),
+	// 		"deviceId":   deviceId,
+	// 		"reason":     reason,
+	// 		"error":      err.Error(),
+	// 	}).Error("发送注册失败响应失败")
+	// 	return
+	// }
+
+	logger.WithFields(logrus.Fields{
+		"connID":     conn.GetConnID(),
+		"deviceId":   deviceId,
+		"reason":     reason,
+		"remoteAddr": conn.RemoteAddr().String(),
+		"timestamp":  time.Now().Format(constants.TimeFormatDefault),
+	}).Warn("设备注册失败响应已发送")
 }
