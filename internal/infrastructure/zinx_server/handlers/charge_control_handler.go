@@ -69,6 +69,10 @@ func (h *ChargeControlHandler) SendChargeControlCommandLegacy(conn ziface.IConne
 func (h *ChargeControlHandler) Handle(request ziface.IRequest) {
 	conn := request.GetConnection()
 
+	// 🔧 DEBUG: 添加调试日志确认Handler被调用
+	fmt.Printf("🔥 DEBUG: ChargeControlHandler.Handle被调用! connID=%d, 时间=%s\n",
+		conn.GetConnID(), time.Now().Format("2006-01-02 15:04:05"))
+
 	// 提取解码后的DNY帧数据
 	decodedFrame, err := h.ExtractDecodedFrame(request)
 	if err != nil {
