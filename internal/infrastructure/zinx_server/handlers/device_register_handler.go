@@ -24,6 +24,38 @@ type DeviceRegisterHandler struct {
 	protocol.DNYFrameHandlerBase
 	// 🔧 新增：重复注册防护
 	lastRegisterTimes sync.Map // deviceID -> time.Time
+	// 🚀 新增：智能注册决策系统
+	deviceStates        sync.Map // deviceID -> *DeviceRegistrationState
+	registrationMetrics sync.Map // deviceID -> *RegistrationMetrics
+}
+
+// DeviceRegistrationState 设备注册状态跟踪
+type DeviceRegistrationState struct {
+	FirstRegistrationTime time.Time
+	LastRegistrationTime  time.Time
+	RegistrationCount     int64
+	CurrentConnectionID   uint64
+	LastConnectionState   string
+	ConsecutiveRetries    int
+	LastDecision          *RegistrationDecision
+}
+
+// RegistrationDecision 注册决策结构
+type RegistrationDecision struct {
+	Action               string        // accept, ignore, update
+	Reason               string        // 决策原因
+	TimeSinceLastReg     time.Duration // 距离上次注册的时间
+	ShouldNotifyBusiness bool          // 是否需要通知业务平台
+	Timestamp            time.Time     // 决策时间
+}
+
+// RegistrationMetrics 注册统计指标
+type RegistrationMetrics struct {
+	TotalAttempts  int64
+	SuccessfulRegs int64
+	IgnoredRegs    int64
+	UpdateRegs     int64
+	LastUpdated    time.Time
 }
 
 // Handle 处理设备注册
@@ -90,30 +122,39 @@ func (h *DeviceRegisterHandler) processDeviceRegistration(decodedFrame *protocol
 		return
 	}
 
-	// 🔧 修改：增强重复注册防护，时间窗口从5秒增加到10秒
-	now := time.Now()
-	if lastRegTime, exists := h.lastRegisterTimes.Load(deviceId); exists {
-		if lastTime, ok := lastRegTime.(time.Time); ok {
-			interval := now.Sub(lastTime)
-			if interval < 10*time.Second { // 从5秒增加到10秒
-				logger.WithFields(logrus.Fields{
-					"connID":   conn.GetConnID(),
-					"deviceId": deviceId,
-					"lastReg":  lastTime.Format(constants.TimeFormatDefault),
-					"interval": interval.String(),
-				}).Warn("设备重复注册，忽略此次注册请求")
+	// � 智能注册决策
+	decision := h.analyzeRegistrationRequest(deviceId, conn)
 
-				// 🔧 新增：发送注册成功响应，避免设备持续重试
-				h.sendRegisterResponse(deviceId, uint32(physicalId), messageID, conn)
-				return
-			}
-		}
+	// 更新统计指标
+	h.updateRegistrationMetrics(deviceId, decision.Action)
+
+	logger.WithFields(logrus.Fields{
+		"connID":   conn.GetConnID(),
+		"deviceId": deviceId,
+		"action":   decision.Action,
+		"reason":   decision.Reason,
+		"interval": decision.TimeSinceLastReg.String(),
+	}).Info("设备注册智能决策")
+
+	switch decision.Action {
+	case "accept":
+		h.handleDeviceRegister(deviceId, uint32(physicalId), messageID, conn, data)
+
+	case "ignore":
+		logger.WithFields(logrus.Fields{
+			"connID":   conn.GetConnID(),
+			"deviceId": deviceId,
+			"reason":   decision.Reason,
+		}).Debug("智能忽略重复注册请求")
+		h.sendRegisterResponse(deviceId, uint32(physicalId), messageID, conn)
+
+	case "update":
+		h.handleRegistrationUpdate(deviceId, uint32(physicalId), messageID, conn, data, decision)
+
+	default:
+		logger.WithField("action", decision.Action).Error("未知的注册决策动作")
+		h.sendRegisterResponse(deviceId, uint32(physicalId), messageID, conn)
 	}
-	h.lastRegisterTimes.Store(deviceId, now)
-
-	// 🔧 统一设备注册处理，不再需要重复注册保护逻辑，
-	// SessionManager.GetOrCreateSession 和 TCPMonitor.BindDeviceIdToConnection 会处理好
-	h.handleDeviceRegister(deviceId, uint32(physicalId), messageID, conn, data)
 }
 
 // 统一设备注册处理
@@ -241,9 +282,29 @@ func (h *DeviceRegisterHandler) handleDeviceRegister(deviceId string, physicalId
 		"timestamp":         now.Format(constants.TimeFormatDefault),
 	}).Info("设备注册成功，连接状态更新为Active，ReadDeadline已重置")
 
-	// 8. 通知设备服务设备上线
-	if ctx := http.GetGlobalHandlerContext(); ctx != nil && ctx.DeviceService != nil {
-		ctx.DeviceService.HandleDeviceOnline(deviceId, iccidFromProp)
+	// 8. 通知设备服务设备上线 - 根据智能决策决定是否通知
+	if stateInterface, exists := h.deviceStates.Load(deviceId); exists {
+		state := stateInterface.(*DeviceRegistrationState)
+		if state.LastDecision != nil && state.LastDecision.ShouldNotifyBusiness {
+			if ctx := http.GetGlobalHandlerContext(); ctx != nil && ctx.DeviceService != nil {
+				ctx.DeviceService.HandleDeviceOnline(deviceId, iccidFromProp)
+				logger.WithFields(logrus.Fields{
+					"deviceId": deviceId,
+					"reason":   state.LastDecision.Reason,
+				}).Info("已通知业务平台设备上线")
+			}
+		} else {
+			logger.WithFields(logrus.Fields{
+				"deviceId": deviceId,
+				"reason":   state.LastDecision.Reason,
+			}).Debug("根据智能决策跳过业务平台通知")
+		}
+	} else {
+		// 兜底：如果没有决策信息，默认通知（向后兼容）
+		if ctx := http.GetGlobalHandlerContext(); ctx != nil && ctx.DeviceService != nil {
+			ctx.DeviceService.HandleDeviceOnline(deviceId, iccidFromProp)
+			logger.WithField("deviceId", deviceId).Info("兜底通知业务平台设备上线")
+		}
 	}
 
 	// 9. 发送注册响应
@@ -301,4 +362,178 @@ func (h *DeviceRegisterHandler) sendRegisterErrorResponse(deviceId string, physi
 		"remoteAddr": conn.RemoteAddr().String(),
 		"timestamp":  time.Now().Format(constants.TimeFormatDefault),
 	}).Warn("设备注册失败响应已发送")
+}
+
+// 🚀 智能注册分析
+func (h *DeviceRegisterHandler) analyzeRegistrationRequest(deviceId string, conn ziface.IConnection) *RegistrationDecision {
+	now := time.Now()
+	connID := conn.GetConnID()
+
+	// 获取或创建设备状态
+	stateInterface, _ := h.deviceStates.LoadOrStore(deviceId, &DeviceRegistrationState{
+		FirstRegistrationTime: now,
+		RegistrationCount:     0,
+		LastDecision:          nil,
+	})
+	state := stateInterface.(*DeviceRegistrationState)
+
+	// 更新统计信息
+	state.RegistrationCount++
+	timeSinceLastReg := now.Sub(state.LastRegistrationTime)
+
+	decision := &RegistrationDecision{
+		TimeSinceLastReg:     timeSinceLastReg,
+		ShouldNotifyBusiness: false,
+		Timestamp:            now,
+	}
+
+	// 首次注册
+	if state.RegistrationCount == 1 {
+		decision.Action = "accept"
+		decision.Reason = "首次注册"
+		decision.ShouldNotifyBusiness = true
+		state.FirstRegistrationTime = now
+		state.CurrentConnectionID = connID
+		state.LastConnectionState = "registering"
+		state.ConsecutiveRetries = 0
+	} else {
+		// 分析重复注册类型
+		switch {
+		case timeSinceLastReg < 5*time.Second:
+			// 5秒内的重复注册 - 可能是网络重传
+			decision.Action = "ignore"
+			decision.Reason = "短时间内重复注册(可能是重传)"
+			state.ConsecutiveRetries++
+
+		case timeSinceLastReg < 30*time.Second && state.CurrentConnectionID == connID:
+			// 30秒内同连接重复注册 - 可能是设备状态同步
+			if state.ConsecutiveRetries < 3 {
+				decision.Action = "update"
+				decision.Reason = "同连接状态同步注册"
+				decision.ShouldNotifyBusiness = false
+			} else {
+				decision.Action = "ignore"
+				decision.Reason = "连续重试过多，暂停处理"
+			}
+
+		case state.CurrentConnectionID != connID:
+			// 不同连接的注册 - 可能是重连
+			decision.Action = "accept"
+			decision.Reason = "连接变更，重新注册"
+			decision.ShouldNotifyBusiness = true
+			state.CurrentConnectionID = connID
+			state.ConsecutiveRetries = 0
+
+		case timeSinceLastReg > 5*time.Minute:
+			// 超过5分钟的重新注册 - 正常的周期性注册
+			decision.Action = "accept"
+			decision.Reason = "周期性重新注册"
+			decision.ShouldNotifyBusiness = true
+			state.ConsecutiveRetries = 0
+
+		default:
+			// 其他情况 - 更新处理
+			decision.Action = "update"
+			decision.Reason = "常规状态更新"
+			decision.ShouldNotifyBusiness = false
+		}
+	}
+
+	// 更新设备状态
+	state.LastRegistrationTime = now
+	state.LastDecision = decision
+	h.deviceStates.Store(deviceId, state)
+
+	return decision
+}
+
+// 🚀 处理注册更新（不触发完整注册流程）
+func (h *DeviceRegisterHandler) handleRegistrationUpdate(deviceId string, physicalId uint32, messageID uint16, conn ziface.IConnection, data []byte, decision *RegistrationDecision) {
+	// 只更新心跳时间和连接状态，不触发业务逻辑
+	deviceSession := session.GetDeviceSession(conn)
+	if deviceSession != nil {
+		deviceSession.UpdateHeartbeat()
+		logger.WithFields(logrus.Fields{
+			"connID":   conn.GetConnID(),
+			"deviceId": deviceId,
+			"reason":   decision.Reason,
+		}).Debug("设备注册状态已更新")
+	} else {
+		logger.WithFields(logrus.Fields{
+			"connID":   conn.GetConnID(),
+			"deviceId": deviceId,
+		}).Warn("设备会话不存在，无法更新心跳")
+	}
+
+	// 发送响应
+	h.sendRegisterResponse(deviceId, physicalId, messageID, conn)
+}
+
+// 🚀 更新注册统计指标
+func (h *DeviceRegisterHandler) updateRegistrationMetrics(deviceId string, action string) {
+	now := time.Now()
+	metricsInterface, _ := h.registrationMetrics.LoadOrStore(deviceId, &RegistrationMetrics{
+		TotalAttempts:  0,
+		SuccessfulRegs: 0,
+		IgnoredRegs:    0,
+		UpdateRegs:     0,
+		LastUpdated:    now,
+	})
+	metrics := metricsInterface.(*RegistrationMetrics)
+
+	metrics.TotalAttempts++
+	switch action {
+	case "accept":
+		metrics.SuccessfulRegs++
+	case "ignore":
+		metrics.IgnoredRegs++
+	case "update":
+		metrics.UpdateRegs++
+	}
+	metrics.LastUpdated = now
+
+	h.registrationMetrics.Store(deviceId, metrics)
+}
+
+// 🚀 获取设备注册统计
+func (h *DeviceRegisterHandler) GetRegistrationStats(deviceId string) (*DeviceRegistrationState, *RegistrationMetrics) {
+	var state *DeviceRegistrationState
+	var metrics *RegistrationMetrics
+
+	if stateInterface, exists := h.deviceStates.Load(deviceId); exists {
+		state = stateInterface.(*DeviceRegistrationState)
+	}
+
+	if metricsInterface, exists := h.registrationMetrics.Load(deviceId); exists {
+		metrics = metricsInterface.(*RegistrationMetrics)
+	}
+
+	return state, metrics
+}
+
+// 🚀 清理过期的设备状态（定期调用）
+func (h *DeviceRegisterHandler) CleanupExpiredStates() {
+	now := time.Now()
+	expiredDevices := make([]string, 0)
+
+	h.deviceStates.Range(func(key, value interface{}) bool {
+		deviceId := key.(string)
+		state := value.(*DeviceRegistrationState)
+
+		// 1小时未活动的设备状态可以清理
+		if now.Sub(state.LastRegistrationTime) > time.Hour {
+			expiredDevices = append(expiredDevices, deviceId)
+		}
+		return true
+	})
+
+	for _, deviceId := range expiredDevices {
+		h.deviceStates.Delete(deviceId)
+		h.registrationMetrics.Delete(deviceId)
+		logger.WithField("deviceId", deviceId).Debug("清理过期设备注册状态")
+	}
+
+	if len(expiredDevices) > 0 {
+		logger.WithField("cleanedCount", len(expiredDevices)).Info("清理过期设备注册状态完成")
+	}
 }

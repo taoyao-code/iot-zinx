@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/aceld/zinx/ziface"
@@ -458,51 +459,61 @@ func SetMasterConnectionAdapter(adapter func(slaveDeviceId string) (ziface.IConn
 	getMasterConnectionForSlaveDevice = adapter
 }
 
-// sendWithDynamicTimeout 使用动态写超时和重试机制发送数据
-// 🔧 核心修复：每次写操作前动态设置WriteDeadline，避免固定超时问题
+// sendWithDynamicTimeout 使用动态写超时和重试机制发送数据（增强版）
 func sendWithDynamicTimeout(conn ziface.IConnection, data []byte, timeout time.Duration, maxRetries int) error {
 	tcpConn := conn.GetTCPConnection()
 	if tcpConn == nil {
 		return fmt.Errorf("无法获取TCP连接")
 	}
 
+	connID := conn.GetConnID()
+	chm := GetConnectionHealthManager()
+	metricsBefore := chm.GetConnectionHealth(connID)
+	baseTimeout := timeout
+	adaptiveTimeout := chm.GetAdaptiveTimeout(connID, baseTimeout)
+	retryConfig := chm.retryConfig
+	if maxRetries < retryConfig.MaxRetries {
+		maxRetries = retryConfig.MaxRetries
+	}
+
 	var lastErr error
 	startTime := time.Now()
 
 	for attempt := 0; attempt <= maxRetries; attempt++ {
-		// 🔧 关键修复：每次写操作前动态设置WriteDeadline
-		writeDeadline := time.Now().Add(timeout)
+		// 每次写操作前动态设置WriteDeadline
+		writeDeadline := time.Now().Add(adaptiveTimeout)
 		if err := tcpConn.SetWriteDeadline(writeDeadline); err != nil {
 			logger.WithFields(logrus.Fields{
-				"connID":  conn.GetConnID(),
+				"connID":  connID,
 				"attempt": attempt + 1,
-				"timeout": timeout.String(),
+				"timeout": adaptiveTimeout.String(),
 				"error":   err.Error(),
 			}).Warn("设置动态写超时失败")
 		}
 
 		// 执行写操作
 		written, err := tcpConn.Write(data)
-		if err == nil && written == len(data) {
-			// 写操作成功
-			elapsed := time.Since(startTime)
+		latency := time.Since(startTime)
+		success := (err == nil && written == len(data))
+		chm.UpdateConnectionHealth(connID, success, latency, err)
+
+		if success {
 			logger.WithFields(logrus.Fields{
-				"connID":   conn.GetConnID(),
+				"connID":   connID,
 				"dataLen":  len(data),
 				"written":  written,
 				"attempts": attempt + 1,
-				"elapsed":  elapsed.String(),
+				"elapsed":  latency.String(),
 				"success":  true,
 			}).Debug("数据发送成功")
 			return nil
 		}
 
-		// 记录错误信息
 		lastErr = err
 		isTimeout := isTimeoutError(err)
 
 		logger.WithFields(logrus.Fields{
-			"connID":     conn.GetConnID(),
+			"connID":     connID,
 			"attempt":    attempt + 1,
 			"maxRetries": maxRetries + 1,
 			"dataLen":    len(data),
@@ -511,38 +522,58 @@ func sendWithDynamicTimeout(conn ziface.IConnection, data []byte, timeout time.D
 			"error":      err.Error(),
 		}).Warn("写操作失败，准备重试")
 
-		// 如果不是超时错误且不是最后一次重试，则快速重试
-		if !isTimeout && attempt < maxRetries {
-			time.Sleep(100 * time.Millisecond) // 短暂延迟
-			continue
+		// 智能重试：根据健康分数和错误类型调整重试策略
+		metrics := chm.GetConnectionHealth(connID)
+		if metrics != nil && metrics.HealthScore < retryConfig.HealthThreshold {
+			logger.WithFields(logrus.Fields{
+				"connID":      connID,
+				"healthScore": metrics.HealthScore,
+				"threshold":   retryConfig.HealthThreshold,
+			}).Warn("连接健康分数过低，提前终止重试")
+			break
 		}
 
-		// 如果是超时错误或到达最大重试次数，进行指数退避
+		// 动态调整超时时间
+		adaptiveTimeout = chm.GetAdaptiveTimeout(connID, baseTimeout)
+
+		// 指数退避
 		if attempt < maxRetries {
-			backoff := time.Duration(attempt+1) * 500 * time.Millisecond
+			backoff := time.Duration(float64(attempt+1)*retryConfig.BackoffFactor*500) * time.Millisecond
 			if backoff > 5*time.Second {
 				backoff = 5 * time.Second
 			}
-
 			logger.WithFields(logrus.Fields{
-				"connID":    conn.GetConnID(),
+				"connID":    connID,
 				"attempt":   attempt + 1,
 				"backoff":   backoff.String(),
 				"nextRetry": attempt + 2,
 			}).Info("等待重试")
-
 			time.Sleep(backoff)
 		}
 	}
 
-	// 所有重试都失败了
 	totalElapsed := time.Since(startTime)
+	metricsAfter := chm.GetConnectionHealth(connID)
 	logger.WithFields(logrus.Fields{
-		"connID":        conn.GetConnID(),
+		"connID":        connID,
 		"dataLen":       len(data),
 		"totalAttempts": maxRetries + 1,
 		"totalElapsed":  totalElapsed.String(),
 		"finalError":    lastErr.Error(),
+		"healthBefore": func() float64 {
+			if metricsBefore != nil {
+				return metricsBefore.HealthScore
+			} else {
+				return 1.0
+			}
+		}(),
+		"healthAfter": func() float64 {
+			if metricsAfter != nil {
+				return metricsAfter.HealthScore
+			} else {
+				return 1.0
+			}
+		}(),
 	}).Error("数据发送最终失败")
 
 	return fmt.Errorf("写操作失败，已重试%d次: %v", maxRetries+1, lastErr)
@@ -558,4 +589,262 @@ func isTimeoutError(err error) bool {
 	return strings.Contains(errStr, "timeout") ||
 		strings.Contains(errStr, "i/o timeout") ||
 		strings.Contains(errStr, "deadline exceeded")
+}
+
+// 🚀 优先级3：网络超时重试机制增强
+
+// ConnectionHealthMetrics 连接健康指标
+type ConnectionHealthMetrics struct {
+	ConnID              uint64        `json:"conn_id"`
+	TotalSendAttempts   int64         `json:"total_send_attempts"`
+	SuccessfulSends     int64         `json:"successful_sends"`
+	FailedSends         int64         `json:"failed_sends"`
+	TimeoutSends        int64         `json:"timeout_sends"`
+	AverageResponseTime time.Duration `json:"average_response_time"`
+	LastSendTime        time.Time     `json:"last_send_time"`
+	LastSuccessTime     time.Time     `json:"last_success_time"`
+	HealthScore         float64       `json:"health_score"` // 0.0-1.0
+	ConsecutiveFailures int           `json:"consecutive_failures"`
+	LastError           string        `json:"last_error"`
+	NetworkLatency      time.Duration `json:"network_latency"`
+	ConnectionStable    bool          `json:"connection_stable"`
+}
+
+// SendMetrics 发送性能指标
+type SendMetrics struct {
+	StartTime         time.Time     `json:"start_time"`
+	EndTime           time.Time     `json:"end_time"`
+	TotalAttempts     int           `json:"total_attempts"`
+	SuccessAttempt    int           `json:"success_attempt"`
+	TotalLatency      time.Duration `json:"total_latency"`
+	RetryStrategy     string        `json:"retry_strategy"`
+	FinalResult       string        `json:"final_result"`
+	AdaptiveTimeout   time.Duration `json:"adaptive_timeout"`
+	HealthScoreBefore float64       `json:"health_score_before"`
+	HealthScoreAfter  float64       `json:"health_score_after"`
+}
+
+// SmartRetryConfig 智能重试配置
+type SmartRetryConfig struct {
+	BaseTimeout     time.Duration
+	MaxTimeout      time.Duration
+	MaxRetries      int
+	BackoffFactor   float64
+	HealthThreshold float64
+	AdaptiveMode    bool
+}
+
+// 全局连接健康管理器
+var (
+	connectionHealthManager = &ConnectionHealthManager{
+		metrics:     make(map[uint64]*ConnectionHealthMetrics),
+		mutex:       sync.RWMutex{},
+		retryConfig: getDefaultRetryConfig(),
+	}
+)
+
+// ConnectionHealthManager 连接健康管理器
+type ConnectionHealthManager struct {
+	metrics     map[uint64]*ConnectionHealthMetrics
+	mutex       sync.RWMutex
+	retryConfig SmartRetryConfig
+}
+
+// getDefaultRetryConfig 获取默认重试配置
+func getDefaultRetryConfig() SmartRetryConfig {
+	return SmartRetryConfig{
+		BaseTimeout:     30 * time.Second,
+		MaxTimeout:      120 * time.Second,
+		MaxRetries:      5,
+		BackoffFactor:   1.5,
+		HealthThreshold: 0.7,
+		AdaptiveMode:    true,
+	}
+}
+
+// GetConnectionHealth 获取连接健康指标
+func (chm *ConnectionHealthManager) GetConnectionHealth(connID uint64) *ConnectionHealthMetrics {
+	chm.mutex.RLock()
+	defer chm.mutex.RUnlock()
+
+	if metrics, exists := chm.metrics[connID]; exists {
+		// 返回副本，避免并发修改
+		metricsCopy := *metrics
+		return &metricsCopy
+	}
+	return nil
+}
+
+// UpdateConnectionHealth 更新连接健康指标
+func (chm *ConnectionHealthManager) UpdateConnectionHealth(connID uint64, success bool, latency time.Duration, err error) {
+	chm.mutex.Lock()
+	defer chm.mutex.Unlock()
+
+	metrics, exists := chm.metrics[connID]
+	if !exists {
+		metrics = &ConnectionHealthMetrics{
+			ConnID:              connID,
+			TotalSendAttempts:   0,
+			SuccessfulSends:     0,
+			FailedSends:         0,
+			TimeoutSends:        0,
+			AverageResponseTime: 0,
+			HealthScore:         1.0,
+			ConsecutiveFailures: 0,
+			ConnectionStable:    true,
+		}
+		chm.metrics[connID] = metrics
+	}
+
+	now := time.Now()
+	metrics.TotalSendAttempts++
+	metrics.LastSendTime = now
+
+	if success {
+		metrics.SuccessfulSends++
+		metrics.LastSuccessTime = now
+		metrics.ConsecutiveFailures = 0
+		metrics.LastError = ""
+
+		// 更新平均响应时间
+		if metrics.AverageResponseTime == 0 {
+			metrics.AverageResponseTime = latency
+		} else {
+			// 使用指数移动平均
+			metrics.AverageResponseTime = time.Duration(float64(metrics.AverageResponseTime)*0.8 + float64(latency)*0.2)
+		}
+		metrics.NetworkLatency = latency
+	} else {
+		metrics.FailedSends++
+		metrics.ConsecutiveFailures++
+		if err != nil {
+			metrics.LastError = err.Error()
+			if isTimeoutError(err) {
+				metrics.TimeoutSends++
+			}
+		}
+	}
+
+	// 计算健康分数
+	metrics.HealthScore = chm.calculateHealthScore(metrics)
+	metrics.ConnectionStable = metrics.HealthScore >= chm.retryConfig.HealthThreshold
+}
+
+// calculateHealthScore 计算连接健康分数
+func (chm *ConnectionHealthManager) calculateHealthScore(metrics *ConnectionHealthMetrics) float64 {
+	if metrics.TotalSendAttempts == 0 {
+		return 1.0
+	}
+
+	successRate := float64(metrics.SuccessfulSends) / float64(metrics.TotalSendAttempts)
+
+	// 考虑连续失败次数的惩罚
+	consecutiveFailurePenalty := float64(metrics.ConsecutiveFailures) * 0.1
+	if consecutiveFailurePenalty > 0.5 {
+		consecutiveFailurePenalty = 0.5
+	}
+
+	// 考虑超时率的惩罚
+	timeoutRate := float64(metrics.TimeoutSends) / float64(metrics.TotalSendAttempts)
+	timeoutPenalty := timeoutRate * 0.3
+
+	// 考虑响应时间的影响
+	latencyPenalty := 0.0
+	if metrics.AverageResponseTime > 5*time.Second {
+		latencyPenalty = 0.1
+	} else if metrics.AverageResponseTime > 10*time.Second {
+		latencyPenalty = 0.2
+	}
+
+	healthScore := successRate - consecutiveFailurePenalty - timeoutPenalty - latencyPenalty
+	if healthScore < 0 {
+		healthScore = 0
+	}
+	if healthScore > 1 {
+		healthScore = 1
+	}
+
+	return healthScore
+}
+
+// GetAdaptiveTimeout 获取自适应超时时间
+func (chm *ConnectionHealthManager) GetAdaptiveTimeout(connID uint64, baseTimeout time.Duration) time.Duration {
+	if !chm.retryConfig.AdaptiveMode {
+		return baseTimeout
+	}
+
+	metrics := chm.GetConnectionHealth(connID)
+	if metrics == nil {
+		return baseTimeout
+	}
+
+	// 根据健康分数和网络延迟调整超时时间
+	adaptiveFactor := 1.0
+
+	if metrics.HealthScore < 0.5 {
+		// 连接质量差，增加超时时间
+		adaptiveFactor = 2.0
+	} else if metrics.HealthScore < 0.7 {
+		adaptiveFactor = 1.5
+	}
+
+	// 考虑网络延迟
+	if metrics.AverageResponseTime > 0 {
+		latencyFactor := float64(metrics.AverageResponseTime) / float64(baseTimeout)
+		if latencyFactor > 0.5 {
+			adaptiveFactor *= (1.0 + latencyFactor)
+		}
+	}
+
+	adaptiveTimeout := time.Duration(float64(baseTimeout) * adaptiveFactor)
+	if adaptiveTimeout > chm.retryConfig.MaxTimeout {
+		adaptiveTimeout = chm.retryConfig.MaxTimeout
+	}
+
+	return adaptiveTimeout
+}
+
+// CleanupOldMetrics 清理过期的连接指标
+func (chm *ConnectionHealthManager) CleanupOldMetrics() {
+	chm.mutex.Lock()
+	defer chm.mutex.Unlock()
+
+	now := time.Now()
+	expiredConnections := make([]uint64, 0)
+
+	for connID, metrics := range chm.metrics {
+		// 清理1小时未活动的连接指标
+		if now.Sub(metrics.LastSendTime) > time.Hour {
+			expiredConnections = append(expiredConnections, connID)
+		}
+	}
+
+	for _, connID := range expiredConnections {
+		delete(chm.metrics, connID)
+	}
+
+	if len(expiredConnections) > 0 {
+		logger.WithField("cleanedCount", len(expiredConnections)).Info("清理过期连接健康指标")
+	}
+}
+
+// GetConnectionHealthManager 获取连接健康管理器
+func GetConnectionHealthManager() *ConnectionHealthManager {
+	return connectionHealthManager
+}
+
+// GetConnectionHealthStats 获取所有连接的健康统计
+func GetConnectionHealthStats() map[uint64]*ConnectionHealthMetrics {
+	chm := connectionHealthManager
+	chm.mutex.RLock()
+	defer chm.mutex.RUnlock()
+
+	stats := make(map[uint64]*ConnectionHealthMetrics)
+	for connID, metrics := range chm.metrics {
+		// 返回副本，避免并发修改
+		metricsCopy := *metrics
+		stats[connID] = &metricsCopy
+	}
+
+	return stats
 }
