@@ -27,7 +27,6 @@ type UnifiedDeviceSession struct {
 	DeviceType    uint16 `json:"device_type"`    // 设备类型
 	DeviceVersion string `json:"device_version"` // 设备版本
 	DirectMode    bool   `json:"direct_mode"`    // 是否直连模式
-	IsPrimary     bool   `json:"is_primary"`     // 是否为主设备（主从架构）
 
 	// === 统一状态 ===
 	State           UnifiedSessionState    `json:"state"`            // 会话状态

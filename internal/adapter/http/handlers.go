@@ -124,7 +124,6 @@ func HandleDeviceStatus(c *gin.Context) {
 			"deviceId":      deviceInfo.DeviceID,
 			"iccid":         deviceInfo.ICCID,
 			"isOnline":      deviceInfo.IsOnline,
-			"isPrimary":     deviceInfo.IsPrimary,
 			"status":        "online",
 			"lastHeartbeat": deviceInfo.LastHeartbeat,
 			"remoteAddr":    deviceInfo.RemoteAddr,

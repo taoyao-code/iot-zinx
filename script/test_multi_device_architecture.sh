@@ -1,9 +1,9 @@
 #!/bin/bash
 
-# 主从设备架构测试脚本
-# 测试主机04A228CD和从设备04A26CF3的连接架构
+# 多设备共享连接架构测试脚本
+# 测试设备04A228CD和04A26CF3的共享连接架构
 
-echo "=== 主从设备架构测试 ==="
+echo "=== 多设备共享连接架构测试 ==="
 echo "测试时间: $(date)"
 echo ""
 
@@ -13,36 +13,27 @@ SERVER_PORT="8080"
 BASE_URL="http://${SERVER_HOST}:${SERVER_PORT}"
 
 # 设备信息
-PRIMARY_DEVICE="04A228CD"    # 主设备
-SECONDARY_DEVICE="04A26CF3"  # 从设备
+DEVICE_1="04A228CD"    # 设备1
+DEVICE_2="04A26CF3"    # 设备2
 
-echo "主设备: ${PRIMARY_DEVICE}"
-echo "从设备: ${SECONDARY_DEVICE}"
+echo "设备1: ${DEVICE_1}"
+echo "设备2: ${DEVICE_2}"
 echo ""
 
 # 测试函数
 test_device_info() {
     local device_id=$1
-    local device_type=$2
-    
-    echo "--- 测试${device_type}设备信息查询 ---"
+    local device_name=$2
+
+    echo "--- 测试${device_name}信息查询 ---"
     echo "设备ID: ${device_id}"
-    
+
     response=$(curl -s -X GET "${BASE_URL}/api/v1/device/${device_id}/info")
     echo "响应: ${response}"
-    
+
     # 解析响应
     if echo "${response}" | grep -q '"code":0'; then
-        echo "✅ ${device_type}设备在线"
-        
-        # 检查是否为主设备
-        if echo "${response}" | grep -q '"isPrimary":true'; then
-            echo "✅ 确认为主设备"
-        elif echo "${response}" | grep -q '"isPrimary":false'; then
-            echo "✅ 确认为从设备"
-        else
-            echo "⚠️  未找到主从设备标识"
-        fi
+        echo "✅ ${device_name}在线"
         
         # 提取ICCID
         iccid=$(echo "${response}" | grep -o '"iccid":"[^"]*"' | cut -d'"' -f4)
@@ -57,7 +48,7 @@ test_device_info() {
         fi
         
     else
-        echo "❌ ${device_type}设备离线或不存在"
+        echo "❌ ${device_name}离线或不存在"
     fi
     echo ""
 }
@@ -65,9 +56,9 @@ test_device_info() {
 # 测试充电命令
 test_charging_command() {
     local device_id=$1
-    local device_type=$2
-    
-    echo "--- 测试${device_type}设备充电命令 ---"
+    local device_name=$2
+
+    echo "--- 测试${device_name}充电命令 ---"
     echo "设备ID: ${device_id}"
     
     # 构造充电请求
@@ -86,9 +77,9 @@ test_charging_command() {
     echo "响应: ${response}"
     
     if echo "${response}" | grep -q '"code":0'; then
-        echo "✅ ${device_type}设备充电命令发送成功"
+        echo "✅ ${device_name}充电命令发送成功"
     else
-        echo "❌ ${device_type}设备充电命令发送失败"
+        echo "❌ ${device_name}充电命令发送失败"
     fi
     echo ""
 }
@@ -107,17 +98,17 @@ test_device_status() {
         device_count=$(echo "${response}" | grep -o '"deviceId":"[^"]*"' | wc -l)
         echo "📊 在线设备数量: ${device_count}"
         
-        # 检查主从设备是否都在线
-        if echo "${response}" | grep -q "${PRIMARY_DEVICE}"; then
-            echo "✅ 主设备${PRIMARY_DEVICE}在线"
+        # 检查两个设备是否都在线
+        if echo "${response}" | grep -q "${DEVICE_1}"; then
+            echo "✅ 设备${DEVICE_1}在线"
         else
-            echo "❌ 主设备${PRIMARY_DEVICE}离线"
+            echo "❌ 设备${DEVICE_1}离线"
         fi
-        
-        if echo "${response}" | grep -q "${SECONDARY_DEVICE}"; then
-            echo "✅ 从设备${SECONDARY_DEVICE}在线"
+
+        if echo "${response}" | grep -q "${DEVICE_2}"; then
+            echo "✅ 设备${DEVICE_2}在线"
         else
-            echo "❌ 从设备${SECONDARY_DEVICE}离线"
+            echo "❌ 设备${DEVICE_2}离线"
         fi
     else
         echo "❌ 设备状态查询失败"
@@ -130,27 +121,27 @@ echo "等待服务器启动..."
 sleep 3
 
 # 执行测试
-echo "开始测试主从设备架构..."
+echo "开始测试多设备共享连接架构..."
 echo ""
 
-# 1. 测试主设备
-test_device_info "${PRIMARY_DEVICE}" "主"
+# 1. 测试设备1
+test_device_info "${DEVICE_1}" "设备1"
 
-# 2. 测试从设备
-test_device_info "${SECONDARY_DEVICE}" "从"
+# 2. 测试设备2
+test_device_info "${DEVICE_2}" "设备2"
 
 # 3. 测试设备状态查询
 test_device_status
 
 # 4. 测试充电命令
-test_charging_command "${PRIMARY_DEVICE}" "主"
-test_charging_command "${SECONDARY_DEVICE}" "从"
+test_charging_command "${DEVICE_1}" "设备1"
+test_charging_command "${DEVICE_2}" "设备2"
 
 echo "=== 测试完成 ==="
 echo "测试结果总结:"
-echo "1. 主设备和从设备应该都能正常查询到信息"
-echo "2. 主设备的isPrimary应该为true，从设备应该为false"
-echo "3. 两个设备应该共享同一个ICCID和远程地址"
-echo "4. 充电命令应该能正常发送到两个设备"
+echo "1. 两个设备应该都能正常查询到信息"
+echo "2. 两个设备应该共享同一个ICCID和远程地址"
+echo "3. 充电命令应该能正常发送到两个设备"
+echo "4. 两个设备在设备组中平等管理，无主从关系"
 echo ""
-echo "如果以上测试都通过，说明主从设备架构工作正常！"
+echo "如果以上测试都通过，说明多设备共享连接架构工作正常！"

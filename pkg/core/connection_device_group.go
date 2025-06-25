@@ -10,16 +10,15 @@ import (
 	"github.com/sirupsen/logrus"
 )
 
-// ConnectionDeviceGroup 连接设备组 - 管理共享同一TCP连接的主从设备
+// ConnectionDeviceGroup 连接设备组 - 管理共享同一TCP连接的多个设备
 type ConnectionDeviceGroup struct {
-	ConnID        uint64                           // 连接ID
-	Connection    ziface.IConnection               // TCP连接
-	ICCID         string                           // 共享ICCID
-	PrimaryDevice string                           // 主设备ID (04A228CD)
-	Devices       map[string]*UnifiedDeviceSession // 设备ID → 设备会话
-	CreatedAt     time.Time                        // 创建时间
-	LastActivity  time.Time                        // 最后活动时间
-	mutex         sync.RWMutex                     // 读写锁
+	ConnID       uint64                           // 连接ID
+	Connection   ziface.IConnection               // TCP连接
+	ICCID        string                           // 共享ICCID
+	Devices      map[string]*UnifiedDeviceSession // 设备ID → 设备会话
+	CreatedAt    time.Time                        // 创建时间
+	LastActivity time.Time                        // 最后活动时间
+	mutex        sync.RWMutex                     // 读写锁
 }
 
 // ConnectionGroupManager 连接设备组管理器
@@ -35,7 +34,6 @@ type DeviceInfo struct {
 	DeviceID      string    `json:"deviceId"`
 	ICCID         string    `json:"iccid"`
 	IsOnline      bool      `json:"isOnline"`
-	IsPrimary     bool      `json:"isPrimary"`
 	LastHeartbeat time.Time `json:"lastHeartbeat"`
 	RemoteAddr    string    `json:"remoteAddr"`
 }
@@ -76,7 +74,6 @@ func (g *ConnectionDeviceGroup) AddDevice(deviceID string, session *UnifiedDevic
 
 	logger.WithFields(logrus.Fields{
 		"deviceID":     deviceID,
-		"isPrimary":    session.IsPrimary,
 		"totalDevices": len(g.Devices),
 		"connID":       g.ConnID,
 	}).Info("设备添加到设备组")
@@ -114,7 +111,6 @@ func (g *ConnectionDeviceGroup) GetDeviceInfo(deviceID string) (*DeviceInfo, err
 		DeviceID:      session.DeviceID,
 		ICCID:         session.ICCID,
 		IsOnline:      true, // 在设备组中即为在线
-		IsPrimary:     session.IsPrimary,
 		LastHeartbeat: session.LastHeartbeat,
 		RemoteAddr:    g.Connection.RemoteAddr().String(),
 	}, nil
@@ -131,7 +127,6 @@ func (g *ConnectionDeviceGroup) GetAllDevices() []*DeviceInfo {
 			DeviceID:      session.DeviceID,
 			ICCID:         session.ICCID,
 			IsOnline:      true,
-			IsPrimary:     session.IsPrimary,
 			LastHeartbeat: session.LastHeartbeat,
 			RemoteAddr:    g.Connection.RemoteAddr().String(),
 		})
@@ -172,17 +167,16 @@ func (g *ConnectionDeviceGroup) GetDeviceCount() int {
 	return len(g.Devices)
 }
 
-// GetPrimaryDevice 获取主设备信息
-func (g *ConnectionDeviceGroup) GetPrimaryDevice() (*UnifiedDeviceSession, bool) {
+// GetDeviceList 获取设备列表
+func (g *ConnectionDeviceGroup) GetDeviceList() []string {
 	g.mutex.RLock()
 	defer g.mutex.RUnlock()
 
-	if g.PrimaryDevice == "" {
-		return nil, false
+	deviceList := make([]string, 0, len(g.Devices))
+	for deviceID := range g.Devices {
+		deviceList = append(deviceList, deviceID)
 	}
-
-	session, exists := g.Devices[g.PrimaryDevice]
-	return session, exists
+	return deviceList
 }
 
 // RegisterDevice 注册设备到连接设备组管理器
@@ -192,16 +186,6 @@ func (m *ConnectionGroupManager) RegisterDevice(conn ziface.IConnection, deviceI
 	// 获取或创建连接设备组
 	group := m.getOrCreateGroup(conn, iccid)
 
-	// 设置主从设备关系
-	if group.PrimaryDevice == "" {
-		// 第一个注册的设备自动成为主设备
-		group.PrimaryDevice = deviceID
-		logger.WithFields(logrus.Fields{
-			"deviceID": deviceID,
-			"connID":   connID,
-		}).Info("设置主设备")
-	}
-
 	// 创建设备会话
 	deviceSession := &UnifiedDeviceSession{
 		SessionID:    generateDeviceSessionID(connID, deviceID),
@@ -210,7 +194,6 @@ func (m *ConnectionGroupManager) RegisterDevice(conn ziface.IConnection, deviceI
 		DeviceID:     deviceID,
 		PhysicalID:   physicalID,
 		ICCID:        iccid,
-		IsPrimary:    deviceID == group.PrimaryDevice,
 		State:        SessionStateRegistered,
 		RegisteredAt: time.Now(),
 		LastActivity: time.Now(),
@@ -224,7 +207,6 @@ func (m *ConnectionGroupManager) RegisterDevice(conn ziface.IConnection, deviceI
 
 	logger.WithFields(logrus.Fields{
 		"deviceID":         deviceID,
-		"isPrimary":        deviceSession.IsPrimary,
 		"groupDeviceCount": group.GetDeviceCount(),
 		"connID":           connID,
 	}).Info("设备注册到设备组")
@@ -281,7 +263,6 @@ func (m *ConnectionGroupManager) HandleHeartbeat(deviceID string, conn ziface.IC
 	session := group.Devices[deviceID]
 	logger.WithFields(logrus.Fields{
 		"deviceID":      deviceID,
-		"isPrimary":     session.IsPrimary,
 		"lastHeartbeat": session.LastHeartbeat,
 		"connID":        conn.GetConnID(),
 	}).Info("设备心跳处理成功")
