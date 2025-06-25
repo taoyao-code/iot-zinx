@@ -167,15 +167,50 @@ func (s *TCPServer) startHeartbeatManager() {
 	heartbeatInterval := time.Duration(s.cfg.DeviceConnection.HeartbeatIntervalSeconds) * time.Second
 	heartbeatTimeout := time.Duration(s.cfg.DeviceConnection.HeartbeatTimeoutSeconds) * time.Second
 
-	// 初始化自定义心跳管理器
-	s.heartbeatManager = NewHeartbeatManager(heartbeatInterval, heartbeatTimeout) // NewHeartbeatManager 来自新的 heartbeat_manager.go
-	network.GlobalActivityUpdater = s.heartbeatManager                            // 注入心跳管理器实例
-	s.heartbeatManager.Start()
-
 	logger.WithFields(logrus.Fields{
 		"heartbeatInterval": heartbeatInterval.String(),
 		"heartbeatTimeout":  heartbeatTimeout.String(),
-	}).Info("自定义心跳管理器已启动")
+	}).Info("开始初始化心跳管理器")
+
+	// 初始化自定义心跳管理器
+	s.heartbeatManager = NewHeartbeatManager(heartbeatInterval, heartbeatTimeout)
+
+	// 验证心跳管理器初始化
+	if !s.heartbeatManager.IsInitialized() {
+		logger.Fatal("❌ 心跳管理器初始化失败，服务器无法启动")
+		return
+	}
+
+	logger.Info("✅ 心跳管理器实例创建成功")
+
+	// 安全设置全局活动更新器
+	if err := network.SetGlobalActivityUpdater(s.heartbeatManager); err != nil {
+		logger.WithField("error", err.Error()).Fatal("❌ GlobalActivityUpdater设置失败")
+		return
+	}
+
+	// 验证全局设置是否成功
+	if !network.IsGlobalActivityUpdaterSet() {
+		logger.Fatal("❌ GlobalActivityUpdater验证失败，服务器无法启动")
+		return
+	}
+
+	logger.Info("✅ GlobalActivityUpdater设置成功")
+
+	// 启动心跳管理器
+	s.heartbeatManager.Start()
+
+	// 验证启动后状态
+	stats := s.heartbeatManager.GetStats()
+	globalStats := network.GetGlobalActivityUpdaterStats()
+
+	logger.WithFields(logrus.Fields{
+		"heartbeatManagerStats": stats,
+		"globalUpdaterStats":    globalStats,
+	}).Info("✅ 自定义心跳管理器已成功启动并注入全局")
+
+	// 调用诊断函数验证全局状态
+	network.DiagnoseGlobalActivityUpdater()
 }
 
 // startServer 启动服务器并等待

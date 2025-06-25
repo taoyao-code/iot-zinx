@@ -1,6 +1,9 @@
 package network
 
 import (
+	"fmt"
+	"time"
+
 	"github.com/aceld/zinx/ziface"
 	"github.com/bujia-iot/iot-zinx/internal/infrastructure/logger"
 	"github.com/bujia-iot/iot-zinx/pkg/constants"
@@ -100,11 +103,89 @@ func SetGlobalHeartbeatManager(manager HeartbeatManagerInterface) {
 // UpdateConnectionActivity 更新连接活动时间
 // 此函数通过全局接口调用实际的心跳管理器
 func UpdateConnectionActivity(conn ziface.IConnection) {
+	if conn == nil {
+		logger.Error("UpdateConnectionActivity: connection is nil")
+		return
+	}
+
 	if GlobalActivityUpdater != nil {
 		GlobalActivityUpdater.UpdateConnectionActivity(conn)
+		logger.WithFields(logrus.Fields{
+			"connID":      conn.GetConnID(),
+			"remoteAddr":  conn.RemoteAddr().String(),
+			"updaterType": fmt.Sprintf("%T", GlobalActivityUpdater),
+		}).Debug("连接活动已通过GlobalActivityUpdater更新")
 	} else {
-		logger.Warn("GlobalActivityUpdater not set, activity time not updated.")
+		logger.WithFields(logrus.Fields{
+			"connID":     conn.GetConnID(),
+			"remoteAddr": conn.RemoteAddr().String(),
+			"timestamp":  time.Now().Format(time.RFC3339),
+		}).Warn("GlobalActivityUpdater not set, activity time not updated")
 	}
+}
+
+// IsGlobalActivityUpdaterSet 验证GlobalActivityUpdater是否已设置
+func IsGlobalActivityUpdaterSet() bool {
+	return GlobalActivityUpdater != nil
+}
+
+// DiagnoseGlobalActivityUpdater 诊断GlobalActivityUpdater状态
+func DiagnoseGlobalActivityUpdater() {
+	if GlobalActivityUpdater != nil {
+		logger.WithFields(logrus.Fields{
+			"GlobalActivityUpdater": "已设置",
+			"type":                  fmt.Sprintf("%T", GlobalActivityUpdater),
+			"initialized":           true,
+		}).Info("✅ GlobalActivityUpdater诊断信息")
+	} else {
+		logger.WithFields(logrus.Fields{
+			"GlobalActivityUpdater": "未设置",
+			"type":                  "nil",
+			"initialized":           false,
+		}).Warn("⚠️ GlobalActivityUpdater诊断信息 - 未正确初始化")
+	}
+}
+
+// SetGlobalActivityUpdater 安全设置GlobalActivityUpdater
+func SetGlobalActivityUpdater(updater ActivityUpdater) error {
+	if updater == nil {
+		return fmt.Errorf("ActivityUpdater不能为nil")
+	}
+
+	GlobalActivityUpdater = updater
+
+	logger.WithFields(logrus.Fields{
+		"updaterType": fmt.Sprintf("%T", updater),
+	}).Info("✅ GlobalActivityUpdater已设置")
+
+	return nil
+}
+
+// GetGlobalActivityUpdaterStats 获取GlobalActivityUpdater统计信息
+func GetGlobalActivityUpdaterStats() map[string]interface{} {
+	if GlobalActivityUpdater == nil {
+		return map[string]interface{}{
+			"set":   false,
+			"type":  "nil",
+			"error": "GlobalActivityUpdater未设置",
+		}
+	}
+
+	// 如果是HeartbeatManager类型，尝试获取统计信息
+	stats := map[string]interface{}{
+		"set":  true,
+		"type": fmt.Sprintf("%T", GlobalActivityUpdater),
+	}
+
+	// 使用类型断言检查是否有GetStats方法
+	if statsProvider, ok := GlobalActivityUpdater.(interface{ GetStats() map[string]interface{} }); ok {
+		detailedStats := statsProvider.GetStats()
+		for k, v := range detailedStats {
+			stats[k] = v
+		}
+	}
+
+	return stats
 }
 
 // MasterSlaveMonitorInterface 主从设备监控接口

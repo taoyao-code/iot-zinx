@@ -37,10 +37,23 @@ func (h *HeartbeatManager) Start() {
 
 // UpdateConnectionActivity 更新连接活动时间
 func (h *HeartbeatManager) UpdateConnectionActivity(conn ziface.IConnection) {
+	// 验证HeartbeatManager是否正确初始化
+	if h == nil {
+		logger.Error("HeartbeatManager is nil, cannot update connection activity")
+		return
+	}
+
+	if conn == nil {
+		logger.Error("Connection is nil, cannot update activity")
+		return
+	}
+
 	h.mu.Lock()
 	defer h.mu.Unlock()
+
 	now := time.Now()
 	connID := conn.GetConnID()
+	h.lastActivityTime[connID] = now
 
 	// 使用DeviceSession统一管理连接状态
 	deviceSession := session.GetDeviceSession(conn)
@@ -48,8 +61,6 @@ func (h *HeartbeatManager) UpdateConnectionActivity(conn ziface.IConnection) {
 		deviceSession.UpdateHeartbeat()
 		deviceSession.SyncToConnection(conn)
 	}
-
-	h.lastActivityTime[connID] = now
 
 	var deviceID string
 	if val, err := conn.GetProperty(constants.PropKeyDeviceId); err == nil && val != nil {
@@ -63,7 +74,33 @@ func (h *HeartbeatManager) UpdateConnectionActivity(conn ziface.IConnection) {
 		"deviceID":   deviceID,
 		"remoteAddr": conn.RemoteAddr().String(),
 		"time":       now.Format(constants.TimeFormatDefault),
-	}).Debug("更新连接活动时间 (自定义心跳管理器)")
+		"manager":    "HeartbeatManager",
+	}).Debug("连接活动时间已更新")
+}
+
+// IsInitialized 验证心跳管理器是否正确初始化
+func (h *HeartbeatManager) IsInitialized() bool {
+	return h != nil && h.lastActivityTime != nil
+}
+
+// GetStats 获取心跳管理器统计信息
+func (h *HeartbeatManager) GetStats() map[string]interface{} {
+	if h == nil {
+		return map[string]interface{}{
+			"initialized": false,
+			"error":       "HeartbeatManager is nil",
+		}
+	}
+
+	h.mu.Lock()
+	defer h.mu.Unlock()
+
+	return map[string]interface{}{
+		"initialized":       true,
+		"activeConnections": len(h.lastActivityTime),
+		"interval":          h.interval.String(),
+		"timeout":           h.timeout.String(),
+	}
 }
 
 // monitorConnectionActivity 监控连接活动
