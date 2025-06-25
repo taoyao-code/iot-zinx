@@ -153,25 +153,23 @@ func (h *DeviceRegisterHandler) handleDeviceRegister(deviceId string, physicalId
 		return
 	}
 
-	// 🔧 使用统一架构：统一处理设备注册
+	// 🔧 使用设备组管理器：主从设备注册处理
 	unifiedSystem := pkg.GetUnifiedSystem()
 	physicalIdStr := fmt.Sprintf("%d", physicalId)
-	version := "1.0"        // 默认版本
-	deviceType := uint16(1) // 默认设备类型
 
-	regErr := unifiedSystem.HandleDeviceRegistration(conn, deviceId, physicalIdStr, iccidFromProp, version, deviceType)
+	regErr := unifiedSystem.GroupManager.RegisterDevice(conn, deviceId, physicalIdStr, iccidFromProp)
 	if regErr != nil {
 		logger.WithFields(logrus.Fields{
 			"deviceId": deviceId,
 			"connID":   conn.GetConnID(),
 			"error":    regErr.Error(),
-		}).Error("DeviceRegisterHandler: 统一架构设备注册失败")
+		}).Error("DeviceRegisterHandler: 设备组注册失败")
 		h.sendRegisterErrorResponse(deviceId, physicalId, messageID, conn, "设备注册失败")
 		return
 	}
 
-	// 验证注册是否成功
-	if boundConn, exists := unifiedSystem.Monitor.GetConnectionByDeviceId(deviceId); !exists || boundConn.GetConnID() != conn.GetConnID() {
+	// 验证注册是否成功 - 使用设备组管理器验证
+	if boundConn, exists := unifiedSystem.GroupManager.GetConnectionByDeviceID(deviceId); !exists || boundConn.GetConnID() != conn.GetConnID() {
 		logger.WithFields(logrus.Fields{
 			"deviceId":        deviceId,
 			"connID":          conn.GetConnID(),

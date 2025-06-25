@@ -76,6 +76,7 @@ type UnifiedSystemInterface struct {
 	SessionManager IUnifiedSessionManager
 	Monitor        IUnifiedConnectionMonitor
 	Logger         IUnifiedLogger
+	GroupManager   *ConnectionGroupManager // 新增：设备组管理器
 }
 
 // GetUnifiedSystem 获取统一系统接口
@@ -84,6 +85,7 @@ func GetUnifiedSystem() *UnifiedSystemInterface {
 		SessionManager: GetUnifiedManager(),
 		Monitor:        GetUnifiedMonitor(),
 		Logger:         GetUnifiedLogger(),
+		GroupManager:   GetGlobalConnectionGroupManager(), // 新增：设备组管理器
 	}
 }
 

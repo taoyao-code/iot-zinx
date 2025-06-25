@@ -88,9 +88,9 @@ func HandleDeviceStatus(c *gin.Context) {
 		return
 	}
 
-	// 🔧 使用统一架构：检查设备连接状态
+	// 🔧 使用设备组管理器：检查设备连接状态
 	unifiedSystem := pkg.GetUnifiedSystem()
-	_, exists := unifiedSystem.Monitor.GetConnectionByDeviceId(deviceID)
+	_, exists := unifiedSystem.GroupManager.GetConnectionByDeviceID(deviceID)
 
 	if !exists {
 		c.JSON(http.StatusNotFound, APIResponse{
@@ -101,64 +101,33 @@ func HandleDeviceStatus(c *gin.Context) {
 		return
 	}
 
-	// 尝试获取TCP连接详细信息作为补充
-	deviceInfo, err := ctx.DeviceService.GetDeviceConnectionInfo(deviceID)
+	// 使用设备组管理器获取设备信息
+	deviceInfo, err := unifiedSystem.GroupManager.GetDeviceInfo(deviceID)
 	if err != nil {
-		// 🔧 修复：处理不同类型的错误
-		if deviceErr, ok := err.(*constants.DeviceError); ok {
-			switch deviceErr.Code {
-			case constants.ErrCodeDeviceOffline:
-				c.JSON(http.StatusOK, APIResponse{
-					Code:    int(constants.ErrCodeDeviceOffline),
-					Message: "设备离线",
-					Data: gin.H{
-						"deviceId": deviceID,
-						"isOnline": false,
-						"status":   "offline",
-					},
-				})
-			case constants.ErrCodeConnectionLost:
-				c.JSON(http.StatusOK, APIResponse{
-					Code:    int(constants.ErrCodeConnectionLost),
-					Message: "连接丢失",
-					Data: gin.H{
-						"deviceId": deviceID,
-						"isOnline": false,
-						"status":   "disconnected",
-					},
-				})
-			default:
-				c.JSON(http.StatusInternalServerError, APIResponse{
-					Code:    int(deviceErr.Code),
-					Message: deviceErr.Message,
-					Data:    nil,
-				})
-			}
-		} else {
-			// 其他类型错误
-			c.JSON(http.StatusInternalServerError, APIResponse{
-				Code:    int(constants.ErrCodeInternalError),
-				Message: "获取设备信息失败",
-				Data:    nil,
-			})
-		}
+		c.JSON(http.StatusOK, APIResponse{
+			Code:    int(constants.ErrCodeDeviceOffline),
+			Message: "设备离线",
+			Data: gin.H{
+				"deviceId": deviceID,
+				"isOnline": false,
+				"status":   "offline",
+			},
+		})
 		return
 	}
 
-	// 成功获取连接信息，返回完整信息
-	isOnline := true // 统一架构中，能获取到连接即表示在线
+	// 成功获取设备信息，返回完整信息
 	c.JSON(http.StatusOK, APIResponse{
 		Code:    0,
 		Message: "成功",
 		Data: gin.H{
-			"deviceId":       deviceInfo.DeviceID,
-			"iccid":          deviceInfo.ICCID,
-			"isOnline":       isOnline,
-			"status":         "online",
-			"lastHeartbeat":  deviceInfo.LastHeartbeat,
-			"heartbeatTime":  deviceInfo.HeartbeatTime,
-			"timeSinceHeart": deviceInfo.TimeSinceHeart,
-			"remoteAddr":     deviceInfo.RemoteAddr,
+			"deviceId":      deviceInfo.DeviceID,
+			"iccid":         deviceInfo.ICCID,
+			"isOnline":      deviceInfo.IsOnline,
+			"isPrimary":     deviceInfo.IsPrimary,
+			"status":        "online",
+			"lastHeartbeat": deviceInfo.LastHeartbeat,
+			"remoteAddr":    deviceInfo.RemoteAddr,
 		},
 	})
 }
@@ -287,8 +256,9 @@ func HandleSendDNYCommand(c *gin.Context) {
 		return
 	}
 
-	// 查询设备连接
-	conn, exists := pkg.Monitor.GetGlobalMonitor().GetConnectionByDeviceId(req.DeviceID)
+	// 查询设备连接 - 使用设备组管理器
+	unifiedSystem := pkg.GetUnifiedSystem()
+	conn, exists := unifiedSystem.GroupManager.GetConnectionByDeviceID(req.DeviceID)
 	if !exists {
 		c.JSON(http.StatusNotFound, APIResponse{
 			Code:    404,
@@ -687,8 +657,9 @@ func HandleDeviceLocate(c *gin.Context) {
 		return
 	}
 
-	// 查询设备连接
-	conn, exists := pkg.Monitor.GetGlobalMonitor().GetConnectionByDeviceId(req.DeviceID)
+	// 查询设备连接 - 使用设备组管理器
+	unifiedSystem := pkg.GetUnifiedSystem()
+	conn, exists := unifiedSystem.GroupManager.GetConnectionByDeviceID(req.DeviceID)
 	if !exists {
 		c.JSON(http.StatusNotFound, APIResponse{
 			Code:    404,

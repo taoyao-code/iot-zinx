@@ -85,6 +85,10 @@ func (m *UnifiedConnectionMonitor) OnConnectionClosed(conn ziface.IConnection) {
 		m.sessionManager.cleanupSession(session, "连接关闭（未注册）")
 	}
 
+	// 清理设备组管理器中的连接
+	groupManager := GetGlobalConnectionGroupManager()
+	groupManager.RemoveConnection(connID)
+
 	logger.WithFields(logrus.Fields{
 		"connID":    connID,
 		"deviceID":  session.DeviceID,

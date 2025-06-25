@@ -138,18 +138,15 @@ func (h *HeartbeatHandler) processHeartbeat(decodedFrame *protocol.DecodedDNYFra
 		"isRegistered":      deviceSession.DeviceID != "",
 	}).Debug("🔧 心跳设备ID匹配检查")
 
-	// 🔧 使用统一架构：心跳处理已在前面完成
-	// 统一架构自动管理设备心跳和会话状态
-
-	// 🔧 使用统一架构：统一处理心跳
+	// 🔧 使用设备组管理器：主从设备心跳处理
 	unifiedSystem := pkg.GetUnifiedSystem()
-	heartbeatErr := unifiedSystem.HandleHeartbeat(deviceId, conn)
+	heartbeatErr := unifiedSystem.GroupManager.HandleHeartbeat(deviceId, conn)
 	if heartbeatErr != nil {
 		logger.WithFields(logrus.Fields{
 			"deviceId": deviceId,
 			"connID":   conn.GetConnID(),
 			"error":    heartbeatErr.Error(),
-		}).Error("统一架构心跳处理失败")
+		}).Error("设备组心跳处理失败")
 		return
 	}
 
