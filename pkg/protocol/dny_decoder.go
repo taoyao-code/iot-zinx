@@ -55,6 +55,7 @@ func (d *DNY_Decoder) GetLengthField() *ziface.LengthField {
 }
 
 // Intercept 拦截器方法，实现多协议解析
+// 🔧 升级：使用多包分割器处理TCP流数据包拼接问题
 // 根据AP3000协议文档，处理ICCID、link心跳、DNY标准协议
 func (d *DNY_Decoder) Intercept(chain ziface.IChain) ziface.IcResp {
 	// 获取原始消息
@@ -78,95 +79,131 @@ func (d *DNY_Decoder) Intercept(chain ziface.IChain) ziface.IcResp {
 	logger.WithFields(logrus.Fields{
 		"connID":     connID,
 		"dataLen":    len(rawData),
-		"dataHex":    fmt.Sprintf("%x", rawData),
+		"dataHex":    fmt.Sprintf("%.200x", rawData), // 显示前200字节
 		"dataString": d.safeStringConvert(rawData),
 	}).Debug("解码器：接收到原始数据")
 
-	// 直接解析原始数据，不使用缓冲区（简化实现）
-	// 尝试解析ICCID（最高优先级）
-	if result := d.tryParseICCIDDirect(rawData, connID); result != nil {
-		logger.WithFields(logrus.Fields{
-			"connID": connID,
-			"iccid":  string(result),
-		}).Info("解码器：成功解析ICCID消息")
-
-		// 设置消息属性
-		iMessage.SetMsgID(constants.MsgIDICCID)
-		iMessage.SetData(result)
-		iMessage.SetDataLen(uint32(len(result)))
-
-		// 解析为统一消息格式
-		parsedMsg, _ := ParseDNYProtocolData(result)
-		return chain.ProceedWithIMessage(iMessage, parsedMsg)
-	}
-
-	// 尝试解析link心跳包
-	if result := d.tryParseLinkHeartbeatDirect(rawData, connID); result != nil {
+	// 🔧 新实现：使用多包分割器处理TCP流数据
+	messages, remaining, err := ParseMultiplePackets(rawData)
+	if err != nil {
 		logger.WithFields(logrus.Fields{
 			"connID":  connID,
-			"content": string(result),
+			"error":   err.Error(),
+			"dataLen": len(rawData),
+		}).Warn("解码器：多包解析失败")
+
+		// 解析失败时，回退到未知消息处理
+		iMessage.SetMsgID(constants.MsgIDUnknown)
+		iMessage.SetData(rawData)
+		iMessage.SetDataLen(uint32(len(rawData)))
+		return chain.ProceedWithIMessage(iMessage, nil)
+	}
+
+	// 记录分割结果
+	logger.WithFields(logrus.Fields{
+		"connID":       connID,
+		"messageCount": len(messages),
+		"remainingLen": len(remaining),
+	}).Debug("解码器：成功分割数据包")
+
+	// 如果没有解析出任何消息
+	if len(messages) == 0 {
+		if len(remaining) > 0 {
+			logger.WithFields(logrus.Fields{
+				"connID":       connID,
+				"remainingLen": len(remaining),
+				"remainingHex": fmt.Sprintf("%.100x", remaining),
+			}).Debug("解码器：数据包不完整，等待更多数据")
+		}
+		return chain.ProceedWithIMessage(nil, nil)
+	}
+
+	// 处理第一个消息（Zinx框架一次只能处理一个消息）
+	// TODO: 后续可优化为批量处理机制
+	firstMsg := messages[0]
+
+	// 根据消息类型设置路由信息
+	switch firstMsg.MessageType {
+	case "iccid":
+		logger.WithFields(logrus.Fields{
+			"connID": connID,
+			"iccid":  firstMsg.ICCIDValue,
+		}).Info("解码器：成功解析ICCID消息")
+
+		iMessage.SetMsgID(constants.MsgIDICCID)
+		iMessage.SetData(firstMsg.RawData)
+		iMessage.SetDataLen(uint32(len(firstMsg.RawData)))
+
+	case "heartbeat_link":
+		logger.WithFields(logrus.Fields{
+			"connID":  connID,
+			"content": string(firstMsg.RawData),
 		}).Info("解码器：成功解析link心跳包")
 
-		// 设置消息属性
 		iMessage.SetMsgID(constants.MsgIDLinkHeartbeat)
-		iMessage.SetData(result)
-		iMessage.SetDataLen(uint32(len(result)))
+		iMessage.SetData(firstMsg.RawData)
+		iMessage.SetDataLen(uint32(len(firstMsg.RawData)))
 
-		// 解析为统一消息格式
-		parsedMsg, _ := ParseDNYProtocolData(result)
-		return chain.ProceedWithIMessage(iMessage, parsedMsg)
-	}
-
-	// 尝试解析DNY标准协议帧
-	if result := d.tryParseDNYFrameDirect(rawData, connID); result != nil {
+	case "standard":
 		logger.WithFields(logrus.Fields{
-			"connID":   connID,
-			"frameLen": len(result),
+			"connID":     connID,
+			"frameLen":   len(firstMsg.RawData),
+			"physicalID": fmt.Sprintf("0x%08X", firstMsg.PhysicalId),
+			"commandID":  fmt.Sprintf("0x%02X", firstMsg.CommandId),
+			"messageID":  fmt.Sprintf("0x%04X", firstMsg.MessageId),
 		}).Info("解码器：成功解析DNY标准协议帧")
 
-		// 解析DNY协议数据
-		parsedMsg, parseErr := ParseDNYProtocolData(result)
-		if parseErr != nil {
-			logger.WithFields(logrus.Fields{
-				"connID": connID,
-				"error":  parseErr.Error(),
-			}).Warn("解码器：DNY帧解析失败")
-			// 返回错误，让框架处理
-			return chain.ProceedWithIMessage(iMessage, nil)
-		}
+		// 使用CommandId进行路由分发
+		iMessage.SetMsgID(uint32(firstMsg.CommandId))
+		iMessage.SetData(firstMsg.RawData)
+		iMessage.SetDataLen(uint32(len(firstMsg.RawData)))
 
-		// 🔧 修复：使用CommandId而不是MessageId进行路由
-		// DNY协议中：
-		// - MessageId 是流水号，用于请求响应匹配
-		// - CommandId 是命令类型，用于路由分发
-		iMessage.SetMsgID(uint32(parsedMsg.CommandId)) // CommandId用于路由分发
-		iMessage.SetData(result)
-		iMessage.SetDataLen(uint32(len(result)))
-
+	case "error":
 		logger.WithFields(logrus.Fields{
-			"connID":    connID,
-			"commandID": fmt.Sprintf("0x%02X", parsedMsg.CommandId),
-			"messageID": fmt.Sprintf("0x%04X", parsedMsg.MessageId),
-			"routeID":   fmt.Sprintf("0x%02X", parsedMsg.CommandId),
-		}).Debug("解码器：DNY协议帧路由信息 - 使用CommandId进行路由")
+			"connID": connID,
+			"error":  firstMsg.ErrorMessage,
+		}).Warn("解码器：协议帧解析失败")
 
-		return chain.ProceedWithIMessage(iMessage, parsedMsg)
+		// 错误消息使用未知类型处理
+		iMessage.SetMsgID(constants.MsgIDUnknown)
+		iMessage.SetData(firstMsg.RawData)
+		iMessage.SetDataLen(uint32(len(firstMsg.RawData)))
+
+	default:
+		logger.WithFields(logrus.Fields{
+			"connID":      connID,
+			"messageType": firstMsg.MessageType,
+		}).Warn("解码器：未知消息类型")
+
+		iMessage.SetMsgID(constants.MsgIDUnknown)
+		iMessage.SetData(firstMsg.RawData)
+		iMessage.SetDataLen(uint32(len(firstMsg.RawData)))
 	}
 
-	// 如果所有解析都失败，记录日志并返回原始数据
-	logger.WithFields(logrus.Fields{
-		"connID":  connID,
-		"dataLen": len(rawData),
-		"dataHex": fmt.Sprintf("%.100x", rawData),
-	}).Warn("解码器：无法解析数据为任何已知协议格式")
+	// 如果有多个消息，记录警告（当前框架限制）
+	if len(messages) > 1 {
+		logger.WithFields(logrus.Fields{
+			"connID":           connID,
+			"totalMessages":    len(messages),
+			"processedMessage": 1,
+			"skippedMessages":  len(messages) - 1,
+		}).Warn("解码器：检测到多个协议包，当前只处理第一个（框架限制）")
 
-	// 🔧 修复：设置未知消息的msgID，避免"api msgID = 0 is not FOUND!"错误
-	iMessage.SetMsgID(constants.MsgIDUnknown)
-	iMessage.SetData(rawData)
-	iMessage.SetDataLen(uint32(len(rawData)))
+		// TODO: 未来优化 - 可以考虑将剩余消息缓存到连接上下文中
+	}
 
-	// 返回原始数据，让未知数据处理器处理
-	return chain.ProceedWithIMessage(iMessage, nil)
+	// 如果有剩余数据，记录信息
+	if len(remaining) > 0 {
+		logger.WithFields(logrus.Fields{
+			"connID":       connID,
+			"remainingLen": len(remaining),
+			"remainingHex": fmt.Sprintf("%.50x", remaining),
+		}).Debug("解码器：存在剩余未完整数据")
+
+		// TODO: 将剩余数据缓存到连接上下文中，等待下次数据到达
+	}
+
+	return chain.ProceedWithIMessage(iMessage, firstMsg)
 }
 
 // -----------------------------------------------------------------------------

@@ -71,26 +71,39 @@ func (h *HeartbeatHandler) processHeartbeat(decodedFrame *protocol.DecodedDNYFra
 		"dataLen":    len(data),
 	}).Debug("收到心跳请求")
 
-	// 🔧 修复：添加边界检查，防止数组越界错误
-	if len(data) < 4 {
+	// 🔧 修复：根据协议文档验证心跳数据的最小长度要求
+	// 不同类型的心跳包有不同的最小长度要求
+	var minDataLen int
+	switch decodedFrame.Command {
+	case uint8(dny_protocol.CmdHeartbeat):     // 0x01 旧版心跳
+		minDataLen = 20 // 根据协议文档，旧版心跳包固定20字节
+	case uint8(dny_protocol.CmdDeviceHeart):   // 0x21 新版心跳
+		minDataLen = 4  // 新版心跳包最少4字节
+	case uint8(dny_protocol.CmdMainHeartbeat): // 0x11 主机心跳
+		minDataLen = 8  // 主机心跳包最少8字节
+	default:
+		minDataLen = 4 // 默认最小长度
+	}
+
+	if len(data) < minDataLen {
 		logger.WithFields(logrus.Fields{
-			"connID":  conn.GetConnID(),
-			"dataLen": len(data),
-			"command": fmt.Sprintf("0x%02X", decodedFrame.Command),
-		}).Debug("心跳数据长度不足4字节，跳过详细解析")
+			"connID":     conn.GetConnID(),
+			"dataLen":    len(data),
+			"minDataLen": minDataLen,
+			"command":    fmt.Sprintf("0x%02X", decodedFrame.Command),
+			"deviceId":   deviceId,
+		}).Warn("心跳数据长度不足，可能是无效的心跳包")
 
-		// 仍然更新心跳时间，保持连接活跃
-		h.updateHeartbeatTime(conn, deviceSession)
-
-		// 记录简化的设备心跳日志
+		// 🔧 修复：对于无效的心跳包，不应该更新心跳时间
+		// 这可能是恶意数据或网络错误，应该记录但不处理
 		logger.WithFields(logrus.Fields{
 			"connID":     conn.GetConnID(),
 			"deviceId":   deviceId,
 			"sessionId":  deviceSession.DeviceID,
 			"remoteAddr": conn.RemoteAddr().String(),
 			"timestamp":  time.Now().Format(constants.TimeFormatDefault),
-			"dataLen":    len(data),
-		}).Info("设备心跳处理完成 (数据长度不足)")
+			"reason":     "心跳数据长度不足",
+		}).Error("拒绝处理无效心跳包")
 		return
 	}
 

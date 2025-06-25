@@ -147,11 +147,16 @@ func (h *SwipeCardHandler) Handle(request ziface.IRequest) {
 	}
 
 	// 7. 发送响应
-	// 将原始物理ID转换为uint32
-	physicalIDUint32 := uint32(decodedFrame.RawPhysicalID[0]) |
-		uint32(decodedFrame.RawPhysicalID[1])<<8 |
-		uint32(decodedFrame.RawPhysicalID[2])<<16 |
-		uint32(decodedFrame.RawPhysicalID[3])<<24
+	// 🔧 修复：使用安全的binary.LittleEndian.Uint32方法解析物理ID
+	physicalIDUint32, err := decodedFrame.GetPhysicalIDAsUint32()
+	if err != nil {
+		logger.WithFields(logrus.Fields{
+			"connID":   conn.GetConnID(),
+			"deviceId": deviceSession.DeviceID,
+			"error":    err.Error(),
+		}).Error("获取物理ID失败")
+		return
+	}
 
 	if err := protocol.SendDNYResponse(conn, physicalIDUint32, decodedFrame.MessageID, decodedFrame.Command, responseData); err != nil {
 		logger.WithFields(logrus.Fields{

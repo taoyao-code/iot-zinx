@@ -210,8 +210,13 @@ func BuildDNYResponsePacketUnified(msg *dny_protocol.Message) ([]byte, error) {
 
 	packet.Write(checksumContent.Bytes())
 
-	// 🔧 修复：校验和只计算物理ID到数据结束的部分，不包括包头和长度字段
-	dataForChecksum := checksumContent.Bytes()
+	// 🔧 修复：为了与解析时保持一致，校验和计算应该包含包头和长度字段
+	// 构建完整的待校验数据：包头 + 长度字段 + 内容
+	fullDataForChecksum := new(bytes.Buffer)
+	fullDataForChecksum.WriteString(HeaderDNY)
+	binary.Write(fullDataForChecksum, binary.LittleEndian, uint16(contentLen))
+	fullDataForChecksum.Write(checksumContent.Bytes())
+	dataForChecksum := fullDataForChecksum.Bytes()
 
 	checksum, err := CalculatePacketChecksumInternal(dataForChecksum)
 	if err != nil {
@@ -334,6 +339,12 @@ func isValidICCID(data []byte) bool {
 	return isValidICCIDStrict(data)
 }
 
+// IsValidICCIDPrefix 检查数据是否符合ICCID前缀格式（为兼容文档中的函数名）
+// 🔧 修复：统一使用严格验证逻辑，确保所有ICCID验证函数返回一致结果
+func IsValidICCIDPrefix(data []byte) bool {
+	return isValidICCIDStrict(data)
+}
+
 // 🔧 修复ICCID验证函数
 // isValidICCIDStrict 严格验证ICCID格式 - 符合ITU-T E.118标准
 // ICCID固定长度为20字节，十六进制字符(0-9,A-F)，以"89"开头
@@ -401,15 +412,164 @@ func ValidateDNYFrame(frameData []byte) (bool, error) {
 	return true, nil
 }
 
-// IsValidICCIDPrefix 检查数据是否符合ICCID前缀格式（为兼容文档中的函数名）
-// 🔧 修复：统一使用严格验证逻辑
-func IsValidICCIDPrefix(data []byte) bool {
-	return isValidICCIDStrict(data)
+// SplitPacketsFromBuffer 从字节缓冲区中分割出完整的数据包
+// 支持处理ICCID、DNY协议包、link心跳包的混合数据流
+// 返回：完整数据包列表、剩余未完成数据、错误信息
+func SplitPacketsFromBuffer(buffer []byte) ([][]byte, []byte, error) {
+	if len(buffer) == 0 {
+		return nil, nil, nil
+	}
+
+	var packets [][]byte
+	offset := 0
+	bufferLen := len(buffer)
+
+	logger.WithFields(logrus.Fields{
+		"bufferLen": bufferLen,
+		"bufferHex": fmt.Sprintf("%.200x", buffer), // 显示前200字节用于调试
+	}).Debug("SplitPacketsFromBuffer: 开始分割数据包")
+
+	for offset < bufferLen {
+		// 检查剩余数据长度
+		remaining := bufferLen - offset
+		if remaining == 0 {
+			break
+		}
+
+		// 尝试识别ICCID (20字节，以"89"开头)
+		if remaining >= constants.IOT_SIM_CARD_LENGTH {
+			candidate := buffer[offset : offset+constants.IOT_SIM_CARD_LENGTH]
+			if isValidICCIDStrict(candidate) {
+				packets = append(packets, candidate)
+				offset += constants.IOT_SIM_CARD_LENGTH
+				logger.WithFields(logrus.Fields{
+					"packetType": "iccid",
+					"packetLen":  constants.IOT_SIM_CARD_LENGTH,
+					"iccid":      string(candidate),
+				}).Debug("SplitPacketsFromBuffer: 提取ICCID包")
+				continue
+			}
+		}
+
+		// 尝试识别link心跳包 (4字节 "link")
+		if remaining >= LinkPacketLength {
+			candidate := buffer[offset : offset+LinkPacketLength]
+			if string(candidate) == HeaderLink {
+				packets = append(packets, candidate)
+				offset += LinkPacketLength
+				logger.WithFields(logrus.Fields{
+					"packetType": "link",
+					"packetLen":  LinkPacketLength,
+				}).Debug("SplitPacketsFromBuffer: 提取link心跳包")
+				continue
+			}
+		}
+
+		// 尝试识别DNY协议包
+		if remaining >= PacketHeaderLength {
+			// 检查DNY包头
+			if string(buffer[offset:offset+PacketHeaderLength]) == HeaderDNY {
+				// 检查是否有足够数据读取长度字段
+				if remaining < PacketHeaderLength+DataLengthBytes {
+					// 数据不完整，返回剩余数据
+					logger.WithFields(logrus.Fields{
+						"remaining":   remaining,
+						"needMinimum": PacketHeaderLength + DataLengthBytes,
+						"packetType":  "dny_incomplete_header",
+					}).Debug("SplitPacketsFromBuffer: DNY包头不完整，保留剩余数据")
+					break
+				}
+
+				// 读取长度字段
+				lengthStart := offset + PacketHeaderLength
+				declaredLength := binary.LittleEndian.Uint16(buffer[lengthStart : lengthStart+DataLengthBytes])
+				totalPacketLength := PacketHeaderLength + DataLengthBytes + int(declaredLength)
+
+				// 检查是否有完整的数据包
+				if remaining < totalPacketLength {
+					// 数据包不完整，返回剩余数据
+					logger.WithFields(logrus.Fields{
+						"remaining":         remaining,
+						"totalPacketLength": totalPacketLength,
+						"declaredLength":    declaredLength,
+						"packetType":        "dny_incomplete_body",
+					}).Debug("SplitPacketsFromBuffer: DNY包数据不完整，保留剩余数据")
+					break
+				}
+
+				// 提取完整的DNY数据包
+				packet := buffer[offset : offset+totalPacketLength]
+				packets = append(packets, packet)
+				offset += totalPacketLength
+
+				logger.WithFields(logrus.Fields{
+					"packetType":     "dny",
+					"packetLen":      totalPacketLength,
+					"declaredLength": declaredLength,
+					"physicalIdHex":  fmt.Sprintf("%x", packet[5:9]), // PhysicalID位置
+				}).Debug("SplitPacketsFromBuffer: 提取DNY协议包")
+				continue
+			}
+		}
+
+		// 无法识别的数据，跳过一个字节继续扫描
+		logger.WithFields(logrus.Fields{
+			"offset":       offset,
+			"unrecognized": fmt.Sprintf("%02x", buffer[offset]),
+			"contextHex":   fmt.Sprintf("%.20x", buffer[offset:min(offset+10, bufferLen)]),
+		}).Warn("SplitPacketsFromBuffer: 跳过无法识别的字节")
+		offset++
+	}
+
+	// 返回剩余未处理的数据
+	var remainingData []byte
+	if offset < bufferLen {
+		remainingData = buffer[offset:]
+		logger.WithFields(logrus.Fields{
+			"remainingLen": len(remainingData),
+			"remainingHex": fmt.Sprintf("%.100x", remainingData),
+		}).Debug("SplitPacketsFromBuffer: 返回剩余未完成数据")
+	}
+
+	logger.WithFields(logrus.Fields{
+		"totalPackets":   len(packets),
+		"processedBytes": offset,
+		"remainingBytes": len(remainingData),
+	}).Debug("SplitPacketsFromBuffer: 分割完成")
+
+	return packets, remainingData, nil
 }
 
-// 以下是旧的 BuildDNYResponsePacket 和 ParseDNYData 函数，需要移除或重构
-// // BuildDNYResponsePacket 构建DNY响应数据包
-// func BuildDNYResponsePacket(commandID byte, physicalID uint32, messageID uint16, payload []byte) ([]byte, error) { ... }
+// ParseMultiplePackets 解析从缓冲区分割出的多个数据包
+// 这是对外的主要接口，内部调用SplitPacketsFromBuffer和ParseDNYProtocolData
+func ParseMultiplePackets(buffer []byte) ([]*dny_protocol.Message, []byte, error) {
+	packets, remainingData, err := SplitPacketsFromBuffer(buffer)
+	if err != nil {
+		return nil, remainingData, fmt.Errorf("packet splitting failed: %w", err)
+	}
 
-// // ParseDNYData 包装 ParseDNYProtocolData 以匹配旧接口签名
-// func ParseDNYData(data []byte) (*dny_protocol.DNYPacketInfo, error) { ... }
+	var messages []*dny_protocol.Message
+	for i, packet := range packets {
+		msg, parseErr := ParseDNYProtocolData(packet)
+		if parseErr != nil {
+			logger.WithFields(logrus.Fields{
+				"packetIndex": i,
+				"packetLen":   len(packet),
+				"packetHex":   fmt.Sprintf("%.100x", packet),
+				"error":       parseErr.Error(),
+			}).Warn("ParseMultiplePackets: 单个数据包解析失败")
+			// 继续处理其他包，不因单个包失败而中断整体处理
+			continue
+		}
+		messages = append(messages, msg)
+	}
+
+	logger.WithFields(logrus.Fields{
+		"inputBufferLen":     len(buffer),
+		"splitPacketCount":   len(packets),
+		"parsedMessageCount": len(messages),
+		"remainingDataLen":   len(remainingData),
+	}).Debug("ParseMultiplePackets: 多包解析完成")
+
+	return messages, remainingData, nil
+}
