@@ -10,6 +10,7 @@ import (
 	"github.com/aceld/zinx/ziface"
 	"github.com/bujia-iot/iot-zinx/internal/infrastructure/logger"
 	"github.com/bujia-iot/iot-zinx/pkg/constants"
+	"github.com/bujia-iot/iot-zinx/pkg/session"
 	"github.com/sirupsen/logrus"
 )
 
@@ -173,7 +174,7 @@ func (dm *DeviceMonitor) OnDeviceRegistered(deviceID string, conn ziface.IConnec
 		if session.ReconnectCount > 0 {
 			// 触发重连回调
 			if dm.onDeviceReconnect != nil {
-				dm.onDeviceReconnect(deviceID, session.LastConnID, conn.GetConnID())
+				dm.onDeviceReconnect(deviceID, session.ConnID, conn.GetConnID())
 			}
 		}
 	}
@@ -187,9 +188,9 @@ func (dm *DeviceMonitor) OnDeviceHeartbeat(deviceID string, conn ziface.IConnect
 	}).Debug("设备监控器：收到设备心跳")
 
 	// 更新会话心跳时间
-	dm.sessionManager.UpdateSession(deviceID, func(session *DeviceSession) {
-		session.LastHeartbeatTime = time.Now()
-		session.Status = constants.DeviceStatusOnline
+	dm.sessionManager.UpdateSession(deviceID, func(deviceSession *session.DeviceSession) {
+		deviceSession.LastHeartbeat = time.Now()
+		deviceSession.Status = constants.DeviceStatusOnline
 	})
 }
 
@@ -244,7 +245,7 @@ func (dm *DeviceMonitor) OnDeviceDisconnect(deviceID string, conn ziface.IConnec
 	}
 
 	// 如果是正常断开但设备长时间未重连，也清理会话
-	if strings.Contains(reason, "normal") && session.LastHeartbeatTime.Before(time.Now().Add(-5*time.Minute)) {
+	if strings.Contains(reason, "normal") && session.LastHeartbeat.Before(time.Now().Add(-5*time.Minute)) {
 		shouldRemoveSession = true
 	}
 
@@ -257,9 +258,9 @@ func (dm *DeviceMonitor) OnDeviceDisconnect(deviceID string, conn ziface.IConnec
 		}).Info("设备会话已立即清理，防止重复注册")
 	} else {
 		// 仅更新会话状态为离线，保留会话以便快速重连
-		dm.sessionManager.UpdateSession(deviceID, func(s *DeviceSession) {
-			s.Status = constants.DeviceStatusOffline
-			s.LastDisconnectTime = time.Now()
+		dm.sessionManager.UpdateSession(deviceID, func(devSession *DeviceSession) {
+			devSession.Status = constants.DeviceStatusOffline
+			devSession.LastDisconnect = time.Now()
 		})
 	}
 
@@ -267,8 +268,8 @@ func (dm *DeviceMonitor) OnDeviceDisconnect(deviceID string, conn ziface.IConnec
 	// 会话状态管理由TCPMonitor统一处理，这里只更新监控相关的统计信息
 
 	// 增加断开计数（监控统计）
-	session.DisconnectCount++
-	session.LastDisconnectTime = time.Now()
+	// 注意：session.DeviceSession 没有 DisconnectCount 字段，这里移除该操作
+	session.LastDisconnect = time.Now()
 
 	// 检查是否有其他设备使用相同ICCID（同一组）
 	if iccid != "" {
@@ -341,7 +342,7 @@ func (dm *DeviceMonitor) checkAllDevicesHeartbeat() {
 		}
 
 		// 检查心跳是否超时
-		if session.LastHeartbeatTime.Before(timeoutThreshold) {
+		if session.LastHeartbeat.Before(timeoutThreshold) {
 			// 添加到超时设备列表
 			timeoutDevices = append(timeoutDevices, deviceID)
 		}
@@ -389,7 +390,7 @@ func (dm *DeviceMonitor) handleDeviceTimeout(deviceID string) {
 	}
 
 	// 获取上次心跳时间
-	lastHeartbeat := session.LastHeartbeatTime
+	lastHeartbeat := session.LastHeartbeat
 	now := time.Now()
 	timeSinceLastHeartbeat := now.Sub(lastHeartbeat)
 
@@ -405,9 +406,9 @@ func (dm *DeviceMonitor) handleDeviceTimeout(deviceID string) {
 	}
 
 	// 设置设备状态为离线
-	dm.sessionManager.UpdateSession(deviceID, func(session *DeviceSession) {
-		session.Status = constants.DeviceStatusOffline
-		session.LastDisconnectTime = now
+	dm.sessionManager.UpdateSession(deviceID, func(devSession *DeviceSession) {
+		devSession.Status = constants.DeviceStatusOffline
+		devSession.LastDisconnect = now
 	})
 
 	// 记录设备超时信息
@@ -530,11 +531,11 @@ func (dm *DeviceMonitor) CheckDeviceStatus() {
 	offlineCount := 0
 
 	// 统计当前设备状态
-	dm.sessionManager.ForEachSession(func(deviceID string, session *DeviceSession) bool {
+	dm.sessionManager.ForEachSession(func(deviceID string, sess *session.DeviceSession) bool {
 		deviceCount++
-		if session.Status == constants.DeviceStatusOnline {
+		if sess.Status == constants.DeviceStatusOnline {
 			onlineCount++
-		} else if session.Status == constants.DeviceStatusOffline {
+		} else if sess.Status == constants.DeviceStatusOffline {
 			offlineCount++
 		}
 		return true
@@ -559,9 +560,9 @@ func (dm *DeviceMonitor) GetMonitorStatistics() map[string]interface{} {
 	reconnectingCount := 0
 
 	// 统计设备状态
-	dm.sessionManager.ForEachSession(func(deviceID string, session *DeviceSession) bool {
+	dm.sessionManager.ForEachSession(func(deviceID string, sess *session.DeviceSession) bool {
 		deviceCount++
-		switch session.Status {
+		switch sess.Status {
 		case constants.DeviceStatusOnline:
 			onlineCount++
 		case constants.DeviceStatusOffline:
@@ -620,11 +621,11 @@ func (dm *DeviceMonitor) CheckAndUpdateDeviceStatus(deviceID string, targetStatu
 
 	// 状态不一致，需要更新
 	oldStatus := session.Status
-	dm.sessionManager.UpdateSession(deviceID, func(session *DeviceSession) {
-		session.Status = targetStatus
+	dm.sessionManager.UpdateSession(deviceID, func(devSession *DeviceSession) {
+		devSession.Status = targetStatus
 		if targetStatus == constants.DeviceStatusOnline {
 			// 如果是更新为在线状态，更新心跳时间
-			session.LastHeartbeatTime = time.Now()
+			devSession.LastHeartbeat = time.Now()
 		}
 	})
 
@@ -665,7 +666,7 @@ func (dm *DeviceMonitor) GetDeviceLastHeartbeat(deviceID string) (time.Time, boo
 		return time.Time{}, false
 	}
 
-	return session.LastHeartbeatTime, true
+	return session.LastHeartbeat, true
 }
 
 // GetAllDeviceStatuses 获取所有设备状态
@@ -675,8 +676,8 @@ func (dm *DeviceMonitor) GetAllDeviceStatuses() map[string]constants.DeviceStatu
 	}
 
 	statuses := make(map[string]constants.DeviceStatus)
-	dm.sessionManager.ForEachSession(func(deviceID string, session *DeviceSession) bool {
-		statuses[deviceID] = session.Status
+	dm.sessionManager.ForEachSession(func(deviceID string, sess *session.DeviceSession) bool {
+		statuses[deviceID] = sess.Status
 		return true
 	})
 

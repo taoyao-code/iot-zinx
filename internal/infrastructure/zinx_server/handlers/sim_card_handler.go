@@ -7,10 +7,11 @@ import (
 
 	"github.com/aceld/zinx/ziface"
 	"github.com/aceld/zinx/znet"
-	"github.com/bujia-iot/iot-zinx/internal/infrastructure/config" // 新增导入
+	"github.com/bujia-iot/iot-zinx/internal/infrastructure/config"
 	"github.com/bujia-iot/iot-zinx/internal/infrastructure/logger"
 	"github.com/bujia-iot/iot-zinx/pkg/constants"
-	"github.com/bujia-iot/iot-zinx/pkg/network" // 引入 network 包
+	"github.com/bujia-iot/iot-zinx/pkg/monitor"
+	"github.com/bujia-iot/iot-zinx/pkg/network"
 	"github.com/sirupsen/logrus"
 )
 
@@ -36,28 +37,37 @@ func (h *SimCardHandler) Handle(request ziface.IRequest) {
 		"dataHex":    fmt.Sprintf("%x", data),
 	}).Info("SimCardHandler: Handle method called")
 
-	// 🔧 修复：统一ICCID验证逻辑 - 符合ITU-T E.118标准
-	// ICCID固定长度为20字节，十六进制字符(0-9,A-F)，以"89"开头
+	// 验证ICCID格式 - 符合ITU-T E.118标准
 	if len(data) == constants.IOT_SIM_CARD_LENGTH && h.isValidICCIDStrict(data) {
 		iccidStr := string(data)
 		now := time.Now()
 
-		// 🔧 修复：严格按照文档要求，仅将ICCID存入连接属性中
-		// 文档要求：收到ICCID后，仅将ICCID存入连接的属性中 (conn.SetProperty("iccid", ...))
+		// 将ICCID存入连接属性中
 		conn.SetProperty(constants.PropKeyICCID, iccidStr)
 
-		// 🔧 修复：不在ICCID阶段更新状态管理器
-		// 根据文档要求，SimCardHandler只负责接收和存储ICCID
-		// 状态管理应该在DeviceRegisterHandler中统一处理
-		// 这样避免了临时设备ID和实际设备ID的不一致问题
+		// 创建连接设备组
+		groupManager := monitor.GetGlobalConnectionGroupManager()
+		group, err := groupManager.CreateGroup(conn.GetConnID(), iccidStr, conn)
+		if err != nil {
+			logger.WithFields(logrus.Fields{
+				"connID":     conn.GetConnID(),
+				"iccid":      iccidStr,
+				"remoteAddr": conn.RemoteAddr().String(),
+				"error":      err,
+			}).Error("SimCardHandler: 创建连接设备组失败")
+			return
+		}
 
-		// 计划 3.b.3: 调用 network.UpdateConnectionActivity(conn)
-		network.UpdateConnectionActivity(conn) // 更新连接活动（例如更新HeartbeatManager中的记录）
+		// 设置连接状态
+		conn.SetProperty("connState", constants.ConnStatusICCIDReceived)
 
-		// 计划 3.b.4 & 5: 重置TCP ReadDeadline，从配置加载
+		// 更新连接活动
+		network.UpdateConnectionActivity(conn)
+
+		// 重置TCP ReadDeadline
 		defaultReadDeadlineSeconds := config.GetConfig().TCPServer.DefaultReadDeadlineSeconds
 		if defaultReadDeadlineSeconds <= 0 {
-			defaultReadDeadlineSeconds = 90 // 默认值，以防配置错误
+			defaultReadDeadlineSeconds = 300 // 默认5分钟
 			logger.Warnf("SimCardHandler: DefaultReadDeadlineSeconds 配置错误或未配置，使用默认值: %ds", defaultReadDeadlineSeconds)
 		}
 		defaultReadDeadline := time.Duration(defaultReadDeadlineSeconds) * time.Second
@@ -75,7 +85,6 @@ func (h *SimCardHandler) Handle(request ziface.IRequest) {
 			logger.WithField("connID", conn.GetConnID()).Warn("SimCardHandler: 无法获取TCP连接以设置ReadDeadline")
 		}
 
-		// 计划 3.b.5: 增强日志记录
 		logger.WithFields(logrus.Fields{
 			"connID":            conn.GetConnID(),
 			"remoteAddr":        conn.RemoteAddr().String(),
@@ -83,15 +92,8 @@ func (h *SimCardHandler) Handle(request ziface.IRequest) {
 			"connState":         constants.ConnStatusICCIDReceived,
 			"readDeadlineSetTo": now.Add(defaultReadDeadline).Format(time.RFC3339),
 			"dataLen":           len(data),
+			"groupStatus":       group.GetStatus().String(),
 		}).Info("SimCardHandler: 收到有效ICCID，更新连接状态并重置ReadDeadline")
-
-		// 原有的 monitor.GetGlobalMonitor().UpdateLastHeartbeatTime(conn) 已被 network.UpdateConnectionActivity(conn) 替代或包含其逻辑
-		// 如果 network.UpdateConnectionActivity 内部没有更新 Zinx Monitor 的心跳时间，且业务仍依赖 Zinx Monitor，则需保留或调整
-		// 根据当前 HeartbeatManager 的设计，它独立于 Zinx Monitor，因此 network.UpdateConnectionActivity 已足够
-
-		// 🔧 修复：严格按照文档要求，SimCardHandler严禁创建会话或绑定任何形式的deviceId
-		// 文档要求：严禁在此阶段创建会话或绑定任何形式的deviceId
-		// 设备注册应该由DeviceRegisterHandler在收到0x20命令时处理
 
 	} else {
 		logger.WithFields(logrus.Fields{

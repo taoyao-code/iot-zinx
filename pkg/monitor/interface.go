@@ -4,6 +4,7 @@ import (
 	"time"
 
 	"github.com/aceld/zinx/ziface"
+	"github.com/bujia-iot/iot-zinx/pkg/session"
 )
 
 // IConnectionMonitor 定义了连接监控器接口
@@ -65,54 +66,55 @@ type IDeviceMonitor interface {
 	GetMonitorStatistics() map[string]interface{}
 }
 
-// 🔧 新增：设备组管理接口
-// IDeviceGroupManager 设备组管理器接口
-type IDeviceGroupManager interface {
-	// GetOrCreateGroup 获取或创建设备组
-	GetOrCreateGroup(iccid string) *DeviceGroup
+// IConnectionGroupManager 连接设备组管理器接口
+type IConnectionGroupManager interface {
+	// CreateGroup 创建连接设备组
+	CreateGroup(connID uint64, iccid string, conn ziface.IConnection) (*ConnectionDeviceGroup, error)
 
-	// GetGroup 获取设备组
-	GetGroup(iccid string) (*DeviceGroup, bool)
+	// GetGroupByConnID 根据连接ID获取设备组
+	GetGroupByConnID(connID uint64) (*ConnectionDeviceGroup, bool)
 
-	// AddDeviceToGroup 将设备添加到设备组
-	AddDeviceToGroup(iccid, deviceID string, session *DeviceSession)
+	// GetGroupByICCID 根据ICCID获取设备组
+	GetGroupByICCID(iccid string) (*ConnectionDeviceGroup, bool)
 
-	// RemoveDeviceFromGroup 从设备组移除设备
-	RemoveDeviceFromGroup(iccid, deviceID string)
+	// GetGroupByDeviceID 根据设备ID获取设备组
+	GetGroupByDeviceID(deviceID string) (*ConnectionDeviceGroup, bool)
 
-	// GetDeviceFromGroup 从设备组获取特定设备
-	GetDeviceFromGroup(iccid, deviceID string) (*DeviceSession, bool)
+	// AddDeviceToGroup 将设备添加到指定连接的设备组
+	AddDeviceToGroup(connID uint64, deviceID string, deviceSession *MonitorDeviceSession) error
 
-	// GetAllDevicesInGroup 获取设备组中的所有设备
-	GetAllDevicesInGroup(iccid string) map[string]*DeviceSession
+	// RemoveDeviceFromGroup 从设备组中移除设备
+	RemoveDeviceFromGroup(deviceID string) error
 
-	// BroadcastToGroup 向设备组中的所有设备广播消息
-	BroadcastToGroup(iccid string, data []byte) int
+	// RemoveGroup 移除连接设备组
+	RemoveGroup(connID uint64) error
 
-	// GetGroupStatistics 获取设备组统计信息
-	GetGroupStatistics() map[string]interface{}
+	// GetAllGroups 获取所有设备组信息
+	GetAllGroups() map[uint64]*ConnectionDeviceGroup
+
+	// GetGroupCount 获取设备组数量
+	GetGroupCount() int
 }
 
-// 🔧 新增：扩展的会话管理器接口
 // ISessionManager 会话管理器接口
 type ISessionManager interface {
 	// CreateSession 创建设备会话
-	CreateSession(deviceID string, conn ziface.IConnection) *DeviceSession
+	CreateSession(deviceID string, conn ziface.IConnection) *session.DeviceSession
 
 	// GetSession 获取设备会话
-	GetSession(deviceID string) (*DeviceSession, bool)
+	GetSession(deviceID string) (*session.DeviceSession, bool)
 
-	// GetSessionByICCID 通过ICCID获取会话（返回最近活跃的设备）
-	GetSessionByICCID(iccid string) (*DeviceSession, bool)
+	// GetSessionByICCID 通过ICCID获取会话
+	GetSessionByICCID(iccid string) (*session.DeviceSession, bool)
 
 	// GetAllSessionsByICCID 通过ICCID获取所有设备会话
-	GetAllSessionsByICCID(iccid string) map[string]*DeviceSession
+	GetAllSessionsByICCID(iccid string) map[string]*session.DeviceSession
 
 	// GetSessionByConnID 通过连接ID获取会话
-	GetSessionByConnID(connID uint64) (*DeviceSession, bool)
+	GetSessionByConnID(connID uint64) (*session.DeviceSession, bool)
 
 	// UpdateSession 更新设备会话
-	UpdateSession(deviceID string, updateFunc func(*DeviceSession)) bool
+	UpdateSession(deviceID string, updateFunc func(*session.DeviceSession)) bool
 
 	// SuspendSession 挂起设备会话
 	SuspendSession(deviceID string) bool
@@ -130,11 +132,44 @@ type ISessionManager interface {
 	GetSessionStatistics() map[string]interface{}
 
 	// ForEachSession 遍历所有会话
-	ForEachSession(callback func(deviceID string, session *DeviceSession) bool)
+	ForEachSession(callback func(deviceID string, session *session.DeviceSession) bool)
 
 	// GetAllSessions 获取所有设备会话
-	GetAllSessions() map[string]*DeviceSession
+	GetAllSessions() map[string]*session.DeviceSession
 
 	// HandleDeviceDisconnect 处理设备断开连接
 	HandleDeviceDisconnect(deviceID string)
+}
+
+// IDeviceGroupManager 设备组管理器接口
+type IDeviceGroupManager interface {
+	// GetOrCreateGroup 获取或创建设备组
+	GetOrCreateGroup(iccid string) *DeviceGroup
+
+	// GetGroup 获取设备组
+	GetGroup(iccid string) (*DeviceGroup, bool)
+
+	// AddDeviceToGroup 将设备添加到设备组
+	AddDeviceToGroup(iccid, deviceID string, session *session.DeviceSession)
+
+	// RemoveDeviceFromGroup 从设备组移除设备
+	RemoveDeviceFromGroup(iccid, deviceID string)
+
+	// GetDeviceFromGroup 从设备组获取特定设备
+	GetDeviceFromGroup(iccid, deviceID string) (*session.DeviceSession, bool)
+
+	// GetAllDevicesInGroup 获取设备组中的所有设备
+	GetAllDevicesInGroup(iccid string) map[string]*session.DeviceSession
+
+	// BroadcastToGroup 向设备组中的所有设备广播消息
+	BroadcastToGroup(iccid string, data []byte) int
+
+	// GetGroupStatistics 获取设备组统计信息
+	GetGroupStatistics() map[string]interface{}
+
+	// CheckGroupIntegrity 设备组数据完整性检查
+	CheckGroupIntegrity(context string) []string
+
+	// CleanupZombieGroups 清理僵尸设备组
+	CleanupZombieGroups(context string) int
 }

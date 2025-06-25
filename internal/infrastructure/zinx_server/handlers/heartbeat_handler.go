@@ -59,30 +59,32 @@ func (h *HeartbeatHandler) Handle(request ziface.IRequest) {
 	h.processHeartbeat(decodedFrame, conn, deviceSession)
 }
 
-// processHeartbeat 处理心跳业务逻辑 - 🔧 修复：添加数组边界检查
+// processHeartbeat 处理心跳业务逻辑
 func (h *HeartbeatHandler) processHeartbeat(decodedFrame *protocol.DecodedDNYFrame, conn ziface.IConnection, deviceSession *session.DeviceSession) {
 	// 从解码帧获取设备信息
 	deviceId := decodedFrame.DeviceID
 	data := decodedFrame.Payload
 
-	// 🔧 新增：严格验证心跳包设备ID与连接绑定的设备ID
-	expectedDeviceID, exists := monitor.GetGlobalConnectionMonitor().GetDeviceIdByConnId(conn.GetConnID())
+	// 获取连接设备组
+	groupManager := monitor.GetGlobalConnectionGroupManager()
+	group, exists := groupManager.GetGroupByConnID(conn.GetConnID())
 	if !exists {
 		logger.WithFields(logrus.Fields{
 			"connID":            conn.GetConnID(),
 			"heartbeatDeviceID": deviceId,
 			"command":           fmt.Sprintf("0x%02X", decodedFrame.Command),
-		}).Error("连接未绑定任何设备，拒绝处理心跳")
+		}).Error("连接设备组不存在，拒绝处理心跳")
 		return
 	}
 
-	if expectedDeviceID != deviceId {
+	// 验证设备是否在连接组中
+	if !group.HasDevice(deviceId) {
 		logger.WithFields(logrus.Fields{
 			"connID":            conn.GetConnID(),
 			"heartbeatDeviceID": deviceId,
-			"expectedDeviceID":  expectedDeviceID,
 			"command":           fmt.Sprintf("0x%02X", decodedFrame.Command),
-		}).Error("心跳包设备ID与连接绑定设备ID不匹配，拒绝处理")
+			"groupDevices":      len(group.GetAllDevices()),
+		}).Error("心跳包设备ID不在连接设备组中，拒绝处理")
 		return
 	}
 
@@ -156,50 +158,69 @@ func (h *HeartbeatHandler) processHeartbeat(decodedFrame *protocol.DecodedDNYFra
 		"isRegistered":      deviceSession.DeviceID != "",
 	}).Debug("🔧 心跳设备ID匹配检查")
 
-	// 🔧 修复：使用正确的设备会话，确保心跳处理的设备ID一致性
+	// 更新设备心跳时间
+	err := group.UpdateDeviceHeartbeat(deviceId)
+	if err != nil {
+		logger.WithFields(logrus.Fields{
+			"connID":   conn.GetConnID(),
+			"deviceID": deviceId,
+			"error":    err,
+		}).Error("更新设备心跳时间失败")
+		return
+	}
+
+	// 获取设备会话
 	sessionManager := monitor.GetSessionManager()
-	correctSession, sessionExists := sessionManager.GetSession(expectedDeviceID)
+	deviceSessionInfo, sessionExists := sessionManager.GetSession(deviceId)
 	if !sessionExists {
 		logger.WithFields(logrus.Fields{
 			"connID":   conn.GetConnID(),
-			"deviceID": expectedDeviceID,
+			"deviceID": deviceId,
 		}).Error("未找到设备会话，拒绝处理心跳")
 		return
 	}
 
-	// 根据协议规范，心跳包不需要服务器应答，只需更新心跳时间
-	// 🔧 修复：使用正确的设备会话更新心跳时间
-	h.updateHeartbeatTime(conn, correctSession)
+	// 更新设备会话心跳时间
+	if deviceSessionInfo != nil {
+		deviceSessionInfo.LastActivityAt = time.Now()
+		h.updateHeartbeatTime(conn, nil) // 简化调用，避免类型不匹配
+	}
 
-	// 使用正确的设备ID和会话
-	effectiveDeviceId := expectedDeviceID
+	// 确保设备在连接组中（通过连接组管理器验证）
+	// groupManager := monitor.GetGlobalConnectionGroupManager()
+	// if !group.HasDevice(deviceId) {
+	// 	logger.WithFields(logrus.Fields{
+	// 		"connID":   conn.GetConnID(),
+	// 		"deviceID": deviceId,
+	// 	}).Error("设备不在连接组中，数据不一致")
+	// 	return
+	// }
 
 	// 记录设备心跳
 	now := time.Now()
 	nowStr := now.Format(constants.TimeFormatDefault)
 	logger.WithFields(logrus.Fields{
 		"connID":            conn.GetConnID(),
-		"effectiveDeviceId": effectiveDeviceId,
-		"sessionId":         correctSession.DeviceID, // 🔧 修复：使用正确的会话ID
+		"effectiveDeviceId": deviceId,
+		"sessionId":         deviceSessionInfo.DeviceID,
 		"iccid":             iccid,
 		"remoteAddr":        conn.RemoteAddr().String(),
 		"timestamp":         nowStr,
-		"isRegistered":      correctSession.DeviceID != "", // 🔧 修复：使用正确的会话状态
+		"isRegistered":      deviceSessionInfo.DeviceID != "",
 	}).Info("设备心跳处理完成")
 }
 
-// updateHeartbeatTime 更新心跳时间 - 🔧 修复：优化未注册设备的心跳处理逻辑
-func (h *HeartbeatHandler) updateHeartbeatTime(conn ziface.IConnection, monitorSession *monitor.DeviceSession) {
-	// 🔧 修复：使用中心化状态管理器，替代多处重复的状态更新
-	stateManager := monitor.GetGlobalStateManager()
-
-	if monitorSession != nil && monitorSession.DeviceID != "" {
-		// 统一通过状态管理器更新设备在线状态
-		// 这会自动处理：连接属性更新、活动时间更新、监听器通知等
-		err := stateManager.MarkDeviceOnline(monitorSession.DeviceID, conn)
+// updateHeartbeatTime 更新心跳时间
+func (h *HeartbeatHandler) updateHeartbeatTime(conn ziface.IConnection, _ interface{}) {
+	// 获取设备ID
+	deviceID, exists := monitor.GetGlobalConnectionMonitor().GetDeviceIdByConnId(conn.GetConnID())
+	if exists {
+		// 使用中心化状态管理器更新设备在线状态
+		stateManager := monitor.GetGlobalStateManager()
+		err := stateManager.MarkDeviceOnline(deviceID, conn)
 		if err != nil {
 			logger.WithFields(logrus.Fields{
-				"deviceId": monitorSession.DeviceID,
+				"deviceId": deviceID,
 				"connID":   conn.GetConnID(),
 				"error":    err,
 			}).Error("更新设备在线状态失败")
@@ -207,42 +228,17 @@ func (h *HeartbeatHandler) updateHeartbeatTime(conn ziface.IConnection, monitorS
 
 		logger.WithFields(logrus.Fields{
 			"connID":    conn.GetConnID(),
-			"deviceId":  monitorSession.DeviceID,
+			"deviceId":  deviceID,
 			"timestamp": time.Now().Format(constants.TimeFormatDefault),
 		}).Debug("心跳处理：已更新设备在线状态")
-
-		// 更新monitor.DeviceSession的心跳时间
-		sessionManager := monitor.GetSessionManager()
-		sessionManager.UpdateSession(monitorSession.DeviceID, func(s *monitor.DeviceSession) {
-			s.LastHeartbeatTime = time.Now()
-		})
 	} else {
-		// 🔧 优化：未注册设备的心跳处理 - 这是正常的业务流程
-		// 设备在注册前发送心跳包是正常的，我们仍然需要保持连接活跃
+		// 未注册设备的心跳处理
 		network.UpdateConnectionActivity(conn)
 
-		// 🔧 优化：从DEBUG角度记录，而不是WARN，因为这是正常流程
-		var debugInfo string
-		if monitorSession == nil {
-			debugInfo = "monitorSession为null"
-		} else {
-			debugInfo = fmt.Sprintf("设备未注册(sessionID=%s, status=%s)",
-				monitorSession.SessionID, monitorSession.Status)
-		}
-
 		logger.WithFields(logrus.Fields{
-			"connID":    conn.GetConnID(),
-			"debugInfo": debugInfo,
-			"note":      "设备注册前的心跳包，连接保持活跃但不更新设备状态",
+			"connID": conn.GetConnID(),
+			"note":   "设备注册前的心跳包，连接保持活跃但不更新设备状态",
 		}).Debug("心跳处理：设备未注册，仅更新连接活动时间")
-
-		// 仍然更新会话的心跳时间，保持会话活跃
-		if monitorSession != nil {
-			sessionManager := monitor.GetSessionManager()
-			sessionManager.UpdateSession(monitorSession.DeviceID, func(s *monitor.DeviceSession) {
-				s.LastHeartbeatTime = time.Now()
-			})
-		}
 	}
 }
 

@@ -9,7 +9,7 @@ import (
 	"github.com/aceld/zinx/ziface"
 	"github.com/bujia-iot/iot-zinx/internal/adapter/http"
 	"github.com/bujia-iot/iot-zinx/internal/domain/dny_protocol"
-	"github.com/bujia-iot/iot-zinx/internal/infrastructure/config" // 新增导入
+	"github.com/bujia-iot/iot-zinx/internal/infrastructure/config"
 	"github.com/bujia-iot/iot-zinx/internal/infrastructure/logger"
 	"github.com/bujia-iot/iot-zinx/pkg/constants"
 	"github.com/bujia-iot/iot-zinx/pkg/monitor"
@@ -116,11 +116,11 @@ func (h *DeviceRegisterHandler) processDeviceRegistration(decodedFrame *protocol
 	h.handleDeviceRegister(deviceId, uint32(physicalId), messageID, conn, data)
 }
 
-// 🔧 统一设备注册处理
+// 统一设备注册处理
 func (h *DeviceRegisterHandler) handleDeviceRegister(deviceId string, physicalId uint32, messageID uint16, conn ziface.IConnection, data []byte) {
 	// 从连接属性中获取ICCID (SimCardHandler应已存入)
 	var iccidFromProp string
-	var err error // 声明err变量以便复用
+	var err error
 
 	if prop, propErr := conn.GetProperty(constants.PropKeyICCID); propErr == nil && prop != nil {
 		if val, ok := prop.(string); ok {
@@ -146,57 +146,30 @@ func (h *DeviceRegisterHandler) handleDeviceRegister(deviceId string, physicalId
 		logger.WithFields(logrus.Fields{
 			"connID":   conn.GetConnID(),
 			"deviceId": deviceId,
-			"error":    err, // 使用已声明和可能已赋值的err
+			"error":    err,
 		}).Warn("DeviceRegisterHandler: 设备注册时连接属性中未找到ICCID或获取失败")
-		// 根据业务需求，如果ICCID是强制的，这里应该返回或不继续进行会话创建
-		// 为了演示，我们继续，但实际项目中应有更严格的错误处理
+		// 发送注册失败响应
+		h.sendRegisterErrorResponse(deviceId, physicalId, messageID, conn, "ICCID未找到")
+		return
 	}
 
-	// 1. 为当前设备获取或创建 monitor.DeviceSession
+	// 1. 获取或创建设备会话
 	sessionManager := monitor.GetSessionManager()
-	devSession, isExisting := sessionManager.GetOrCreateSession(deviceId, conn)
+	devSession, _ := sessionManager.GetOrCreateSession(deviceId, conn)
 
-	// 确保 devSession 非 nil
 	if devSession == nil {
 		logger.WithFields(logrus.Fields{
 			"deviceId": deviceId,
 			"connID":   conn.GetConnID(),
-		}).Error("DeviceRegisterHandler: SessionManager.CreateSession 返回了 nil 会话")
-		// 通常 CreateSession 不会返回 nil，但做好检查
+		}).Error("DeviceRegisterHandler: SessionManager.GetOrCreateSession 返回了 nil 会话")
+		h.sendRegisterErrorResponse(deviceId, physicalId, messageID, conn, "会话创建失败")
 		return
 	}
 
-	// 正常情况下, CreateSession 内部会从 conn 提取 ICCID 并设置到 devSession.ICCID
-	// 以及添加到 DeviceGroupManager。如果 devSession.ICCID 为空，说明 CreateSession 内部逻辑可能有问题
-	// 或者 conn 上确实没有 ICCID。
-	if devSession.ICCID == "" && iccidFromProp != "" {
-		// 这是一个后备或警告，理想情况下 CreateSession 应该处理好
-		logger.WithFields(logrus.Fields{
-			"deviceId":      deviceId,
-			"connID":        conn.GetConnID(),
-			"warning":       "devSession.ICCID为空，但连接属性中存在ICCID。SessionManager.CreateSession可能未正确处理ICCID。",
-			"iccidFromProp": iccidFromProp,
-		}).Warn("DeviceRegisterHandler: ICCID 来源不一致警告")
-		// 如果需要强制设置，可以考虑:
-		devSession.ICCID = iccidFromProp
-		sessionManager.UpdateSession(deviceId, func(s *monitor.DeviceSession) { s.ICCID = iccidFromProp })
-	}
-
-	// 如果是新会话，则初始化
-	if !isExisting {
-		// 对于新会话，可能需要执行一些特定的初始化逻辑
-		// 例如，从注册数据包中解析设备类型等信息
-		sessionManager.UpdateSession(deviceId, func(s *monitor.DeviceSession) {
-			// s.DeviceType = parsedDeviceType // (需要解析data)
-			s.Context["registerPayload"] = data // 示例
-		})
-	}
-
-	// 2. 设备连接绑定到TCPMonitor
-	// deviceId 是唯一的字符串标识，conn 是共享的连接
+	// 2. 设备连接绑定到TCPMonitor（这会将设备添加到连接设备组）
 	monitor.GetGlobalConnectionMonitor().BindDeviceIdToConnection(deviceId, conn)
 
-	// 🔧 新增：验证绑定是否成功，防止连接绑定冲突导致的状态不一致
+	// 验证绑定是否成功
 	if boundConn, exists := monitor.GetGlobalConnectionMonitor().GetConnectionByDeviceId(deviceId); !exists || boundConn.GetConnID() != conn.GetConnID() {
 		logger.WithFields(logrus.Fields{
 			"deviceId":        deviceId,
@@ -211,13 +184,11 @@ func (h *DeviceRegisterHandler) handleDeviceRegister(deviceId string, physicalId
 			"error": "设备绑定失败",
 		}).Error("设备注册失败：连接绑定失败")
 
-		// 发送注册失败响应
 		h.sendRegisterErrorResponse(deviceId, physicalId, messageID, conn, "连接绑定失败")
 		return
 	}
 
-	// 🔧 修复：使用中心化状态管理器更新设备为在线状态
-	// 设备注册成功后直接设置为在线，避免状态转换混乱
+	// 3. 使用中心化状态管理器更新设备为在线状态
 	stateManager := monitor.GetGlobalStateManager()
 	err = stateManager.MarkDeviceOnline(deviceId, conn)
 	if err != nil {
@@ -228,15 +199,12 @@ func (h *DeviceRegisterHandler) handleDeviceRegister(deviceId string, physicalId
 		}).Error("更新设备在线状态失败")
 	}
 
-	// 3. 设置Zinx框架层的session，确保心跳处理时能正确识别设备
+	// 4. 设置Zinx框架层的session
 	linkedSession := session.GetDeviceSession(conn)
 	if linkedSession != nil {
-		// 设置DeviceID，确保心跳处理时能正确识别设备
 		linkedSession.DeviceID = deviceId
 		linkedSession.PhysicalID = fmt.Sprintf("0x%08X", uint32(physicalId))
 		linkedSession.LastActivityAt = time.Now()
-
-		// 同步属性到连接
 		linkedSession.SyncToConnection(conn)
 
 		logger.WithFields(logrus.Fields{
@@ -244,22 +212,18 @@ func (h *DeviceRegisterHandler) handleDeviceRegister(deviceId string, physicalId
 			"deviceId":          deviceId,
 			"sessionDeviceID":   linkedSession.DeviceID,
 			"sessionPhysicalID": linkedSession.PhysicalID,
-		}).Debug("🔧 DeviceSession.DeviceID已设置并同步")
-	} else {
-		logger.WithFields(logrus.Fields{
-			"connID":   conn.GetConnID(),
-			"deviceId": deviceId,
-		}).Error("无法获取DeviceSession")
+		}).Debug("DeviceSession.DeviceID已设置并同步")
 	}
 
-	// 调用连接活动更新
+	// 5. 更新连接活动和状态
 	network.UpdateConnectionActivity(conn)
+	conn.SetProperty("connState", constants.ConnStatusActiveRegistered)
 
-	// 重置TCP ReadDeadline
+	// 6. 重置TCP ReadDeadline
 	now := time.Now()
 	defaultReadDeadlineSeconds := config.GetConfig().TCPServer.DefaultReadDeadlineSeconds
 	if defaultReadDeadlineSeconds <= 0 {
-		defaultReadDeadlineSeconds = 90 // 默认值，以防配置错误
+		defaultReadDeadlineSeconds = 300 // 默认5分钟
 		logger.Warnf("DeviceRegisterHandler: DefaultReadDeadlineSeconds 配置错误或未配置，使用默认值: %ds", defaultReadDeadlineSeconds)
 	}
 	defaultReadDeadline := time.Duration(defaultReadDeadlineSeconds) * time.Second
@@ -267,43 +231,32 @@ func (h *DeviceRegisterHandler) handleDeviceRegister(deviceId string, physicalId
 		if err := tcpConn.SetReadDeadline(now.Add(defaultReadDeadline)); err != nil {
 			logger.WithFields(logrus.Fields{
 				"connID":              conn.GetConnID(),
-				"deviceId":            deviceId,      // 使用deviceId，因为iccidFromProp可能为空
-				"iccid":               iccidFromProp, // 添加iccidFromProp以供调试
+				"deviceId":            deviceId,
+				"iccid":               iccidFromProp,
 				"error":               err,
 				"readDeadlineSeconds": defaultReadDeadlineSeconds,
 			}).Error("DeviceRegisterHandler: 设置ReadDeadline失败")
-		} else {
-			logger.WithFields(logrus.Fields{
-				"connID":              conn.GetConnID(),
-				"deviceId":            deviceId,
-				"readDeadlineSeconds": defaultReadDeadlineSeconds,
-			}).Debug("DeviceRegisterHandler: 成功更新ReadDeadline")
 		}
-	} else {
-		logger.WithFields(logrus.Fields{
-			"connID":   conn.GetConnID(),
-			"deviceId": deviceId,
-		}).Warn("DeviceRegisterHandler: 无法获取TCP连接以设置ReadDeadline")
 	}
 
-	// 记录设备注册信息
+	// 7. 记录设备注册信息
 	logger.WithFields(logrus.Fields{
 		"connID":            conn.GetConnID(),
 		"physicalIdHex":     fmt.Sprintf("0x%08X", physicalId),
 		"physicalIdStr":     deviceId,
-		"iccid":             iccidFromProp, // 使用 iccidFromProp
+		"iccid":             iccidFromProp,
 		"connState":         constants.ConnStatusActiveRegistered,
 		"readDeadlineSetTo": now.Add(defaultReadDeadline).Format(time.RFC3339),
 		"remoteAddr":        conn.RemoteAddr().String(),
 		"timestamp":         now.Format(constants.TimeFormatDefault),
 	}).Info("设备注册成功，连接状态更新为Active，ReadDeadline已重置")
 
-	// 🔧 修复：通知设备服务设备上线，更新状态存储
+	// 8. 通知设备服务设备上线
 	if ctx := http.GetGlobalHandlerContext(); ctx != nil && ctx.DeviceService != nil {
 		ctx.DeviceService.HandleDeviceOnline(deviceId, iccidFromProp)
 	}
 
-	// 发送注册响应
+	// 9. 发送注册响应
 	h.sendRegisterResponse(deviceId, physicalId, messageID, conn)
 }
 

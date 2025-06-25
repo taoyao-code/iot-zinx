@@ -9,8 +9,12 @@ import (
 	"github.com/aceld/zinx/ziface"
 	"github.com/bujia-iot/iot-zinx/internal/infrastructure/logger"
 	"github.com/bujia-iot/iot-zinx/pkg/constants"
+	"github.com/bujia-iot/iot-zinx/pkg/session"
 	"github.com/sirupsen/logrus"
 )
+
+// 类型别名，避免在匿名函数中的类型冲突
+type DeviceSession = session.DeviceSession
 
 // DNYProtocolSender 定义DNY协议发送器接口
 // 这样可以避免循环导入问题
@@ -38,11 +42,11 @@ func SetConnectionMonitor(monitor IConnectionMonitor) {
 
 // DeviceGroup 设备组，管理同一ICCID下的多个设备
 type DeviceGroup struct {
-	ICCID     string                    // SIM卡号
-	Devices   map[string]*DeviceSession // DeviceID -> DeviceSession
-	CreatedAt time.Time                 // 创建时间
-	UpdatedAt time.Time                 // 最后更新时间
-	mutex     sync.RWMutex              // 读写锁
+	ICCID     string                            // SIM卡号
+	Devices   map[string]*session.DeviceSession // DeviceID -> DeviceSession
+	CreatedAt time.Time                         // 创建时间
+	UpdatedAt time.Time                         // 最后更新时间
+	mutex     sync.RWMutex                      // 读写锁
 }
 
 // DeviceGroupManager 设备组管理器
@@ -72,14 +76,14 @@ func GetDeviceGroupManager() *DeviceGroupManager {
 func NewDeviceGroup(iccid string) *DeviceGroup {
 	return &DeviceGroup{
 		ICCID:     iccid,
-		Devices:   make(map[string]*DeviceSession),
+		Devices:   make(map[string]*session.DeviceSession),
 		CreatedAt: time.Now(),
 		UpdatedAt: time.Now(),
 	}
 }
 
 // AddDevice 向设备组添加设备
-func (dg *DeviceGroup) AddDevice(deviceID string, session *DeviceSession) {
+func (dg *DeviceGroup) AddDevice(deviceID string, session *session.DeviceSession) {
 	dg.mutex.Lock()
 	defer dg.mutex.Unlock()
 
@@ -130,7 +134,7 @@ func (dg *DeviceGroup) RemoveDevice(deviceID string) {
 }
 
 // GetDevice 获取设备组中的特定设备
-func (dg *DeviceGroup) GetDevice(deviceID string) (*DeviceSession, bool) {
+func (dg *DeviceGroup) GetDevice(deviceID string) (*session.DeviceSession, bool) {
 	dg.mutex.RLock()
 	defer dg.mutex.RUnlock()
 
@@ -139,12 +143,12 @@ func (dg *DeviceGroup) GetDevice(deviceID string) (*DeviceSession, bool) {
 }
 
 // GetAllDevices 获取设备组中的所有设备
-func (dg *DeviceGroup) GetAllDevices() map[string]*DeviceSession {
+func (dg *DeviceGroup) GetAllDevices() map[string]*session.DeviceSession {
 	dg.mutex.RLock()
 	defer dg.mutex.RUnlock()
 
 	// 返回副本，避免并发问题
-	devices := make(map[string]*DeviceSession)
+	devices := make(map[string]*session.DeviceSession)
 	for k, v := range dg.Devices {
 		devices[k] = v
 	}
@@ -186,7 +190,7 @@ func (dgm *DeviceGroupManager) GetGroup(iccid string) (*DeviceGroup, bool) {
 
 // AddDeviceToGroup 将设备添加到设备组
 // 🔧 重构：使用全局锁确保设备组操作的原子性
-func (dgm *DeviceGroupManager) AddDeviceToGroup(iccid, deviceID string, session *DeviceSession) {
+func (dgm *DeviceGroupManager) AddDeviceToGroup(iccid, deviceID string, session *session.DeviceSession) {
 	// 🔧 使用全局设备组锁，确保整个操作的原子性
 	dgm.globalGroupMutex.Lock()
 	defer dgm.globalGroupMutex.Unlock()
@@ -289,7 +293,7 @@ func (dgm *DeviceGroupManager) RemoveDeviceFromGroup(iccid, deviceID string) {
 }
 
 // GetDeviceFromGroup 从设备组获取特定设备
-func (dgm *DeviceGroupManager) GetDeviceFromGroup(iccid, deviceID string) (*DeviceSession, bool) {
+func (dgm *DeviceGroupManager) GetDeviceFromGroup(iccid, deviceID string) (*session.DeviceSession, bool) {
 	if group, exists := dgm.GetGroup(iccid); exists {
 		return group.GetDevice(deviceID)
 	}
@@ -297,11 +301,11 @@ func (dgm *DeviceGroupManager) GetDeviceFromGroup(iccid, deviceID string) (*Devi
 }
 
 // GetAllDevicesInGroup 获取设备组中的所有设备
-func (dgm *DeviceGroupManager) GetAllDevicesInGroup(iccid string) map[string]*DeviceSession {
+func (dgm *DeviceGroupManager) GetAllDevicesInGroup(iccid string) map[string]*session.DeviceSession {
 	if group, exists := dgm.GetGroup(iccid); exists {
 		return group.GetAllDevices()
 	}
-	return make(map[string]*DeviceSession)
+	return make(map[string]*session.DeviceSession)
 }
 
 // BroadcastToGroup 向设备组中的所有设备广播消息
@@ -325,7 +329,7 @@ func (dgm *DeviceGroupManager) BroadcastToGroup(iccid string, data []byte) int {
 }
 
 // synchronousBroadcast 同步广播（适用于少量设备）
-func (dgm *DeviceGroupManager) synchronousBroadcast(iccid string, devices map[string]*DeviceSession, data []byte) int {
+func (dgm *DeviceGroupManager) synchronousBroadcast(iccid string, devices map[string]*session.DeviceSession, data []byte) int {
 	successCount := 0
 
 	for deviceID, session := range devices {
@@ -381,7 +385,7 @@ func (dgm *DeviceGroupManager) synchronousBroadcast(iccid string, devices map[st
 }
 
 // concurrentBroadcast 并发广播（适用于大量设备）
-func (dgm *DeviceGroupManager) concurrentBroadcast(iccid string, devices map[string]*DeviceSession, data []byte) int {
+func (dgm *DeviceGroupManager) concurrentBroadcast(iccid string, devices map[string]*session.DeviceSession, data []byte) int {
 	// 确定是否为DNY协议消息
 	isDNYProtocol := globalDNYSender != nil
 
@@ -404,7 +408,7 @@ func (dgm *DeviceGroupManager) concurrentBroadcast(iccid string, devices map[str
 	successCounter := int32(0)
 
 	// 首先过滤出所有在线设备
-	activeDevices := make(map[string]*DeviceSession)
+	activeDevices := make(map[string]*session.DeviceSession)
 	for deviceID, session := range devices {
 		if session.Status == constants.DeviceStatusOnline {
 			activeDevices[deviceID] = session
@@ -418,7 +422,7 @@ func (dgm *DeviceGroupManager) concurrentBroadcast(iccid string, devices map[str
 		// 限制并发数
 		semaphore <- struct{}{}
 
-		go func(deviceID string, session *DeviceSession) {
+		go func(deviceID string, devSession *DeviceSession) {
 			defer wg.Done()
 			defer func() { <-semaphore }() // 释放信号量
 
