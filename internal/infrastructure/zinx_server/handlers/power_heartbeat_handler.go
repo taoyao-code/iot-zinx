@@ -125,28 +125,98 @@ func (h *PowerHeartbeatHandler) processPowerHeartbeat(decodedFrame *protocol.Dec
 	// 生成设备ID
 	deviceId := fmt.Sprintf("%08X", physicalId)
 
-	// 解析功率心跳数据，支持多种数据格式
+	// 🔧 重要修复：完整解析功率心跳包数据，包括充电状态
+	// 根据协议文档：端口号(1) + 各端口状态(2) + 充电时长(2) + 累计电量(2) + 启动状态(1) + 实时功率(2) + 最大功率(2) + 最小功率(2) + 平均功率(2) + ...
 	var logFields logrus.Fields
-	if len(data) >= 8 {
-		// 最简单的格式: [端口号(1)][电流(2)][功率(2)][电压(2)][保留(1)]
-		portNumber := data[0]
-		currentMA := binary.LittleEndian.Uint16(data[1:3])    // 电流，单位mA
-		powerHalfW := binary.LittleEndian.Uint16(data[3:5])   // 功率，单位0.5W
-		voltageDeciV := binary.LittleEndian.Uint16(data[5:7]) // 电压，单位0.1V
+	var chargingStatus string = "未知"
+	var isCharging bool = false
 
-		// 记录功率心跳数据
-		logFields = logrus.Fields{
-			"connID":       conn.GetConnID(),
-			"physicalId":   fmt.Sprintf("0x%08X", physicalId),
-			"deviceId":     deviceId,
-			"portNumber":   portNumber,
-			"currentMA":    currentMA,
-			"powerHalfW":   powerHalfW,
-			"voltageDeciV": voltageDeciV,
-			"remoteAddr":   conn.RemoteAddr().String(),
-			"timestamp":    time.Now().Format(constants.TimeFormatDefault),
+	if len(data) >= 8 {
+		// 解析基础功率数据
+		portNumber := data[0] // 端口号：00表示1号端口，01表示2号端口
+
+		// 🔧 关键修复：解析各端口状态（充电状态）
+		var portStatus uint8
+		if len(data) >= 3 {
+			// 各端口状态在第2-3字节，取第一个端口的状态
+			portStatus = data[1] // 第一个端口的状态
+
+			// 根据协议解析充电状态
+			switch portStatus {
+			case 1:
+				chargingStatus = "充电中"
+				isCharging = true
+			case 2:
+				chargingStatus = "已扫码，等待插入充电器"
+				isCharging = false
+			case 3:
+				chargingStatus = "有充电器但未充电（已充满）"
+				isCharging = false
+			case 5:
+				chargingStatus = "浮充"
+				isCharging = true
+			default:
+				chargingStatus = fmt.Sprintf("其他状态(%d)", portStatus)
+				isCharging = false
+			}
 		}
-		logger.WithFields(logFields).Info("收到功率心跳数据")
+
+		// 解析其他功率数据
+		var chargeDuration uint16 = 0
+		var cumulativeEnergy uint16 = 0
+		var realtimePower uint16 = 0
+
+		if len(data) >= 8 {
+			// 简化解析：当数据长度足够时解析功率信息
+			if len(data) >= 6 {
+				chargeDuration = binary.LittleEndian.Uint16(data[3:5]) // 充电时长
+			}
+			if len(data) >= 8 {
+				cumulativeEnergy = binary.LittleEndian.Uint16(data[5:7]) // 累计电量
+			}
+			if len(data) >= 10 {
+				realtimePower = binary.LittleEndian.Uint16(data[8:10]) // 实时功率
+			}
+		} else {
+			// 兼容旧格式：[端口号(1)][电流(2)][功率(2)][电压(2)][保留(1)]
+			powerHalfW := binary.LittleEndian.Uint16(data[3:5]) // 功率，单位0.5W
+			realtimePower = powerHalfW
+		}
+
+		// 🔧 关键修复：记录充电状态变化
+		logFields = logrus.Fields{
+			"connID":           conn.GetConnID(),
+			"physicalId":       fmt.Sprintf("0x%08X", physicalId),
+			"deviceId":         deviceId,
+			"portNumber":       portNumber + 1, // 显示为1号端口、2号端口
+			"portStatus":       portStatus,
+			"chargingStatus":   chargingStatus,
+			"isCharging":       isCharging,
+			"chargeDuration":   chargeDuration,
+			"cumulativeEnergy": cumulativeEnergy,
+			"realtimePower":    realtimePower,
+			"remoteAddr":       conn.RemoteAddr().String(),
+			"timestamp":        time.Now().Format(constants.TimeFormatDefault),
+		}
+
+		// 🔧 重要：区分充电状态日志级别
+		if isCharging {
+			logger.WithFields(logFields).Info("⚡ 设备充电状态：正在充电")
+		} else {
+			logger.WithFields(logFields).Info("🔌 设备充电状态：未充电")
+		}
+
+		// 🔧 新增：充电状态变化通知
+		if isCharging {
+			logger.WithFields(logrus.Fields{
+				"deviceId":         deviceId,
+				"portNumber":       portNumber + 1,
+				"chargingStatus":   chargingStatus,
+				"chargeDuration":   chargeDuration,
+				"cumulativeEnergy": cumulativeEnergy,
+				"realtimePower":    realtimePower,
+			}).Warn("🚨 充电状态监控：设备正在充电")
+		}
 	}
 
 	// 更新心跳时间
