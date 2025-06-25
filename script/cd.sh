@@ -36,13 +36,13 @@ curl -X POST http://localhost:7055/api/v1/charging/start \
   }'
 
   # 停止充电指令 - 修复：使用正确的设备ID
-  curl -X POST http://localhost:7055/api/v1/charging/stop \
-  -H "Content-Type: application/json" \
-  -d '{
-    "deviceId": "04A228CD",
-    "port": 1,
-    "orderNo": "ORDER_XXXXX"
-  }'
+  # curl -X POST http://localhost:7055/api/v1/charging/stop \
+  # -H "Content-Type: application/json" \
+  # -d '{
+  #   "deviceId": "04A228CD",
+  #   "port": 1,
+  #   "orderNo": "ORDER_XXXXX"
+  # }'
 
   # 发送设备定位命令 - 修复：使用正确的设备ID
 curl -X POST http://localhost:7055/api/v1/device/locate \
