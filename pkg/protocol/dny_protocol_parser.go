@@ -163,8 +163,8 @@ func ParseDNYProtocolData(data []byte) (*dny_protocol.Message, error) {
 }
 
 // CalculatePacketChecksumInternal 是 CalculatePacketChecksum 的内部版本，避免循环依赖或公开不必要的接口
-// 🔧 修复：dataFrame 参数应为从物理ID开始，直到数据内容结束的部分（不包括包头、长度字段和校验和）
-// 根据实际测试：校验和只计算物理ID + 消息ID + 命令 + 数据部分
+// 🔧 修复：根据协议文档和用户验证，校验和计算从包头"DNY"开始到校验和前的所有字节
+// 计算范围：包头(DNY) + 长度字段 + 物理ID + 消息ID + 命令 + 数据（不包括校验和本身）
 func CalculatePacketChecksumInternal(dataFrame []byte) (uint16, error) {
 	// DEBUG: Log input to CalculatePacketChecksumInternal
 	logger.WithFields(logrus.Fields{
@@ -176,10 +176,19 @@ func CalculatePacketChecksumInternal(dataFrame []byte) (uint16, error) {
 		return 0, errors.New("data frame for checksum calculation is empty")
 	}
 
+	// 🔧 关键修复：按字节无符号累加和校验，从包头到数据的内容
+	// 根据用户验证的原始报文：444E590D00CD28A20479082263EE5C68 -> 校验和应为4B05
 	var sum uint16
-	for _, b := range dataFrame { // 从包头"DNY"开始计算到数据内容结束
+	for _, b := range dataFrame {
 		sum += uint16(b)
 	}
+
+	logger.WithFields(logrus.Fields{
+		"dataFrameLen":    len(dataFrame),
+		"calculatedSum":   fmt.Sprintf("0x%04X", sum),
+		"sumLittleEndian": fmt.Sprintf("%02X %02X", byte(sum), byte(sum>>8)),
+	}).Trace("CalculatePacketChecksumInternal: 校验和计算完成")
+
 	return sum, nil
 }
 

@@ -237,9 +237,10 @@ func buildDNYPacket(physicalID uint32, messageID uint16, command uint8, data []b
 	// 数据
 	packet = append(packet, data...)
 
-	// 计算校验和 (从物理ID开始的所有字节)
+	// 🔧 修复：计算校验和 (从包头"DNY"开始的所有字节，不包括校验和本身)
+	// 根据协议文档和用户验证，校验和计算从包头开始到数据结束
 	var checksum uint16
-	for i := 5; i < len(packet); i++ { // 从物理ID开始(跳过"DNY"和长度字段)
+	for i := 0; i < len(packet); i++ { // 从包头"DNY"开始计算到数据结束
 		checksum += uint16(packet[i])
 	}
 
