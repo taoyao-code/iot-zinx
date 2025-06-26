@@ -311,6 +311,9 @@ func buildDNYPacket(physicalID uint32, messageID uint16, command uint8, data []b
 func NeedConfirmation(command uint8) bool {
 	// 明确不需要确认的指令（根据协议文档"无须应答"/"无需应答"标注）
 	noConfirmationCommands := []uint8{
+		// 设备注册类指令 - "请求-应答"模式，服务器发送应答后设备无需再次回复确认
+		0x20, // 设备注册包 - 协议明确：服务器发送应答后，设备无需再次回复确认
+
 		// 时间同步类指令 - 都是"请求-应答"模式，服务器发送应答后设备无需再次回复确认
 		0x12, // 主机获取服务器时间 - 协议明确：服务器发送应答后，主机无需再次回复确认
 		0x22, // 设备获取服务器时间 - 协议明确：服务器发送应答后，设备无需再次回复确认

@@ -299,11 +299,12 @@ func (h *DeviceRegisterHandler) handleDeviceRegister(deviceId string, physicalId
 
 // 🔧 新增：统一的注册响应发送
 func (h *DeviceRegisterHandler) sendRegisterResponse(deviceId string, physicalId uint32, messageID uint16, conn ziface.IConnection) {
-	// 构建注册响应数据
+	// 构建注册响应数据 - 使用DNY协议格式
 	responseData := []byte{dny_protocol.ResponseSuccess}
 
-	// 发送注册响应
-	if err := h.SendResponse(conn, responseData); err != nil {
+	// 🔧 修复：使用DNY协议发送器而不是简单的Zinx消息
+	// 设备注册响应需要使用正确的DNY协议格式，包含完整的帧头、物理ID、消息ID等
+	if err := protocol.SendDNYResponse(conn, physicalId, messageID, dny_protocol.CmdDeviceRegister, responseData); err != nil {
 		logger.WithFields(logrus.Fields{
 			"connID":     conn.GetConnID(),
 			"physicalId": fmt.Sprintf("0x%08X", physicalId),
