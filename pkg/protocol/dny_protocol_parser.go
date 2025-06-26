@@ -187,45 +187,31 @@ func CalculatePacketChecksumInternal(dataFrame []byte) (uint16, error) {
 func BuildDNYResponsePacketUnified(msg *dny_protocol.Message) ([]byte, error) {
 	// 根据协议，“长度”字段的值应为 PhysicalID(4) + MessageID(2) + 命令(1) + 数据(n) + 校验(2) 的总和
 	contentLen := uint16(PhysicalIDLength + MessageIDLength + CommandLength + len(msg.Data) + ChecksumLength)
-	// 之前的错误： contentLen := PhysicalIDLength + MessageIDLength + CommandLength + len(msg.Data)
-
-	if contentLen > 0xFFFF { // 理论上 uint16 最大值就是0xFFFF，但这里是检查计算后的 contentLen 是否超出了协议本身允许的最大包长限制（如果有的话，但协议文档是256字节，这里用0xFFFF作为uint16的自然上限）
-		// 协议规定每包最多256字节，指的是“长度”字段声明的这部分内容。
-		// 3(DNY) + 2(LenField) + 256 = 261.
-		// 此处 contentLen 是“长度”字段的值，其最大为256.
-		if contentLen > 256 {
-			return nil, errors.New("payload too large for DNY packet (max content length 256 bytes)")
-		}
+	if contentLen > 256 {
+		return nil, errors.New("payload too large for DNY packet (max content length 256 bytes)")
 	}
 
 	packet := new(bytes.Buffer)
+
+	// 1. 写入包头和长度
 	packet.WriteString(HeaderDNY)
-	binary.Write(packet, binary.LittleEndian, uint16(contentLen))
+	binary.Write(packet, binary.LittleEndian, contentLen)
 
-	checksumContent := new(bytes.Buffer)
-	binary.Write(checksumContent, binary.LittleEndian, msg.PhysicalId)
-	binary.Write(checksumContent, binary.LittleEndian, msg.MessageId)
-	checksumContent.WriteByte(byte(msg.CommandId))
-	checksumContent.Write(msg.Data)
+	// 2. 写入核心内容
+	binary.Write(packet, binary.LittleEndian, msg.PhysicalId)
+	binary.Write(packet, binary.LittleEndian, msg.MessageId)
+	packet.WriteByte(byte(msg.CommandId))
+	packet.Write(msg.Data)
 
-	packet.Write(checksumContent.Bytes())
-
-	// 🔧 修复：为了与解析时保持一致，校验和计算应该包含包头和长度字段
-	// 构建完整的待校验数据：包头 + 长度字段 + 内容
-	fullDataForChecksum := new(bytes.Buffer)
-	fullDataForChecksum.WriteString(HeaderDNY)
-	binary.Write(fullDataForChecksum, binary.LittleEndian, uint16(contentLen))
-	fullDataForChecksum.Write(checksumContent.Bytes())
-	dataForChecksum := fullDataForChecksum.Bytes()
-
-	logger.WithFields(logrus.Fields{
-		"dataForChecksum": hex.EncodeToString(dataForChecksum),
-	}).Info("用于计算校验和的数据")
-
+	// 3. 基于当前包的内容计算校验和
+	// 计算范围：包头(DNY) + 长度 + 物理ID + 消息ID + 命令 + 数据
+	dataForChecksum := packet.Bytes()
 	checksum, err := CalculatePacketChecksumInternal(dataForChecksum)
 	if err != nil {
 		return nil, fmt.Errorf("failed to calculate checksum for unified packet: %w", err)
 	}
+
+	// 4. 写入校验和
 	binary.Write(packet, binary.LittleEndian, checksum)
 
 	return packet.Bytes(), nil
