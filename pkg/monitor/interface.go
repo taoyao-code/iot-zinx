@@ -52,12 +52,15 @@ type ISessionManager interface {
 	GetAllSessions() map[string]*session.DeviceSession
 }
 
-// IDeviceGroupManager 设备组管理器接口（向后兼容）
-// 注意：统一架构中设备组功能已集成到统一会话管理器中
+// IDeviceGroupManager 设备组管理器接口（已废弃）
+//
+// DEPRECATED: 此接口已废弃，请使用 pkg/core/connection_device_group.go 中的接口
+//
+// 迁移指南：
+// - 使用 core.GetGlobalConnectionGroupManager() 替代此接口
+// - 设备组功能已集成到统一的连接设备组管理器中
+// - 新架构基于TCP连接而非ICCID进行设备组管理
 type IDeviceGroupManager interface {
-	GetGroup(iccid string) (*DeviceGroup, bool)
-	AddDeviceToGroup(iccid, deviceID string, session *session.DeviceSession)
-	RemoveDeviceFromGroup(iccid, deviceID string)
-	BroadcastToGroup(iccid string, data []byte) int
+	// 已废弃的方法，保留用于向后兼容
 	GetGroupStatistics() map[string]interface{}
 }

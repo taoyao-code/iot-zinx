@@ -55,9 +55,9 @@ func InitPackagesWithDependencies(sessionManager monitor.ISessionManager, connMa
 	// 旧的心跳服务注册已被统一架构替代
 	logger.Info("心跳功能已集成到统一架构中")
 
-	// 设置monitor包的DNY协议发送器
-	// 这里通过适配器模式解决循环依赖问题
-	monitor.SetDNYProtocolSender(&dnyProtocolSenderAdapter{})
+	// 设置monitor包的DNY协议发送器（已废弃）
+	// DEPRECATED: monitor.DeviceGroup 已废弃，此调用不再需要
+	// monitor.SetDNYProtocolSender(&dnyProtocolSenderAdapter{})
 
 	// 设置network包访问monitor包的函数
 	network.SetUpdateDeviceStatusFunc(func(deviceID string, status constants.DeviceStatus) error {

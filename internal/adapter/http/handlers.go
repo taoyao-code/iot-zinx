@@ -4,7 +4,6 @@ import (
 	"encoding/hex"
 	"fmt"
 	"net/http"
-	"strconv"
 	"strings"
 	"time"
 
@@ -253,30 +252,10 @@ func HandleSendDNYCommand(c *gin.Context) {
 		return
 	}
 
-	// 查询设备连接 - 使用设备组管理器
-	unifiedSystem := pkg.GetUnifiedSystem()
-	conn, exists := unifiedSystem.GroupManager.GetConnectionByDeviceID(req.DeviceID)
-	if !exists {
-		c.JSON(http.StatusNotFound, APIResponse{
-			Code:    404,
-			Message: "设备不在线",
-		})
-		return
-	}
-
-	// 解析物理ID - 🔧 修复：使用16进制解析，与其他接口保持一致
-	physicalID, err := strconv.ParseUint(req.DeviceID, 16, 32)
-	if err != nil {
-		c.JSON(http.StatusBadRequest, APIResponse{
-			Code:    400,
-			Message: "设备ID格式错误",
-		})
-		return
-	}
-
 	// 解析数据字段
 	var data []byte
 	if req.Data != "" {
+		var err error
 		data, err = hex.DecodeString(req.Data)
 		if err != nil {
 			c.JSON(http.StatusBadRequest, APIResponse{
@@ -287,15 +266,13 @@ func HandleSendDNYCommand(c *gin.Context) {
 		}
 	}
 
-	// 🔧 使用pkg包中的统一接口构建DNY协议帧
-	packetData := pkg.Protocol.BuildDNYResponsePacket(uint32(physicalID), req.MessageID, req.Command, data)
-
-	// 发送到设备
-	err = conn.SendBuffMsg(0, packetData)
+	// 🔧 使用统一发送服务发送命令
+	sender := service.GetGlobalUnifiedSender()
+	result, err := sender.SendCommandToDevice(req.DeviceID, req.Command, data, "DNY通用命令")
 	if err != nil {
 		logger.WithFields(logrus.Fields{
 			"deviceId": req.DeviceID,
-			"command":  req.Command,
+			"command":  fmt.Sprintf("0x%02X", req.Command),
 			"error":    err.Error(),
 		}).Error("发送DNY命令到设备失败")
 
@@ -309,16 +286,17 @@ func HandleSendDNYCommand(c *gin.Context) {
 	logger.WithFields(logrus.Fields{
 		"deviceId":  req.DeviceID,
 		"command":   fmt.Sprintf("0x%02X", req.Command),
-		"messageId": req.MessageID,
+		"messageId": fmt.Sprintf("0x%04X", result.MessageID),
+		"connId":    result.ConnID,
 		"dataHex":   hex.EncodeToString(data),
-		"packetHex": hex.EncodeToString(packetData),
-	}).Info("发送DNY命令到设备")
+	}).Info("发送DNY命令到设备成功")
 
 	c.JSON(http.StatusOK, APIResponse{
 		Code:    0,
 		Message: "DNY命令发送成功",
 		Data: gin.H{
-			"packetHex": hex.EncodeToString(packetData),
+			"messageId": fmt.Sprintf("0x%04X", result.MessageID),
+			"connId":    result.ConnID,
 		},
 	})
 }
@@ -354,37 +332,16 @@ func HandleQueryDeviceStatus(c *gin.Context) {
 		return
 	}
 
-	// 检查设备连接
-	conn, exists := ctx.DeviceService.GetDeviceConnection(deviceID)
-	if !exists {
-		c.JSON(http.StatusNotFound, APIResponse{
-			Code:    404,
-			Message: "设备不在线",
-		})
-		return
-	}
-
-	// 解析设备ID为物理ID
-	physicalID, err := strconv.ParseUint(deviceID, 16, 32)
-	if err != nil {
-		c.JSON(http.StatusBadRequest, APIResponse{
-			Code:    400,
-			Message: "设备ID格式错误",
-		})
-		return
-	}
-
-	// 生成消息ID
-	messageID := pkg.Protocol.GetNextMessageID()
-
-	// 发送查询状态命令(0x81)
-	err = pkg.Protocol.SendDNYResponse(conn, uint32(physicalID), messageID, 0x81, []byte{})
+	// 🔧 使用统一发送服务发送查询状态命令(0x81)
+	sender := service.GetGlobalUnifiedSender()
+	result, err := sender.SendCommandToDevice(deviceID, 0x81, []byte{}, "查询设备状态")
 	if err != nil {
 		logger.WithFields(logrus.Fields{
 			"deviceId": deviceID,
 			"command":  "0x81",
 			"error":    err.Error(),
 		}).Error("发送查询命令失败")
+
 		c.JSON(http.StatusInternalServerError, APIResponse{
 			Code:    500,
 			Message: "发送查询命令失败: " + err.Error(),
@@ -395,7 +352,8 @@ func HandleQueryDeviceStatus(c *gin.Context) {
 	logger.WithFields(logrus.Fields{
 		"deviceId":  deviceID,
 		"command":   "0x81",
-		"messageId": messageID,
+		"messageId": fmt.Sprintf("0x%04X", result.MessageID),
+		"connId":    result.ConnID,
 	}).Info("查询设备状态命令发送成功")
 
 	c.JSON(http.StatusOK, APIResponse{
@@ -404,7 +362,8 @@ func HandleQueryDeviceStatus(c *gin.Context) {
 		Data: gin.H{
 			"deviceId":  deviceID,
 			"command":   "0x81",
-			"messageId": messageID,
+			"messageId": fmt.Sprintf("0x%04X", result.MessageID),
+			"connId":    result.ConnID,
 		},
 	})
 }
@@ -654,40 +613,17 @@ func HandleDeviceLocate(c *gin.Context) {
 		return
 	}
 
-	// 查询设备连接 - 使用设备组管理器
-	unifiedSystem := pkg.GetUnifiedSystem()
-	conn, exists := unifiedSystem.GroupManager.GetConnectionByDeviceID(req.DeviceID)
-	if !exists {
-		c.JSON(http.StatusNotFound, APIResponse{
-			Code:    404,
-			Message: "设备不在线",
-		})
-		return
-	}
-
-	// 解析设备ID为物理ID
-	physicalID, err := parseDeviceIDToPhysicalID(req.DeviceID)
-	if err != nil {
-		c.JSON(http.StatusBadRequest, APIResponse{
-			Code:    400,
-			Message: "设备ID格式错误: " + err.Error(),
-		})
-		return
-	}
-
-	// 生成消息ID
-	messageID := pkg.Protocol.GetNextMessageID()
-
 	// 构造命令数据（1字节定位时间）
 	data := []byte{req.LocateTime}
 
-	// 发送设备定位命令(0x96)
-	err = pkg.Protocol.SendDNYResponse(conn, uint32(physicalID), messageID, 0x96, data)
+	// 🔧 使用统一发送服务发送设备定位命令(0x96)
+	sender := service.GetGlobalUnifiedSender()
+	result, err := sender.SendCommandToDevice(req.DeviceID, 0x96, data, "设备定位")
 	if err != nil {
 		logger.WithFields(logrus.Fields{
 			"deviceID":   req.DeviceID,
 			"locateTime": req.LocateTime,
-			"error":      err,
+			"error":      err.Error(),
 		}).Error("发送设备定位命令失败")
 
 		c.JSON(http.StatusInternalServerError, APIResponse{
@@ -700,7 +636,8 @@ func HandleDeviceLocate(c *gin.Context) {
 	logger.WithFields(logrus.Fields{
 		"deviceID":   req.DeviceID,
 		"locateTime": req.LocateTime,
-		"messageID":  fmt.Sprintf("0x%04X", messageID),
+		"messageID":  fmt.Sprintf("0x%04X", result.MessageID),
+		"connId":     result.ConnID,
 	}).Info("设备定位命令发送成功")
 
 	c.JSON(http.StatusOK, APIResponse{
@@ -709,7 +646,8 @@ func HandleDeviceLocate(c *gin.Context) {
 		Data: map[string]interface{}{
 			"deviceID":   req.DeviceID,
 			"locateTime": req.LocateTime,
-			"messageID":  fmt.Sprintf("0x%04X", messageID),
+			"messageID":  fmt.Sprintf("0x%04X", result.MessageID),
+			"connId":     result.ConnID,
 		},
 	})
 }

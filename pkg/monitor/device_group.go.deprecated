@@ -1,3 +1,16 @@
+// DEPRECATED: 此文件已废弃，请使用 pkg/core/connection_device_group.go
+//
+// 废弃原因：
+// 1. 与 pkg/core/connection_device_group.go 存在架构冲突
+// 2. 不符合"串联设备"模型的业务需求
+// 3. 基于 ICCID 的设备组管理与实际的 TCP 连接管理不匹配
+//
+// 迁移指南：
+// - 使用 core.GetGlobalConnectionGroupManager() 替代 monitor.GetGlobalDeviceGroupManager()
+// - 使用 ConnectionDeviceGroup 替代 DeviceGroup
+// - 设备注册使用 RegisterDevice(conn, deviceID, physicalID, iccid)
+// - 设备查找使用 GetConnectionByDeviceID(deviceID)
+
 package monitor
 
 import (

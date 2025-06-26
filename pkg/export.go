@@ -86,22 +86,22 @@ var Protocol = ProtocolExport{
 	ParseDNYHexString:        protocol.ParseDNYHexString,
 	ParseDNYDataWithConsumed: protocol.ParseDNYDataWithConsumed,
 	ParseMultipleDNYFrames:   protocol.ParseMultipleDNYFrames,
-	
-	IsDNYProtocolData:        protocol.IsDNYProtocolData,
-	IsHexString:              protocol.IsHexString,
-	IsAllDigits:              protocol.IsAllDigits,
-	HandleSpecialMessage:     protocol.IsSpecialMessage, // 修正：指向统一解析器中的函数
-	IOT_SIM_CARD_LENGTH:      constants.IOT_SIM_CARD_LENGTH,
-	IOT_LINK_HEARTBEAT:       constants.IOT_LINK_HEARTBEAT,
-	NewRawDataHook:           protocol.NewRawDataHook,
-	DefaultRawDataHandler:    protocol.DefaultRawDataHandler,
-	PrintRawData:             protocol.PrintRawData,
-	SendDNYResponse:          protocol.SendDNYResponse,
-	SendDNYRequest:           protocol.SendDNYRequest,
-	BuildDNYResponsePacket:   protocol.BuildDNYResponsePacket,
-	BuildDNYRequestPacket:    protocol.BuildDNYRequestPacket,
-	NeedConfirmation:         protocol.NeedConfirmation,
-	GetNextMessageID:         protocol.GetNextMessageID,
+
+	IsDNYProtocolData:      protocol.IsDNYProtocolData,
+	IsHexString:            protocol.IsHexString,
+	IsAllDigits:            protocol.IsAllDigits,
+	HandleSpecialMessage:   protocol.IsSpecialMessage, // 修正：指向统一解析器中的函数
+	IOT_SIM_CARD_LENGTH:    constants.IOT_SIM_CARD_LENGTH,
+	IOT_LINK_HEARTBEAT:     constants.IOT_LINK_HEARTBEAT,
+	NewRawDataHook:         protocol.NewRawDataHook,
+	DefaultRawDataHandler:  protocol.DefaultRawDataHandler,
+	PrintRawData:           protocol.PrintRawData,
+	SendDNYResponse:        protocol.SendDNYResponse,
+	SendDNYRequest:         protocol.SendDNYRequest,
+	BuildDNYResponsePacket: protocol.BuildDNYResponsePacket,
+	BuildDNYRequestPacket:  protocol.BuildDNYRequestPacket,
+	NeedConfirmation:       protocol.NeedConfirmation,
+	GetNextMessageID:       protocol.GetNextMessageID,
 }
 
 // Network 网络相关工具导出
@@ -175,17 +175,19 @@ type MonitorInterface struct {
 	// 🔧 新增：设备监控器接口
 	GetGlobalDeviceMonitor func() monitor.IDeviceMonitor
 
-	// 设备会话管理
-	CreateDeviceSession  func(deviceID string, conn ziface.IConnection) *monitor.DeviceSession
-	GetDeviceSession     func(deviceID string) (*monitor.DeviceSession, bool)
-	GetSessionsByICCID   func(iccid string) map[string]*monitor.DeviceSession
+	// 设备会话管理（已废弃，保留用于向后兼容）
+	// DEPRECATED: 请使用 core.GetGlobalConnectionGroupManager()
+	CreateDeviceSession  func(deviceID string, conn ziface.IConnection) interface{} // 改为interface{}避免编译错误
+	GetDeviceSession     func(deviceID string) (interface{}, bool)                  // 改为interface{}避免编译错误
+	GetSessionsByICCID   func(iccid string) map[string]interface{}                  // 改为interface{}避免编译错误
 	SuspendDeviceSession func(deviceID string) bool
 	ResumeDeviceSession  func(deviceID string, conn ziface.IConnection) bool
 	RemoveDeviceSession  func(deviceID string) bool
 
-	// 设备组管理
-	GetDeviceGroup        func(iccid string) (*monitor.DeviceGroup, bool)
-	AddDeviceToGroup      func(iccid, deviceID string, session *monitor.DeviceSession)
+	// 设备组管理（已废弃，保留用于向后兼容）
+	// DEPRECATED: 请使用 core.GetGlobalConnectionGroupManager()
+	GetDeviceGroup        func(iccid string) (interface{}, bool)            // 返回类型改为interface{}避免编译错误
+	AddDeviceToGroup      func(iccid, deviceID string, session interface{}) // 改为interface{}避免编译错误
 	RemoveDeviceFromGroup func(iccid, deviceID string)
 	BroadcastToGroup      func(iccid string, data []byte) int
 	GetGroupStatistics    func() map[string]interface{}
@@ -217,13 +219,13 @@ var Monitor = MonitorInterface{
 	},
 
 	// 设备会话管理实现（向后兼容，但功能有限）
-	CreateDeviceSession: func(deviceID string, conn ziface.IConnection) *monitor.DeviceSession {
+	CreateDeviceSession: func(deviceID string, conn ziface.IConnection) interface{} {
 		return nil // 统一架构中会话创建由统一管理器处理
 	},
-	GetDeviceSession: func(deviceID string) (*monitor.DeviceSession, bool) {
+	GetDeviceSession: func(deviceID string) (interface{}, bool) {
 		return nil, false // 统一架构中使用不同的会话模型
 	},
-	GetSessionsByICCID: func(iccid string) map[string]*monitor.DeviceSession {
+	GetSessionsByICCID: func(iccid string) map[string]interface{} {
 		return nil // 统一架构中使用不同的会话模型
 	},
 	SuspendDeviceSession: func(deviceID string) bool {
@@ -237,10 +239,10 @@ var Monitor = MonitorInterface{
 	},
 
 	// 设备组管理实现（向后兼容，但功能有限）
-	GetDeviceGroup: func(iccid string) (*monitor.DeviceGroup, bool) {
+	GetDeviceGroup: func(iccid string) (interface{}, bool) {
 		return nil, false // 统一架构中设备组功能已集成
 	},
-	AddDeviceToGroup: func(iccid, deviceID string, session *monitor.DeviceSession) {
+	AddDeviceToGroup: func(iccid, deviceID string, session interface{}) {
 		// 统一架构中设备组功能已集成，无需单独操作
 	},
 	RemoveDeviceFromGroup: func(iccid, deviceID string) {

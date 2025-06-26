@@ -125,6 +125,9 @@ func (d *DNY_Decoder) Intercept(chain ziface.IChain) ziface.IcResp {
 	// 根据消息类型设置路由信息
 	switch firstMsg.MessageType {
 	case "iccid":
+		// 记录到通信日志
+		logger.LogReceiveData(connID, len(firstMsg.RawData), "ICCID", firstMsg.ICCIDValue, 0)
+
 		logger.WithFields(logrus.Fields{
 			"connID": connID,
 			"iccid":  firstMsg.ICCIDValue,
@@ -135,6 +138,9 @@ func (d *DNY_Decoder) Intercept(chain ziface.IChain) ziface.IcResp {
 		iMessage.SetDataLen(uint32(len(firstMsg.RawData)))
 
 	case "heartbeat_link":
+		// 记录到通信日志
+		logger.LogReceiveData(connID, len(firstMsg.RawData), "LINK_HEARTBEAT", "", 0)
+
 		logger.WithFields(logrus.Fields{
 			"connID":  connID,
 			"content": string(firstMsg.RawData),
@@ -145,6 +151,10 @@ func (d *DNY_Decoder) Intercept(chain ziface.IChain) ziface.IcResp {
 		iMessage.SetDataLen(uint32(len(firstMsg.RawData)))
 
 	case "standard":
+		// 记录到通信日志
+		deviceID := fmt.Sprintf("%08X", firstMsg.PhysicalId)
+		logger.LogReceiveData(connID, len(firstMsg.RawData), "DNY_STANDARD", deviceID, uint8(firstMsg.CommandId))
+
 		logger.WithFields(logrus.Fields{
 			"connID":     connID,
 			"frameLen":   len(firstMsg.RawData),

@@ -15,6 +15,9 @@ import (
 // 全局日志实例
 var log = logrus.New()
 
+// 专用通信日志实例
+var communicationLog = logrus.New()
+
 // Init 初始化日志系统
 func Init(cfg *config.LoggerConfig) error {
 	// 设置日志级别
@@ -54,6 +57,42 @@ func Init(cfg *config.LoggerConfig) error {
 		// 默认输出到标准输出
 		log.SetOutput(os.Stdout)
 	}
+
+	return nil
+}
+
+// InitCommunicationLogger 初始化专用通信日志
+func InitCommunicationLogger(logDir string) error {
+	// 设置通信日志格式
+	communicationLog.SetFormatter(&logrus.TextFormatter{
+		TimestampFormat: constants.TimeFormatDefault,
+		FullTimestamp:   true,
+		DisableColors:   true, // 文件日志不需要颜色
+	})
+
+	// 设置日志级别为Info，确保记录所有通信日志
+	communicationLog.SetLevel(logrus.InfoLevel)
+
+	// 创建通信日志文件
+	commLogPath := filepath.Join(logDir, "communication.log")
+	commLogDir := filepath.Dir(commLogPath)
+
+	if err := os.MkdirAll(commLogDir, 0o755); err != nil {
+		return fmt.Errorf("failed to create communication log directory: %w", err)
+	}
+
+	commFile, err := os.OpenFile(commLogPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o666)
+	if err != nil {
+		return fmt.Errorf("failed to open communication log file: %w", err)
+	}
+
+	communicationLog.SetOutput(commFile)
+
+	// 记录初始化信息
+	communicationLog.WithFields(logrus.Fields{
+		"logPath": commLogPath,
+		"level":   "info",
+	}).Info("通信日志系统初始化完成")
 
 	return nil
 }
@@ -213,4 +252,37 @@ func HexDump(message string, data []byte, logHexDump bool) {
 		hexStr := fmt.Sprintf("%X", data)
 		log.WithField("hex_data", hexStr).Debug(message)
 	}
+}
+
+// GetCommunicationLogger 获取通信日志实例
+func GetCommunicationLogger() *logrus.Logger {
+	return communicationLog
+}
+
+// LogCommunication 记录通信数据
+func LogCommunication(direction string, fields logrus.Fields, message string) {
+	communicationLog.WithFields(fields).Info(fmt.Sprintf("[%s] %s", direction, message))
+}
+
+// LogSendData 记录发送数据
+func LogSendData(deviceID string, commandID uint8, messageID uint16, connID uint64, payloadLen int, description string) {
+	LogCommunication("SEND", logrus.Fields{
+		"deviceID":    deviceID,
+		"commandID":   fmt.Sprintf("0x%02X", commandID),
+		"messageID":   fmt.Sprintf("0x%04X", messageID),
+		"connID":      connID,
+		"payloadLen":  payloadLen,
+		"description": description,
+	}, "数据发送")
+}
+
+// LogReceiveData 记录接收数据
+func LogReceiveData(connID uint64, dataLen int, messageType string, deviceID string, commandID uint8) {
+	LogCommunication("RECV", logrus.Fields{
+		"connID":      connID,
+		"dataLen":     dataLen,
+		"messageType": messageType,
+		"deviceID":    deviceID,
+		"commandID":   fmt.Sprintf("0x%02X", commandID),
+	}, "数据接收")
 }

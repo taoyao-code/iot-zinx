@@ -41,8 +41,9 @@ func InitUnifiedArchitecture() {
 		return nil, "", false
 	})
 
-	// 6. 设置monitor包的DNY协议发送器
-	monitor.SetDNYProtocolSender(&unifiedDNYProtocolSenderAdapter{})
+	// 6. 设置monitor包的DNY协议发送器（已废弃）
+	// DEPRECATED: monitor.DeviceGroup 已废弃，此调用不再需要
+	// monitor.SetDNYProtocolSender(&unifiedDNYProtocolSenderAdapter{})
 
 	// 7. 修复：为CommandManager设置命令发送函数，激活重试机制
 	network.SetSendCommandFunc(func(conn ziface.IConnection, physicalID uint32, messageID uint16, command uint8, data []byte) error {
