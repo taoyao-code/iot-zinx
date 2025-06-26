@@ -115,50 +115,48 @@ func (h *ChargeControlHandler) processChargeControl(decodedFrame *protocol.Decod
 	}).Info("收到充电控制请求")
 
 	// 🔧 严格按照协议文档解析设备对充电控制命令的应答
-	// 协议规范：
-	// 标准应答格式(20字节)：命令(1) + 应答(1) + 订单编号(16) + 端口号(1) + 待充端口(2)
-	// 简化应答格式(2字节)：应答(1) + 其他数据(1)
+	// 协议规范（固定格式）：
+	// 设备应答数据部分必须是19字节：应答(1) + 订单编号(16) + 端口号(1) + 待充端口(2)
+	// 注意：命令字段(0x82)已经在DNY协议层处理，这里只处理应答数据部分
 
-	if len(data) < 1 {
+	const EXPECTED_RESPONSE_LENGTH = 19
+
+	if len(data) != EXPECTED_RESPONSE_LENGTH {
 		logger.WithFields(logrus.Fields{
-			"connID":    conn.GetConnID(),
-			"deviceId":  deviceID,
-			"messageID": fmt.Sprintf("0x%04X", messageID),
-			"dataLen":   len(data),
-		}).Error("充电控制应答数据长度不足")
+			"connID":      conn.GetConnID(),
+			"deviceId":    deviceID,
+			"messageID":   fmt.Sprintf("0x%04X", messageID),
+			"expectedLen": EXPECTED_RESPONSE_LENGTH,
+			"actualLen":   len(data),
+			"rawData":     fmt.Sprintf("%02X", data),
+		}).Error("设备应答数据长度不符合协议规范")
+
+		// 🚨 协议不合规：记录详细信息用于调试
+		logger.WithFields(logrus.Fields{
+			"protocolViolation": true,
+			"expectedFormat":    "应答(1字节) + 订单编号(16字节) + 端口号(1字节) + 待充端口(2字节)",
+			"actualData":        fmt.Sprintf("%02X", data),
+			"possibleCauses": []string{
+				"设备实现不规范",
+				"数据传输截断",
+				"协议版本不匹配",
+			},
+		}).Warn("检测到非标准设备应答格式")
+
+		// 发送错误响应
+		responseData := []byte{dny_protocol.ResponseFailed}
+		h.SendResponse(conn, responseData)
 		return
 	}
 
-	// 解析应答状态（第一个字节）
-	responseCode := data[0]
-	var orderNumber string
-	var portNumber byte
-	var waitingPorts uint16
-	var responseFormat string
+	// 严格按照协议文档解析19字节应答数据
+	responseCode := data[0]                                 // 应答状态(1字节)
+	orderBytes := data[1:17]                                // 订单编号(16字节)
+	portNumber := data[17]                                  // 端口号(1字节)
+	waitingPorts := binary.LittleEndian.Uint16(data[18:20]) // 待充端口(2字节)
 
-	// 根据数据长度判断应答格式
-	if len(data) >= 20 {
-		// 标准应答格式：应答(1字节) + 订单编号(16字节) + 端口号(1字节) + 待充端口(2字节)
-		orderBytes := data[1:17]
-		orderNumber = string(bytes.TrimRight(orderBytes, "\x00"))
-		portNumber = data[17]
-		waitingPorts = binary.LittleEndian.Uint16(data[18:20])
-		responseFormat = "标准应答格式(20字节)"
-
-	} else if len(data) >= 2 {
-		// 简化应答格式或非标准格式
-		portNumber = data[1] // 第二个字节可能是端口号
-		orderNumber = "UNKNOWN"
-		waitingPorts = 0
-		responseFormat = fmt.Sprintf("简化应答格式(%d字节)", len(data))
-
-	} else {
-		// 最简应答格式：仅应答状态
-		portNumber = 0
-		orderNumber = "UNKNOWN"
-		waitingPorts = 0
-		responseFormat = "最简应答格式(1字节)"
-	}
+	// 处理订单编号（去除空字符）
+	orderNumber := string(bytes.TrimRight(orderBytes, "\x00"))
 
 	// 根据协议文档解析应答状态含义
 	var statusMeaning string
@@ -207,7 +205,7 @@ func (h *ChargeControlHandler) processChargeControl(decodedFrame *protocol.Decod
 		"portNumber":     portNumber,
 		"orderNumber":    orderNumber,
 		"waitingPorts":   fmt.Sprintf("0x%04X", waitingPorts),
-		"responseFormat": responseFormat,
+		"responseFormat": "标准协议格式(19字节)",
 		"dataLen":        len(data),
 		"rawData":        fmt.Sprintf("%02X", data),
 		"timestamp":      time.Now().Format(constants.TimeFormatDefault),
