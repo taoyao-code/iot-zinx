@@ -239,26 +239,33 @@ func (s *DeviceService) GetDeviceConnection(deviceID string) (ziface.IConnection
 
 // IsDeviceOnline 检查设备是否在线
 func (s *DeviceService) IsDeviceOnline(deviceID string) bool {
-	// 🔧 优先使用设备服务的业务状态（准确状态）
-	status, exists := s.GetDeviceStatus(deviceID)
-	logger.WithFields(logrus.Fields{
-		"deviceId":       deviceID,
-		"businessStatus": status,
-		"businessExists": exists,
-	}).Info("检查设备业务状态")
-
-	if exists && status == string(constants.DeviceStatusOnline) {
-		return true
-	}
-
-	// 如果业务状态不存在或为离线，再检查TCP连接状态作为备选
-	_, connExists := s.GetDeviceConnection(deviceID)
+	// 🔧 修复：优先使用TCP连接状态（实时状态），业务状态作为辅助
+	conn, connExists := s.GetDeviceConnection(deviceID)
 	logger.WithFields(logrus.Fields{
 		"deviceId":   deviceID,
 		"connExists": connExists,
-	}).Info("检查设备TCP连接状态")
+	}).Debug("检查设备TCP连接状态")
 
-	return connExists
+	if !connExists {
+		// 连接不存在，设备肯定离线
+		return false
+	}
+
+	// 检查连接状态属性
+	if statusVal, err := conn.GetProperty(pkg.PropKeyConnStatus); err == nil && statusVal != nil {
+		if connStatus, ok := statusVal.(constants.ConnStatus); ok {
+			isActive := connStatus.IsConsideredActive()
+			logger.WithFields(logrus.Fields{
+				"deviceId":   deviceID,
+				"connStatus": string(connStatus),
+				"isActive":   isActive,
+			}).Debug("检查连接状态属性")
+			return isActive
+		}
+	}
+
+	// 如果没有状态属性，有连接就认为在线
+	return true
 }
 
 // SendCommandToDevice 发送命令到设备

@@ -88,11 +88,8 @@ func HandleDeviceStatus(c *gin.Context) {
 		return
 	}
 
-	// 🔧 使用设备组管理器：检查设备连接状态
-	unifiedSystem := pkg.GetUnifiedSystem()
-	_, exists := unifiedSystem.GroupManager.GetConnectionByDeviceID(deviceID)
-
-	if !exists {
+	// 🔧 修复：使用设备服务统一检查设备状态
+	if !ctx.DeviceService.IsDeviceOnline(deviceID) {
 		c.JSON(http.StatusNotFound, APIResponse{
 			Code:    int(constants.ErrCodeDeviceNotFound),
 			Message: "设备不存在",
@@ -101,8 +98,8 @@ func HandleDeviceStatus(c *gin.Context) {
 		return
 	}
 
-	// 使用设备组管理器获取设备信息
-	deviceInfo, err := unifiedSystem.GroupManager.GetDeviceInfo(deviceID)
+	// 使用设备服务获取设备连接信息
+	deviceInfo, err := ctx.DeviceService.GetDeviceConnectionInfo(deviceID)
 	if err != nil {
 		c.JSON(http.StatusOK, APIResponse{
 			Code:    int(constants.ErrCodeDeviceOffline),
@@ -124,8 +121,9 @@ func HandleDeviceStatus(c *gin.Context) {
 			"deviceId":      deviceInfo.DeviceID,
 			"iccid":         deviceInfo.ICCID,
 			"isOnline":      deviceInfo.IsOnline,
-			"status":        "online",
+			"status":        deviceInfo.Status,
 			"lastHeartbeat": deviceInfo.LastHeartbeat,
+			"heartbeatTime": deviceInfo.HeartbeatTime,
 			"remoteAddr":    deviceInfo.RemoteAddr,
 		},
 	})

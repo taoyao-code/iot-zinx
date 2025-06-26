@@ -282,29 +282,15 @@ func (h *DeviceRegisterHandler) handleDeviceRegister(deviceId string, physicalId
 		"timestamp":         now.Format(constants.TimeFormatDefault),
 	}).Info("设备注册成功，连接状态更新为Active，ReadDeadline已重置")
 
-	// 8. 通知设备服务设备上线 - 根据智能决策决定是否通知
-	if stateInterface, exists := h.deviceStates.Load(deviceId); exists {
-		state := stateInterface.(*DeviceRegistrationState)
-		if state.LastDecision != nil && state.LastDecision.ShouldNotifyBusiness {
-			if ctx := http.GetGlobalHandlerContext(); ctx != nil && ctx.DeviceService != nil {
-				ctx.DeviceService.HandleDeviceOnline(deviceId, iccidFromProp)
-				logger.WithFields(logrus.Fields{
-					"deviceId": deviceId,
-					"reason":   state.LastDecision.Reason,
-				}).Info("已通知业务平台设备上线")
-			}
-		} else {
-			logger.WithFields(logrus.Fields{
-				"deviceId": deviceId,
-				"reason":   state.LastDecision.Reason,
-			}).Debug("根据智能决策跳过业务平台通知")
-		}
+	// 8. 通知设备服务设备上线 - 🔧 修复：确保每次注册都更新设备状态
+	if ctx := http.GetGlobalHandlerContext(); ctx != nil && ctx.DeviceService != nil {
+		ctx.DeviceService.HandleDeviceOnline(deviceId, iccidFromProp)
+		logger.WithFields(logrus.Fields{
+			"deviceId": deviceId,
+			"iccid":    iccidFromProp,
+		}).Info("设备上线")
 	} else {
-		// 兜底：如果没有决策信息，默认通知（向后兼容）
-		if ctx := http.GetGlobalHandlerContext(); ctx != nil && ctx.DeviceService != nil {
-			ctx.DeviceService.HandleDeviceOnline(deviceId, iccidFromProp)
-			logger.WithField("deviceId", deviceId).Info("兜底通知业务平台设备上线")
-		}
+		logger.WithField("deviceId", deviceId).Warn("设备服务未初始化，无法通知设备上线")
 	}
 
 	// 9. 发送注册响应

@@ -104,6 +104,14 @@ func (s *ChargeControlService) SendChargeControlCommand(req *dto.ChargeControlRe
 		"qrCodeLight":       req.QRCodeLight,
 	}).Info("发送充电控制命令")
 
+	// 🔧 修复：注册命令到命令管理器进行跟踪
+	cmdManager := pkg.Network.GetCommandManager()
+	if cmdManager != nil {
+		// 构建命令数据用于跟踪
+		cmdData := []byte{req.PortNumber, req.ChargeCommand}
+		cmdManager.RegisterCommand(conn, uint32(physicalID), messageID, 0x82, cmdData)
+	}
+
 	// 通知监视器发送数据
 	s.monitor.OnRawDataSent(conn, packet)
 
