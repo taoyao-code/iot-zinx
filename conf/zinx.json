@@ -9,7 +9,7 @@
   "LogFile": "zinx.log",
   "LogIsolationLevel": 0,
   "Mode": "tcp",
-  "TCPWriteTimeout": "60s",
+  "TCPWriteTimeout": "120s",
   "TCPReadTimeout": "300s",
   "SendBufferSize": 131072,
   "ReceiveBufferSize": 131072,

@@ -5,6 +5,13 @@ import (
 	"github.com/sirupsen/logrus"
 )
 
+// INetworkManager 网络管理器接口（前向声明）
+type INetworkManager interface {
+	GetTCPWriter() interface{}
+	GetCommandQueue() interface{}
+	GetCommandManager() interface{}
+}
+
 // IUnifiedSessionManager 统一会话管理器接口
 // 替代所有分散的管理器接口
 type IUnifiedSessionManager interface {
@@ -77,6 +84,7 @@ type UnifiedSystemInterface struct {
 	Monitor        IUnifiedConnectionMonitor
 	Logger         IUnifiedLogger
 	GroupManager   *ConnectionGroupManager // 新增：设备组管理器
+	Network        INetworkManager         // 新增：网络管理器
 }
 
 // GetUnifiedSystem 获取统一系统接口
@@ -86,6 +94,7 @@ func GetUnifiedSystem() *UnifiedSystemInterface {
 		Monitor:        GetUnifiedMonitor(),
 		Logger:         GetUnifiedLogger(),
 		GroupManager:   GetGlobalConnectionGroupManager(), // 新增：设备组管理器
+		Network:        GetGlobalNetworkManager(),         // 新增：网络管理器
 	}
 }
 

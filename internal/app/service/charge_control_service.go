@@ -12,6 +12,7 @@ import (
 	"github.com/bujia-iot/iot-zinx/pkg"
 	"github.com/bujia-iot/iot-zinx/pkg/constants"
 	"github.com/bujia-iot/iot-zinx/pkg/monitor"
+	"github.com/bujia-iot/iot-zinx/pkg/network"
 	"github.com/sirupsen/logrus"
 )
 
@@ -104,6 +105,31 @@ func (s *ChargeControlService) SendChargeControlCommand(req *dto.ChargeControlRe
 		"qrCodeLight":       req.QRCodeLight,
 	}).Info("发送充电控制命令")
 
+	// 🔧 优化：使用命令队列和TCP写入器发送命令
+	if unifiedSystem != nil && unifiedSystem.Network != nil {
+		// 获取TCP写入器
+		if tcpWriterInterface := unifiedSystem.Network.GetTCPWriter(); tcpWriterInterface != nil {
+			// 类型断言为具体的TCP写入器
+			if tcpWriter, ok := tcpWriterInterface.(*network.TCPWriter); ok {
+				// 使用带重试的TCP写入器
+				err = tcpWriter.SendBuffMsgWithRetry(conn, 0, packet)
+			} else {
+				// 降级到普通发送
+				err = conn.SendBuffMsg(0, packet)
+			}
+		} else {
+			// 降级到普通发送
+			err = conn.SendBuffMsg(0, packet)
+		}
+	} else {
+		// 降级到普通发送
+		err = conn.SendBuffMsg(0, packet)
+	}
+
+	if err != nil {
+		return fmt.Errorf("发送充电控制命令失败: %w", err)
+	}
+
 	// 🔧 修复：注册命令到命令管理器进行跟踪
 	cmdManager := pkg.Network.GetCommandManager()
 	if cmdManager != nil {
@@ -114,12 +140,6 @@ func (s *ChargeControlService) SendChargeControlCommand(req *dto.ChargeControlRe
 
 	// 通知监视器发送数据
 	s.monitor.OnRawDataSent(conn, packet)
-
-	// 发送数据到设备
-	err = conn.SendBuffMsg(0, packet)
-	if err != nil {
-		return fmt.Errorf("发送充电控制命令失败: %w", err)
-	}
 
 	return nil
 }

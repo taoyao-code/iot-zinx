@@ -358,6 +358,7 @@ func (h *DeviceRegisterHandler) analyzeRegistrationRequest(deviceId string, conn
 	// 获取或创建设备状态
 	stateInterface, _ := h.deviceStates.LoadOrStore(deviceId, &DeviceRegistrationState{
 		FirstRegistrationTime: now,
+		LastRegistrationTime:  now, // 🔧 修复：初始化为当前时间，避免时间计算溢出
 		RegistrationCount:     0,
 		LastDecision:          nil,
 	})

@@ -138,16 +138,26 @@ func (h *HeartbeatHandler) processHeartbeat(decodedFrame *protocol.DecodedDNYFra
 		"isRegistered":      deviceSession.DeviceID != "",
 	}).Debug("🔧 心跳设备ID匹配检查")
 
-	// 🔧 使用设备组管理器：主从设备心跳处理
+	// 🔧 修复：设备组心跳处理 - 如果设备组不存在，记录但不中断处理
 	unifiedSystem := pkg.GetUnifiedSystem()
 	heartbeatErr := unifiedSystem.GroupManager.HandleHeartbeat(deviceId, conn)
 	if heartbeatErr != nil {
-		logger.WithFields(logrus.Fields{
-			"deviceId": deviceId,
-			"connID":   conn.GetConnID(),
-			"error":    heartbeatErr.Error(),
-		}).Error("设备组心跳处理失败")
-		return
+		if strings.Contains(heartbeatErr.Error(), "设备组不存在") {
+			// 设备组不存在是正常情况（心跳可能在注册之前到达）
+			logger.WithFields(logrus.Fields{
+				"deviceId": deviceId,
+				"connID":   conn.GetConnID(),
+				"reason":   "设备尚未注册，心跳将在注册后正常处理",
+			}).Debug("设备组心跳处理：设备组不存在")
+			// 继续处理心跳，不返回错误
+		} else {
+			logger.WithFields(logrus.Fields{
+				"deviceId": deviceId,
+				"connID":   conn.GetConnID(),
+				"error":    heartbeatErr.Error(),
+			}).Error("设备组心跳处理失败")
+			return
+		}
 	}
 
 	// 确保设备在连接组中（通过连接组管理器验证）

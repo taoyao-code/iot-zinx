@@ -49,3 +49,15 @@ type IConnectionHooks interface {
 	// SetOnConnectionClosedFunc 设置连接关闭回调函数
 	SetOnConnectionClosedFunc(fn func(conn ziface.IConnection))
 }
+
+// INetworkManager 网络管理器接口
+type INetworkManager interface {
+	// 获取TCP写入器
+	GetTCPWriter() *TCPWriter
+	
+	// 获取命令队列
+	GetCommandQueue() *CommandQueue
+	
+	// 获取命令管理器
+	GetCommandManager() ICommandManager
+}
