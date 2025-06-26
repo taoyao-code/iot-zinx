@@ -519,17 +519,8 @@ func HandleStopCharging(c *gin.Context) {
 		return
 	}
 
-	// 检查设备是否在线
-	if !ctx.DeviceService.IsDeviceOnline(req.DeviceID) {
-		c.JSON(http.StatusNotFound, APIResponse{
-			Code:    404,
-			Message: "设备不在线",
-		})
-		return
-	}
-
-	// 使用统一的充电控制服务
-	chargeService := service.NewChargeControlService(pkg.Monitor.GetGlobalMonitor())
+	// 使用统一的充电控制服务（带设备状态检查器）
+	chargeService := service.NewChargeControlServiceWithDeviceChecker(pkg.Monitor.GetGlobalMonitor(), ctx.DeviceService)
 
 	// 构建统一的充电控制请求
 	chargeReq := &dto.ChargeControlRequest{
@@ -541,10 +532,41 @@ func HandleStopCharging(c *gin.Context) {
 
 	// 发送停止充电命令
 	if err := chargeService.SendChargeControlCommand(chargeReq); err != nil {
-		c.JSON(http.StatusInternalServerError, APIResponse{
-			Code:    500,
-			Message: "发送停止充电命令失败: " + err.Error(),
-		})
+		// 🔧 修复：根据错误类型返回不同的HTTP状态码和错误信息
+		if deviceErr, ok := err.(*constants.DeviceError); ok {
+			switch deviceErr.Code {
+			case constants.ErrCodeDeviceNotFound:
+				c.JSON(http.StatusNotFound, APIResponse{
+					Code:    int(constants.ErrCodeDeviceNotFound),
+					Message: "设备不存在",
+				})
+			case constants.ErrCodeDeviceOffline:
+				c.JSON(http.StatusBadRequest, APIResponse{
+					Code:    int(constants.ErrCodeDeviceOffline),
+					Message: "设备离线，无法执行停止充电操作",
+				})
+			case constants.ErrCodeConnectionLost:
+				c.JSON(http.StatusBadRequest, APIResponse{
+					Code:    int(constants.ErrCodeConnectionLost),
+					Message: "设备连接丢失，请稍后重试",
+				})
+			case constants.ErrCodeInvalidState:
+				c.JSON(http.StatusBadRequest, APIResponse{
+					Code:    int(constants.ErrCodeInvalidState),
+					Message: deviceErr.Message,
+				})
+			default:
+				c.JSON(http.StatusInternalServerError, APIResponse{
+					Code:    int(deviceErr.Code),
+					Message: deviceErr.Message,
+				})
+			}
+		} else {
+			c.JSON(http.StatusInternalServerError, APIResponse{
+				Code:    500,
+				Message: "发送停止充电命令失败: " + err.Error(),
+			})
+		}
 		return
 	}
 
