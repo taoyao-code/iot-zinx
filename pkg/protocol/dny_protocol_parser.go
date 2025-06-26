@@ -218,6 +218,10 @@ func BuildDNYResponsePacketUnified(msg *dny_protocol.Message) ([]byte, error) {
 	fullDataForChecksum.Write(checksumContent.Bytes())
 	dataForChecksum := fullDataForChecksum.Bytes()
 
+	logger.WithFields(logrus.Fields{
+		"dataForChecksum": hex.EncodeToString(dataForChecksum),
+	}).Info("用于计算校验和的数据")
+
 	checksum, err := CalculatePacketChecksumInternal(dataForChecksum)
 	if err != nil {
 		return nil, fmt.Errorf("failed to calculate checksum for unified packet: %w", err)
