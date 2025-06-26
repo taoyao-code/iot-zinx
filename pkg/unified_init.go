@@ -7,6 +7,7 @@ import (
 	"github.com/bujia-iot/iot-zinx/internal/infrastructure/logger"
 	"github.com/bujia-iot/iot-zinx/pkg/core"
 	"github.com/bujia-iot/iot-zinx/pkg/monitor"
+	"github.com/bujia-iot/iot-zinx/pkg/network"
 	"github.com/bujia-iot/iot-zinx/pkg/protocol"
 )
 
@@ -42,6 +43,9 @@ func InitUnifiedArchitecture() {
 
 	// 6. 设置monitor包的DNY协议发送器
 	monitor.SetDNYProtocolSender(&unifiedDNYProtocolSenderAdapter{})
+
+	// 7. 修复：为CommandManager设置命令发送函数，激活重试机制
+	network.SetSendCommandFunc(protocol.SendDNYResponse)
 
 	logger.Info("统一架构初始化完成")
 }
