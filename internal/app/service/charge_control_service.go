@@ -48,100 +48,11 @@ func NewChargeControlServiceWithDeviceChecker(monitor monitor.IConnectionMonitor
 
 // SendChargeControlCommand 发送充电控制命令
 func (s *ChargeControlService) SendChargeControlCommand(req *dto.ChargeControlRequest) error {
-	// 验证请求参数
-	if err := req.Validate(); err != nil {
-		return fmt.Errorf("请求参数验证失败: %w", err)
-	}
-
-	// 🔧 修复：严格按照文档要求，直接使用标准格式的DeviceID，无需转换
-	// 文档要求：所有服务层和API层的deviceId参数，都应视为标准格式的DeviceID，直接使用
-
-	// 🔧 使用设备组管理器：检查设备连接状态
-	unifiedSystem := pkg.GetUnifiedSystem()
-	conn, deviceExists := unifiedSystem.GroupManager.GetConnectionByDeviceID(req.DeviceID)
-
-	if !deviceExists {
-		return constants.NewDeviceError(constants.ErrCodeDeviceNotFound, req.DeviceID, "设备不存在或未连接")
-	}
-
-	// 解析设备ID为物理ID
-	physicalID, err := strconv.ParseUint(req.DeviceID, 16, 32)
-	if err != nil {
-		return fmt.Errorf("设备ID格式错误: %w", err)
-	}
-
 	// 生成消息ID - 使用全局消息ID管理器
 	messageID := pkg.Protocol.GetNextMessageID()
 
-	// 构建充电控制协议包
-	packet := dny_protocol.BuildChargeControlPacket(
-		uint32(physicalID),
-		messageID,
-		req.RateMode,
-		req.Balance,
-		req.PortNumber,
-		req.ChargeCommand,
-		req.ChargeDuration,
-		req.OrderNumber,
-		req.MaxChargeDuration,
-		req.MaxPower,
-		req.QRCodeLight,
-	)
-
-	// 记录发送日志
-	logger.WithFields(logrus.Fields{
-		"connID":            conn.GetConnID(),
-		"deviceId":          req.DeviceID,
-		"physicalId":        fmt.Sprintf("0x%08X", physicalID),
-		"messageId":         fmt.Sprintf("0x%04X", messageID),
-		"rateMode":          req.RateMode,
-		"balance":           req.Balance,
-		"portNumber":        req.PortNumber,
-		"chargeCommand":     req.ChargeCommand,
-		"chargeDuration":    req.ChargeDuration,
-		"orderNumber":       req.OrderNumber,
-		"maxChargeDuration": req.MaxChargeDuration,
-		"maxPower":          req.MaxPower,
-		"qrCodeLight":       req.QRCodeLight,
-	}).Info("发送充电控制命令")
-
-	// 🔧 优化：使用命令队列和TCP写入器发送命令
-	if unifiedSystem != nil && unifiedSystem.Network != nil {
-		// 获取TCP写入器
-		if tcpWriterInterface := unifiedSystem.Network.GetTCPWriter(); tcpWriterInterface != nil {
-			// 类型断言为具体的TCP写入器
-			if tcpWriter, ok := tcpWriterInterface.(*network.TCPWriter); ok {
-				// 使用带重试的TCP写入器
-				err = tcpWriter.SendBuffMsgWithRetry(conn, 0, packet)
-			} else {
-				// 降级到普通发送
-				err = conn.SendBuffMsg(0, packet)
-			}
-		} else {
-			// 降级到普通发送
-			err = conn.SendBuffMsg(0, packet)
-		}
-	} else {
-		// 降级到普通发送
-		err = conn.SendBuffMsg(0, packet)
-	}
-
-	if err != nil {
-		return fmt.Errorf("发送充电控制命令失败: %w", err)
-	}
-
-	// 🔧 修复：注册命令到命令管理器进行跟踪
-	cmdManager := pkg.Network.GetCommandManager()
-	if cmdManager != nil {
-		// 构建命令数据用于跟踪
-		cmdData := []byte{req.PortNumber, req.ChargeCommand}
-		cmdManager.RegisterCommand(conn, uint32(physicalID), messageID, 0x82, cmdData)
-	}
-
-	// 通知监视器发送数据
-	s.monitor.OnRawDataSent(conn, packet)
-
-	return nil
+	// 调用统一的发送函数
+	return s.sendChargeControlCommandWithMessageID(req, messageID)
 }
 
 // ProcessChargeControlResponse 处理充电控制响应
@@ -483,17 +394,19 @@ func (s *ChargeControlService) GetChargeStatusAsync(
 	return nil
 }
 
-// sendChargeControlCommandWithMessageID 发送充电控制命令（指定消息ID）
+// sendChargeControlCommandWithMessageID 发送充电控制命令（指定消息ID）- 统一发送函数
 func (s *ChargeControlService) sendChargeControlCommandWithMessageID(req *dto.ChargeControlRequest, messageID uint16) error {
 	// 验证请求参数
 	if err := req.Validate(); err != nil {
 		return fmt.Errorf("请求参数验证失败: %w", err)
 	}
 
-	// 获取设备连接
-	conn, exists := s.monitor.GetConnectionByDeviceId(req.DeviceID)
-	if !exists {
-		return fmt.Errorf("设备 %s 不在线", req.DeviceID)
+	// 🔧 修复：使用统一的设备连接获取方式
+	unifiedSystem := pkg.GetUnifiedSystem()
+	conn, deviceExists := unifiedSystem.GroupManager.GetConnectionByDeviceID(req.DeviceID)
+
+	if !deviceExists {
+		return constants.NewDeviceError(constants.ErrCodeDeviceNotFound, req.DeviceID, "设备不存在或未连接")
 	}
 
 	// 解析设备ID为物理ID
@@ -532,16 +445,58 @@ func (s *ChargeControlService) sendChargeControlCommandWithMessageID(req *dto.Ch
 		"maxChargeDuration": req.MaxChargeDuration,
 		"maxPower":          req.MaxPower,
 		"qrCodeLight":       req.QRCodeLight,
-	}).Info("发送充电控制命令（指定消息ID）")
+	}).Info("发送充电控制命令")
 
-	// 通知监视器发送数据
-	s.monitor.OnRawDataSent(conn, packet)
+	// 🔧 修复：使用统一的发送逻辑，支持TCP写入器重试
+	if unifiedSystem != nil && unifiedSystem.Network != nil {
+		// 获取TCP写入器
+		if tcpWriterInterface := unifiedSystem.Network.GetTCPWriter(); tcpWriterInterface != nil {
+			// 类型断言为具体的TCP写入器
+			if tcpWriter, ok := tcpWriterInterface.(*network.TCPWriter); ok {
+				// 使用带重试的TCP写入器
+				err = tcpWriter.SendBuffMsgWithRetry(conn, 0, packet)
+			} else {
+				// 降级到普通发送
+				err = conn.SendBuffMsg(0, packet)
+			}
+		} else {
+			// 降级到普通发送
+			err = conn.SendBuffMsg(0, packet)
+		}
+	} else {
+		// 降级到普通发送
+		err = conn.SendBuffMsg(0, packet)
+	}
 
-	// 发送数据到设备
-	err = conn.SendBuffMsg(0, packet)
 	if err != nil {
 		return fmt.Errorf("发送充电控制命令失败: %w", err)
 	}
+
+	// 🔧 修复：统一的命令注册逻辑
+	cmdManager := pkg.Network.GetCommandManager()
+	if cmdManager != nil {
+		// 提取完整的协议数据部分（不包括DNY头部和校验和）
+		// packet格式：DNY(3) + 长度(2) + 物理ID(4) + 消息ID(2) + 命令(1) + 数据(37) + 校验(2)
+		// 我们需要保存：命令(1) + 数据(37) = 38字节，用于重发时重新构建完整包
+		if len(packet) >= 51 { // 3+2+4+2+1+37+2 = 51字节
+			// 提取命令和数据部分：从第12字节开始的38字节（命令1字节+数据37字节）
+			cmdData := packet[12 : 12+38] // 命令(1字节) + 完整充电控制数据(37字节)
+			cmdManager.RegisterCommand(conn, uint32(physicalID), messageID, 0x82, cmdData)
+		} else {
+			// 降级处理：如果包格式异常，使用简化数据
+			cmdData := []byte{req.PortNumber, req.ChargeCommand}
+			cmdManager.RegisterCommand(conn, uint32(physicalID), messageID, 0x82, cmdData)
+			logger.WithFields(logrus.Fields{
+				"expectedLen": 51,
+				"actualLen":   len(packet),
+				"deviceId":    req.DeviceID,
+				"messageId":   fmt.Sprintf("0x%04X", messageID),
+			}).Warn("充电控制包长度异常，使用简化数据注册命令")
+		}
+	}
+
+	// 通知监视器发送数据
+	s.monitor.OnRawDataSent(conn, packet)
 
 	return nil
 }

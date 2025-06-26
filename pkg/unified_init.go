@@ -45,7 +45,28 @@ func InitUnifiedArchitecture() {
 	monitor.SetDNYProtocolSender(&unifiedDNYProtocolSenderAdapter{})
 
 	// 7. 修复：为CommandManager设置命令发送函数，激活重试机制
-	network.SetSendCommandFunc(protocol.SendDNYResponse)
+	network.SetSendCommandFunc(func(conn ziface.IConnection, physicalID uint32, messageID uint16, command uint8, data []byte) error {
+		// 🔧 修复：处理充电控制命令的特殊数据格式
+		// 对于充电控制命令(0x82)，data可能包含命令字节+37字节数据，需要特殊处理
+		var actualData []byte
+
+		if command == 0x82 && len(data) == 38 {
+			// 充电控制命令：data格式为 命令(1字节) + 充电控制数据(37字节)
+			// 验证第一个字节是否为命令字节
+			if data[0] == command {
+				// 提取实际的充电控制数据（跳过第一个命令字节）
+				actualData = data[1:]
+			} else {
+				// 如果第一个字节不是命令字节，直接使用原始数据
+				actualData = data
+			}
+		} else {
+			// 其他命令或格式，直接使用原始数据
+			actualData = data
+		}
+
+		return protocol.SendDNYResponse(conn, physicalID, messageID, command, actualData)
+	})
 
 	logger.Info("统一架构初始化完成")
 }
