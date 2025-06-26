@@ -1,6 +1,8 @@
 package handlers
 
 import (
+	"bytes"
+	"encoding/binary"
 	"fmt"
 	"time"
 
@@ -112,33 +114,55 @@ func (h *ChargeControlHandler) processChargeControl(decodedFrame *protocol.Decod
 		"timestamp": time.Now().Format(constants.TimeFormatDefault),
 	}).Info("收到充电控制请求")
 
-	// 解析控制参数
-	if len(data) < 4 {
+	// 🔧 修复：正确解析充电控制响应数据
+	// 根据协议文档，设备响应格式：应答(1字节) + [订单编号(16字节) + 端口号(1字节) + 待充端口(2字节)]
+	if len(data) < 1 {
 		logger.WithFields(logrus.Fields{
 			"connID":    conn.GetConnID(),
 			"deviceId":  deviceID,
 			"messageID": fmt.Sprintf("0x%04X", messageID),
 			"dataLen":   len(data),
-		}).Error("充电控制数据长度不足")
-		// 发送错误响应
-		responseData := []byte{dny_protocol.ResponseFailed}
-		h.SendResponse(conn, responseData)
+		}).Error("充电控制响应数据长度不足")
 		return
 	}
 
-	// 提取充电控制参数
-	gunNumber := data[0]
-	controlCommand := data[1]
+	// 解析响应状态
+	responseStatus := data[0]
+	var orderNumber string
+	var portNumber byte
+	var waitPorts uint16
+
+	// 解析完整响应（如果数据足够）
+	if len(data) >= 20 {
+		// 完整响应格式：应答(1字节) + 订单编号(16字节) + 端口号(1字节) + 待充端口(2字节)
+		orderBytes := data[1:17]
+		orderNumber = string(bytes.TrimRight(orderBytes, "\x00"))
+		portNumber = data[17]
+		if len(data) >= 20 {
+			waitPorts = binary.LittleEndian.Uint16(data[18:20])
+		}
+	} else if len(data) >= 2 {
+		// 简化响应格式：应答(1字节) + 端口号(1字节)
+		portNumber = data[1]
+		orderNumber = "UNKNOWN"
+	} else {
+		// 最简响应格式：仅应答状态
+		portNumber = 0
+		orderNumber = "UNKNOWN"
+	}
 
 	logger.WithFields(logrus.Fields{
 		"connID":         conn.GetConnID(),
 		"deviceId":       deviceID,
 		"messageID":      fmt.Sprintf("0x%04X", messageID),
 		"sessionId":      deviceSession.DeviceID,
-		"gunNumber":      gunNumber,
-		"controlCommand": fmt.Sprintf("0x%02X", controlCommand),
+		"responseStatus": fmt.Sprintf("0x%02X", responseStatus),
+		"orderNumber":    orderNumber,
+		"portNumber":     portNumber,
+		"waitPorts":      fmt.Sprintf("0x%04X", waitPorts),
+		"dataLen":        len(data),
 		"timestamp":      time.Now().Format(constants.TimeFormatDefault),
-	}).Info("充电控制参数")
+	}).Info("充电控制响应解析")
 
 	// 成功响应
 	responseData := []byte{dny_protocol.ResponseSuccess}
@@ -189,10 +213,11 @@ func (h *ChargeControlHandler) processChargeControl(decodedFrame *protocol.Decod
 	}
 
 	logger.WithFields(logrus.Fields{
-		"connID":    conn.GetConnID(),
-		"deviceId":  deviceSession.DeviceID,
-		"gunNumber": gunNumber,
-		"command":   fmt.Sprintf("0x%02X", controlCommand),
-		"timestamp": time.Now().Format(constants.TimeFormatDefault),
-	}).Info("充电控制处理完成")
+		"connID":         conn.GetConnID(),
+		"deviceId":       deviceSession.DeviceID,
+		"responseStatus": fmt.Sprintf("0x%02X", responseStatus),
+		"portNumber":     portNumber,
+		"orderNumber":    orderNumber,
+		"timestamp":      time.Now().Format(constants.TimeFormatDefault),
+	}).Info("充电控制响应处理完成")
 }
