@@ -2,7 +2,9 @@ package service
 
 import (
 	"fmt"
+	"net"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/aceld/zinx/ziface"
@@ -447,27 +449,8 @@ func (s *ChargeControlService) sendChargeControlCommandWithMessageID(req *dto.Ch
 		"qrCodeLight":       req.QRCodeLight,
 	}).Info("发送充电控制命令")
 
-	// 🔧 修复：使用统一的发送逻辑，支持TCP写入器重试
-	if unifiedSystem != nil && unifiedSystem.Network != nil {
-		// 获取TCP写入器
-		if tcpWriterInterface := unifiedSystem.Network.GetTCPWriter(); tcpWriterInterface != nil {
-			// 类型断言为具体的TCP写入器
-			if tcpWriter, ok := tcpWriterInterface.(*network.TCPWriter); ok {
-				// 使用带重试的TCP写入器
-				err = tcpWriter.SendBuffMsgWithRetry(conn, 0, packet)
-			} else {
-				// 降级到普通发送
-				err = conn.SendBuffMsg(0, packet)
-			}
-		} else {
-			// 降级到普通发送
-			err = conn.SendBuffMsg(0, packet)
-		}
-	} else {
-		// 降级到普通发送
-		err = conn.SendBuffMsg(0, packet)
-	}
-
+	// 🔧 修复：增强的发送逻辑，包含连接健康检查和智能重试
+	err = s.sendPacketWithHealthCheck(conn, packet, req.DeviceID)
 	if err != nil {
 		return fmt.Errorf("发送充电控制命令失败: %w", err)
 	}
@@ -802,6 +785,214 @@ func (s *ChargeControlService) initiateRefund(response *dto.ChargeControlRespons
 	// return s.refundService.ProcessRefund(refundRequest)
 
 	return nil
+}
+
+// ======================== 网络连接优化方法 ========================
+
+// sendPacketWithHealthCheck 带连接健康检查的数据包发送
+func (s *ChargeControlService) sendPacketWithHealthCheck(conn ziface.IConnection, packet []byte, deviceID string) error {
+	// 1. 连接健康检查
+	if !s.isConnectionHealthy(conn, deviceID) {
+		return fmt.Errorf("连接不健康，拒绝发送数据包")
+	}
+
+	// 2. 尝试使用增强的TCP写入器
+	unifiedSystem := pkg.GetUnifiedSystem()
+	if unifiedSystem != nil && unifiedSystem.Network != nil {
+		if tcpWriterInterface := unifiedSystem.Network.GetTCPWriter(); tcpWriterInterface != nil {
+			if tcpWriter, ok := tcpWriterInterface.(*network.TCPWriter); ok {
+				// 使用带重试的TCP写入器
+				return tcpWriter.SendBuffMsgWithRetry(conn, 0, packet)
+			}
+		}
+	}
+
+	// 3. 降级到普通发送，但增加超时保护
+	return s.sendWithTimeoutProtection(conn, packet, deviceID)
+}
+
+// isConnectionHealthy 检查连接健康状态
+func (s *ChargeControlService) isConnectionHealthy(conn ziface.IConnection, deviceID string) bool {
+	// 1. 基本连接检查
+	if conn == nil {
+		logger.WithField("deviceID", deviceID).Error("连接为空")
+		return false
+	}
+
+	// 2. 检查连接状态
+	if conn.GetConnID() <= 0 {
+		logger.WithFields(logrus.Fields{
+			"deviceID": deviceID,
+			"connID":   conn.GetConnID(),
+		}).Error("连接ID无效")
+		return false
+	}
+
+	// 3. 检查最后活动时间
+	if lastActivity, err := conn.GetProperty(constants.PropKeyLastHeartbeat); err == nil {
+		if timestamp, ok := lastActivity.(int64); ok {
+			lastTime := time.Unix(timestamp, 0)
+			inactiveTime := time.Since(lastTime)
+
+			// 如果超过5分钟无活动，认为连接不健康
+			if inactiveTime > 5*time.Minute {
+				logger.WithFields(logrus.Fields{
+					"deviceID":     deviceID,
+					"connID":       conn.GetConnID(),
+					"inactiveTime": inactiveTime.String(),
+				}).Warn("连接长时间无活动，可能不健康")
+				return false
+			}
+		}
+	}
+
+	// 4. 检查TCP连接状态
+	if rawConn := conn.GetConnection(); rawConn != nil {
+		if tcpConn, ok := rawConn.(*net.TCPConn); ok {
+			// 尝试设置一个很短的写超时来测试连接
+			testDeadline := time.Now().Add(1 * time.Millisecond)
+			if err := tcpConn.SetWriteDeadline(testDeadline); err != nil {
+				logger.WithFields(logrus.Fields{
+					"deviceID": deviceID,
+					"connID":   conn.GetConnID(),
+					"error":    err.Error(),
+				}).Warn("无法设置写超时，连接可能已断开")
+				return false
+			}
+			// 重置写超时
+			tcpConn.SetWriteDeadline(time.Time{})
+		}
+	}
+
+	return true
+}
+
+// sendWithTimeoutProtection 带超时保护的发送
+func (s *ChargeControlService) sendWithTimeoutProtection(conn ziface.IConnection, packet []byte, deviceID string) error {
+	// 设置动态写超时
+	if rawConn := conn.GetConnection(); rawConn != nil {
+		if tcpConn, ok := rawConn.(*net.TCPConn); ok {
+			// 根据数据包大小计算超时时间
+			timeout := s.calculateWriteTimeout(len(packet))
+			writeDeadline := time.Now().Add(timeout)
+
+			if err := tcpConn.SetWriteDeadline(writeDeadline); err != nil {
+				logger.WithFields(logrus.Fields{
+					"deviceID": deviceID,
+					"connID":   conn.GetConnID(),
+					"timeout":  timeout.String(),
+					"error":    err.Error(),
+				}).Warn("设置动态写超时失败")
+			} else {
+				logger.WithFields(logrus.Fields{
+					"deviceID": deviceID,
+					"connID":   conn.GetConnID(),
+					"timeout":  timeout.String(),
+					"dataSize": len(packet),
+				}).Debug("设置动态写超时成功")
+			}
+		}
+	}
+
+	// 执行发送
+	err := conn.SendBuffMsg(0, packet)
+
+	// 记录发送结果
+	if err != nil {
+		isTimeout := s.isTimeoutError(err)
+		logger.WithFields(logrus.Fields{
+			"deviceID":  deviceID,
+			"connID":    conn.GetConnID(),
+			"dataSize":  len(packet),
+			"error":     err.Error(),
+			"isTimeout": isTimeout,
+		}).Error("数据包发送失败")
+
+		// 如果是超时错误，尝试重置连接
+		if isTimeout {
+			s.handleTimeoutError(conn, deviceID)
+		}
+	} else {
+		logger.WithFields(logrus.Fields{
+			"deviceID": deviceID,
+			"connID":   conn.GetConnID(),
+			"dataSize": len(packet),
+		}).Debug("数据包发送成功")
+	}
+
+	return err
+}
+
+// calculateWriteTimeout 计算写超时时间
+func (s *ChargeControlService) calculateWriteTimeout(dataSize int) time.Duration {
+	// 基础超时时间
+	baseTimeout := 10 * time.Second
+
+	// 根据数据大小调整超时时间
+	// 每KB数据增加1秒超时
+	sizeTimeout := time.Duration(dataSize/1024) * time.Second
+
+	// 最小5秒，最大60秒
+	timeout := baseTimeout + sizeTimeout
+	if timeout < 5*time.Second {
+		timeout = 5 * time.Second
+	}
+	if timeout > 60*time.Second {
+		timeout = 60 * time.Second
+	}
+
+	return timeout
+}
+
+// isTimeoutError 判断是否为超时错误
+func (s *ChargeControlService) isTimeoutError(err error) bool {
+	if err == nil {
+		return false
+	}
+
+	errStr := strings.ToLower(err.Error())
+	return strings.Contains(errStr, "timeout") ||
+		strings.Contains(errStr, "i/o timeout") ||
+		strings.Contains(errStr, "deadline exceeded")
+}
+
+// handleTimeoutError 处理超时错误
+func (s *ChargeControlService) handleTimeoutError(conn ziface.IConnection, deviceID string) {
+	logger.WithFields(logrus.Fields{
+		"deviceID": deviceID,
+		"connID":   conn.GetConnID(),
+		"action":   "timeout_recovery",
+	}).Warn("检测到超时错误，尝试连接恢复")
+
+	// 1. 重置TCP连接的写超时
+	if rawConn := conn.GetConnection(); rawConn != nil {
+		if tcpConn, ok := rawConn.(*net.TCPConn); ok {
+			// 清除写超时
+			tcpConn.SetWriteDeadline(time.Time{})
+
+			// 设置一个较长的新超时
+			newDeadline := time.Now().Add(30 * time.Second)
+			if err := tcpConn.SetWriteDeadline(newDeadline); err != nil {
+				logger.WithFields(logrus.Fields{
+					"deviceID": deviceID,
+					"connID":   conn.GetConnID(),
+					"error":    err.Error(),
+				}).Error("重置写超时失败")
+			}
+		}
+	}
+
+	// 2. 更新连接活动时间
+	conn.SetProperty(constants.PropKeyLastHeartbeat, time.Now().Unix())
+
+	// 3. 通知监控器连接可能有问题
+	if s.monitor != nil {
+		// 这里可以添加连接质量监控的通知
+		logger.WithFields(logrus.Fields{
+			"deviceID": deviceID,
+			"connID":   conn.GetConnID(),
+		}).Info("已通知监控器连接超时事件")
+	}
 }
 
 // 🔧 修复：严格按照文档要求，删除convertToInternalDeviceID函数
