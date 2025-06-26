@@ -96,7 +96,7 @@ func setChecksumProperties(conn ziface.IConnection, dnyMsg *dny_protocol.Message
 	checksum := uint16(rawData[checksumPos]) | uint16(rawData[checksumPos+1])<<8
 
 	// 使用简单的累加校验和进行验证
-	calculatedChecksum := CalculatePacketChecksum(rawData[:checksumPos])
+	calculatedChecksum, _ := CalculatePacketChecksumInternal(rawData[:checksumPos])
 	checksumValid := (calculatedChecksum == checksum)
 
 	// 如果校验和无效，记录详细信息

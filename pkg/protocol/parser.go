@@ -101,7 +101,7 @@ func ParseDNYData(data []byte) (*DNYParseResult, error) {
 		result.Checksum = binary.LittleEndian.Uint16(result.RawData[checksumPos : checksumPos+2])
 
 		// 验证校验和
-		calculatedChecksum := CalculatePacketChecksum(result.RawData[:checksumPos])
+		calculatedChecksum, _ := CalculatePacketChecksumInternal(result.RawData[:checksumPos])
 		result.ChecksumValid = (calculatedChecksum == result.Checksum)
 	}
 

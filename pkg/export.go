@@ -86,7 +86,7 @@ var Protocol = ProtocolExport{
 	ParseDNYHexString:        protocol.ParseDNYHexString,
 	ParseDNYDataWithConsumed: protocol.ParseDNYDataWithConsumed,
 	ParseMultipleDNYFrames:   protocol.ParseMultipleDNYFrames,
-	CalculatePacketChecksum:  protocol.CalculatePacketChecksum,
+	
 	IsDNYProtocolData:        protocol.IsDNYProtocolData,
 	IsHexString:              protocol.IsHexString,
 	IsAllDigits:              protocol.IsAllDigits,

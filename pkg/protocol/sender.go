@@ -289,10 +289,16 @@ func buildDNYPacket(physicalID uint32, messageID uint16, command uint8, data []b
 	// 数据
 	packet = append(packet, data...)
 
-	// 使用当前配置的校验和计算方法计算校验和
 	// 校验和计算范围是从包头第一个字节到数据内容最后一个字节（校验位前）。
 	// 即 DNY + Length + PhysicalID + MessageID + Command + Data
-	checksum := CalculatePacketChecksum(packet) // CalculatePacketChecksum 应计算当前 packet 内容的校验和
+	checksum, err := CalculatePacketChecksumInternal(packet)
+	if err != nil {
+		// 在实际应用中，这里应该有更健壮的错误处理
+		// 例如，返回一个错误或记录严重日志
+		// 为了保持函数签名不变，我们暂时打印错误并返回一个空的校验和
+		fmt.Printf("Error calculating checksum: %v\n", err)
+		checksum = 0
+	}
 
 	// 添加校验和（小端序）
 	packet = append(packet, byte(checksum), byte(checksum>>8))
