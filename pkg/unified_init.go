@@ -71,7 +71,7 @@ func InitUnifiedArchitecture() {
 	})
 
 	// 8. 初始化全局统一发送器
-	network.InitGlobalSender(unifiedSystem.Monitor)
+	network.InitGlobalSender()
 
 	// 9. 启动命令管理器
 	cmdMgr := network.GetCommandManager()

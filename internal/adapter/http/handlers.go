@@ -13,6 +13,7 @@ import (
 	"github.com/bujia-iot/iot-zinx/internal/infrastructure/logger"
 	"github.com/bujia-iot/iot-zinx/pkg"
 	"github.com/bujia-iot/iot-zinx/pkg/constants"
+	"github.com/bujia-iot/iot-zinx/pkg/core"
 	"github.com/gin-gonic/gin"
 	"github.com/sirupsen/logrus"
 )
@@ -400,6 +401,28 @@ func HandleStartCharging(c *gin.Context) {
 		return
 	}
 
+	// 🔧 关键修复：使用统一端口管理器进行端口号转换
+	portManager := core.GetPortManager()
+
+	// 验证API端口号（1-based）
+	if err := portManager.ValidateAPIPort(int(req.Port)); err != nil {
+		c.JSON(http.StatusBadRequest, APIResponse{
+			Code:    400,
+			Message: fmt.Sprintf("端口号无效: %s", err.Error()),
+		})
+		return
+	}
+
+	// 转换为协议端口号（0-based）
+	protocolPort, err := portManager.APIToProtocol(int(req.Port))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, APIResponse{
+			Code:    400,
+			Message: fmt.Sprintf("端口号转换失败: %s", err.Error()),
+		})
+		return
+	}
+
 	// 使用统一的充电控制服务（带设备状态检查器）
 	ctx := GetGlobalHandlerContext()
 	if ctx == nil || ctx.DeviceService == nil {
@@ -412,12 +435,12 @@ func HandleStartCharging(c *gin.Context) {
 
 	chargeService := service.NewChargeControlServiceWithDeviceChecker(pkg.Monitor.GetGlobalMonitor(), ctx.DeviceService)
 
-	// 构建统一的充电控制请求
+	// 构建统一的充电控制请求 - 🔧 修复：使用协议端口号
 	chargeReq := &dto.ChargeControlRequest{
 		DeviceID:       req.DeviceID,
 		RateMode:       req.Mode,
 		Balance:        req.Balance,
-		PortNumber:     req.Port,
+		PortNumber:     byte(protocolPort), // 使用转换后的协议端口号
 		ChargeCommand:  dny_protocol.ChargeCommandStart,
 		ChargeDuration: req.Value,
 		OrderNumber:    req.OrderNo,
@@ -478,7 +501,7 @@ func HandleStartCharging(c *gin.Context) {
 // ChargingStopParams 停止充电请求参数
 type ChargingStopParams struct {
 	DeviceID string `json:"deviceId" binding:"required" example:"04ceaa40" swaggertype:"string" description:"设备ID"`
-	Port     byte   `json:"port" example:"1" enum:"1,2,3,4,5,6,7,8,255" swaggertype:"integer" description:"端口号: 1-8或255(停止所有端口)"`
+	Port     byte   `json:"port" example:"1" enum:"1,2,3,4,5,6,7,8,255" swaggertype:"integer" description:"端口号: 1-8或255(设备智能选择端口)"`
 	OrderNo  string `json:"orderNo" example:"ORDER_20250619001" swaggertype:"string" description:"订单号，可选"`
 }
 
@@ -504,9 +527,39 @@ func HandleStopCharging(c *gin.Context) {
 		return
 	}
 
-	// 如果没有指定端口，默认停止所有端口
+	// 🔧 修复：使用统一端口管理器进行端口号转换
+	portManager := core.GetPortManager()
+
+	// 如果没有指定端口，默认停止所有端口（使用0xFF）
 	if req.Port == 0 {
 		req.Port = 0xFF
+	}
+
+	var protocolPort int
+
+	// 处理特殊情况：停止所有端口（0xFF在协议中表示设备智能选择端口）
+	if req.Port == 0xFF {
+		protocolPort = 0xFF // 协议中0xFF表示设备智能选择端口
+	} else {
+		// 验证API端口号（1-based）
+		if err := portManager.ValidateAPIPort(int(req.Port)); err != nil {
+			c.JSON(http.StatusBadRequest, APIResponse{
+				Code:    400,
+				Message: fmt.Sprintf("端口号无效: %s", err.Error()),
+			})
+			return
+		}
+
+		// 转换为协议端口号（0-based）
+		var err error
+		protocolPort, err = portManager.APIToProtocol(int(req.Port))
+		if err != nil {
+			c.JSON(http.StatusBadRequest, APIResponse{
+				Code:    400,
+				Message: fmt.Sprintf("端口号转换失败: %s", err.Error()),
+			})
+			return
+		}
 	}
 
 	// 获取设备服务
@@ -522,10 +575,10 @@ func HandleStopCharging(c *gin.Context) {
 	// 使用统一的充电控制服务（带设备状态检查器）
 	chargeService := service.NewChargeControlServiceWithDeviceChecker(pkg.Monitor.GetGlobalMonitor(), ctx.DeviceService)
 
-	// 构建统一的充电控制请求
+	// 构建统一的充电控制请求 - 🔧 修复：使用协议端口号
 	chargeReq := &dto.ChargeControlRequest{
 		DeviceID:      req.DeviceID,
-		PortNumber:    req.Port,
+		PortNumber:    byte(protocolPort), // 使用转换后的协议端口号
 		ChargeCommand: dny_protocol.ChargeCommandStop,
 		OrderNumber:   req.OrderNo,
 	}

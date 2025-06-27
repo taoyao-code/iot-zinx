@@ -4,12 +4,12 @@ import (
 	"fmt"
 	"net"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/aceld/zinx/ziface"
 	"github.com/bujia-iot/iot-zinx/internal/infrastructure/logger"
 	"github.com/bujia-iot/iot-zinx/pkg/constants"
-	"github.com/bujia-iot/iot-zinx/pkg/monitor"
 	"github.com/sirupsen/logrus"
 )
 
@@ -43,26 +43,174 @@ var DefaultSendConfig = SendConfig{
 	LogLevel:       logrus.InfoLevel,
 }
 
+// SenderConfig 发送器配置
+type SenderConfig struct {
+	MaxWorkers        int           `json:"max_workers"`         // 最大工作协程数
+	QueueSize         int           `json:"queue_size"`          // 队列大小
+	RetryConfig       RetryConfig   `json:"retry_config"`        // 重试配置
+	BufferSize        int           `json:"buffer_size"`         // 缓冲区大小
+	FlowControlEnable bool          `json:"flow_control_enable"` // 是否启用流控
+	HealthCheckEnable bool          `json:"health_check_enable"` // 是否启用健康检查
+	MonitorInterval   time.Duration `json:"monitor_interval"`    // 监控间隔
+	WriteTimeout      time.Duration `json:"write_timeout"`       // 写超时
+}
+
+// SenderStats 发送器统计信息
+type SenderStats struct {
+	TotalSent         int64        `json:"total_sent"`
+	TotalSuccess      int64        `json:"total_success"`
+	TotalFailed       int64        `json:"total_failed"`
+	TotalRetries      int64        `json:"total_retries"`
+	TotalTimeout      int64        `json:"total_timeout"`
+	QueuedCommands    int64        `json:"queued_commands"`
+	ProcessedCommands int64        `json:"processed_commands"`
+	LastSentTime      time.Time    `json:"last_sent_time"`
+	LastErrorTime     time.Time    `json:"last_error_time"`
+	LastError         string       `json:"last_error"`
+	mutex             sync.RWMutex `json:"-"`
+}
+
+// DefaultSenderConfig 默认发送器配置
+var DefaultSenderConfig = &SenderConfig{
+	MaxWorkers:        10,
+	QueueSize:         1000,
+	RetryConfig:       DefaultRetryConfig,
+	BufferSize:        8192,
+	FlowControlEnable: true,
+	HealthCheckEnable: true,
+	MonitorInterval:   30 * time.Second,
+	WriteTimeout:      10 * time.Second,
+}
+
 // UnifiedSender 统一发送器 - 系统中唯一的发送入口
-// 🔧 增强版：集成高级重试机制、连接健康管理、动态超时等功能
+// 解决网络层传输问题：缓冲区管理、流控、重试机制、错误处理
 type UnifiedSender struct {
+	// 核心组件
 	tcpWriter     *TCPWriter
-	monitor       monitor.IConnectionMonitor
-	healthManager interface{} // 连接健康管理器（使用接口避免循环导入）
-	retryConfig   RetryConfig // 重试配置
+	commandQueue  *CommandQueue
+	bufferMonitor *WriteBufferMonitor
+
+	// 管理器引用
+	connectionMgr interface{} // 统一连接管理器（避免循环导入）
+	messageIDMgr  interface{} // 统一消息ID管理器（避免循环导入）
+	portMgr       interface{} // 统一端口管理器（避免循环导入）
+
+	// 配置参数
+	config *SenderConfig
+
+	// 统计信息
+	stats *SenderStats
+
+	// 控制通道
+	stopChan chan struct{}
+	running  bool
+	mutex    sync.RWMutex
 }
 
 // NewUnifiedSender 创建统一发送器
-// 🔧 增强版：集成连接健康管理和高级重试机制
-func NewUnifiedSender(monitor monitor.IConnectionMonitor) *UnifiedSender {
-	tcpWriter := NewTCPWriter(DefaultRetryConfig, nil, logrus.New())
+func NewUnifiedSender() *UnifiedSender {
+	config := DefaultSenderConfig
+	logger := logrus.New()
 
-	return &UnifiedSender{
+	// 创建核心组件
+	tcpWriter := NewTCPWriter(config.RetryConfig, nil, logger)
+	commandQueue := NewCommandQueue(config.MaxWorkers, tcpWriter, logger)
+	bufferMonitor := NewWriteBufferMonitor(config.MonitorInterval, config.WriteTimeout)
+
+	sender := &UnifiedSender{
 		tcpWriter:     tcpWriter,
-		monitor:       monitor,
-		healthManager: nil, // 将在需要时延迟初始化，避免循环导入
-		retryConfig:   DefaultRetryConfig,
+		commandQueue:  commandQueue,
+		bufferMonitor: bufferMonitor,
+		config:        config,
+		stats:         &SenderStats{},
+		stopChan:      make(chan struct{}),
+		running:       false,
 	}
+
+	return sender
+}
+
+// Start 启动统一发送器
+func (s *UnifiedSender) Start() error {
+	s.mutex.Lock()
+	defer s.mutex.Unlock()
+
+	if s.running {
+		return nil
+	}
+
+	s.running = true
+
+	// 启动命令队列
+	s.commandQueue.Start()
+
+	// 启动缓冲区监控
+	s.bufferMonitor.Start()
+
+	logger.WithFields(logrus.Fields{
+		"max_workers":   s.config.MaxWorkers,
+		"queue_size":    s.config.QueueSize,
+		"buffer_size":   s.config.BufferSize,
+		"write_timeout": s.config.WriteTimeout,
+	}).Info("统一发送器已启动")
+
+	return nil
+}
+
+// Stop 停止统一发送器
+func (s *UnifiedSender) Stop() {
+	s.mutex.Lock()
+	defer s.mutex.Unlock()
+
+	if !s.running {
+		return
+	}
+
+	s.running = false
+	close(s.stopChan)
+
+	// 停止命令队列
+	s.commandQueue.Stop()
+
+	// 停止缓冲区监控
+	s.bufferMonitor.Stop()
+
+	logger.Info("统一发送器已停止")
+}
+
+// updateStats 更新统计信息
+func (s *UnifiedSender) updateStats(updateFunc func(*SenderStats)) {
+	s.stats.mutex.Lock()
+	defer s.stats.mutex.Unlock()
+	updateFunc(s.stats)
+}
+
+// GetStats 获取统计信息
+func (s *UnifiedSender) GetStats() map[string]interface{} {
+	s.stats.mutex.RLock()
+	defer s.stats.mutex.RUnlock()
+
+	return map[string]interface{}{
+		"total_sent":         s.stats.TotalSent,
+		"total_success":      s.stats.TotalSuccess,
+		"total_failed":       s.stats.TotalFailed,
+		"total_retries":      s.stats.TotalRetries,
+		"total_timeout":      s.stats.TotalTimeout,
+		"queued_commands":    s.stats.QueuedCommands,
+		"processed_commands": s.stats.ProcessedCommands,
+		"last_sent_time":     s.stats.LastSentTime.Format(time.RFC3339),
+		"last_error_time":    s.stats.LastErrorTime.Format(time.RFC3339),
+		"last_error":         s.stats.LastError,
+		"success_rate":       s.calculateSuccessRate(),
+	}
+}
+
+// calculateSuccessRate 计算成功率
+func (s *UnifiedSender) calculateSuccessRate() float64 {
+	if s.stats.TotalSent == 0 {
+		return 0.0
+	}
+	return float64(s.stats.TotalSuccess) / float64(s.stats.TotalSent) * 100.0
 }
 
 // SendRawData 发送原始数据（不封装协议）
@@ -161,10 +309,18 @@ func (s *UnifiedSender) sendWithConfig(conn ziface.IConnection, data []byte, con
 	// 5. 记录发送结果
 	s.logSendResult(conn, config.Type, data, info, err)
 
-	// 6. 通知监控器
-	if s.monitor != nil {
-		s.monitor.OnRawDataSent(conn, data)
-	}
+	// 6. 更新统计信息
+	s.updateStats(func(stats *SenderStats) {
+		stats.TotalSent++
+		stats.LastSentTime = time.Now()
+		if err == nil {
+			stats.TotalSuccess++
+		} else {
+			stats.TotalFailed++
+			stats.LastErrorTime = time.Now()
+			stats.LastError = err.Error()
+		}
+	})
 
 	return err
 }
@@ -474,8 +630,9 @@ func (s *UnifiedSender) calculateRetryDelay(attempt int, baseDelay time.Duration
 var globalUnifiedSender *UnifiedSender
 
 // InitGlobalSender 初始化全局发送器
-func InitGlobalSender(monitor monitor.IConnectionMonitor) {
-	globalUnifiedSender = NewUnifiedSender(monitor)
+func InitGlobalSender() {
+	globalUnifiedSender = NewUnifiedSender()
+	globalUnifiedSender.Start()
 }
 
 // GetGlobalSender 获取全局发送器
