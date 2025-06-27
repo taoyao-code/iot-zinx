@@ -65,11 +65,8 @@ type DeviceServiceInterface interface {
 	// ValidateCard 验证卡片
 	ValidateCard(deviceId string, cardNumber string, cardType byte, gunNumber byte) (bool, byte, byte, uint32)
 
-	// StartCharging 开始充电
-	StartCharging(deviceId string, portNumber byte, cardId uint32) ([]byte, error)
-
-	// StopCharging 停止充电
-	StopCharging(deviceId string, portNumber byte, orderNumber string) error
+	// 🔧 重构：充电相关方法已移至 UnifiedChargingService
+	// StartCharging 和 StopCharging 方法已删除，请使用 service.GetUnifiedChargingService()
 
 	// ===============================
 	// TCP处理器专用接口

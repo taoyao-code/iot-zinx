@@ -801,19 +801,46 @@ func generateAlertID() string {
 // GetStats 获取统计信息
 func (m *UnifiedMonitorCenter) GetStats() map[string]interface{} {
 	m.stats.mutex.RLock()
-	stats := *m.stats
+	stats := MonitorStats{
+		TotalConnections: m.stats.TotalConnections,
+		TotalDevices:     m.stats.TotalDevices,
+		TotalAlerts:      m.stats.TotalAlerts,
+		ActiveAlerts:     m.stats.ActiveAlerts,
+		MonitoringUptime: m.stats.MonitoringUptime,
+		LastUpdateTime:   m.stats.LastUpdateTime,
+	}
 	m.stats.mutex.RUnlock()
 
 	m.connectionMonitor.stats.mutex.RLock()
-	connStats := *m.connectionMonitor.stats
+	connStats := ConnectionStats{
+		TotalConnections:   m.connectionMonitor.stats.TotalConnections,
+		ActiveConnections:  m.connectionMonitor.stats.ActiveConnections,
+		TotalBytesIn:       m.connectionMonitor.stats.TotalBytesIn,
+		TotalBytesOut:      m.connectionMonitor.stats.TotalBytesOut,
+		TotalErrors:        m.connectionMonitor.stats.TotalErrors,
+		LastConnectionTime: m.connectionMonitor.stats.LastConnectionTime,
+	}
 	m.connectionMonitor.stats.mutex.RUnlock()
 
 	m.deviceMonitor.stats.mutex.RLock()
-	deviceStats := *m.deviceMonitor.stats
+	deviceStats := DeviceStats{
+		TotalDevices:      m.deviceMonitor.stats.TotalDevices,
+		OnlineDevices:     m.deviceMonitor.stats.OnlineDevices,
+		OfflineDevices:    m.deviceMonitor.stats.OfflineDevices,
+		TotalHeartbeats:   m.deviceMonitor.stats.TotalHeartbeats,
+		TotalCommands:     m.deviceMonitor.stats.TotalCommands,
+		LastHeartbeatTime: m.deviceMonitor.stats.LastHeartbeatTime,
+	}
 	m.deviceMonitor.stats.mutex.RUnlock()
 
 	m.alertManager.stats.mutex.RLock()
-	alertStats := *m.alertManager.stats
+	alertStats := AlertStats{
+		TotalAlerts:    m.alertManager.stats.TotalAlerts,
+		ActiveAlerts:   m.alertManager.stats.ActiveAlerts,
+		ResolvedAlerts: m.alertManager.stats.ResolvedAlerts,
+		CriticalAlerts: m.alertManager.stats.CriticalAlerts,
+		LastAlertTime:  m.alertManager.stats.LastAlertTime,
+	}
 	m.alertManager.stats.mutex.RUnlock()
 
 	return map[string]interface{}{

@@ -168,8 +168,6 @@ func SetupUnifiedMonitorCompatibility() {
 	Monitor.GetGlobalMonitor = func() monitor.IConnectionMonitor {
 		return core.GetUnifiedSystem().Monitor
 	}
-	Monitor.GetGlobalDeviceMonitor = func() monitor.IDeviceMonitor {
-		// 返回nil，因为统一架构不需要单独的设备监控器
-		return nil
-	}
+	// 🔧 清理：删除废弃的设备监控器引用
+	// 统一架构中不再需要单独的设备监控器
 }

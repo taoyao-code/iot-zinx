@@ -18,8 +18,9 @@ import (
 )
 
 // SendDNYResponse 发送DNY协议响应
-// 该函数用于发送DNY协议响应数据包，并注册到命令管理器进行跟踪
+// 🔧 语义明确：用于服务器响应设备的请求（如注册响应、心跳响应、状态查询响应等）
 // 🔧 支持主从设备架构：分机设备响应通过主机连接发送
+// 使用场景：设备注册响应、心跳响应、充电控制响应等
 func SendDNYResponse(conn ziface.IConnection, physicalID uint32, messageID uint16, command uint8, data []byte) error {
 	// 参数验证
 	if conn == nil {
@@ -67,7 +68,8 @@ func SendDNYResponse(conn ziface.IConnection, physicalID uint32, messageID uint1
 }
 
 // SendDNYRequest 发送DNY协议请求
-// 该函数专门用于服务器主动发送查询命令等请求场景
+// 🔧 语义明确：用于服务器主动向设备发送请求（如查询命令、控制命令、配置命令等）
+// 使用场景：充电控制命令、状态查询命令、设备定位命令、参数设置命令等
 func SendDNYRequest(conn ziface.IConnection, physicalID uint32, messageID uint16, command uint8, data []byte) error {
 	// 参数验证
 	if conn == nil {

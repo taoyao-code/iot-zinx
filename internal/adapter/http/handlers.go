@@ -7,13 +7,13 @@ import (
 	"strings"
 	"time"
 
-	"github.com/bujia-iot/iot-zinx/internal/app/dto"
 	"github.com/bujia-iot/iot-zinx/internal/app/service"
-	"github.com/bujia-iot/iot-zinx/internal/domain/dny_protocol"
 	"github.com/bujia-iot/iot-zinx/internal/infrastructure/logger"
 	"github.com/bujia-iot/iot-zinx/pkg"
 	"github.com/bujia-iot/iot-zinx/pkg/constants"
 	"github.com/bujia-iot/iot-zinx/pkg/core"
+	"github.com/bujia-iot/iot-zinx/pkg/network"
+	"github.com/bujia-iot/iot-zinx/pkg/utils"
 	"github.com/gin-gonic/gin"
 	"github.com/sirupsen/logrus"
 )
@@ -267,9 +267,41 @@ func HandleSendDNYCommand(c *gin.Context) {
 		}
 	}
 
-	// 🔧 使用统一发送服务发送命令
-	sender := service.GetGlobalUnifiedSender()
-	result, err := sender.SendCommandToDevice(req.DeviceID, req.Command, data, "DNY通用命令")
+	// 🔧 使用网络层统一发送器发送命令
+	sender := network.GetGlobalSender()
+	if sender == nil {
+		c.JSON(http.StatusInternalServerError, APIResponse{
+			Code:    500,
+			Message: "统一发送器未初始化",
+		})
+		return
+	}
+
+	// 获取设备连接
+	conn, exists := core.GetGlobalConnectionGroupManager().GetConnectionByDeviceID(req.DeviceID)
+	if !exists {
+		c.JSON(http.StatusNotFound, APIResponse{
+			Code:    404,
+			Message: "设备不存在或未连接",
+		})
+		return
+	}
+
+	// 解析设备ID为物理ID
+	physicalID, err := utils.ParseDeviceIDToPhysicalID(req.DeviceID)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, APIResponse{
+			Code:    400,
+			Message: "设备ID格式错误: " + err.Error(),
+		})
+		return
+	}
+
+	// 生成消息ID
+	messageID := pkg.Protocol.GetNextMessageID()
+
+	// 发送DNY命令
+	err = pkg.Protocol.SendDNYRequest(conn, physicalID, messageID, req.Command, data)
 	if err != nil {
 		logger.WithFields(logrus.Fields{
 			"deviceId": req.DeviceID,
@@ -287,8 +319,8 @@ func HandleSendDNYCommand(c *gin.Context) {
 	logger.WithFields(logrus.Fields{
 		"deviceId":  req.DeviceID,
 		"command":   fmt.Sprintf("0x%02X", req.Command),
-		"messageId": fmt.Sprintf("0x%04X", result.MessageID),
-		"connId":    result.ConnID,
+		"messageId": fmt.Sprintf("0x%04X", messageID),
+		"connId":    conn.GetConnID(),
 		"dataHex":   hex.EncodeToString(data),
 	}).Info("发送DNY命令到设备成功")
 
@@ -296,8 +328,8 @@ func HandleSendDNYCommand(c *gin.Context) {
 		Code:    0,
 		Message: "DNY命令发送成功",
 		Data: gin.H{
-			"messageId": fmt.Sprintf("0x%04X", result.MessageID),
-			"connId":    result.ConnID,
+			"messageId": fmt.Sprintf("0x%04X", messageID),
+			"connId":    conn.GetConnID(),
 		},
 	})
 }
@@ -333,9 +365,41 @@ func HandleQueryDeviceStatus(c *gin.Context) {
 		return
 	}
 
-	// 🔧 使用统一发送服务发送查询状态命令(0x81)
-	sender := service.GetGlobalUnifiedSender()
-	result, err := sender.SendCommandToDevice(deviceID, 0x81, []byte{}, "查询设备状态")
+	// 🔧 使用网络层统一发送器发送查询状态命令(0x81)
+	sender := network.GetGlobalSender()
+	if sender == nil {
+		c.JSON(http.StatusInternalServerError, APIResponse{
+			Code:    500,
+			Message: "统一发送器未初始化",
+		})
+		return
+	}
+
+	// 获取设备连接
+	conn, exists := core.GetGlobalConnectionGroupManager().GetConnectionByDeviceID(deviceID)
+	if !exists {
+		c.JSON(http.StatusNotFound, APIResponse{
+			Code:    404,
+			Message: "设备不存在或未连接",
+		})
+		return
+	}
+
+	// 解析设备ID为物理ID
+	physicalID, err := utils.ParseDeviceIDToPhysicalID(deviceID)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, APIResponse{
+			Code:    400,
+			Message: "设备ID格式错误: " + err.Error(),
+		})
+		return
+	}
+
+	// 生成消息ID
+	messageID := pkg.Protocol.GetNextMessageID()
+
+	// 发送查询状态命令(0x81)
+	err = pkg.Protocol.SendDNYRequest(conn, physicalID, messageID, 0x81, []byte{})
 	if err != nil {
 		logger.WithFields(logrus.Fields{
 			"deviceId": deviceID,
@@ -353,8 +417,8 @@ func HandleQueryDeviceStatus(c *gin.Context) {
 	logger.WithFields(logrus.Fields{
 		"deviceId":  deviceID,
 		"command":   "0x81",
-		"messageId": fmt.Sprintf("0x%04X", result.MessageID),
-		"connId":    result.ConnID,
+		"messageId": fmt.Sprintf("0x%04X", messageID),
+		"connId":    conn.GetConnID(),
 	}).Info("查询设备状态命令发送成功")
 
 	c.JSON(http.StatusOK, APIResponse{
@@ -363,8 +427,8 @@ func HandleQueryDeviceStatus(c *gin.Context) {
 		Data: gin.H{
 			"deviceId":  deviceID,
 			"command":   "0x81",
-			"messageId": fmt.Sprintf("0x%04X", result.MessageID),
-			"connId":    result.ConnID,
+			"messageId": fmt.Sprintf("0x%04X", messageID),
+			"connId":    conn.GetConnID(),
 		},
 	})
 }
@@ -401,99 +465,37 @@ func HandleStartCharging(c *gin.Context) {
 		return
 	}
 
-	// 🔧 关键修复：使用统一端口管理器进行端口号转换
-	portManager := core.GetPortManager()
+	// 🔧 重构：使用统一充电服务
+	unifiedChargingService := service.GetUnifiedChargingService()
 
-	// 验证API端口号（1-based）
-	if err := portManager.ValidateAPIPort(int(req.Port)); err != nil {
-		c.JSON(http.StatusBadRequest, APIResponse{
-			Code:    400,
-			Message: fmt.Sprintf("端口号无效: %s", err.Error()),
-		})
-		return
+	// 构建统一充电请求
+	chargingReq := &service.ChargingRequest{
+		DeviceID:    req.DeviceID,
+		Port:        int(req.Port), // API端口号(1-based)
+		Command:     "start",
+		Duration:    req.Value,
+		OrderNumber: req.OrderNo,
+		Balance:     req.Balance,
+		Mode:        req.Mode,
 	}
 
-	// 转换为协议端口号（0-based）
-	protocolPort, err := portManager.APIToProtocol(int(req.Port))
+	// 处理充电请求
+	response, err := unifiedChargingService.ProcessChargingRequest(chargingReq)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, APIResponse{
-			Code:    400,
-			Message: fmt.Sprintf("端口号转换失败: %s", err.Error()),
-		})
+		// 🔧 简化：统一错误处理
+		handleUnifiedChargingError(c, err)
 		return
 	}
 
-	// 使用统一的充电控制服务（带设备状态检查器）
-	ctx := GetGlobalHandlerContext()
-	if ctx == nil || ctx.DeviceService == nil {
-		c.JSON(http.StatusInternalServerError, APIResponse{
-			Code:    500,
-			Message: "系统错误: 设备服务未初始化",
-		})
-		return
-	}
-
-	chargeService := service.NewChargeControlServiceWithDeviceChecker(pkg.Monitor.GetGlobalMonitor(), ctx.DeviceService)
-
-	// 构建统一的充电控制请求 - 🔧 修复：使用协议端口号
-	chargeReq := &dto.ChargeControlRequest{
-		DeviceID:       req.DeviceID,
-		RateMode:       req.Mode,
-		Balance:        req.Balance,
-		PortNumber:     byte(protocolPort), // 使用转换后的协议端口号
-		ChargeCommand:  dny_protocol.ChargeCommandStart,
-		ChargeDuration: req.Value,
-		OrderNumber:    req.OrderNo,
-	}
-
-	// 发送充电控制命令 - 🔧 修复：使用精细化错误处理
-	if err := chargeService.SendChargeControlCommand(chargeReq); err != nil {
-		// 🔧 修复：根据错误类型返回不同的HTTP状态码和错误信息
-		if deviceErr, ok := err.(*constants.DeviceError); ok {
-			switch deviceErr.Code {
-			case constants.ErrCodeDeviceNotFound:
-				c.JSON(http.StatusNotFound, APIResponse{
-					Code:    int(constants.ErrCodeDeviceNotFound),
-					Message: "设备不存在",
-				})
-			case constants.ErrCodeDeviceOffline:
-				c.JSON(http.StatusBadRequest, APIResponse{
-					Code:    int(constants.ErrCodeDeviceOffline),
-					Message: "设备离线，无法执行充电操作",
-				})
-			case constants.ErrCodeConnectionLost:
-				c.JSON(http.StatusBadRequest, APIResponse{
-					Code:    int(constants.ErrCodeConnectionLost),
-					Message: "设备连接丢失，请稍后重试",
-				})
-			case constants.ErrCodeInvalidState:
-				c.JSON(http.StatusBadRequest, APIResponse{
-					Code:    int(constants.ErrCodeInvalidState),
-					Message: deviceErr.Message,
-				})
-			default:
-				c.JSON(http.StatusInternalServerError, APIResponse{
-					Code:    int(deviceErr.Code),
-					Message: deviceErr.Message,
-				})
-			}
-		} else {
-			// 其他类型错误
-			c.JSON(http.StatusInternalServerError, APIResponse{
-				Code:    int(constants.ErrCodeInternalError),
-				Message: "发送充电控制命令失败: " + err.Error(),
-			})
-		}
-		return
-	}
-
+	// 返回成功响应
 	c.JSON(http.StatusOK, APIResponse{
 		Code:    0,
-		Message: "开始充电命令发送成功",
+		Message: response.Message,
 		Data: gin.H{
-			"deviceId":    req.DeviceID,
-			"port":        req.Port,
-			"orderNumber": req.OrderNo,
+			"deviceId":    response.DeviceID,
+			"port":        response.Port,
+			"orderNumber": response.OrderNumber,
+			"status":      response.Status,
 		},
 	})
 }
@@ -527,109 +529,40 @@ func HandleStopCharging(c *gin.Context) {
 		return
 	}
 
-	// 🔧 修复：使用统一端口管理器进行端口号转换
-	portManager := core.GetPortManager()
+	// 🔧 重构：使用统一充电服务
+	unifiedChargingService := service.GetUnifiedChargingService()
 
-	// 如果没有指定端口，默认停止所有端口（使用0xFF）
-	if req.Port == 0 {
-		req.Port = 0xFF
+	// 如果没有指定端口，默认停止所有端口（使用255）
+	port := int(req.Port)
+	if port == 0 {
+		port = 255 // API层使用255表示智能选择端口
 	}
 
-	var protocolPort int
-
-	// 处理特殊情况：停止所有端口（0xFF在协议中表示设备智能选择端口）
-	if req.Port == 0xFF {
-		protocolPort = 0xFF // 协议中0xFF表示设备智能选择端口
-	} else {
-		// 验证API端口号（1-based）
-		if err := portManager.ValidateAPIPort(int(req.Port)); err != nil {
-			c.JSON(http.StatusBadRequest, APIResponse{
-				Code:    400,
-				Message: fmt.Sprintf("端口号无效: %s", err.Error()),
-			})
-			return
-		}
-
-		// 转换为协议端口号（0-based）
-		var err error
-		protocolPort, err = portManager.APIToProtocol(int(req.Port))
-		if err != nil {
-			c.JSON(http.StatusBadRequest, APIResponse{
-				Code:    400,
-				Message: fmt.Sprintf("端口号转换失败: %s", err.Error()),
-			})
-			return
-		}
+	// 构建统一充电请求
+	chargingReq := &service.ChargingRequest{
+		DeviceID:    req.DeviceID,
+		Port:        port,
+		Command:     "stop",
+		OrderNumber: req.OrderNo,
 	}
 
-	// 获取设备服务
-	ctx := GetGlobalHandlerContext()
-	if ctx == nil || ctx.DeviceService == nil {
-		c.JSON(http.StatusInternalServerError, APIResponse{
-			Code:    500,
-			Message: "系统错误: 设备服务未初始化",
-		})
+	// 处理充电请求
+	response, err := unifiedChargingService.ProcessChargingRequest(chargingReq)
+	if err != nil {
+		// 🔧 简化：统一错误处理
+		handleUnifiedChargingError(c, err)
 		return
 	}
 
-	// 使用统一的充电控制服务（带设备状态检查器）
-	chargeService := service.NewChargeControlServiceWithDeviceChecker(pkg.Monitor.GetGlobalMonitor(), ctx.DeviceService)
-
-	// 构建统一的充电控制请求 - 🔧 修复：使用协议端口号
-	chargeReq := &dto.ChargeControlRequest{
-		DeviceID:      req.DeviceID,
-		PortNumber:    byte(protocolPort), // 使用转换后的协议端口号
-		ChargeCommand: dny_protocol.ChargeCommandStop,
-		OrderNumber:   req.OrderNo,
-	}
-
-	// 发送停止充电命令
-	if err := chargeService.SendChargeControlCommand(chargeReq); err != nil {
-		// 🔧 修复：根据错误类型返回不同的HTTP状态码和错误信息
-		if deviceErr, ok := err.(*constants.DeviceError); ok {
-			switch deviceErr.Code {
-			case constants.ErrCodeDeviceNotFound:
-				c.JSON(http.StatusNotFound, APIResponse{
-					Code:    int(constants.ErrCodeDeviceNotFound),
-					Message: "设备不存在",
-				})
-			case constants.ErrCodeDeviceOffline:
-				c.JSON(http.StatusBadRequest, APIResponse{
-					Code:    int(constants.ErrCodeDeviceOffline),
-					Message: "设备离线，无法执行停止充电操作",
-				})
-			case constants.ErrCodeConnectionLost:
-				c.JSON(http.StatusBadRequest, APIResponse{
-					Code:    int(constants.ErrCodeConnectionLost),
-					Message: "设备连接丢失，请稍后重试",
-				})
-			case constants.ErrCodeInvalidState:
-				c.JSON(http.StatusBadRequest, APIResponse{
-					Code:    int(constants.ErrCodeInvalidState),
-					Message: deviceErr.Message,
-				})
-			default:
-				c.JSON(http.StatusInternalServerError, APIResponse{
-					Code:    int(deviceErr.Code),
-					Message: deviceErr.Message,
-				})
-			}
-		} else {
-			c.JSON(http.StatusInternalServerError, APIResponse{
-				Code:    500,
-				Message: "发送停止充电命令失败: " + err.Error(),
-			})
-		}
-		return
-	}
-
+	// 返回成功响应
 	c.JSON(http.StatusOK, APIResponse{
 		Code:    0,
-		Message: "停止充电命令发送成功",
+		Message: response.Message,
 		Data: gin.H{
-			"deviceId":    req.DeviceID,
-			"port":        req.Port,
-			"orderNumber": req.OrderNo,
+			"deviceId":    response.DeviceID,
+			"port":        response.Port,
+			"orderNumber": response.OrderNumber,
+			"status":      response.Status,
 		},
 	})
 }
@@ -691,9 +624,41 @@ func HandleDeviceLocate(c *gin.Context) {
 	// 构造命令数据（1字节定位时间）
 	data := []byte{req.LocateTime}
 
-	// 🔧 使用统一发送服务发送设备定位命令(0x96)
-	sender := service.GetGlobalUnifiedSender()
-	result, err := sender.SendCommandToDevice(req.DeviceID, 0x96, data, "设备定位")
+	// 🔧 使用网络层统一发送器发送设备定位命令(0x96)
+	sender := network.GetGlobalSender()
+	if sender == nil {
+		c.JSON(http.StatusInternalServerError, APIResponse{
+			Code:    500,
+			Message: "统一发送器未初始化",
+		})
+		return
+	}
+
+	// 获取设备连接
+	conn, exists := core.GetGlobalConnectionGroupManager().GetConnectionByDeviceID(req.DeviceID)
+	if !exists {
+		c.JSON(http.StatusNotFound, APIResponse{
+			Code:    404,
+			Message: "设备不存在或未连接",
+		})
+		return
+	}
+
+	// 解析设备ID为物理ID
+	physicalID, err := utils.ParseDeviceIDToPhysicalID(req.DeviceID)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, APIResponse{
+			Code:    400,
+			Message: "设备ID格式错误: " + err.Error(),
+		})
+		return
+	}
+
+	// 生成消息ID
+	messageID := pkg.Protocol.GetNextMessageID()
+
+	// 发送设备定位命令(0x96)
+	err = pkg.Protocol.SendDNYRequest(conn, physicalID, messageID, 0x96, data)
 	if err != nil {
 		logger.WithFields(logrus.Fields{
 			"deviceID":   req.DeviceID,
@@ -711,8 +676,8 @@ func HandleDeviceLocate(c *gin.Context) {
 	logger.WithFields(logrus.Fields{
 		"deviceID":   req.DeviceID,
 		"locateTime": req.LocateTime,
-		"messageID":  fmt.Sprintf("0x%04X", result.MessageID),
-		"connId":     result.ConnID,
+		"messageID":  fmt.Sprintf("0x%04X", messageID),
+		"connId":     conn.GetConnID(),
 	}).Info("设备定位命令发送成功")
 
 	c.JSON(http.StatusOK, APIResponse{
@@ -721,8 +686,8 @@ func HandleDeviceLocate(c *gin.Context) {
 		Data: map[string]interface{}{
 			"deviceID":   req.DeviceID,
 			"locateTime": req.LocateTime,
-			"messageID":  fmt.Sprintf("0x%04X", result.MessageID),
-			"connId":     result.ConnID,
+			"messageID":  fmt.Sprintf("0x%04X", messageID),
+			"connId":     conn.GetConnID(),
 		},
 	})
 }
@@ -747,3 +712,55 @@ func parseDeviceIDToPhysicalID(deviceID string) (uint32, error) {
 }
 
 // 🔧 buildDNYPacket 已删除 - 使用 dny_protocol.BuildDNYPacket() 或更好的 pkg.Protocol.BuildDNYResponsePacket()
+
+// ===== 统一错误处理函数 =====
+
+// handleUnifiedChargingError 处理统一充电服务的错误
+func handleUnifiedChargingError(c *gin.Context, err error) {
+	// 检查是否为设备错误
+	if deviceErr, ok := err.(*constants.DeviceError); ok {
+		switch deviceErr.Code {
+		case constants.ErrCodeDeviceNotFound:
+			c.JSON(http.StatusNotFound, APIResponse{
+				Code:    int(constants.ErrCodeDeviceNotFound),
+				Message: "设备不存在",
+			})
+		case constants.ErrCodeDeviceOffline:
+			c.JSON(http.StatusBadRequest, APIResponse{
+				Code:    int(constants.ErrCodeDeviceOffline),
+				Message: "设备离线，无法执行充电操作",
+			})
+		case constants.ErrCodeConnectionLost:
+			c.JSON(http.StatusBadRequest, APIResponse{
+				Code:    int(constants.ErrCodeConnectionLost),
+				Message: "设备连接丢失，请稍后重试",
+			})
+		case constants.ErrCodeInvalidState:
+			c.JSON(http.StatusBadRequest, APIResponse{
+				Code:    int(constants.ErrCodeInvalidState),
+				Message: deviceErr.Message,
+			})
+		default:
+			c.JSON(http.StatusInternalServerError, APIResponse{
+				Code:    int(deviceErr.Code),
+				Message: deviceErr.Message,
+			})
+		}
+		return
+	}
+
+	// 检查是否为参数验证错误
+	if strings.Contains(err.Error(), "端口号") || strings.Contains(err.Error(), "参数") {
+		c.JSON(http.StatusBadRequest, APIResponse{
+			Code:    400,
+			Message: err.Error(),
+		})
+		return
+	}
+
+	// 其他错误
+	c.JSON(http.StatusInternalServerError, APIResponse{
+		Code:    int(constants.ErrCodeInternalError),
+		Message: "充电操作失败: " + err.Error(),
+	})
+}

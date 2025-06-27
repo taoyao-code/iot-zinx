@@ -133,6 +133,23 @@ func (m *MessageIDManager) Stop() {
 	logger.Info("消息ID管理器已停止")
 }
 
+// GetNextMessageID 获取下一个消息ID（简化版本，用于向后兼容）
+func (m *MessageIDManager) GetNextMessageID() uint16 {
+	// 原子递增计数器
+	newValue := atomic.AddUint64(&m.counter, 1)
+
+	// 转换为uint16范围，避免使用0
+	messageID := uint16(newValue % uint64(m.maxMessageID))
+	if messageID == 0 {
+		messageID = 1
+	}
+
+	// 更新统计信息
+	m.updateStats(true)
+
+	return messageID
+}
+
 // GenerateMessageID 生成新的消息ID
 // 这是系统中唯一的消息ID生成入口
 func (m *MessageIDManager) GenerateMessageID(deviceID string, command uint8, connID uint64) uint16 {

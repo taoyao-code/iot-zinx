@@ -4,7 +4,6 @@ import (
 	"errors"
 	"fmt"
 	"strconv"
-	"sync"
 	"time"
 
 	"github.com/aceld/zinx/ziface"
@@ -12,6 +11,7 @@ import (
 	"github.com/bujia-iot/iot-zinx/internal/infrastructure/logger"
 	"github.com/bujia-iot/iot-zinx/pkg"
 	"github.com/bujia-iot/iot-zinx/pkg/constants"
+	"github.com/bujia-iot/iot-zinx/pkg/core"
 	"github.com/bujia-iot/iot-zinx/pkg/monitor"
 	"github.com/bujia-iot/iot-zinx/pkg/network"
 	"github.com/sirupsen/logrus"
@@ -19,11 +19,12 @@ import (
 
 // DeviceService 设备服务，处理设备业务逻辑
 type DeviceService struct {
-	// 设备状态存储
-	deviceStatus     sync.Map // map[string]string - deviceId -> status
-	deviceLastUpdate sync.Map // map[string]int64 - deviceId -> timestamp
 	// TCP监控器引用 - 用于底层连接操作
 	tcpMonitor monitor.IConnectionMonitor
+	// 🔧 统一业务平台通知管理器
+	notificationManager *core.BusinessNotificationManager
+	// 🔧 统一设备状态管理器
+	statusManager *core.DeviceStatusManager
 }
 
 // DeviceInfo 设备信息结构体
@@ -39,11 +40,15 @@ func NewDeviceService() *DeviceService {
 	service := &DeviceService{
 		// 🔧 使用统一架构：直接使用统一监控器
 		tcpMonitor: nil, // 将在getTCPMonitor()方法中动态获取
+		// 🔧 使用统一业务平台通知管理器
+		notificationManager: core.GetBusinessNotificationManager(),
+		// 🔧 使用统一设备状态管理器
+		statusManager: core.GetDeviceStatusManager(),
 	}
 
 	// 🔧 使用统一架构：不再初始化旧的设备监控器
 	// 统一架构会自动处理设备超时和状态管理
-	logger.Info("设备服务已初始化，使用统一架构")
+	logger.Info("设备服务已初始化，使用统一架构、统一通知管理器和统一状态管理器")
 
 	return service
 }
@@ -65,14 +70,8 @@ func (s *DeviceService) getTCPMonitor() monitor.IConnectionMonitor {
 
 // HandleDeviceOnline 处理设备上线
 func (s *DeviceService) HandleDeviceOnline(deviceId string, iccid string) {
-	// 记录设备上线
-	logger.WithFields(logrus.Fields{
-		"deviceId": deviceId,
-		"iccid":    iccid,
-	}).Info("设备上线")
-
-	// 更新设备状态为在线
-	s.HandleDeviceStatusUpdate(deviceId, constants.DeviceStatusOnline)
+	// 🔧 使用统一状态管理器处理设备上线
+	s.statusManager.HandleDeviceOnline(deviceId)
 
 	// 🔧 实现业务平台API调用
 	s.notifyBusinessPlatform("device_online", map[string]interface{}{
@@ -84,14 +83,8 @@ func (s *DeviceService) HandleDeviceOnline(deviceId string, iccid string) {
 
 // HandleDeviceOffline 处理设备离线
 func (s *DeviceService) HandleDeviceOffline(deviceId string, iccid string) {
-	// 记录设备离线
-	logger.WithFields(logrus.Fields{
-		"deviceId": deviceId,
-		"iccid":    iccid,
-	}).Info("设备离线")
-
-	// 更新设备状态为离线
-	s.HandleDeviceStatusUpdate(deviceId, constants.DeviceStatusOffline)
+	// 🔧 使用统一状态管理器处理设备离线
+	s.statusManager.HandleDeviceOffline(deviceId)
 
 	// 🔧 实现业务平台API调用
 	s.notifyBusinessPlatform("device_offline", map[string]interface{}{
@@ -109,9 +102,8 @@ func (s *DeviceService) HandleDeviceStatusUpdate(deviceId string, status constan
 		"status":   status,
 	}).Info("设备状态更新")
 
-	// 更新设备状态到内存存储
-	s.deviceStatus.Store(deviceId, status)
-	s.deviceLastUpdate.Store(deviceId, NowUnix())
+	// 🔧 使用统一状态管理器更新设备状态
+	s.statusManager.UpdateDeviceStatus(deviceId, string(status))
 
 	// 🔧 实现业务平台API调用
 	s.notifyBusinessPlatform("device_status_update", map[string]interface{}{
@@ -123,35 +115,30 @@ func (s *DeviceService) HandleDeviceStatusUpdate(deviceId string, status constan
 
 // GetDeviceStatus 获取设备状态
 func (s *DeviceService) GetDeviceStatus(deviceId string) (string, bool) {
-	value, exists := s.deviceStatus.Load(deviceId)
-	if !exists {
-		return "", false
-	}
-	status, ok := value.(string)
-	return status, ok
+	// 🔧 使用统一状态管理器获取设备状态
+	status := s.statusManager.GetDeviceStatus(deviceId)
+	return status, status != ""
 }
 
 // GetAllDevices 获取所有设备状态
 func (s *DeviceService) GetAllDevices() []DeviceInfo {
 	var devices []DeviceInfo
 
-	s.deviceStatus.Range(func(key, value interface{}) bool {
-		deviceId := key.(string)
-		status := value.(constants.DeviceStatus)
+	// 🔧 使用统一状态管理器获取所有设备状态
+	allStatuses := s.statusManager.GetAllDeviceStatuses()
 
+	for deviceId, status := range allStatuses {
 		device := DeviceInfo{
 			DeviceID: deviceId,
-			Status:   string(status),
+			Status:   status,
 		}
 
 		// 获取最后更新时间
-		if lastUpdate, ok := s.deviceLastUpdate.Load(deviceId); ok {
-			device.LastSeen = lastUpdate.(int64)
-		}
+		_, timestamp := s.statusManager.GetDeviceStatusWithTimestamp(deviceId)
+		device.LastSeen = timestamp
 
 		devices = append(devices, device)
-		return true
-	})
+	}
 
 	return devices
 }
@@ -240,33 +227,8 @@ func (s *DeviceService) GetDeviceConnection(deviceID string) (ziface.IConnection
 
 // IsDeviceOnline 检查设备是否在线
 func (s *DeviceService) IsDeviceOnline(deviceID string) bool {
-	// 🔧 修复：优先使用TCP连接状态（实时状态），业务状态作为辅助
-	conn, connExists := s.GetDeviceConnection(deviceID)
-	logger.WithFields(logrus.Fields{
-		"deviceId":   deviceID,
-		"connExists": connExists,
-	}).Debug("检查设备TCP连接状态")
-
-	if !connExists {
-		// 连接不存在，设备肯定离线
-		return false
-	}
-
-	// 检查连接状态属性
-	if statusVal, err := conn.GetProperty(pkg.PropKeyConnStatus); err == nil && statusVal != nil {
-		if connStatus, ok := statusVal.(constants.ConnStatus); ok {
-			isActive := connStatus.IsConsideredActive()
-			logger.WithFields(logrus.Fields{
-				"deviceId":   deviceID,
-				"connStatus": string(connStatus),
-				"isActive":   isActive,
-			}).Debug("检查连接状态属性")
-			return isActive
-		}
-	}
-
-	// 如果没有状态属性，有连接就认为在线
-	return true
+	// 🔧 使用统一状态管理器检查设备是否在线
+	return s.statusManager.IsDeviceOnline(deviceID)
 }
 
 // SendCommandToDevice 发送命令到设备
@@ -281,8 +243,8 @@ func (s *DeviceService) SendCommandToDevice(deviceID string, command byte, data 
 	// 生成消息ID - 使用全局消息ID管理器
 	messageID := pkg.Protocol.GetNextMessageID()
 
-	// 发送命令到设备（使用正确的DNY协议）
-	err = pkg.Protocol.SendDNYResponse(conn, uint32(physicalID), messageID, command, data)
+	// 🔧 修复：发送命令到设备应该使用SendDNYRequest（服务器主动请求）
+	err = pkg.Protocol.SendDNYRequest(conn, uint32(physicalID), messageID, command, data)
 	if err != nil {
 		logger.WithFields(logrus.Fields{
 			"deviceId": deviceID,
@@ -314,8 +276,8 @@ func (s *DeviceService) SendDNYCommandToDevice(deviceID string, command byte, da
 		return nil, fmt.Errorf("设备ID格式错误: %v", err)
 	}
 
-	// 🔧 使用pkg包中的统一接口构建DNY协议帧
-	packetData := pkg.Protocol.BuildDNYResponsePacket(uint32(physicalID), messageID, command, data)
+	// 🔧 修复：发送命令应该使用BuildDNYRequestPacket（服务器主动请求）
+	packetData := pkg.Protocol.BuildDNYRequestPacket(uint32(physicalID), messageID, command, data)
 
 	// 🔧 修复：使用统一发送器发送
 	globalSender := network.GetGlobalSender()
@@ -410,48 +372,8 @@ func (s *DeviceService) ValidateCard(deviceId string, cardNumber string, cardTyp
 	return true, 0x00, 0x00, 10000
 }
 
-// StartCharging 开始充电
-func (s *DeviceService) StartCharging(deviceId string, portNumber byte, cardId uint32) ([]byte, error) {
-	// 生成订单号
-	orderNumber := []byte("CHG2025052800001")
-
-	// 🔧 实现业务平台API调用
-	s.notifyBusinessPlatform("charging_start", map[string]interface{}{
-		"deviceId":    deviceId,
-		"portNumber":  portNumber,
-		"cardId":      cardId,
-		"orderNumber": string(orderNumber),
-		"timestamp":   time.Now().Unix(),
-	})
-
-	logger.WithFields(logrus.Fields{
-		"deviceId":   deviceId,
-		"portNumber": portNumber,
-		"cardId":     cardId,
-		"order":      string(orderNumber),
-	}).Info("开始充电")
-
-	return orderNumber, nil
-}
-
-// StopCharging 停止充电
-func (s *DeviceService) StopCharging(deviceId string, portNumber byte, orderNumber string) error {
-	// 🔧 实现业务平台API调用
-	s.notifyBusinessPlatform("charging_stop", map[string]interface{}{
-		"deviceId":    deviceId,
-		"portNumber":  portNumber,
-		"orderNumber": orderNumber,
-		"timestamp":   time.Now().Unix(),
-	})
-
-	logger.WithFields(logrus.Fields{
-		"deviceId":   deviceId,
-		"portNumber": portNumber,
-		"order":      orderNumber,
-	}).Info("停止充电")
-
-	return nil
-}
+// 🔧 重构：充电相关方法已移至 UnifiedChargingService
+// StartCharging 和 StopCharging 方法已删除，请使用 service.GetUnifiedChargingService()
 
 // HandleSettlement 处理结算数据
 func (s *DeviceService) HandleSettlement(deviceId string, settlement *dny_protocol.SettlementData) bool {
@@ -540,28 +462,14 @@ func NowUnix() int64 {
 // 🔧 事件处理已经通过设备监控器的回调机制实现
 // 不再需要单独的事件处理方法
 
-// notifyBusinessPlatform 通知业务平台API（模拟实现）
+// notifyBusinessPlatform 通知业务平台API - 🔧 使用统一通知管理器
 func (s *DeviceService) notifyBusinessPlatform(eventType string, data map[string]interface{}) {
-	// 🔧 模拟业务平台API调用
-	logger.WithFields(logrus.Fields{
-		"eventType": eventType,
-		"data":      data,
-	}).Info("通知业务平台API")
-
-	// 在实际项目中，这里应该：
-	// 1. 构建HTTP请求
-	// 2. 调用业务平台的API接口
-	// 3. 处理响应和错误
-	// 4. 实现重试机制
-	// 5. 记录调用日志
-
-	// 示例实现：
-	// client := &http.Client{Timeout: 10 * time.Second}
-	// jsonData, _ := json.Marshal(data)
-	// resp, err := client.Post("https://api.business-platform.com/events", "application/json", bytes.NewBuffer(jsonData))
-	// if err != nil {
-	//     logger.WithError(err).Error("调用业务平台API失败")
-	//     return
-	// }
-	// defer resp.Body.Close()
+	err := s.notificationManager.NotifyBusinessPlatform(eventType, data)
+	if err != nil {
+		logger.WithFields(logrus.Fields{
+			"eventType": eventType,
+			"data":      data,
+			"error":     err.Error(),
+		}).Error("业务平台通知失败")
+	}
 }

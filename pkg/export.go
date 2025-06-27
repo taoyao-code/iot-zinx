@@ -6,6 +6,7 @@ import (
 	"github.com/aceld/zinx/ziface"
 	"github.com/bujia-iot/iot-zinx/internal/infrastructure/logger"
 	"github.com/bujia-iot/iot-zinx/pkg/constants"
+	"github.com/bujia-iot/iot-zinx/pkg/core"
 	"github.com/bujia-iot/iot-zinx/pkg/monitor"
 	"github.com/bujia-iot/iot-zinx/pkg/network"
 	"github.com/bujia-iot/iot-zinx/pkg/protocol"
@@ -101,7 +102,9 @@ var Protocol = ProtocolExport{
 	BuildDNYResponsePacket: protocol.BuildDNYResponsePacket,
 	BuildDNYRequestPacket:  protocol.BuildDNYRequestPacket,
 	NeedConfirmation:       protocol.NeedConfirmation,
-	GetNextMessageID:       protocol.GetNextMessageID,
+	GetNextMessageID: func() uint16 {
+		return core.GetMessageIDManager().GetNextMessageID()
+	},
 }
 
 // Network 网络相关工具导出
@@ -172,25 +175,11 @@ type MonitorInterface struct {
 	GetDeviceGroupManager func() monitor.IDeviceGroupManager
 	GetSessionManager     func() monitor.ISessionManager
 
-	// 🔧 新增：设备监控器接口
-	GetGlobalDeviceMonitor func() monitor.IDeviceMonitor
+	// 🔧 清理：删除废弃的设备监控器接口
+	// 统一架构中不再需要单独的设备监控器
 
-	// 设备会话管理（已废弃，保留用于向后兼容）
-	// DEPRECATED: 请使用 core.GetGlobalConnectionGroupManager()
-	CreateDeviceSession  func(deviceID string, conn ziface.IConnection) interface{} // 改为interface{}避免编译错误
-	GetDeviceSession     func(deviceID string) (interface{}, bool)                  // 改为interface{}避免编译错误
-	GetSessionsByICCID   func(iccid string) map[string]interface{}                  // 改为interface{}避免编译错误
-	SuspendDeviceSession func(deviceID string) bool
-	ResumeDeviceSession  func(deviceID string, conn ziface.IConnection) bool
-	RemoveDeviceSession  func(deviceID string) bool
-
-	// 设备组管理（已废弃，保留用于向后兼容）
-	// DEPRECATED: 请使用 core.GetGlobalConnectionGroupManager()
-	GetDeviceGroup        func(iccid string) (interface{}, bool)            // 返回类型改为interface{}避免编译错误
-	AddDeviceToGroup      func(iccid, deviceID string, session interface{}) // 改为interface{}避免编译错误
-	RemoveDeviceFromGroup func(iccid, deviceID string)
-	BroadcastToGroup      func(iccid string, data []byte) int
-	GetGroupStatistics    func() map[string]interface{}
+	// 🔧 清理：删除废弃的设备会话管理和设备组管理接口
+	// 这些功能已集成到 core.GetGlobalConnectionGroupManager() 中
 
 	// 连接管理
 	GetConnectionByDeviceId  func(deviceId string) (ziface.IConnection, bool)
@@ -213,47 +202,8 @@ var Monitor = MonitorInterface{
 		return nil // 统一架构中不再需要单独的会话管理器
 	},
 
-	// 🔧 统一架构：设备监控器已集成
-	GetGlobalDeviceMonitor: func() monitor.IDeviceMonitor {
-		return nil // 统一架构中不再需要单独的设备监控器
-	},
-
-	// 设备会话管理实现（向后兼容，但功能有限）
-	CreateDeviceSession: func(deviceID string, conn ziface.IConnection) interface{} {
-		return nil // 统一架构中会话创建由统一管理器处理
-	},
-	GetDeviceSession: func(deviceID string) (interface{}, bool) {
-		return nil, false // 统一架构中使用不同的会话模型
-	},
-	GetSessionsByICCID: func(iccid string) map[string]interface{} {
-		return nil // 统一架构中使用不同的会话模型
-	},
-	SuspendDeviceSession: func(deviceID string) bool {
-		return false // 统一架构中会话管理由统一管理器处理
-	},
-	ResumeDeviceSession: func(deviceID string, conn ziface.IConnection) bool {
-		return false // 统一架构中会话管理由统一管理器处理
-	},
-	RemoveDeviceSession: func(deviceID string) bool {
-		return false // 统一架构中会话管理由统一管理器处理
-	},
-
-	// 设备组管理实现（向后兼容，但功能有限）
-	GetDeviceGroup: func(iccid string) (interface{}, bool) {
-		return nil, false // 统一架构中设备组功能已集成
-	},
-	AddDeviceToGroup: func(iccid, deviceID string, session interface{}) {
-		// 统一架构中设备组功能已集成，无需单独操作
-	},
-	RemoveDeviceFromGroup: func(iccid, deviceID string) {
-		// 统一架构中设备组功能已集成，无需单独操作
-	},
-	BroadcastToGroup: func(iccid string, data []byte) int {
-		return 0 // 统一架构中设备组功能已集成
-	},
-	GetGroupStatistics: func() map[string]interface{} {
-		return map[string]interface{}{} // 统一架构中统计信息由统一管理器提供
-	},
+	// 🔧 清理：废弃的设备监控器和会话管理功能已删除
+	// 统一架构中这些功能已集成到 core.GetGlobalConnectionGroupManager() 中
 
 	// 连接管理实现
 	GetConnectionByDeviceId: func(deviceId string) (ziface.IConnection, bool) {
