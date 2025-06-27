@@ -143,9 +143,17 @@ func (h *ChargeControlHandler) processChargeControl(decodedFrame *protocol.Decod
 			},
 		}).Warn("检测到非标准设备应答格式")
 
-		// 发送错误响应
+		// 发送错误响应 - 🔧 修复：使用正确的DNY协议发送方法
 		responseData := []byte{dny_protocol.ResponseFailed}
-		h.SendResponse(conn, responseData)
+		physicalId := binary.LittleEndian.Uint32(decodedFrame.RawPhysicalID)
+		if err := protocol.SendDNYResponse(conn, physicalId, decodedFrame.MessageID, decodedFrame.Command, responseData); err != nil {
+			logger.WithFields(logrus.Fields{
+				"connID":    conn.GetConnID(),
+				"deviceId":  deviceID,
+				"messageID": fmt.Sprintf("0x%04X", messageID),
+				"error":     err.Error(),
+			}).Error("发送充电控制错误响应失败")
+		}
 		return
 	}
 

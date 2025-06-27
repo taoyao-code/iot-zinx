@@ -204,6 +204,9 @@ func (h *DNYFrameHandlerBase) UpdateDeviceSessionFromFrame(deviceSession *sessio
 }
 
 // SendResponse 发送响应数据
+// ⚠️ 警告：此方法发送原始数据，不包含DNY协议封装！
+// 🔧 推荐：使用 protocol.SendDNYResponse() 发送完整的DNY协议响应
+// 🚫 注意：对于充电控制等重要命令，必须使用DNY协议封装
 func (h *DNYFrameHandlerBase) SendResponse(conn ziface.IConnection, data []byte) error {
 	if conn == nil {
 		return errors.New("连接对象为空")
