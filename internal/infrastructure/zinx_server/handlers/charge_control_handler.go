@@ -116,10 +116,11 @@ func (h *ChargeControlHandler) processChargeControl(decodedFrame *protocol.Decod
 
 	// 🔧 严格按照协议文档解析设备对充电控制命令的应答
 	// 协议规范（固定格式）：
-	// 设备应答数据部分必须是19字节：应答(1) + 订单编号(16) + 端口号(1) + 待充端口(2)
+	// 设备应答数据部分必须是20字节：应答(1) + 订单编号(16) + 端口号(1) + 待充端口(2)
 	// 注意：命令字段(0x82)已经在DNY协议层处理，这里只处理应答数据部分
+	// 🔧 修复：根据AP3000协议文档，正确的应答长度是20字节，不是19字节
 
-	const EXPECTED_RESPONSE_LENGTH = 19
+	const EXPECTED_RESPONSE_LENGTH = 20
 
 	if len(data) != EXPECTED_RESPONSE_LENGTH {
 		logger.WithFields(logrus.Fields{
@@ -157,7 +158,7 @@ func (h *ChargeControlHandler) processChargeControl(decodedFrame *protocol.Decod
 		return
 	}
 
-	// 严格按照协议文档解析19字节应答数据
+	// 严格按照协议文档解析20字节应答数据
 	responseCode := data[0]                                 // 应答状态(1字节)
 	orderBytes := data[1:17]                                // 订单编号(16字节)
 	portNumber := data[17]                                  // 端口号(1字节)
@@ -213,27 +214,14 @@ func (h *ChargeControlHandler) processChargeControl(decodedFrame *protocol.Decod
 		"portNumber":     portNumber,
 		"orderNumber":    orderNumber,
 		"waitingPorts":   fmt.Sprintf("0x%04X", waitingPorts),
-		"responseFormat": "标准协议格式(19字节)",
+		"responseFormat": "标准协议格式(20字节)",
 		"dataLen":        len(data),
 		"rawData":        fmt.Sprintf("%02X", data),
 		"timestamp":      time.Now().Format(constants.TimeFormatDefault),
 	}).Info("充电控制应答解析")
 
-	// 成功响应
-	responseData := []byte{dny_protocol.ResponseSuccess}
-
-	physicalId := binary.LittleEndian.Uint32(decodedFrame.RawPhysicalID)
-
-	// 发送响应
-	if err := protocol.SendDNYResponse(conn, physicalId, decodedFrame.MessageID, decodedFrame.Command, responseData); err != nil {
-		logger.WithFields(logrus.Fields{
-			"connID":    conn.GetConnID(),
-			"deviceId":  deviceID,
-			"messageID": fmt.Sprintf("0x%04X", messageID),
-			"error":     err.Error(),
-		}).Error("发送充电控制响应失败")
-		return
-	}
+	// 🔧 关键修复：设备发送的是对服务器充电命令的应答，服务器不需要再发送响应
+	// 删除错误的响应发送逻辑，防止无意义的通信循环
 
 	// 🔧 修复：更新自定义心跳管理器的连接活动时间
 	// 这是解决连接超时问题的关键修复

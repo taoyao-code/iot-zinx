@@ -564,7 +564,7 @@ emergency_stop_device() {
         -H "Content-Type: application/json" \
         -d "{
             \"deviceId\": \"${device_id}\",
-            \"port\": 255,
+            \"port\": 1,
             \"orderNo\": \"EMERGENCY_STOP_$(date +%s)\"
         }")
 
