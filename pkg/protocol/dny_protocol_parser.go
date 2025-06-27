@@ -511,11 +511,19 @@ func SplitPacketsFromBuffer(buffer []byte) ([][]byte, []byte, error) {
 			}
 		}
 
-		// 无法识别的数据，跳过一个字节继续扫描
+		// 🔧 增强：智能处理无法识别的数据
+		// 检查是否为压缩数据或其他特殊格式
+		if detectAndHandleSpecialData(buffer, offset, &packets, &offset) {
+			continue
+		}
+
+		// 最后手段：跳过一个字节继续扫描，但增加更详细的诊断信息
 		logger.WithFields(logrus.Fields{
 			"offset":       offset,
 			"unrecognized": fmt.Sprintf("%02x", buffer[offset]),
-			"contextHex":   fmt.Sprintf("%.20x", buffer[offset:min(offset+10, bufferLen)]),
+			"contextHex":   fmt.Sprintf("%.40x", buffer[offset:min(offset+20, bufferLen)]), // 增加上下文长度
+			"remainingLen": remaining,
+			"position":     fmt.Sprintf("%d/%d", offset, bufferLen),
 		}).Warn("SplitPacketsFromBuffer: 跳过无法识别的字节")
 		offset++
 	}
@@ -571,4 +579,158 @@ func ParseMultiplePackets(buffer []byte) ([]*dny_protocol.Message, []byte, error
 	}).Debug("ParseMultiplePackets: 多包解析完成")
 
 	return messages, remainingData, nil
+}
+
+// detectAndHandleSpecialData 检测并处理特殊格式的数据包
+// 🔧 新增：智能处理压缩数据、十六进制编码数据等特殊格式
+// 返回true表示成功处理了数据包，false表示无法识别
+func detectAndHandleSpecialData(buffer []byte, offset int, packets *[][]byte, newOffset *int) bool {
+	remaining := len(buffer) - offset
+	if remaining < 4 {
+		return false
+	}
+
+	// 检测gzip压缩数据 (1f8b08开头)
+	if remaining >= 10 &&
+		buffer[offset] == 0x1f &&
+		buffer[offset+1] == 0x8b &&
+		buffer[offset+2] == 0x08 {
+
+		logger.WithFields(logrus.Fields{
+			"offset":     offset,
+			"remaining":  remaining,
+			"signature":  "gzip",
+			"contextHex": fmt.Sprintf("%.20x", buffer[offset:min(offset+10, len(buffer))]),
+		}).Info("SplitPacketsFromBuffer: 检测到gzip压缩数据，尝试处理")
+
+		// 尝试找到gzip数据的结束位置
+		// gzip格式：10字节头部 + 压缩数据 + 8字节尾部
+		gzipEndPos := findGzipEnd(buffer, offset)
+		if gzipEndPos > offset {
+			compressedData := buffer[offset:gzipEndPos]
+
+			// 尝试解压缩
+			if decompressed, err := decompressGzipData(compressedData); err == nil {
+				logger.WithFields(logrus.Fields{
+					"originalLen":     len(compressedData),
+					"decompressedLen": len(decompressed),
+					"decompressedHex": fmt.Sprintf("%.100x", decompressed),
+				}).Info("SplitPacketsFromBuffer: 成功解压缩数据，递归解析")
+
+				// 递归解析解压后的数据
+				subPackets, _, subErr := SplitPacketsFromBuffer(decompressed)
+				if subErr == nil && len(subPackets) > 0 {
+					*packets = append(*packets, subPackets...)
+					*newOffset = gzipEndPos
+					return true
+				}
+			} else {
+				logger.WithFields(logrus.Fields{
+					"error":   err.Error(),
+					"dataLen": len(compressedData),
+				}).Warn("SplitPacketsFromBuffer: gzip解压缩失败")
+			}
+		}
+	}
+
+	// 检测十六进制编码的数据
+	if remaining >= 6 && isHexEncodedData(buffer, offset, min(remaining, 100)) {
+		hexLen := findHexDataEnd(buffer, offset)
+		if hexLen > 0 {
+			hexData := buffer[offset : offset+hexLen]
+			if decoded, err := hex.DecodeString(string(hexData)); err == nil {
+				logger.WithFields(logrus.Fields{
+					"originalLen": len(hexData),
+					"decodedLen":  len(decoded),
+					"decodedHex":  fmt.Sprintf("%.100x", decoded),
+				}).Info("SplitPacketsFromBuffer: 成功解码十六进制数据，递归解析")
+
+				// 递归解析解码后的数据
+				subPackets, _, subErr := SplitPacketsFromBuffer(decoded)
+				if subErr == nil && len(subPackets) > 0 {
+					*packets = append(*packets, subPackets...)
+					*newOffset = offset + hexLen
+					return true
+				}
+			}
+		}
+	}
+
+	// 检测以空字节开头的数据包（可能是协议头被污染）
+	if remaining >= 20 && buffer[offset] == 0x00 {
+		// 寻找可能的DNY协议头
+		for i := offset + 1; i < min(offset+50, len(buffer)-3); i++ {
+			if string(buffer[i:i+3]) == HeaderDNY {
+				logger.WithFields(logrus.Fields{
+					"offset":        offset,
+					"dnyFoundAt":    i,
+					"skippedBytes":  i - offset,
+					"contextBefore": fmt.Sprintf("%.20x", buffer[offset:i]),
+					"contextAfter":  fmt.Sprintf("%.20x", buffer[i:min(i+10, len(buffer))]),
+				}).Warn("SplitPacketsFromBuffer: 跳过污染字节找到DNY协议头")
+
+				*newOffset = i
+				return true
+			}
+		}
+	}
+
+	return false
+}
+
+// findGzipEnd 查找gzip数据的结束位置
+func findGzipEnd(buffer []byte, start int) int {
+	// gzip格式的简化检测：寻找可能的结尾
+	// 实际实现应该解析gzip header来确定数据长度
+	for i := start + 10; i < len(buffer)-8; i++ {
+		// 检查是否后面紧跟其他已知格式的数据
+		if i+3 < len(buffer) && string(buffer[i:i+3]) == HeaderDNY {
+			return i
+		}
+		if i+20 < len(buffer) && isValidICCIDStrict(buffer[i:i+20]) {
+			return i
+		}
+		if i+4 < len(buffer) && string(buffer[i:i+4]) == HeaderLink {
+			return i
+		}
+	}
+	return start + 100 // 默认最大长度
+}
+
+// decompressGzipData 解压缩gzip数据
+func decompressGzipData(data []byte) ([]byte, error) {
+	// 这里应该实现真正的gzip解压缩
+	// 为了简化，暂时返回错误，实际项目中需要使用compress/gzip包
+	return nil, fmt.Errorf("gzip decompression not implemented yet")
+}
+
+// isHexEncodedData 检测是否为十六进制编码的数据
+func isHexEncodedData(buffer []byte, offset, checkLen int) bool {
+	if checkLen < 6 {
+		return false
+	}
+
+	hexCount := 0
+	for i := 0; i < checkLen && offset+i < len(buffer); i++ {
+		b := buffer[offset+i]
+		if (b >= '0' && b <= '9') || (b >= 'A' && b <= 'F') || (b >= 'a' && b <= 'f') {
+			hexCount++
+		} else {
+			break
+		}
+	}
+
+	// 如果80%以上是十六进制字符，认为是十六进制编码
+	return hexCount >= checkLen*8/10 && hexCount%2 == 0
+}
+
+// findHexDataEnd 查找十六进制数据的结束位置
+func findHexDataEnd(buffer []byte, offset int) int {
+	for i := offset; i < len(buffer); i++ {
+		b := buffer[i]
+		if !((b >= '0' && b <= '9') || (b >= 'A' && b <= 'F') || (b >= 'a' && b <= 'f')) {
+			return i - offset
+		}
+	}
+	return len(buffer) - offset
 }

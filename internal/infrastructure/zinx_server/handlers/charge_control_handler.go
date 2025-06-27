@@ -214,8 +214,10 @@ func (h *ChargeControlHandler) processChargeControl(decodedFrame *protocol.Decod
 	// 成功响应
 	responseData := []byte{dny_protocol.ResponseSuccess}
 
+	physicalId := binary.LittleEndian.Uint32(decodedFrame.RawPhysicalID)
+
 	// 发送响应
-	if err := h.SendResponse(conn, responseData); err != nil {
+	if err := protocol.SendDNYResponse(conn, physicalId, decodedFrame.MessageID, decodedFrame.Command, responseData); err != nil {
 		logger.WithFields(logrus.Fields{
 			"connID":    conn.GetConnID(),
 			"deviceId":  deviceID,

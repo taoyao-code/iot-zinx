@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"github.com/aceld/zinx/ziface"
+	"github.com/bujia-iot/iot-zinx/internal/domain/dny_protocol"
 	"github.com/bujia-iot/iot-zinx/internal/infrastructure/logger"
 	"github.com/bujia-iot/iot-zinx/pkg/constants"
 	"github.com/sirupsen/logrus"
@@ -90,13 +91,29 @@ func (d *DNY_Decoder) Intercept(chain ziface.IChain) ziface.IcResp {
 			"connID":  connID,
 			"error":   err.Error(),
 			"dataLen": len(rawData),
-		}).Warn("解码器：多包解析失败")
+			"dataHex": fmt.Sprintf("%.100x", rawData),
+		}).Warn("解码器：多包解析失败，创建错误类型的DNY消息")
 
-		// 解析失败时，回退到未知消息处理
+		// 🔧 改进：即使解析失败，也创建一个错误类型的DNY消息对象
+		errorMsg := &dny_protocol.Message{
+			MessageType:  "error",
+			ErrorMessage: fmt.Sprintf("协议解析失败: %v", err),
+			RawData:      rawData,
+		}
+
+		// 设置消息路由信息
 		iMessage.SetMsgID(constants.MsgIDUnknown)
 		iMessage.SetData(rawData)
 		iMessage.SetDataLen(uint32(len(rawData)))
-		return chain.ProceedWithIMessage(iMessage, nil)
+
+		// 保存DNY消息对象到扩展属性
+		if req, ok := chain.Request().(interface {
+			SetProperty(key string, value interface{})
+		}); ok {
+			req.SetProperty("dny_message", errorMsg)
+		}
+
+		return chain.ProceedWithIMessage(iMessage, errorMsg)
 	}
 
 	// 记录分割结果
@@ -211,6 +228,31 @@ func (d *DNY_Decoder) Intercept(chain ziface.IChain) ziface.IcResp {
 		}).Debug("解码器：存在剩余未完整数据")
 
 		// TODO: 将剩余数据缓存到连接上下文中，等待下次数据到达
+	}
+
+	// 🔧 关键修复：确保统一DNY消息对象正确传递给后续处理器
+	// 将解析的DNY消息对象设置到消息的扩展属性中，供后续处理器使用
+	if firstMsg != nil {
+		// 将DNY消息对象保存到IMessage的扩展属性中
+		// 这样后续的命令处理器就能正确获取到统一的DNY消息对象
+		if req, ok := chain.Request().(interface {
+			SetProperty(key string, value interface{})
+		}); ok {
+			req.SetProperty("dny_message", firstMsg)
+		}
+
+		// 记录成功传递DNY消息对象
+		logger.WithFields(logrus.Fields{
+			"connID":      connID,
+			"messageType": firstMsg.MessageType,
+			"msgID":       iMessage.GetMsgID(),
+		}).Debug("解码器：成功传递统一DNY消息对象")
+	} else {
+		// 如果没有解析出消息，记录警告
+		logger.WithFields(logrus.Fields{
+			"connID": connID,
+			"msgID":  iMessage.GetMsgID(),
+		}).Warn("解码器：未能解析出统一DNY消息对象")
 	}
 
 	return chain.ProceedWithIMessage(iMessage, firstMsg)
