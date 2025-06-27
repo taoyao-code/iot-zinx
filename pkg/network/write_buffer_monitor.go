@@ -65,8 +65,15 @@ func (wbm *WriteBufferMonitor) Stop() {
 		return
 	}
 
-	close(wbm.stopChan)
 	wbm.running = false
+
+	// 安全关闭通道
+	select {
+	case <-wbm.stopChan:
+		// 通道已经关闭
+	default:
+		close(wbm.stopChan)
+	}
 
 	logger.Info("写缓冲区监控器已停止")
 }

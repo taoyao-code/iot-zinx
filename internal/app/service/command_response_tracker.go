@@ -246,8 +246,13 @@ func (t *CommandResponseTracker) Stop() {
 	t.mutex.Lock()
 	defer t.mutex.Unlock()
 
-	// 停止清理协程
-	close(t.stopCleanup)
+	// 安全停止清理协程
+	select {
+	case <-t.stopCleanup:
+		// 通道已经关闭
+	default:
+		close(t.stopCleanup)
+	}
 	t.cleanupTicker.Stop()
 
 	// 取消所有等待中的命令

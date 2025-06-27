@@ -207,10 +207,11 @@ func BuildChargeControlPacket(
 	return buildDNYPacket(physicalID, messageID, CmdChargeControl, data)
 }
 
-// buildDNYPacket 构建DNY协议数据包的通用实现
+// buildDNYPacket 构建DNY协议数据包的通用实现 (已废弃)
+// 🔧 重构：此函数已废弃，使用 pkg/protocol/unified_dny_builder.go 中的统一构建器
 func buildDNYPacket(physicalID uint32, messageID uint16, command uint8, data []byte) []byte {
-	// 计算数据长度 (物理ID + 消息ID + 命令 + 数据)
-	contentLen := 4 + 2 + 1 + len(data) // PhysicalID(4) + MessageID(2) + Command(1) + Data
+	// 🔧 修复：使用正确的协议规范，长度字段包含校验和
+	contentLen := 4 + 2 + 1 + len(data) + 2 // PhysicalID(4) + MessageID(2) + Command(1) + Data + Checksum(2)
 
 	// 创建包缓冲区
 	packet := make([]byte, 0, 3+2+contentLen+2) // Header(3) + Length(2) + Content + Checksum(2)

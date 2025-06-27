@@ -110,8 +110,8 @@ func sendDNYPacket(conn ziface.IConnection, packet []byte, physicalID uint32, me
 		"timestamp":  time.Now().Format(constants.TimeFormatDefault),
 	}).Debug("准备发送DNY协议数据")
 
-	// 🔧 修复：使用动态写超时机制，支持重试
-	err := sendWithDynamicTimeout(conn, packet, 60*time.Second, 3) // 60秒超时，最多重试3次
+	// 🔧 重构：使用统一发送器，集成所有高级功能
+	err := network.SendDNY(conn, packet)
 	if err != nil {
 		logger.WithFields(logrus.Fields{
 			"connID":     conn.GetConnID(),
@@ -245,17 +245,29 @@ func ensureValidPhysicalID(conn ziface.IConnection, physicalID uint32) (uint32, 
 }
 
 // BuildDNYResponsePacket 构建DNY协议响应数据包
+// 🔧 重构：使用统一DNY构建器，确保数据一致性
 func BuildDNYResponsePacket(physicalID uint32, messageID uint16, command uint8, data []byte) []byte {
-	return buildDNYPacket(physicalID, messageID, command, data)
+	logger.WithFields(logrus.Fields{
+		"function": "BuildDNYResponsePacket",
+		"note":     "已重构为使用统一DNY构建器",
+	}).Debug("构建DNY响应数据包")
+
+	return BuildUnifiedDNYPacket(physicalID, messageID, command, data)
 }
 
 // BuildDNYRequestPacket 构建DNY协议请求数据包
+// 🔧 重构：使用统一DNY构建器，确保数据一致性
 func BuildDNYRequestPacket(physicalID uint32, messageID uint16, command uint8, data []byte) []byte {
-	return buildDNYPacket(physicalID, messageID, command, data)
+	logger.WithFields(logrus.Fields{
+		"function": "BuildDNYRequestPacket",
+		"note":     "已重构为使用统一DNY构建器",
+	}).Debug("构建DNY请求数据包")
+
+	return BuildUnifiedDNYPacket(physicalID, messageID, command, data)
 }
 
 // buildDNYPacket 构建DNY协议数据包的通用实现
-// 请求包和响应包的格式相同，只是语义不同
+// 🔧 重构：使用统一DNY构建器，替代原有重复实现
 func buildDNYPacket(physicalID uint32, messageID uint16, command uint8, data []byte) []byte {
 	// 计算纯数据内容长度（物理ID + 消息ID + 命令 + 实际数据 + 校验和）
 	// 根据协议，“长度”字段的值应为 PhysicalID(4) + MessageID(2) + 命令(1) + 数据(n) + 校验(2) 的总和

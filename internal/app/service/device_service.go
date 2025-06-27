@@ -13,6 +13,7 @@ import (
 	"github.com/bujia-iot/iot-zinx/pkg"
 	"github.com/bujia-iot/iot-zinx/pkg/constants"
 	"github.com/bujia-iot/iot-zinx/pkg/monitor"
+	"github.com/bujia-iot/iot-zinx/pkg/network"
 	"github.com/sirupsen/logrus"
 )
 
@@ -316,8 +317,13 @@ func (s *DeviceService) SendDNYCommandToDevice(deviceID string, command byte, da
 	// 🔧 使用pkg包中的统一接口构建DNY协议帧
 	packetData := pkg.Protocol.BuildDNYResponsePacket(uint32(physicalID), messageID, command, data)
 
-	// 发送到设备
-	err = conn.SendBuffMsg(0, packetData)
+	// 🔧 修复：使用统一发送器发送
+	globalSender := network.GetGlobalSender()
+	if globalSender == nil {
+		return nil, fmt.Errorf("统一发送器未初始化")
+	}
+
+	err = globalSender.SendDNYPacket(conn, packetData)
 	if err != nil {
 		logger.WithFields(logrus.Fields{
 			"deviceId": deviceID,

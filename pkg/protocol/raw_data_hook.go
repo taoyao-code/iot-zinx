@@ -7,6 +7,7 @@ import (
 
 	"github.com/aceld/zinx/ziface"
 	"github.com/bujia-iot/iot-zinx/internal/infrastructure/logger"
+	"github.com/bujia-iot/iot-zinx/pkg/network"
 	"github.com/bujia-iot/iot-zinx/pkg/session"
 	"github.com/sirupsen/logrus"
 )
@@ -116,9 +117,9 @@ func handleICCIDResponse(conn ziface.IConnection, data string) bool {
 			deviceSession.SyncToConnection(conn)
 		}
 
-		// 响应设备
+		// 响应设备 - 🔧 使用统一发送器
 		response := "ICCID识别成功\r\n"
-		if err := conn.SendBuffMsg(0, []byte(response)); err != nil {
+		if err := network.SendRaw(conn, []byte(response)); err != nil {
 			logger.WithFields(logrus.Fields{
 				"error":      err.Error(),
 				"connID":     conn.GetConnID(),
@@ -148,9 +149,9 @@ func handleATCommandResponse(conn ziface.IConnection, data string) bool {
 
 	// 简单的AT命令响应
 	if strings.HasPrefix(strings.TrimSpace(data), "AT") {
-		// 发送OK响应
+		// 发送OK响应 - 🔧 使用统一发送器
 		response := "OK\r\n"
-		if err := conn.SendBuffMsg(0, []byte(response)); err != nil {
+		if err := network.SendRaw(conn, []byte(response)); err != nil {
 			logger.WithFields(logrus.Fields{
 				"error":      err.Error(),
 				"connID":     conn.GetConnID(),

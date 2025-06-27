@@ -89,8 +89,15 @@ func (chc *ConnectionHealthChecker) Stop() {
 		return
 	}
 
-	close(chc.stopChan)
 	chc.running = false
+
+	// 安全关闭通道
+	select {
+	case <-chc.stopChan:
+		// 通道已经关闭
+	default:
+		close(chc.stopChan)
+	}
 
 	// 停止写缓冲区监控器
 	chc.writeBufferMonitor.Stop()

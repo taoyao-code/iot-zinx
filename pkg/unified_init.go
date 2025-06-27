@@ -5,6 +5,7 @@ import (
 
 	"github.com/aceld/zinx/ziface"
 	"github.com/bujia-iot/iot-zinx/internal/infrastructure/logger"
+	"github.com/bujia-iot/iot-zinx/pkg/constants"
 	"github.com/bujia-iot/iot-zinx/pkg/core"
 	"github.com/bujia-iot/iot-zinx/pkg/monitor"
 	"github.com/bujia-iot/iot-zinx/pkg/network"
@@ -69,6 +70,49 @@ func InitUnifiedArchitecture() {
 		return protocol.SendDNYResponse(conn, physicalID, messageID, command, actualData)
 	})
 
+	// 8. 初始化全局统一发送器
+	network.InitGlobalSender(unifiedSystem.Monitor)
+
+	// 9. 启动命令管理器
+	cmdMgr := network.GetCommandManager()
+	cmdMgr.Start()
+	logger.Info("命令管理器已启动")
+
+	// 10. 设置设备注册检查函数
+	network.SetDeviceRegistrationChecker(func(deviceId string) bool {
+		if unifiedSystem.Monitor != nil {
+			_, exists := unifiedSystem.Monitor.GetConnectionByDeviceId(deviceId)
+			return exists
+		}
+		return true // 如果监控器未初始化，保守处理
+	})
+
+	// 11. 设置network包访问monitor包的函数
+	network.SetUpdateDeviceStatusFunc(func(deviceID string, status constants.DeviceStatus) error {
+		if unifiedSystem.Monitor != nil {
+			unifiedSystem.Monitor.UpdateDeviceStatus(deviceID, string(status))
+			return nil
+		}
+		return fmt.Errorf("统一监控器未初始化")
+	})
+
+	// 12. 启动监控管理器
+	monitoringManager := network.GetGlobalMonitoringManager()
+	if monitoringManager != nil {
+		// 设置连接监控器
+		network.SetGlobalConnectionMonitor(unifiedSystem.Monitor)
+
+		// 启动监控管理器
+		if err := monitoringManager.Start(); err != nil {
+			logger.Errorf("启动监控管理器失败: %v", err)
+		} else {
+			logger.Info("全局监控管理器已启动")
+		}
+	}
+
+	// 13. 设置向后兼容性
+	SetupUnifiedMonitorCompatibility()
+
 	logger.Info("统一架构初始化完成")
 }
 
@@ -76,8 +120,26 @@ func InitUnifiedArchitecture() {
 func CleanupUnifiedArchitecture() {
 	logger.Info("开始清理统一架构资源...")
 
-	// 统一架构的清理工作会自动处理
-	// 无需手动清理各个组件
+	// 1. 停止命令管理器
+	cmdMgr := network.GetCommandManager()
+	if cmdMgr != nil {
+		cmdMgr.Stop()
+		logger.Info("命令管理器已停止")
+	}
+
+	// 2. 停止监控管理器
+	monitoringManager := network.GetGlobalMonitoringManager()
+	if monitoringManager != nil {
+		monitoringManager.Stop()
+		logger.Info("全局监控管理器已停止")
+	}
+
+	// 3. 清理统一系统资源
+	unifiedSystem := core.GetUnifiedSystem()
+	if unifiedSystem != nil {
+		// 统一系统的清理工作会自动处理
+		logger.Info("统一系统资源已清理")
+	}
 
 	logger.Info("统一架构资源清理完成")
 }
@@ -91,12 +153,8 @@ func (a *unifiedDNYProtocolSenderAdapter) SendDNYData(conn ziface.IConnection, d
 	unifiedSystem := core.GetUnifiedSystem()
 	unifiedSystem.HandleDataSent(conn, data)
 
-	// 实际发送数据
-	if tcpConn := conn.GetTCPConnection(); tcpConn != nil {
-		_, err := tcpConn.Write(data)
-		return err
-	}
-	return fmt.Errorf("无法获取TCP连接")
+	// 使用统一发送器发送数据
+	return network.SendDNY(conn, data)
 }
 
 // GetUnifiedSystem 获取统一系统接口（向后兼容）

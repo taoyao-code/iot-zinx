@@ -1,7 +1,6 @@
 package service
 
 import (
-	"encoding/binary"
 	"fmt"
 	"sync"
 	"time"
@@ -9,6 +8,8 @@ import (
 	"github.com/aceld/zinx/ziface"
 	"github.com/bujia-iot/iot-zinx/internal/infrastructure/logger"
 	"github.com/bujia-iot/iot-zinx/pkg/core"
+	"github.com/bujia-iot/iot-zinx/pkg/network"
+	"github.com/bujia-iot/iot-zinx/pkg/protocol"
 	"github.com/sirupsen/logrus"
 )
 
@@ -110,9 +111,20 @@ func (s *UnifiedDataSender) SendDataToDevice(deviceID string, commandID uint8, p
 	// 3. 生成消息ID
 	messageID := s.getNextMessageID()
 
-	// 4. 构建并发送DNY协议数据
-	packet := s.buildDNYPacket(physicalID, messageID, commandID, payload)
-	err = conn.SendBuffMsg(0, packet)
+	// 4. 构建并发送DNY协议数据 - 🔧 使用统一DNY构建器
+	packet := protocol.BuildUnifiedDNYPacket(physicalID, messageID, commandID, payload)
+
+	// 🔧 修复：使用统一发送器
+	globalSender := network.GetGlobalSender()
+	if globalSender == nil {
+		return &SendResult{
+			Success:   false,
+			ConnID:    conn.GetConnID(),
+			Timestamp: startTime,
+		}, fmt.Errorf("统一发送器未初始化")
+	}
+
+	err = globalSender.SendDNYPacket(conn, packet)
 	if err != nil {
 		s.updateStats(false, err.Error())
 
@@ -256,56 +268,26 @@ func (s *UnifiedDataSender) getNextMessageID() uint16 {
 	return s.messageIDCounter
 }
 
-// buildDNYPacket 构建DNY协议数据包
+// buildDNYPacket 构建DNY协议数据包 (已废弃)
+// 🔧 重构：此函数已废弃，使用统一DNY构建器替代
 func (s *UnifiedDataSender) buildDNYPacket(physicalID uint32, messageID uint16, command uint8, data []byte) []byte {
-	// DNY协议包结构：
-	// Header(3) + Length(2) + PhysicalID(4) + MessageID(2) + Command(1) + Data(N) + Checksum(2)
+	logger.WithFields(logrus.Fields{
+		"function": "UnifiedDataSender.buildDNYPacket",
+		"note":     "已废弃，使用统一DNY构建器",
+	}).Debug("废弃函数调用")
 
-	dataLen := len(data)
-	contentLen := 4 + 2 + 1 + dataLen + 2 // PhysicalID + MessageID + Command + Data + Checksum
-	totalLen := 3 + 2 + contentLen        // Header + Length + Content
-
-	packet := make([]byte, totalLen)
-	offset := 0
-
-	// 1. Header "DNY"
-	copy(packet[offset:], []byte("DNY"))
-	offset += 3
-
-	// 2. Length (小端序)
-	binary.LittleEndian.PutUint16(packet[offset:], uint16(contentLen))
-	offset += 2
-
-	// 3. PhysicalID (小端序)
-	binary.LittleEndian.PutUint32(packet[offset:], physicalID)
-	offset += 4
-
-	// 4. MessageID (小端序)
-	binary.LittleEndian.PutUint16(packet[offset:], messageID)
-	offset += 2
-
-	// 5. Command
-	packet[offset] = command
-	offset += 1
-
-	// 6. Data
-	if dataLen > 0 {
-		copy(packet[offset:], data)
-		offset += dataLen
-	}
-
-	// 7. Checksum (计算从Header开始到Data结束的校验和)
-	checksum := s.calculateChecksum(packet[:offset])
-	binary.LittleEndian.PutUint16(packet[offset:], checksum)
-
-	return packet
+	return protocol.BuildUnifiedDNYPacket(physicalID, messageID, command, data)
 }
 
-// calculateChecksum 计算DNY协议校验和
+// calculateChecksum 计算DNY协议校验和 (已废弃)
+// 🔧 重构：此函数已废弃，校验和计算已集成到统一DNY构建器中
 func (s *UnifiedDataSender) calculateChecksum(data []byte) uint16 {
-	var sum uint16
-	for _, b := range data {
-		sum += uint16(b)
-	}
-	return sum
+	logger.WithFields(logrus.Fields{
+		"function": "UnifiedDataSender.calculateChecksum",
+		"note":     "已废弃，校验和计算已集成到统一DNY构建器",
+	}).Debug("废弃函数调用")
+
+	// 使用统一构建器的校验和计算
+	builder := protocol.GetGlobalDNYBuilder()
+	return builder.CalculateChecksum(data)
 }

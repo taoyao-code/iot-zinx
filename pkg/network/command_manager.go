@@ -117,13 +117,21 @@ func (cm *CommandManager) Start() {
 // Stop 停止命令管理器
 func (cm *CommandManager) Stop() {
 	cm.lock.Lock()
+	defer cm.lock.Unlock()
+
 	if !cm.isRunning {
-		cm.lock.Unlock()
 		return
 	}
+
 	cm.isRunning = false
-	close(cm.stopChan)
-	cm.lock.Unlock()
+
+	// 安全关闭通道
+	select {
+	case <-cm.stopChan:
+		// 通道已经关闭
+	default:
+		close(cm.stopChan)
+	}
 
 	logger.Info("命令管理器已停止")
 }

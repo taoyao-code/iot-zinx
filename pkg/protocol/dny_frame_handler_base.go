@@ -11,6 +11,7 @@ import (
 
 	"github.com/bujia-iot/iot-zinx/internal/domain/dny_protocol" // 引入统一消息结构
 	"github.com/bujia-iot/iot-zinx/internal/infrastructure/logger"
+	"github.com/bujia-iot/iot-zinx/pkg/network"
 	"github.com/bujia-iot/iot-zinx/pkg/session"
 )
 
@@ -216,8 +217,8 @@ func (h *DNYFrameHandlerBase) SendResponse(conn ziface.IConnection, data []byte)
 		return errors.New("响应数据为空")
 	}
 
-	// 使用Zinx的发送方法
-	return conn.SendBuffMsg(0, data)
+	// 🔧 修复：使用统一发送器发送原始数据
+	return network.SendRaw(conn, data)
 }
 
 // ValidateFrame 验证帧数据有效性 - 🔧 修复：放宽验证条件，提高兼容性

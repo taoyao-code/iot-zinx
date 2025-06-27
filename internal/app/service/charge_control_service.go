@@ -449,8 +449,13 @@ func (s *ChargeControlService) sendChargeControlCommandWithMessageID(req *dto.Ch
 		"qrCodeLight":       req.QRCodeLight,
 	}).Info("发送充电控制命令")
 
-	// 🔧 修复：增强的发送逻辑，包含连接健康检查和智能重试
-	err = s.sendPacketWithHealthCheck(conn, packet, req.DeviceID)
+	// 🔧 修复：使用统一发送器替代复杂的发送逻辑
+	unifiedSender := network.GetGlobalSender()
+	if unifiedSender == nil {
+		return fmt.Errorf("统一发送器未初始化")
+	}
+
+	err = unifiedSender.SendDNYPacket(conn, packet)
 	if err != nil {
 		return fmt.Errorf("发送充电控制命令失败: %w", err)
 	}
@@ -796,19 +801,8 @@ func (s *ChargeControlService) sendPacketWithHealthCheck(conn ziface.IConnection
 		return fmt.Errorf("连接不健康，拒绝发送数据包")
 	}
 
-	// 2. 尝试使用增强的TCP写入器
-	unifiedSystem := pkg.GetUnifiedSystem()
-	if unifiedSystem != nil && unifiedSystem.Network != nil {
-		if tcpWriterInterface := unifiedSystem.Network.GetTCPWriter(); tcpWriterInterface != nil {
-			if tcpWriter, ok := tcpWriterInterface.(*network.TCPWriter); ok {
-				// 使用带重试的TCP写入器
-				return tcpWriter.SendBuffMsgWithRetry(conn, 0, packet)
-			}
-		}
-	}
-
-	// 3. 降级到普通发送，但增加超时保护
-	return s.sendWithTimeoutProtection(conn, packet, deviceID)
+	// 2. 使用统一发送器
+	return network.SendRaw(conn, packet)
 }
 
 // isConnectionHealthy 检查连接健康状态
@@ -894,8 +888,8 @@ func (s *ChargeControlService) sendWithTimeoutProtection(conn ziface.IConnection
 		}
 	}
 
-	// 执行发送
-	err := conn.SendBuffMsg(0, packet)
+	// 执行发送 - 使用统一发送器
+	err := network.SendRaw(conn, packet)
 
 	// 记录发送结果
 	if err != nil {
