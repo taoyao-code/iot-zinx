@@ -735,9 +735,9 @@ func handleUnifiedChargingError(c *gin.Context, err error) {
 				Code:    int(constants.ErrCodeConnectionLost),
 				Message: "设备连接丢失，请稍后重试",
 			})
-		case constants.ErrCodeInvalidState:
+		case constants.ErrCodeInvalidData:
 			c.JSON(http.StatusBadRequest, APIResponse{
-				Code:    int(constants.ErrCodeInvalidState),
+				Code:    int(constants.ErrCodeInvalidData),
 				Message: deviceErr.Message,
 			})
 		default:
@@ -760,7 +760,7 @@ func handleUnifiedChargingError(c *gin.Context, err error) {
 
 	// 其他错误
 	c.JSON(http.StatusInternalServerError, APIResponse{
-		Code:    int(constants.ErrCodeInternalError),
+		Code:    int(constants.ErrCodeInvalidOperation),
 		Message: "充电操作失败: " + err.Error(),
 	})
 }

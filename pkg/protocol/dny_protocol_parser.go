@@ -21,9 +21,11 @@ import (
 )
 
 const (
-	HeaderDNY          = "DNY"
+	// 使用统一的协议常量
+	HeaderDNY          = constants.ProtocolHeader // 已弃用，使用 constants.ProtocolHeader
 	HeaderLink         = "link"
-	MinPacketLength    = 12 // DNY + Length(2) + PhysicalID(4) + MessageID(2) + Command(1) + Checksum(2)
+	// 使用统一的协议常量
+	MinPacketLength    = constants.MinPacketSize // 已弃用，使用 constants.MinPacketSize
 	LinkPacketLength   = 4  // link
 	PhysicalIDLength   = 4
 	MessageIDLength    = 2

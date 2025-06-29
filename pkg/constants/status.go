@@ -37,10 +37,7 @@ type UpdateDeviceStatusFuncType func(deviceID string, status DeviceStatus) error
 
 // 🔧 删除重复定义，统一到下面的状态常量中
 
-// 🔧 新增：时间格式化常量
-const (
-	TimeFormatDefault = "2006-01-02 15:04:05"
-)
+// 🔧 修复：时间格式化常量已在 protocol_constants.go 中定义，删除重复定义
 
 // 🔧 统一状态常量定义 - 使用 DeviceConnectionState 作为基础类型
 const (
@@ -161,18 +158,8 @@ func (s DeviceConnectionState) IsValidTransition(newState DeviceConnectionState)
 // DeviceErrorCode 设备错误码类型
 type DeviceErrorCode int
 
-const (
-	ErrCodeSuccess          DeviceErrorCode = 0    // 成功
-	ErrCodeDeviceNotFound   DeviceErrorCode = 1001 // 设备不存在
-	ErrCodeDeviceOffline    DeviceErrorCode = 1002 // 设备离线
-	ErrCodeConnectionLost   DeviceErrorCode = 1003 // 连接丢失
-	ErrCodeICCIDMissing     DeviceErrorCode = 1004 // ICCID缺失
-	ErrCodeRegistrationFail DeviceErrorCode = 1005 // 注册失败
-	ErrCodeInvalidState     DeviceErrorCode = 1006 // 状态无效
-	ErrCodeCommandTimeout   DeviceErrorCode = 1007 // 命令超时
-	ErrCodeProtocolError    DeviceErrorCode = 1008 // 协议错误
-	ErrCodeInternalError    DeviceErrorCode = 1009 // 内部错误
-)
+// 🔧 修复：错误码已在 protocol_constants.go 中定义，删除重复定义
+// 保留 DeviceErrorCode 类型定义，但删除重复的常量
 
 // DeviceError 设备相关错误
 type DeviceError struct {

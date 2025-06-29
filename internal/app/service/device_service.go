@@ -163,7 +163,7 @@ type DeviceConnectionInfo struct {
 func (s *DeviceService) GetDeviceConnectionInfo(deviceID string) (*DeviceConnectionInfo, error) {
 	tcpMonitor := s.getTCPMonitor()
 	if tcpMonitor == nil {
-		return nil, constants.NewDeviceError(constants.ErrCodeInternalError, deviceID, "TCP监控器未初始化")
+		return nil, constants.NewDeviceError(constants.ErrCodeConnectionLost, deviceID, "TCP监控器未初始化")
 	}
 
 	// 🔧 使用统一架构：直接检查设备连接状态

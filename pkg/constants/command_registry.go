@@ -79,7 +79,7 @@ func (r *CommandRegistry) GetCommandPriority(commandID uint8) int {
 func (r *CommandRegistry) GetAllCommands() map[uint8]*CommandInfo {
 	r.mutex.RLock()
 	defer r.mutex.RUnlock()
-	
+
 	// 创建副本避免外部修改
 	result := make(map[uint8]*CommandInfo)
 	for id, info := range r.commands {
@@ -94,7 +94,7 @@ func (r *CommandRegistry) GetAllCommands() map[uint8]*CommandInfo {
 func (r *CommandRegistry) GetCommandsByCategory(category string) []*CommandInfo {
 	r.mutex.RLock()
 	defer r.mutex.RUnlock()
-	
+
 	var result []*CommandInfo
 	for _, info := range r.commands {
 		if info.Category == category {
@@ -146,9 +146,7 @@ func GetCommandDescription(commandID uint8) string {
 	return GetGlobalCommandRegistry().GetCommandDescription(commandID)
 }
 
-func GetCommandPriority(commandID uint8) int {
-	return GetGlobalCommandRegistry().GetCommandPriority(commandID)
-}
+// 🔧 修复：GetCommandPriority 全局函数已在 ap3000_commands.go 中定义，删除重复定义
 
 func GetCommandInfo(commandID uint8) (*CommandInfo, bool) {
 	return GetGlobalCommandRegistry().GetCommandInfo(commandID)

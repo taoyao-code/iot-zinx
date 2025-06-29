@@ -16,7 +16,8 @@ const (
 const (
 	IOT_SIM_CARD_LENGTH = 20     // ICCID长度
 	IOT_LINK_HEARTBEAT  = "link" // Link心跳字符串
-	DNY_MIN_PACKET_LEN  = 12     // DNY协议最小数据包长度
+	// 使用统一的协议常量
+	DNY_MIN_PACKET_LEN  = MinPacketSize // 已弃用，使用 MinPacketSize
 
 	// 连接缓冲区管理常量
 	ConnectionBufferKey = "dny_connection_buffer" // 连接缓冲区属性键
@@ -29,7 +30,8 @@ const (
 	ICCIDMessageLength = 20     // ICCID标准长度（文档兼容性）
 	ICCIDValidPrefix   = "89"   // ICCID有效前缀（ITU-T E.118标准，电信行业标识符）
 	DNYMinHeaderLength = 5      // DNY协议最小头部长度("DNY" + 长度字段)
-	DNYHeaderMagic     = "DNY"  // DNY协议魔数
+	// 使用统一的协议常量
+	DNYHeaderMagic     = ProtocolHeader // 已弃用，使用 ProtocolHeader
 	DNYChecksumLength  = 2      // DNY校验和长度
 )
 
