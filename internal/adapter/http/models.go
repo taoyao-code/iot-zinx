@@ -107,3 +107,29 @@ type RoutesResponse struct {
 	Routes []RouteInfo `json:"routes"` // 路由列表
 	Count  int         `json:"count"`  // 路由总数
 }
+
+// ChargingStartParams 开始充电请求参数
+// @Description 开始充电的请求参数
+type ChargingStartParams struct {
+	DeviceID string `json:"deviceId" binding:"required" example:"04ceaa40" swaggertype:"string" description:"设备ID"`
+	Port     byte   `json:"port" binding:"required" example:"1" minimum:"1" maximum:"8" swaggertype:"integer" description:"充电端口号(1-8)"`
+	Mode     byte   `json:"mode" example:"0" enum:"0,1" swaggertype:"integer" description:"充电模式: 0=按时间 1=按电量"`
+	Value    uint16 `json:"value" binding:"required" example:"60" minimum:"1" swaggertype:"integer" description:"充电值: 时间(分钟)/电量(0.1度)"`
+	OrderNo  string `json:"orderNo" binding:"required" example:"ORDER_20250619001" swaggertype:"string" description:"订单号"`
+	Balance  uint32 `json:"balance" example:"1000" swaggertype:"integer" description:"余额(分)，可选"`
+}
+
+// ChargingStopParams 停止充电请求参数
+// @Description 停止充电的请求参数
+type ChargingStopParams struct {
+	DeviceID string `json:"deviceId" binding:"required" example:"04ceaa40" swaggertype:"string" description:"设备ID"`
+	Port     byte   `json:"port" example:"1" enum:"1,2,3,4,5,6,7,8,255" swaggertype:"integer" description:"端口号: 1-8或255(设备智能选择端口)"`
+	OrderNo  string `json:"orderNo" example:"ORDER_20250619001" swaggertype:"string" description:"订单号，可选"`
+}
+
+// DeviceLocateRequest 设备定位请求参数
+// @Description 设备定位请求参数
+type DeviceLocateRequest struct {
+	DeviceID   string `json:"deviceId" binding:"required" example:"04A26CF3" swaggertype:"string" description:"设备ID"`
+	LocateTime uint8  `json:"locateTime" binding:"required" example:"10" minimum:"1" maximum:"255" swaggertype:"integer" description:"定位时间(秒)，范围1-255"`
+}

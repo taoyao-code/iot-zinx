@@ -92,8 +92,8 @@ case "error":       // 解析错误
 ```go
 import "github.com/bujia-iot/iot-zinx/pkg"
 
-// 初始化pkg包依赖关系
-pkg.InitPackages()
+// 初始化统一架构（v2.0.0+）
+pkg.InitUnifiedArchitecture()
 
 // 使用协议相关功能
 packet := pkg.Protocol.NewDNYDataPackFactory().NewDataPack(true)
