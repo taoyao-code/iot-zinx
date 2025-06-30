@@ -14,17 +14,31 @@ const (
 	ErrInvalidParameter
 	ErrNotImplemented
 
-	// 设备相关错误
+	// 协议解析错误码
+	ErrInvalidHeader
+	ErrInvalidLength
+	ErrInvalidChecksum
+	ErrInvalidCommand
+	ErrInvalidData
+
+	// 连接错误码
+	ErrConnectionLost
+	ErrConnectionTimeout
+	ErrConnectionRefused
+	ErrConnectionLimit
+
+	// 业务错误码
 	ErrDeviceNotFound
+	ErrDeviceOffline
+	ErrInvalidOperation
+	ErrOperationTimeout
 	ErrDeviceAlreadyRegistered
 	ErrDeviceConnectionFailed
 	ErrDeviceNotConnected
 
 	// 协议相关错误
 	ErrProtocolParseFailed
-	ErrProtocolInvalidChecksum
 	ErrProtocolPackageTooLarge
-	ErrProtocolInvalidCommand
 
 	// 通信相关错误
 	ErrCommandSerialization

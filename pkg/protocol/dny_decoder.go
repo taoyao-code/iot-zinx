@@ -15,10 +15,6 @@ import (
 // 协议解析常量 - 根据AP3000协议文档精确定义
 // -----------------------------------------------------------------------------
 const (
-	// ICCID相关常量 - 符合ITU-T E.118标准
-	ICCID_FIXED_LENGTH = 20   // ICCID固定长度：20位十六进制字符
-	ICCID_PREFIX_CMCC  = "89" // ICCID标准前缀（ITU-T E.118，电信行业标识符）
-
 	// Link心跳相关常量 - 根据文档：{6C 69 6E 6B }link是模块心跳包，长度固定为4字节
 	LINK_HEARTBEAT_LENGTH  = 4      // link心跳包固定长度
 	LINK_HEARTBEAT_CONTENT = "link" // link心跳包内容
@@ -266,7 +262,7 @@ func (d *DNY_Decoder) Intercept(chain ziface.IChain) ziface.IcResp {
 // tryParseICCIDDirect 直接解析ICCID消息
 // 根据ITU-T E.118标准：ICCID长度固定为20字节，十六进制字符，以"89"开头
 func (d *DNY_Decoder) tryParseICCIDDirect(data []byte, connID uint64) []byte {
-	if len(data) != ICCID_FIXED_LENGTH {
+	if len(data) != constants.IOT_SIM_CARD_LENGTH {
 		return nil
 	}
 
@@ -300,7 +296,7 @@ func (d *DNY_Decoder) tryParseDNYFrameDirect(data []byte, connID uint64) []byte 
 	}
 
 	// 检查DNY包头
-	if string(data[:DNY_HEADER_LENGTH]) != DNY_HEADER_MAGIC {
+	if string(data[:DNY_HEADER_LENGTH]) != constants.ProtocolHeader {
 		return nil
 	}
 
@@ -337,7 +333,7 @@ func (d *DNY_Decoder) tryParseDNYFrameDirect(data []byte, connID uint64) []byte 
 // isValidICCIDBytes 验证ICCID字节格式
 // 🔧 修复：支持真实ICCID格式，十六进制字符(0-9,A-F)，以"89"开头
 func (d *DNY_Decoder) isValidICCIDBytes(data []byte) bool {
-	if len(data) != ICCID_FIXED_LENGTH {
+	if len(data) != constants.IOT_SIM_CARD_LENGTH {
 		return false
 	}
 
@@ -348,7 +344,7 @@ func (d *DNY_Decoder) isValidICCIDBytes(data []byte) bool {
 	}
 
 	// 必须以"89"开头（ITU-T E.118标准，电信行业标识符）
-	if dataStr[:2] != ICCID_PREFIX_CMCC {
+	if dataStr[:2] != constants.ICCIDValidPrefix {
 		return false
 	}
 

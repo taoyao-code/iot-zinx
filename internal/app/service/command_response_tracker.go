@@ -84,13 +84,7 @@ func (t *CommandResponseTracker) TrackCommand(
 	// 存储等待命令
 	t.pendingCommands.Store(commandID, pendingCmd)
 
-	logger.WithFields(logrus.Fields{
-		"commandId": commandID,
-		"deviceId":  deviceID,
-		"command":   fmt.Sprintf("0x%02X", command),
-		"messageId": fmt.Sprintf("0x%04X", messageID),
-		"timeout":   timeout.String(),
-	}).Info("开始跟踪命令响应")
+	logger.Info("开始跟踪命令响应")
 
 	// 启动超时处理协程
 	go t.handleCommandTimeout(pendingCmd)
@@ -115,10 +109,7 @@ func (t *CommandResponseTracker) NotifyResponse(deviceID string, messageID uint1
 	})
 
 	if found == nil {
-		logger.WithFields(logrus.Fields{
-			"deviceId":  deviceID,
-			"messageId": fmt.Sprintf("0x%04X", messageID),
-		}).Warn("未找到对应的等待命令")
+		logger.Warn("未找到对应的等待命令")
 		return false
 	}
 
@@ -128,12 +119,7 @@ func (t *CommandResponseTracker) NotifyResponse(deviceID string, messageID uint1
 	// 取消超时
 	found.Cancel()
 
-	logger.WithFields(logrus.Fields{
-		"commandId": commandID,
-		"deviceId":  deviceID,
-		"messageId": fmt.Sprintf("0x%04X", messageID),
-		"elapsed":   time.Since(found.CreatedAt).String(),
-	}).Info("收到命令响应")
+	logger.Info("收到命令响应")
 
 	// 通知响应
 	if found.Callback != nil {
@@ -168,13 +154,7 @@ func (t *CommandResponseTracker) handleCommandTimeout(cmd *PendingCommand) {
 
 	// 检查是否因为超时还是正常响应
 	if cmd.Context.Err() == context.DeadlineExceeded {
-		logger.WithFields(logrus.Fields{
-			"commandId": cmd.ID,
-			"deviceId":  cmd.DeviceID,
-			"command":   fmt.Sprintf("0x%02X", cmd.Command),
-			"messageId": fmt.Sprintf("0x%04X", cmd.MessageID),
-			"elapsed":   time.Since(cmd.CreatedAt).String(),
-		}).Warn("命令响应超时")
+		logger.Warn("命令响应超时")
 
 		// 调用超时回调
 		if cmd.Callback != nil {
@@ -225,9 +205,7 @@ func (t *CommandResponseTracker) cleanupExpiredCommands() {
 	}
 
 	if len(expiredCommands) > 0 {
-		logger.WithFields(logrus.Fields{
-			"count": len(expiredCommands),
-		}).Info("清理过期命令完成")
+		logger.Info("清理过期命令完成")
 	}
 }
 

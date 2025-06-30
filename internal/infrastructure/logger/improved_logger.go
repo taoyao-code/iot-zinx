@@ -13,16 +13,60 @@ import (
 	"gopkg.in/natefinch/lumberjack.v2"
 )
 
+var globalImprovedLogger *ImprovedLogger
+
+func init() {
+	globalImprovedLogger = NewImprovedLogger()
+}
+
 // ImprovedLogger 改进的日志系统
 type ImprovedLogger struct {
-	logger *logrus.Logger
-	config *config.LoggerConfig
+	logger           *logrus.Logger
+	config           *config.LoggerConfig
+	communicationLog *logrus.Logger
+}
+
+// InitCommunicationLogger 初始化专用通信日志
+func (il *ImprovedLogger) InitCommunicationLogger(logDir string) error {
+	// 设置通信日志格式
+	il.communicationLog.SetFormatter(&logrus.TextFormatter{
+		TimestampFormat: constants.TimeFormatDefault,
+		FullTimestamp:   true,
+		DisableColors:   true, // 文件日志不需要颜色
+	})
+
+	// 设置日志级别为Info，确保记录所有通信日志
+	il.communicationLog.SetLevel(logrus.InfoLevel)
+
+	// 创建通信日志文件
+	commLogPath := filepath.Join(logDir, "communication.log")
+	commLogDir := filepath.Dir(commLogPath)
+
+	if err := os.MkdirAll(commLogDir, 0o755); err != nil {
+		return fmt.Errorf("failed to create communication log directory: %w", err)
+	}
+
+	commFile, err := os.OpenFile(commLogPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o666)
+	if err != nil {
+		return fmt.Errorf("failed to open communication log file: %w", err)
+	}
+
+	il.communicationLog.SetOutput(commFile)
+
+	// 记录初始化信息
+	il.communicationLog.WithFields(logrus.Fields{
+		"logPath": commLogPath,
+		"level":   "info",
+	}).Info("通信日志系统初始化完成")
+
+	return nil
 }
 
 // NewImprovedLogger 创建改进的日志实例
 func NewImprovedLogger() *ImprovedLogger {
 	return &ImprovedLogger{
-		logger: logrus.New(),
+		logger:           logrus.New(),
+		communicationLog: logrus.New(),
 	}
 }
 
@@ -103,6 +147,90 @@ func (il *ImprovedLogger) InitImproved(cfg *config.LoggerConfig) error {
 		"max_age_days": cfg.MaxAgeDays,
 		"hex_dump":     cfg.LogHexDump,
 	}).Info("日志系统初始化完成")
+
+	return nil
+}
+
+// InitWithConsole 初始化日志系统，同时输出到控制台和文件
+func (il *ImprovedLogger) InitWithConsole(cfg *config.LoggerConfig) error {
+	// 强制设置为debug级别，确保输出所有日志
+	forcedLevel := "debug"
+	level, err := logrus.ParseLevel(forcedLevel)
+	if err != nil {
+		// 如果解析失败，强制使用debug级别
+		level = logrus.DebugLevel
+	}
+	il.logger.SetLevel(level)
+
+	// 设置日志格式
+	if strings.ToLower(cfg.Format) == "json" {
+		il.logger.SetFormatter(&logrus.JSONFormatter{
+			TimestampFormat: constants.TimeFormatDefault,
+		})
+	} else {
+		il.logger.SetFormatter(&logrus.TextFormatter{
+			TimestampFormat: constants.TimeFormatDefault,
+			FullTimestamp:   true,
+			ForceColors:     true, // 强制启用颜色
+		})
+	}
+
+	// 直接在控制台输出测试信息
+	fmt.Println("\n===== 日志系统初始化开始 =====")
+	fmt.Printf("原始日志级别: %s\n", cfg.Level)
+	fmt.Printf("强制设置级别: %s\n", forcedLevel)
+	fmt.Printf("实际使用级别: %s\n", level.String())
+	fmt.Printf("日志格式: %s\n", cfg.Format)
+	fmt.Printf("日志文件路径: %s\n", cfg.FilePath)
+
+	// 设置同时输出到控制台和文件
+	writers := []io.Writer{os.Stdout}
+
+	// 如果配置了文件路径，添加文件输出
+	if cfg.FilePath != "" {
+		// 获取绝对路径
+		absPath, err := filepath.Abs(cfg.FilePath)
+		if err != nil {
+			fmt.Printf("获取日志文件绝对路径失败: %v\n", err)
+			absPath = cfg.FilePath
+		}
+		fmt.Printf("日志文件绝对路径: %s\n", absPath)
+
+		logDir := filepath.Dir(absPath)
+		fmt.Printf("创建日志目录: %s\n", logDir)
+
+		if err := os.MkdirAll(logDir, 0o755); err != nil {
+			fmt.Printf("创建日志目录失败: %v\n", err)
+			return fmt.Errorf("failed to create log directory: %w", err)
+		}
+
+		// 测试文件权限
+		testFileName := filepath.Join(logDir, "test_permission.tmp")
+		testFile, err := os.OpenFile(testFileName, os.O_CREATE|os.O_WRONLY, 0o666)
+		if err != nil {
+			fmt.Printf("测试文件权限失败: %v\n", err)
+		} else {
+			testFile.WriteString("测试写入权限")
+			testFile.Close()
+			os.Remove(testFileName)
+			fmt.Println("文件权限测试成功")
+		}
+
+		// 创建日志文件
+		fmt.Printf("打开日志文件: %s\n", absPath)
+		file, err := os.OpenFile(absPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o666)
+		if err != nil {
+			fmt.Printf("打开日志文件失败: %v\n", err)
+			return fmt.Errorf("failed to open log file: %w", err)
+		}
+
+		fmt.Printf("日志文件已打开: %v\n", file.Name())
+		writers = append(writers, file)
+	}
+
+	// 创建多路输出
+	multiWriter := io.MultiWriter(writers...)
+	il.logger.SetOutput(multiWriter)
 
 	return nil
 }
@@ -226,4 +354,112 @@ func (il *ImprovedLogger) HexDump(message string, data []byte, logHexDump bool) 
 	if logHexDump && il.logger.IsLevelEnabled(logrus.DebugLevel) {
 		il.HexDumpImproved(message, data)
 	}
+}
+
+// GetLogger 获取logrus实例
+func GetLogger() *logrus.Logger {
+	return globalImprovedLogger.GetLogger()
+}
+
+// Debug 输出Debug级别日志
+func Debug(args ...interface{}) {
+	msg := fmt.Sprint(args...)
+	globalImprovedLogger.Debug(msg, nil)
+}
+
+// Debugf 格式化输出Debug级别日志
+func Debugf(format string, args ...interface{}) {
+	globalImprovedLogger.logger.Debugf(format, args...)
+}
+
+// Info 输出Info级别日志
+func Info(args ...interface{}) {
+	msg := fmt.Sprint(args...)
+	globalImprovedLogger.Info(msg, nil)
+}
+
+// Infof 格式化输出Info级别日志
+func Infof(format string, args ...interface{}) {
+	globalImprovedLogger.logger.Infof(format, args...)
+}
+
+// Warn 输出Warn级别日志
+func Warn(args ...interface{}) {
+	msg := fmt.Sprint(args...)
+	globalImprovedLogger.Warn(msg, nil)
+}
+
+// Warnf 格式化输出Warn级别日志
+func Warnf(format string, args ...interface{}) {
+	globalImprovedLogger.logger.Warnf(format, args...)
+}
+
+// Error 输出Error级别日志
+func Error(args ...interface{}) {
+	msg := fmt.Sprint(args...)
+	globalImprovedLogger.Error(msg, nil)
+}
+
+// Errorf 格式化输出Error级别日志
+func Errorf(format string, args ...interface{}) {
+	globalImprovedLogger.logger.Errorf(format, args...)
+}
+
+// Fatal 输出Fatal级别日志
+func Fatal(args ...interface{}) {
+	msg := fmt.Sprint(args...)
+	globalImprovedLogger.Fatal(msg, nil)
+}
+
+// Fatalf 格式化输出Fatal级别日志
+func Fatalf(format string, args ...interface{}) {
+	globalImprovedLogger.logger.Fatalf(format, args...)
+}
+
+// WithField 添加字段到日志
+func WithField(key string, value interface{}) *logrus.Entry {
+	return globalImprovedLogger.logger.WithField(key, value)
+}
+
+// WithFields 添加多个字段到日志
+func WithFields(fields logrus.Fields) *logrus.Entry {
+	return globalImprovedLogger.logger.WithFields(fields)
+}
+
+// HexDump 全局HexDump
+func HexDump(message string, data []byte, logHexDump bool) {
+	globalImprovedLogger.HexDump(message, data, logHexDump)
+}
+
+// GetCommunicationLogger 获取通信日志实例
+func GetCommunicationLogger() *logrus.Logger {
+	return globalImprovedLogger.communicationLog
+}
+
+// LogCommunication 记录通信数据
+func LogCommunication(direction string, fields logrus.Fields, message string) {
+	globalImprovedLogger.communicationLog.WithFields(fields).Info(fmt.Sprintf("[%s] %s", direction, message))
+}
+
+// LogSendData 记录发送数据
+func LogSendData(deviceID string, commandID uint8, messageID uint16, connID uint64, payloadLen int, description string) {
+	LogCommunication("SEND", logrus.Fields{
+		"deviceID":    deviceID,
+		"commandID":   fmt.Sprintf("0x%02X", commandID),
+		"messageID":   fmt.Sprintf("0x%04X", messageID),
+		"connID":      connID,
+		"payloadLen":  payloadLen,
+		"description": description,
+	}, "数据发送")
+}
+
+// LogReceiveData 记录接收数据
+func LogReceiveData(connID uint64, dataLen int, messageType string, deviceID string, commandID uint8) {
+	LogCommunication("RECV", logrus.Fields{
+		"connID":      connID,
+		"dataLen":     dataLen,
+		"messageType": messageType,
+		"deviceID":    deviceID,
+		"commandID":   fmt.Sprintf("0x%02X", commandID),
+	}, "数据接收")
 }

@@ -13,7 +13,6 @@ import (
 	"github.com/bujia-iot/iot-zinx/pkg"
 	"github.com/bujia-iot/iot-zinx/pkg/network"
 	"github.com/bujia-iot/iot-zinx/pkg/protocol"
-	"github.com/sirupsen/logrus"
 )
 
 // TCPServer 封装TCP服务器功能
@@ -112,10 +111,7 @@ func (s *TCPServer) initializePackageDependencies() {
 	// 设置向后兼容性
 	pkg.SetupUnifiedMonitorCompatibility()
 
-	logger.WithFields(logrus.Fields{
-		"architecture": "unified",
-		"status":       "initialized",
-	}).Info("统一架构已正确初始化")
+	logger.Info("统一架构已正确初始化")
 }
 
 // setupConnectionHooks 设置连接钩子
@@ -171,10 +167,7 @@ func (s *TCPServer) startHeartbeatManager() {
 	heartbeatInterval := time.Duration(s.cfg.DeviceConnection.HeartbeatIntervalSeconds) * time.Second
 	heartbeatTimeout := time.Duration(s.cfg.DeviceConnection.HeartbeatTimeoutSeconds) * time.Second
 
-	logger.WithFields(logrus.Fields{
-		"heartbeatInterval": heartbeatInterval.String(),
-		"heartbeatTimeout":  heartbeatTimeout.String(),
-	}).Info("开始初始化心跳管理器")
+	logger.Info("开始初始化心跳管理器")
 
 	// 初始化自定义心跳管理器
 	s.heartbeatManager = NewHeartbeatManager(heartbeatInterval, heartbeatTimeout)
@@ -189,7 +182,7 @@ func (s *TCPServer) startHeartbeatManager() {
 
 	// 安全设置全局活动更新器
 	if err := network.SetGlobalActivityUpdater(s.heartbeatManager); err != nil {
-		logger.WithField("error", err.Error()).Fatal("❌ GlobalActivityUpdater设置失败")
+		logger.Fatal("❌ GlobalActivityUpdater设置失败")
 		return
 	}
 
@@ -205,13 +198,7 @@ func (s *TCPServer) startHeartbeatManager() {
 	s.heartbeatManager.Start()
 
 	// 验证启动后状态
-	stats := s.heartbeatManager.GetStats()
-	globalStats := network.GetGlobalActivityUpdaterStats()
-
-	logger.WithFields(logrus.Fields{
-		"heartbeatManagerStats": stats,
-		"globalUpdaterStats":    globalStats,
-	}).Info("✅ 自定义心跳管理器已成功启动并注入全局")
+	logger.Info("✅ 自定义心跳管理器已成功启动并注入全局")
 
 	// 调用诊断函数验证全局状态
 	network.DiagnoseGlobalActivityUpdater()

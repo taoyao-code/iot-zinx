@@ -1,9 +1,7 @@
 package service
 
 import (
-	"errors"
 	"fmt"
-	"strconv"
 	"time"
 
 	"github.com/aceld/zinx/ziface"
@@ -12,8 +10,10 @@ import (
 	"github.com/bujia-iot/iot-zinx/pkg"
 	"github.com/bujia-iot/iot-zinx/pkg/constants"
 	"github.com/bujia-iot/iot-zinx/pkg/core"
+	"github.com/bujia-iot/iot-zinx/pkg/errors"
 	"github.com/bujia-iot/iot-zinx/pkg/monitor"
 	"github.com/bujia-iot/iot-zinx/pkg/network"
+	"github.com/bujia-iot/iot-zinx/pkg/utils"
 	"github.com/sirupsen/logrus"
 )
 
@@ -97,10 +97,7 @@ func (s *DeviceService) HandleDeviceOffline(deviceId string, iccid string) {
 // HandleDeviceStatusUpdate 处理设备状态更新
 func (s *DeviceService) HandleDeviceStatusUpdate(deviceId string, status constants.DeviceStatus) {
 	// 记录设备状态更新
-	logger.WithFields(logrus.Fields{
-		"deviceId": deviceId,
-		"status":   status,
-	}).Info("设备状态更新")
+	logger.Info("设备状态更新")
 
 	// 🔧 使用统一状态管理器更新设备状态
 	s.statusManager.UpdateDeviceStatus(deviceId, string(status))
@@ -163,7 +160,7 @@ type DeviceConnectionInfo struct {
 func (s *DeviceService) GetDeviceConnectionInfo(deviceID string) (*DeviceConnectionInfo, error) {
 	tcpMonitor := s.getTCPMonitor()
 	if tcpMonitor == nil {
-		return nil, constants.NewDeviceError(constants.ErrCodeConnectionLost, deviceID, "TCP监控器未初始化")
+		return nil, constants.NewDeviceError(errors.ErrConnectionLost, deviceID, "TCP监控器未初始化")
 	}
 
 	// 🔧 使用统一架构：直接检查设备连接状态
@@ -172,7 +169,7 @@ func (s *DeviceService) GetDeviceConnectionInfo(deviceID string) (*DeviceConnect
 	// 查询设备连接状态
 	conn, connExists := tcpMonitor.GetConnectionByDeviceId(deviceID)
 	if !connExists {
-		return nil, constants.NewDeviceError(constants.ErrCodeDeviceNotFound, deviceID, "设备未连接")
+		return nil, constants.NewDeviceError(errors.ErrDeviceNotFound, deviceID, "设备未连接")
 	}
 
 	// 构建设备连接信息
@@ -235,11 +232,15 @@ func (s *DeviceService) IsDeviceOnline(deviceID string) bool {
 func (s *DeviceService) SendCommandToDevice(deviceID string, command byte, data []byte) error {
 	conn, exists := s.GetDeviceConnection(deviceID)
 	if !exists {
-		return errors.New("设备不在线")
+		return errors.New(errors.ErrDeviceOffline, "设备不在线")
 	}
 
 	// 解析设备ID为物理ID
-	physicalID, err := strconv.ParseUint(deviceID, 16, 32)
+	physicalID, err := utils.ParseDeviceIDToPhysicalID(deviceID)
+	if err != nil {
+		return err
+	}
+
 	// 生成消息ID - 使用全局消息ID管理器
 	messageID := pkg.Protocol.GetNextMessageID()
 
@@ -254,11 +255,7 @@ func (s *DeviceService) SendCommandToDevice(deviceID string, command byte, data 
 		return fmt.Errorf("发送命令失败: %v", err)
 	}
 
-	logger.WithFields(logrus.Fields{
-		"deviceId":  deviceID,
-		"command":   fmt.Sprintf("0x%02X", command),
-		"messageId": messageID,
-	}).Info("发送命令到设备成功")
+	logger.Info("发送命令到设备成功")
 
 	return nil
 }
@@ -267,11 +264,11 @@ func (s *DeviceService) SendCommandToDevice(deviceID string, command byte, data 
 func (s *DeviceService) SendDNYCommandToDevice(deviceID string, command byte, data []byte, messageID uint16) ([]byte, error) {
 	conn, exists := s.GetDeviceConnection(deviceID)
 	if !exists {
-		return nil, errors.New("设备不在线")
+		return nil, errors.New(errors.ErrDeviceOffline, "设备不在线")
 	}
 
 	// 解析物理ID
-	physicalID, err := strconv.ParseUint(deviceID, 10, 32)
+	physicalID, err := utils.ParseDeviceIDToPhysicalID(deviceID)
 	if err != nil {
 		return nil, fmt.Errorf("设备ID格式错误: %v", err)
 	}
@@ -295,11 +292,7 @@ func (s *DeviceService) SendDNYCommandToDevice(deviceID string, command byte, da
 		return nil, fmt.Errorf("发送DNY命令失败: %v", err)
 	}
 
-	logger.WithFields(logrus.Fields{
-		"deviceId":  deviceID,
-		"command":   fmt.Sprintf("0x%02X", command),
-		"messageId": messageID,
-	}).Info("发送DNY命令到设备成功")
+	logger.Info("发送DNY命令到设备成功")
 
 	return packetData, nil
 }
@@ -317,11 +310,7 @@ func (s *DeviceService) GetEnhancedDeviceList() []map[string]interface{} {
 		detailedInfo, err := s.GetDeviceConnectionInfo(deviceInfo.DeviceID)
 		if err != nil {
 			// 连接信息获取失败，但仍使用业务状态
-			logger.WithFields(logrus.Fields{
-				"deviceId":       deviceInfo.DeviceID,
-				"businessStatus": deviceInfo.Status,
-				"error":          err.Error(),
-			}).Debug("获取设备连接信息失败，使用业务状态")
+			logger.Debug("获取设备连接信息失败，使用业务状态")
 
 			devices = append(devices, map[string]interface{}{
 				"deviceId": deviceInfo.DeviceID,
@@ -331,13 +320,7 @@ func (s *DeviceService) GetEnhancedDeviceList() []map[string]interface{} {
 		} else {
 			// 成功获取连接信息，进行状态一致性检查
 			if isOnline != detailedInfo.IsOnline {
-				logger.WithFields(logrus.Fields{
-					"deviceId":       deviceInfo.DeviceID,
-					"businessStatus": deviceInfo.Status,
-					"connStatus":     detailedInfo.Status,
-					"businessOnline": isOnline,
-					"connOnline":     detailedInfo.IsOnline,
-				}).Warn("⚠️ 业务状态与连接状态不一致")
+				logger.Warn("⚠️ 业务状态与连接状态不一致")
 			}
 
 			devices = append(devices, map[string]interface{}{
@@ -361,12 +344,7 @@ func (s *DeviceService) ValidateCard(deviceId string, cardNumber string, cardTyp
 	// 这里应该调用业务平台API验证卡片
 	// 为了简化，假设卡片有效，返回正常状态和计时模式
 
-	logger.WithFields(logrus.Fields{
-		"deviceId":   deviceId,
-		"cardNumber": cardNumber,
-		"cardType":   cardType,
-		"gunNumber":  gunNumber,
-	}).Debug("验证卡片")
+	logger.Debug("验证卡片")
 
 	// 返回：是否有效，账户状态，费率模式，余额（分）
 	return true, 0x00, 0x00, 10000
@@ -377,15 +355,7 @@ func (s *DeviceService) ValidateCard(deviceId string, cardNumber string, cardTyp
 
 // HandleSettlement 处理结算数据
 func (s *DeviceService) HandleSettlement(deviceId string, settlement *dny_protocol.SettlementData) bool {
-	logger.WithFields(logrus.Fields{
-		"deviceId":       deviceId,
-		"orderId":        settlement.OrderID,
-		"cardNumber":     settlement.CardNumber,
-		"gunNumber":      settlement.GunNumber,
-		"electricEnergy": settlement.ElectricEnergy,
-		"totalFee":       settlement.TotalFee,
-		"stopReason":     settlement.StopReason,
-	}).Info("处理结算数据")
+	logger.Info("处理结算数据")
 
 	// 🔧 实现业务平台API调用
 	s.notifyBusinessPlatform("settlement", map[string]interface{}{
@@ -404,16 +374,7 @@ func (s *DeviceService) HandleSettlement(deviceId string, settlement *dny_protoc
 
 // HandlePowerHeartbeat 处理功率心跳数据
 func (s *DeviceService) HandlePowerHeartbeat(deviceId string, power *dny_protocol.PowerHeartbeatData) {
-	logger.WithFields(logrus.Fields{
-		"deviceId":       deviceId,
-		"gunNumber":      power.GunNumber,
-		"voltage":        power.Voltage,
-		"current":        float64(power.Current) / 100.0,
-		"power":          power.Power,
-		"electricEnergy": power.ElectricEnergy,
-		"temperature":    float64(power.Temperature) / 10.0,
-		"status":         power.Status,
-	}).Debug("处理功率心跳数据")
+	logger.Debug("处理功率心跳数据")
 
 	// 更新设备状态为在线
 	s.HandleDeviceStatusUpdate(deviceId, constants.DeviceStatusOnline)
@@ -434,12 +395,7 @@ func (s *DeviceService) HandlePowerHeartbeat(deviceId string, power *dny_protoco
 
 // HandleParameterSetting 处理参数设置
 func (s *DeviceService) HandleParameterSetting(deviceId string, param *dny_protocol.ParameterSettingData) (bool, []byte) {
-	logger.WithFields(logrus.Fields{
-		"deviceId":      deviceId,
-		"parameterType": param.ParameterType,
-		"parameterId":   param.ParameterID,
-		"valueLength":   len(param.Value),
-	}).Info("处理参数设置")
+	logger.Info("处理参数设置")
 
 	// 🔧 实现业务平台API调用
 	s.notifyBusinessPlatform("parameter_setting", map[string]interface{}{
@@ -466,10 +422,6 @@ func NowUnix() int64 {
 func (s *DeviceService) notifyBusinessPlatform(eventType string, data map[string]interface{}) {
 	err := s.notificationManager.NotifyBusinessPlatform(eventType, data)
 	if err != nil {
-		logger.WithFields(logrus.Fields{
-			"eventType": eventType,
-			"data":      data,
-			"error":     err.Error(),
-		}).Error("业务平台通知失败")
+		logger.Error("业务平台通知失败")
 	}
 }

@@ -264,7 +264,7 @@ func GetGlobalMonitoringManager() *MonitoringManager {
 		// 连接监控器将在初始化时设置
 		globalMonitoringManager = NewMonitoringManager(
 			DefaultMonitoringConfig(),
-			nil, // 将在pkg.InitPackages中设置
+			nil, // 将在统一架构初始化时设置
 		)
 	})
 	return globalMonitoringManager

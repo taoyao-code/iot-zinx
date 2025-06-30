@@ -56,36 +56,13 @@ func TestCleanupUnifiedArchitecture(t *testing.T) {
 	t.Log("统一架构清理验证通过")
 }
 
-// TestBackwardCompatibility 测试向后兼容性
-func TestBackwardCompatibility(t *testing.T) {
-	// 测试旧的初始化函数是否正确重定向
-	InitPackages()
+// TestBackwardCompatibility 测试向后兼容性（已移除）
+// 注意：v2.0.0 版本已移除废弃的 InitPackages 和 CleanupPackages 函数
+// 请使用 InitUnifiedArchitecture 和 CleanupUnifiedArchitecture 替代
 
-	// 验证统一系统是否正确初始化
-	unifiedSystem := core.GetUnifiedSystem()
-	if unifiedSystem == nil {
-		t.Fatal("向后兼容初始化失败")
-	}
-
-	// 测试旧的清理函数是否正确重定向
-	CleanupPackages()
-
-	t.Log("向后兼容性验证通过")
-}
-
-// TestInitPackagesWithDependencies 测试带依赖的初始化函数
-func TestInitPackagesWithDependencies(t *testing.T) {
-	// 测试带依赖的初始化函数是否正确重定向
-	InitPackagesWithDependencies(nil, nil)
-
-	// 验证统一系统是否正确初始化
-	unifiedSystem := core.GetUnifiedSystem()
-	if unifiedSystem == nil {
-		t.Fatal("带依赖的初始化失败")
-	}
-
-	t.Log("带依赖的初始化验证通过")
-}
+// TestInitPackagesWithDependencies 测试带依赖的初始化函数（已移除）
+// 注意：v2.0.0 版本已移除废弃的 InitPackagesWithDependencies 函数
+// 请使用 InitUnifiedArchitecture 替代，新架构不需要手动依赖注入
 
 // TestGetUnifiedSystem 测试获取统一系统接口
 func TestGetUnifiedSystem(t *testing.T) {
@@ -118,20 +95,20 @@ func TestSetupUnifiedMonitorCompatibility(t *testing.T) {
 		t.Fatal("Monitor.GetGlobalMonitor 未设置")
 	}
 
-	if Monitor.GetGlobalDeviceMonitor == nil {
-		t.Fatal("Monitor.GetGlobalDeviceMonitor 未设置")
-	}
-
 	// 测试获取全局监控器
 	globalMonitor := Monitor.GetGlobalMonitor()
 	if globalMonitor == nil {
 		t.Fatal("获取全局监控器失败")
 	}
 
-	// 测试获取设备监控器（应该返回nil）
-	deviceMonitor := Monitor.GetGlobalDeviceMonitor()
-	if deviceMonitor != nil {
-		t.Error("设备监控器应该返回nil（统一架构不需要单独的设备监控器）")
+	// 验证设备组管理器
+	if Monitor.GetDeviceGroupManager == nil {
+		t.Fatal("Monitor.GetDeviceGroupManager 未设置")
+	}
+
+	// 验证会话管理器
+	if Monitor.GetSessionManager == nil {
+		t.Fatal("Monitor.GetSessionManager 未设置")
 	}
 
 	t.Log("统一监控器兼容性设置验证通过")

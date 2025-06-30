@@ -13,6 +13,9 @@ import (
 	"github.com/bujia-iot/iot-zinx/pkg/utils"
 )
 
+// 全局连接监控器变量（从 pkg/init.go 迁移）
+var globalConnectionMonitor monitor.IConnectionMonitor
+
 // 设备状态常量
 const (
 	DeviceStatusOnline       = constants.DeviceStatusOnline

@@ -11,6 +11,7 @@ import (
 	"github.com/bujia-iot/iot-zinx/pkg"
 	"github.com/bujia-iot/iot-zinx/pkg/constants"
 	"github.com/bujia-iot/iot-zinx/pkg/core"
+	"github.com/bujia-iot/iot-zinx/pkg/errors"
 	"github.com/bujia-iot/iot-zinx/pkg/network"
 	"github.com/bujia-iot/iot-zinx/pkg/utils"
 	"github.com/sirupsen/logrus"
@@ -181,7 +182,7 @@ func (s *UnifiedChargingService) validateAndConvertRequest(req *ChargingRequest)
 func (s *UnifiedChargingService) getDeviceConnection(deviceID string) (ziface.IConnection, error) {
 	conn, exists := s.connectionMgr.GetConnectionByDeviceID(deviceID)
 	if !exists {
-		return nil, constants.NewDeviceError(constants.ErrCodeDeviceNotFound, deviceID, "设备不存在或未连接")
+		return nil, constants.NewDeviceError(errors.ErrDeviceNotFound, deviceID, "设备不存在或未连接")
 	}
 	return conn, nil
 }

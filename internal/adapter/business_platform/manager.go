@@ -3,6 +3,7 @@ package business_platform
 import (
 	"sync"
 
+	"github.com/bujia-iot/iot-zinx/internal/infrastructure/logger"
 	"github.com/sirupsen/logrus"
 )
 
@@ -108,7 +109,7 @@ func (m *Manager) UpdateConfig(config *Config) error {
 	m.client = NewClient(config, m.logger)
 	m.eventManager = NewEventManager(m.client, m.logger)
 
-	m.logger.Info("业务平台配置已更新")
+	logger.Info("业务平台配置已更新")
 	return nil
 }
 
@@ -126,7 +127,7 @@ func (m *Manager) Close() {
 	}
 
 	m.initialized = false
-	m.logger.Info("业务平台管理器已关闭")
+	logger.Info("业务平台管理器已关闭")
 }
 
 // GetStats 获取统计信息

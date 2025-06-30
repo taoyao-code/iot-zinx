@@ -185,13 +185,13 @@ func (h *HeartbeatManager) checkConnectionActivity() {
 
 		if now.Sub(lastActivity) > h.timeout {
 			logger.WithFields(logrus.Fields{
-				"connID":       connID,
-				"deviceId":     deviceId,
-				"remoteAddr":   conn.RemoteAddr().String(),
-				"lastActivity": lastActivity.Format(constants.TimeFormatDefault),
-				"idleTime":     now.Sub(lastActivity).String(),
-				"timeout":      h.timeout.String(),
-			}).Warn("连接长时间无活动 (自定义心跳)，判定为断开")
+		"connID":       connID,
+		"deviceId":     deviceId,
+		"remoteAddr":   conn.RemoteAddr().String(),
+		"lastActivity": lastActivity.Format(constants.TimeFormatDefault),
+		"idleTime":     now.Sub(lastActivity).String(),
+		"timeout":      h.timeout.String(),
+	}).Warn("连接长时间无活动 (自定义心跳)，判定为断开")
 			connectionsToDisconnect = append(connectionsToDisconnect, conn)
 		}
 		return true
@@ -204,8 +204,8 @@ func (h *HeartbeatManager) checkConnectionActivity() {
 
 	if disconnectCount > 0 {
 		logger.WithFields(logrus.Fields{
-			"count": disconnectCount,
-		}).Info("已断开不活跃连接")
+		"count": disconnectCount,
+	}).Info("已断开不活跃连接")
 	}
 }
 

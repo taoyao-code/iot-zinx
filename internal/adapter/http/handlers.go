@@ -12,6 +12,7 @@ import (
 	"github.com/bujia-iot/iot-zinx/pkg"
 	"github.com/bujia-iot/iot-zinx/pkg/constants"
 	"github.com/bujia-iot/iot-zinx/pkg/core"
+	"github.com/bujia-iot/iot-zinx/pkg/errors"
 	"github.com/bujia-iot/iot-zinx/pkg/network"
 	"github.com/bujia-iot/iot-zinx/pkg/utils"
 	"github.com/gin-gonic/gin"
@@ -91,7 +92,7 @@ func HandleDeviceStatus(c *gin.Context) {
 	// 🔧 修复：使用设备服务统一检查设备状态
 	if !ctx.DeviceService.IsDeviceOnline(deviceID) {
 		c.JSON(http.StatusNotFound, APIResponse{
-			Code:    int(constants.ErrCodeDeviceNotFound),
+			Code:    int(errors.ErrDeviceNotFound),
 			Message: "设备不存在",
 			Data:    nil,
 		})
@@ -102,7 +103,7 @@ func HandleDeviceStatus(c *gin.Context) {
 	deviceInfo, err := ctx.DeviceService.GetDeviceConnectionInfo(deviceID)
 	if err != nil {
 		c.JSON(http.StatusOK, APIResponse{
-			Code:    int(constants.ErrCodeDeviceOffline),
+			Code:    int(errors.ErrDeviceOffline),
 			Message: "设备离线",
 			Data: gin.H{
 				"deviceId": deviceID,
@@ -692,24 +693,7 @@ func HandleDeviceLocate(c *gin.Context) {
 	})
 }
 
-// parseDeviceIDToPhysicalID 解析设备ID字符串为物理ID
-func parseDeviceIDToPhysicalID(deviceID string) (uint32, error) {
-	// 移除可能的前缀和后缀空格
-	deviceID = strings.TrimSpace(deviceID)
 
-	// 尝试解析为16进制
-	var physicalID uint32
-	_, err := fmt.Sscanf(deviceID, "%X", &physicalID)
-	if err != nil {
-		// 如果16进制解析失败，尝试直接解析为数字
-		_, err2 := fmt.Sscanf(deviceID, "%d", &physicalID)
-		if err2 != nil {
-			return 0, fmt.Errorf("设备ID格式错误，应为16进制或10进制数字: %s", deviceID)
-		}
-	}
-
-	return physicalID, nil
-}
 
 // 🔧 buildDNYPacket 已删除 - 使用 dny_protocol.BuildDNYPacket() 或更好的 pkg.Protocol.BuildDNYResponsePacket()
 
@@ -720,24 +704,24 @@ func handleUnifiedChargingError(c *gin.Context, err error) {
 	// 检查是否为设备错误
 	if deviceErr, ok := err.(*constants.DeviceError); ok {
 		switch deviceErr.Code {
-		case constants.ErrCodeDeviceNotFound:
+		case errors.ErrDeviceNotFound:
 			c.JSON(http.StatusNotFound, APIResponse{
-				Code:    int(constants.ErrCodeDeviceNotFound),
+				Code:    int(errors.ErrDeviceNotFound),
 				Message: "设备不存在",
 			})
-		case constants.ErrCodeDeviceOffline:
+		case errors.ErrDeviceOffline:
 			c.JSON(http.StatusBadRequest, APIResponse{
-				Code:    int(constants.ErrCodeDeviceOffline),
+				Code:    int(errors.ErrDeviceOffline),
 				Message: "设备离线，无法执行充电操作",
 			})
-		case constants.ErrCodeConnectionLost:
+		case errors.ErrConnectionLost:
 			c.JSON(http.StatusBadRequest, APIResponse{
-				Code:    int(constants.ErrCodeConnectionLost),
+				Code:    int(errors.ErrConnectionLost),
 				Message: "设备连接丢失，请稍后重试",
 			})
-		case constants.ErrCodeInvalidData:
+		case errors.ErrInvalidData:
 			c.JSON(http.StatusBadRequest, APIResponse{
-				Code:    int(constants.ErrCodeInvalidData),
+				Code:    int(errors.ErrInvalidData),
 				Message: deviceErr.Message,
 			})
 		default:
@@ -760,7 +744,7 @@ func handleUnifiedChargingError(c *gin.Context, err error) {
 
 	// 其他错误
 	c.JSON(http.StatusInternalServerError, APIResponse{
-		Code:    int(constants.ErrCodeInvalidOperation),
+		Code:    int(errors.ErrInvalidOperation),
 		Message: "充电操作失败: " + err.Error(),
 	})
 }

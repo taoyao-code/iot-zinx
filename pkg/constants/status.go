@@ -1,7 +1,11 @@
 // Package constants 定义了项目中使用的各种常量
 package constants
 
-import "fmt"
+import (
+	"fmt"
+
+	"github.com/bujia-iot/iot-zinx/pkg/errors"
+)
 
 // 🔧 统一状态管理：将原有的 ConnStatus 和 DeviceStatus 合并为统一的状态系统
 // 这解决了原有三套状态系统（ConnState/ConnStatus/DeviceStatus）混乱的问题
@@ -155,15 +159,9 @@ func (s DeviceConnectionState) IsValidTransition(newState DeviceConnectionState)
 
 // 🔧 精细化错误处理 - 设备相关错误码和错误类型
 
-// DeviceErrorCode 设备错误码类型
-type DeviceErrorCode int
-
-// 🔧 修复：错误码已在 protocol_constants.go 中定义，删除重复定义
-// 保留 DeviceErrorCode 类型定义，但删除重复的常量
-
 // DeviceError 设备相关错误
 type DeviceError struct {
-	Code     DeviceErrorCode
+	Code     errors.ErrorCode
 	Message  string
 	DeviceID string
 	Details  map[string]interface{}
@@ -177,7 +175,7 @@ func (e *DeviceError) Error() string {
 }
 
 // NewDeviceError 创建设备错误
-func NewDeviceError(code DeviceErrorCode, deviceID, message string) *DeviceError {
+func NewDeviceError(code errors.ErrorCode, deviceID, message string) *DeviceError {
 	return &DeviceError{
 		Code:     code,
 		Message:  message,
