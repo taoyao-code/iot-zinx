@@ -13,9 +13,10 @@ type Config struct {
 	HTTPAPIServer    HTTPAPIServerConfig    `mapstructure:"httpApiServer"`
 	Redis            RedisConfig            `mapstructure:"redis"`
 	Logger           LoggerConfig           `mapstructure:"logger"`
-	BusinessPlatform BusinessPlatformConfig `mapstructure:"businessPlatform"`
 	Timeouts         TimeoutsConfig         `mapstructure:"timeouts"`
 	DeviceConnection DeviceConnectionConfig `mapstructure:"deviceConnection"`
+	HealthCheck      HealthCheckConfig      `mapstructure:"healthCheck"`
+	Retry            RetryConfig            `mapstructure:"retry"`
 	Notification     NotificationConfig     `mapstructure:"notification"`
 }
 
@@ -111,15 +112,6 @@ type LoggerConfig struct {
 	FilePath string `mapstructure:"filePath"` // 废弃: 使用 fileDir + filePrefix
 }
 
-// BusinessPlatformConfig 业务平台API配置
-type BusinessPlatformConfig struct {
-	APIURL              string `mapstructure:"apiUrl"`
-	APIKey              string `mapstructure:"apiKey"`
-	TimeoutSeconds      int    `mapstructure:"timeoutSeconds"`
-	RetryCount          int    `mapstructure:"retryCount"`
-	RetryBaseIntervalMs int    `mapstructure:"retryBaseIntervalMs"`
-}
-
 // TimeoutsConfig 超时配置
 type TimeoutsConfig struct {
 	DeviceInitSeconds            int `mapstructure:"deviceInitSeconds"`
@@ -144,6 +136,26 @@ type DifferentiatedTimeouts struct {
 	HeartbeatResponseTimeoutSeconds int `mapstructure:"heartbeatResponseTimeoutSeconds" yaml:"heartbeatResponseTimeoutSeconds"` // 心跳响应超时
 	DataTransferTimeoutSeconds      int `mapstructure:"dataTransferTimeoutSeconds" yaml:"dataTransferTimeoutSeconds"`           // 数据传输超时
 	DefaultWriteTimeoutSeconds      int `mapstructure:"defaultWriteTimeoutSeconds" yaml:"defaultWriteTimeoutSeconds"`           // 默认写操作超时
+}
+
+// HealthCheckConfig 健康检查配置
+type HealthCheckConfig struct {
+	Interval                  int     `mapstructure:"interval"`                  // 健康检查间隔（秒）
+	TimeoutThreshold          int     `mapstructure:"timeoutThreshold"`          // 超时阈值（秒）
+	FailureThreshold          int     `mapstructure:"failureThreshold"`          // 连续失败阈值
+	EnableNetworkDiagnosis    bool    `mapstructure:"enableNetworkDiagnosis"`    // 启用网络诊断
+	BufferHealthWarningLevel  float64 `mapstructure:"bufferHealthWarningLevel"`  // 缓冲区警告水位
+	BufferHealthCriticalLevel float64 `mapstructure:"bufferHealthCriticalLevel"` // 缓冲区严重水位
+}
+
+// RetryConfig 重试配置
+type RetryConfig struct {
+	MaxRetries                int     `mapstructure:"maxRetries"`                // 最大重试次数
+	InitialDelayMs            int     `mapstructure:"initialDelayMs"`            // 初始延迟（毫秒）
+	MaxDelayMs                int     `mapstructure:"maxDelayMs"`                // 最大延迟（毫秒）
+	BackoffFactor             float64 `mapstructure:"backoffFactor"`             // 退避因子
+	EnableRetryOnTimeout      bool    `mapstructure:"enableRetryOnTimeout"`      // 超时时启用重试
+	EnableRetryOnNetworkError bool    `mapstructure:"enableRetryOnNetworkError"` // 网络错误时启用重试
 }
 
 // 全局配置实例
@@ -180,11 +192,18 @@ func LoadConfig(configPath string) error {
 
 // NotificationConfig 通知配置
 type NotificationConfig struct {
-	Enabled   bool                    `mapstructure:"enabled"`
-	QueueSize int                     `mapstructure:"queue_size"`
-	Workers   int                     `mapstructure:"workers"`
-	Endpoints []NotificationEndpoint  `mapstructure:"endpoints"`
-	Retry     NotificationRetryConfig `mapstructure:"retry"`
+	Enabled        bool                    `mapstructure:"enabled"`
+	QueueSize      int                     `mapstructure:"queue_size"`
+	Workers        int                     `mapstructure:"workers"`
+	PortStatusSync PortStatusSyncConfig    `mapstructure:"port_status_sync"`
+	Endpoints      []NotificationEndpoint  `mapstructure:"endpoints"`
+	Retry          NotificationRetryConfig `mapstructure:"retry"`
+}
+
+// PortStatusSyncConfig 端口状态同步配置
+type PortStatusSyncConfig struct {
+	Enabled          bool   `mapstructure:"enabled"`           // 是否启用端口状态实时同步
+	DebounceInterval string `mapstructure:"debounce_interval"` // 防抖间隔
 }
 
 // NotificationEndpoint 通知端点配置

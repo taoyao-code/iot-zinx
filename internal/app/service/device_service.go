@@ -21,8 +21,6 @@ import (
 type DeviceService struct {
 	// TCP监控器引用 - 用于底层连接操作
 	tcpMonitor monitor.IConnectionMonitor
-	// 🔧 统一业务平台通知管理器
-	notificationManager *core.BusinessNotificationManager
 	// 🔧 统一设备状态管理器
 	statusManager *core.DeviceStatusManager
 }
@@ -40,15 +38,13 @@ func NewDeviceService() *DeviceService {
 	service := &DeviceService{
 		// 🔧 使用统一架构：直接使用统一监控器
 		tcpMonitor: nil, // 将在getTCPMonitor()方法中动态获取
-		// 🔧 使用统一业务平台通知管理器
-		notificationManager: core.GetBusinessNotificationManager(),
 		// 🔧 使用统一设备状态管理器
 		statusManager: core.GetDeviceStatusManager(),
 	}
 
 	// 🔧 使用统一架构：不再初始化旧的设备监控器
 	// 统一架构会自动处理设备超时和状态管理
-	logger.Info("设备服务已初始化，使用统一架构、统一通知管理器和统一状态管理器")
+	logger.Info("设备服务已初始化，使用统一架构和统一状态管理器")
 
 	return service
 }
@@ -73,12 +69,7 @@ func (s *DeviceService) HandleDeviceOnline(deviceId string, iccid string) {
 	// 🔧 使用统一状态管理器处理设备上线
 	s.statusManager.HandleDeviceOnline(deviceId)
 
-	// 🔧 实现业务平台API调用
-	s.notifyBusinessPlatform("device_online", map[string]interface{}{
-		"deviceId":  deviceId,
-		"iccid":     iccid,
-		"timestamp": time.Now().Unix(),
-	})
+	// 🔧 通知已迁移到新的第三方平台通知系统，在协议处理器层面直接集成
 }
 
 // HandleDeviceOffline 处理设备离线
@@ -86,12 +77,7 @@ func (s *DeviceService) HandleDeviceOffline(deviceId string, iccid string) {
 	// 🔧 使用统一状态管理器处理设备离线
 	s.statusManager.HandleDeviceOffline(deviceId)
 
-	// 🔧 实现业务平台API调用
-	s.notifyBusinessPlatform("device_offline", map[string]interface{}{
-		"deviceId":  deviceId,
-		"iccid":     iccid,
-		"timestamp": time.Now().Unix(),
-	})
+	// 🔧 通知已迁移到新的第三方平台通知系统，在协议处理器层面直接集成
 }
 
 // HandleDeviceStatusUpdate 处理设备状态更新
@@ -102,12 +88,7 @@ func (s *DeviceService) HandleDeviceStatusUpdate(deviceId string, status constan
 	// 🔧 使用统一状态管理器更新设备状态
 	s.statusManager.UpdateDeviceStatus(deviceId, string(status))
 
-	// 🔧 实现业务平台API调用
-	s.notifyBusinessPlatform("device_status_update", map[string]interface{}{
-		"deviceId":  deviceId,
-		"status":    status,
-		"timestamp": time.Now().Unix(),
-	})
+	// 🔧 通知已迁移到新的第三方平台通知系统，在协议处理器层面直接集成
 }
 
 // GetDeviceStatus 获取设备状态
@@ -357,17 +338,7 @@ func (s *DeviceService) ValidateCard(deviceId string, cardNumber string, cardTyp
 func (s *DeviceService) HandleSettlement(deviceId string, settlement *dny_protocol.SettlementData) bool {
 	logger.Info("处理结算数据")
 
-	// 🔧 实现业务平台API调用
-	s.notifyBusinessPlatform("settlement", map[string]interface{}{
-		"deviceId":       deviceId,
-		"orderId":        settlement.OrderID,
-		"cardNumber":     settlement.CardNumber,
-		"gunNumber":      settlement.GunNumber,
-		"electricEnergy": settlement.ElectricEnergy,
-		"totalFee":       settlement.TotalFee,
-		"stopReason":     settlement.StopReason,
-		"timestamp":      time.Now().Unix(),
-	})
+	// 🔧 通知已迁移到新的第三方平台通知系统，在协议处理器层面直接集成
 
 	return true
 }
@@ -379,32 +350,14 @@ func (s *DeviceService) HandlePowerHeartbeat(deviceId string, power *dny_protoco
 	// 更新设备状态为在线
 	s.HandleDeviceStatusUpdate(deviceId, constants.DeviceStatusOnline)
 
-	// 🔧 实现业务平台API调用
-	s.notifyBusinessPlatform("power_heartbeat", map[string]interface{}{
-		"deviceId":       deviceId,
-		"gunNumber":      power.GunNumber,
-		"voltage":        power.Voltage,
-		"current":        float64(power.Current) / 100.0,
-		"power":          power.Power,
-		"electricEnergy": power.ElectricEnergy,
-		"temperature":    float64(power.Temperature) / 10.0,
-		"status":         power.Status,
-		"timestamp":      time.Now().Unix(),
-	})
+	// 🔧 通知已迁移到新的第三方平台通知系统，在协议处理器层面直接集成
 }
 
 // HandleParameterSetting 处理参数设置
 func (s *DeviceService) HandleParameterSetting(deviceId string, param *dny_protocol.ParameterSettingData) (bool, []byte) {
 	logger.Info("处理参数设置")
 
-	// 🔧 实现业务平台API调用
-	s.notifyBusinessPlatform("parameter_setting", map[string]interface{}{
-		"deviceId":      deviceId,
-		"parameterType": param.ParameterType,
-		"parameterId":   param.ParameterID,
-		"value":         param.Value,
-		"timestamp":     time.Now().Unix(),
-	})
+	// 🔧 通知已迁移到新的第三方平台通知系统，在协议处理器层面直接集成
 
 	// 返回成功和空的结果值
 	return true, []byte{}
@@ -417,11 +370,3 @@ func NowUnix() int64 {
 
 // 🔧 事件处理已经通过设备监控器的回调机制实现
 // 不再需要单独的事件处理方法
-
-// notifyBusinessPlatform 通知业务平台API - 🔧 使用统一通知管理器
-func (s *DeviceService) notifyBusinessPlatform(eventType string, data map[string]interface{}) {
-	err := s.notificationManager.NotifyBusinessPlatform(eventType, data)
-	if err != nil {
-		logger.Error("业务平台通知失败")
-	}
-}

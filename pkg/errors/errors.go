@@ -46,11 +46,6 @@ const (
 	ErrCommandTimeout
 	ErrCommandNotSupported
 
-	// 业务平台相关错误
-	ErrBusinessPlatformUnavailable
-	ErrBusinessPlatformResponseInvalid
-	ErrBusinessPlatformAuthFailed
-
 	// Redis缓存相关错误
 	ErrRedisConnectionFailed
 	ErrRedisOperationFailed
