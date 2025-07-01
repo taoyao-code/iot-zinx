@@ -14,6 +14,7 @@ import (
 	"github.com/bujia-iot/iot-zinx/pkg"
 	"github.com/bujia-iot/iot-zinx/pkg/constants"
 	"github.com/bujia-iot/iot-zinx/pkg/network"
+	"github.com/bujia-iot/iot-zinx/pkg/notification"
 	"github.com/bujia-iot/iot-zinx/pkg/protocol"
 	"github.com/bujia-iot/iot-zinx/pkg/session"
 	"github.com/sirupsen/logrus"
@@ -282,7 +283,19 @@ func (h *DeviceRegisterHandler) handleDeviceRegister(deviceId string, physicalId
 		"timestamp":         now.Format(constants.TimeFormatDefault),
 	}).Info("设备注册成功，连接状态更新为Active，ReadDeadline已重置")
 
-	// 8. 通知设备服务设备上线 - 🔧 修复：确保每次注册都更新设备状态
+	// 8. 发送设备上线通知
+	integrator := notification.GetGlobalNotificationIntegrator()
+	if integrator.IsEnabled() {
+		deviceData := map[string]interface{}{
+			"iccid":         iccidFromProp,
+			"physical_id":   fmt.Sprintf("0x%08X", physicalId),
+			"register_time": now.Unix(),
+			"remote_addr":   conn.RemoteAddr().String(),
+		}
+		integrator.NotifyDeviceOnline(conn, deviceId, deviceData)
+	}
+
+	// 9. 通知设备服务设备上线 - 🔧 修复：确保每次注册都更新设备状态
 	if ctx := http.GetGlobalHandlerContext(); ctx != nil && ctx.DeviceService != nil {
 		ctx.DeviceService.HandleDeviceOnline(deviceId, iccidFromProp)
 		logger.WithFields(logrus.Fields{

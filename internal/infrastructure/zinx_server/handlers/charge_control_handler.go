@@ -9,6 +9,7 @@ import (
 	"github.com/bujia-iot/iot-zinx/internal/infrastructure/logger"
 	"github.com/bujia-iot/iot-zinx/pkg/monitor"
 	"github.com/bujia-iot/iot-zinx/pkg/network"
+	"github.com/bujia-iot/iot-zinx/pkg/notification"
 	"github.com/bujia-iot/iot-zinx/pkg/protocol"
 	"github.com/bujia-iot/iot-zinx/pkg/session"
 	"github.com/sirupsen/logrus"
@@ -119,6 +120,23 @@ func (h *ChargeControlHandler) processChargeControlResponse(decodedFrame *protoc
 		"portNumber":   portNumber,
 		"orderNumber":  orderNumber,
 	}).Info("充电控制响应解析完成")
+
+	// 发送充电开始/结束通知
+	integrator := notification.GetGlobalNotificationIntegrator()
+	if integrator.IsEnabled() && responseCode == 0x00 {
+		// 根据响应判断是充电开始还是结束
+		notificationData := map[string]interface{}{
+			"port_number":   portNumber,
+			"order_number":  orderNumber,
+			"response_code": responseCode,
+			"status_desc":   statusDesc,
+			"device_id":     deviceID,
+		}
+
+		// 这里简化处理，实际应该根据业务逻辑判断是开始还是结束
+		// 可以通过查询设备状态或订单状态来判断
+		integrator.NotifyChargingStart(decodedFrame, conn, notificationData)
+	}
 
 	// 🔧 核心功能：更新连接活动时间和确认命令
 	network.UpdateConnectionActivity(conn)

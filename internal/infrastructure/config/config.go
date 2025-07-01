@@ -16,22 +16,44 @@ type Config struct {
 	BusinessPlatform BusinessPlatformConfig `mapstructure:"businessPlatform"`
 	Timeouts         TimeoutsConfig         `mapstructure:"timeouts"`
 	DeviceConnection DeviceConnectionConfig `mapstructure:"deviceConnection"`
+	Notification     NotificationConfig     `mapstructure:"notification"`
 }
 
 // TCPServerConfig TCP服务器配置
 type TCPServerConfig struct {
-	Host                       string     `mapstructure:"host" yaml:"host"`
-	Port                       int        `mapstructure:"port" yaml:"port"`
-	Zinx                       ZinxConfig `mapstructure:"zinx" yaml:"zinx"`
-	InitialReadDeadlineSeconds int        `mapstructure:"initialReadDeadlineSeconds" yaml:"initialReadDeadlineSeconds"` // 新增：初始读取超时
-	DefaultReadDeadlineSeconds int        `mapstructure:"defaultReadDeadlineSeconds" yaml:"defaultReadDeadlineSeconds"` // 新增：默认读取超时
+	// 基础配置
+	Host string `mapstructure:"host" yaml:"host"`
+	Port int    `mapstructure:"port" yaml:"port"`
+
+	// 超时配置
+	InitialReadDeadlineSeconds int `mapstructure:"initialReadDeadlineSeconds" yaml:"initialReadDeadlineSeconds"`
+	DefaultReadDeadlineSeconds int `mapstructure:"defaultReadDeadlineSeconds" yaml:"defaultReadDeadlineSeconds"`
+	TCPWriteTimeoutSeconds     int `mapstructure:"tcpWriteTimeoutSeconds" yaml:"tcpWriteTimeoutSeconds"`
+	TCPReadTimeoutSeconds      int `mapstructure:"tcpReadTimeoutSeconds" yaml:"tcpReadTimeoutSeconds"`
+
+	// 缓冲区配置
+	SendBufferSize    int `mapstructure:"sendBufferSize" yaml:"sendBufferSize"`
+	ReceiveBufferSize int `mapstructure:"receiveBufferSize" yaml:"receiveBufferSize"`
+
+	// TCP选项
+	KeepAlive              bool `mapstructure:"keepAlive" yaml:"keepAlive"`
+	KeepAlivePeriodSeconds int  `mapstructure:"keepAlivePeriodSeconds" yaml:"keepAlivePeriodSeconds"`
+	TCPNoDelay             bool `mapstructure:"tcpNoDelay" yaml:"tcpNoDelay"`
+
+	// 队列配置
+	SendQueueSize      int `mapstructure:"sendQueueSize" yaml:"sendQueueSize"`
+	ReadQueueSize      int `mapstructure:"readQueueSize" yaml:"readQueueSize"`
+	WriteChannelBuffer int `mapstructure:"writeChannelBuffer" yaml:"writeChannelBuffer"`
+	ReadChannelBuffer  int `mapstructure:"readChannelBuffer" yaml:"readChannelBuffer"`
+
+	// Zinx框架配置
+	Zinx ZinxConfig `mapstructure:"zinx" yaml:"zinx"`
 }
 
 // ZinxConfig Zinx框架配置
 type ZinxConfig struct {
 	Name             string `mapstructure:"name"`
 	Version          string `mapstructure:"version"`
-	TCPPort          int    `mapstructure:"tcpPort"`
 	MaxConn          int    `mapstructure:"maxConn"`
 	WorkerPoolSize   int    `mapstructure:"workerPoolSize"`
 	MaxWorkerTaskLen int    `mapstructure:"maxWorkerTaskLen"`
@@ -64,17 +86,29 @@ type RedisConfig struct {
 	WriteTimeout int    `mapstructure:"writeTimeout"`
 }
 
-// LoggerConfig 日志配置
+// LoggerConfig 统一日志配置
 type LoggerConfig struct {
-	Level            string `mapstructure:"level"`
-	Format           string `mapstructure:"format"`
-	FilePath         string `mapstructure:"filePath"`
-	MaxSizeMB        int    `mapstructure:"maxSizeMB"`
-	MaxBackups       int    `mapstructure:"maxBackups"`
-	MaxAgeDays       int    `mapstructure:"maxAgeDays"`
-	LogHexDump       bool   `mapstructure:"logHexDump"`
-	EnableConsole    bool   `mapstructure:"enableConsole"`
-	EnableStructured bool   `mapstructure:"enableStructured"`
+	// 基础配置
+	Level            string `mapstructure:"level"`            // 日志级别
+	Format           string `mapstructure:"format"`           // 输出格式: json, text
+	EnableConsole    bool   `mapstructure:"enableConsole"`    // 是否输出到控制台
+	EnableStructured bool   `mapstructure:"enableStructured"` // 是否启用结构化日志
+	LogHexDump       bool   `mapstructure:"logHexDump"`       // 是否记录十六进制数据
+
+	// 文件输出配置
+	EnableFile bool   `mapstructure:"enableFile"` // 是否输出到文件
+	FileDir    string `mapstructure:"fileDir"`    // 日志文件目录
+	FilePrefix string `mapstructure:"filePrefix"` // 日志文件前缀
+
+	// 轮转配置
+	RotationType string `mapstructure:"rotationType"` // 轮转类型: size, daily
+	MaxSizeMB    int    `mapstructure:"maxSizeMB"`    // 按大小轮转: 最大文件大小(MB)
+	MaxBackups   int    `mapstructure:"maxBackups"`   // 按大小轮转: 最大备份文件数
+	MaxAgeDays   int    `mapstructure:"maxAgeDays"`   // 保留天数
+	Compress     bool   `mapstructure:"compress"`     // 是否压缩旧文件
+
+	// 兼容性字段 (废弃，但保留以避免配置错误)
+	FilePath string `mapstructure:"filePath"` // 废弃: 使用 fileDir + filePrefix
 }
 
 // BusinessPlatformConfig 业务平台API配置
@@ -137,6 +171,39 @@ func Load(configPath string) error {
 // GetConfig 获取全局配置
 func GetConfig() *Config {
 	return &GlobalConfig
+}
+
+// LoadConfig 加载配置文件（向后兼容）
+func LoadConfig(configPath string) error {
+	return Load(configPath)
+}
+
+// NotificationConfig 通知配置
+type NotificationConfig struct {
+	Enabled   bool                    `mapstructure:"enabled"`
+	QueueSize int                     `mapstructure:"queue_size"`
+	Workers   int                     `mapstructure:"workers"`
+	Endpoints []NotificationEndpoint  `mapstructure:"endpoints"`
+	Retry     NotificationRetryConfig `mapstructure:"retry"`
+}
+
+// NotificationEndpoint 通知端点配置
+type NotificationEndpoint struct {
+	Name       string            `mapstructure:"name"`
+	Type       string            `mapstructure:"type"`
+	URL        string            `mapstructure:"url"`
+	Headers    map[string]string `mapstructure:"headers"`
+	Timeout    string            `mapstructure:"timeout"`
+	EventTypes []string          `mapstructure:"event_types"`
+	Enabled    bool              `mapstructure:"enabled"`
+}
+
+// NotificationRetryConfig 重试配置
+type NotificationRetryConfig struct {
+	MaxAttempts     int     `mapstructure:"max_attempts"`
+	InitialInterval string  `mapstructure:"initial_interval"`
+	MaxInterval     string  `mapstructure:"max_interval"`
+	Multiplier      float64 `mapstructure:"multiplier"`
 }
 
 // FormatHTTPAddress 格式化HTTP服务器地址为host:port格式

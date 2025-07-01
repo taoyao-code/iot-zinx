@@ -3,10 +3,14 @@ package core
 import (
 	"fmt"
 	"sync"
+	"time"
 
 	"github.com/bujia-iot/iot-zinx/internal/infrastructure/logger"
 	"github.com/sirupsen/logrus"
 )
+
+// PortStatusChangeCallback 端口状态变化回调函数类型
+type PortStatusChangeCallback func(deviceID string, portNumber int, oldStatus, newStatus string, data map[string]interface{})
 
 // PortManager 统一端口管理器
 // 解决端口号转换混乱问题，建立统一的端口处理标准
@@ -18,6 +22,11 @@ type PortManager struct {
 	portStates  map[int]PortState // 端口状态映射
 	portDevices map[int]string    // 端口设备映射
 	devicePorts map[string][]int  // 设备端口映射
+
+	// 状态变化检测
+	statusChangeCallbacks []PortStatusChangeCallback // 状态变化回调函数列表
+	debounceInterval      time.Duration              // 防抖间隔
+	lastChangeTime        map[string]time.Time       // 最后变化时间 (key: deviceID:portNumber)
 }
 
 // PortState 端口状态
@@ -64,6 +73,11 @@ func NewPortManager(maxPorts int) *PortManager {
 		portStates:  make(map[int]PortState),
 		portDevices: make(map[int]string),
 		devicePorts: make(map[string][]int),
+
+		// 状态变化检测初始化
+		statusChangeCallbacks: make([]PortStatusChangeCallback, 0),
+		debounceInterval:      2 * time.Second, // 默认2秒防抖
+		lastChangeTime:        make(map[string]time.Time),
 	}
 
 	// 初始化所有端口状态
@@ -75,6 +89,30 @@ func NewPortManager(maxPorts int) *PortManager {
 	}
 
 	return pm
+}
+
+// RegisterStatusChangeCallback 注册端口状态变化回调函数
+func (pm *PortManager) RegisterStatusChangeCallback(callback PortStatusChangeCallback) {
+	pm.mutex.Lock()
+	defer pm.mutex.Unlock()
+
+	pm.statusChangeCallbacks = append(pm.statusChangeCallbacks, callback)
+
+	logger.WithFields(logrus.Fields{
+		"callback_count": len(pm.statusChangeCallbacks),
+	}).Debug("注册端口状态变化回调函数")
+}
+
+// SetDebounceInterval 设置防抖间隔
+func (pm *PortManager) SetDebounceInterval(interval time.Duration) {
+	pm.mutex.Lock()
+	defer pm.mutex.Unlock()
+
+	pm.debounceInterval = interval
+
+	logger.WithFields(logrus.Fields{
+		"interval": interval,
+	}).Debug("设置端口状态变化防抖间隔")
 }
 
 // APIToProtocol 将API端口号(1-based)转换为协议端口号(0-based)
@@ -158,13 +196,19 @@ func (pm *PortManager) UpdatePortState(protocolPort int, status string, deviceID
 		return err
 	}
 
-	state := pm.portStates[protocolPort]
-	state.Status = status
-	state.DeviceID = deviceID
-	state.OrderNumber = orderNumber
-	state.IsCharging = (status == PortStatusCharging)
+	// 获取旧状态
+	oldState := pm.portStates[protocolPort]
+	oldStatus := oldState.Status
 
-	pm.portStates[protocolPort] = state
+	// 更新状态
+	newState := oldState
+	newState.Status = status
+	newState.DeviceID = deviceID
+	newState.OrderNumber = orderNumber
+	newState.IsCharging = (status == PortStatusCharging)
+	newState.LastActivity = time.Now().Unix()
+
+	pm.portStates[protocolPort] = newState
 
 	// 更新设备端口映射
 	if deviceID != "" {
@@ -174,13 +218,74 @@ func (pm *PortManager) UpdatePortState(protocolPort int, status string, deviceID
 
 	logger.WithFields(logrus.Fields{
 		"protocol_port": protocolPort,
-		"status":        status,
+		"old_status":    oldStatus,
+		"new_status":    status,
 		"device_id":     deviceID,
 		"order_number":  orderNumber,
-		"is_charging":   state.IsCharging,
+		"is_charging":   newState.IsCharging,
 	}).Info("端口状态已更新")
 
+	// 检测状态变化并触发回调
+	if oldStatus != status {
+		pm.triggerStatusChangeCallbacks(deviceID, protocolPort, oldStatus, status, map[string]interface{}{
+			"order_number":  orderNumber,
+			"is_charging":   newState.IsCharging,
+			"last_activity": newState.LastActivity,
+		})
+	}
+
 	return nil
+}
+
+// triggerStatusChangeCallbacks 触发状态变化回调
+func (pm *PortManager) triggerStatusChangeCallbacks(deviceID string, protocolPort int, oldStatus, newStatus string, data map[string]interface{}) {
+	// 防抖检查
+	changeKey := fmt.Sprintf("%s:%d", deviceID, protocolPort)
+	now := time.Now()
+
+	if lastTime, exists := pm.lastChangeTime[changeKey]; exists {
+		if now.Sub(lastTime) < pm.debounceInterval {
+			logger.WithFields(logrus.Fields{
+				"device_id":     deviceID,
+				"protocol_port": protocolPort,
+				"old_status":    oldStatus,
+				"new_status":    newStatus,
+				"debounce_time": pm.debounceInterval,
+			}).Debug("端口状态变化被防抖过滤")
+			return
+		}
+	}
+
+	pm.lastChangeTime[changeKey] = now
+
+	// 异步触发回调，避免阻塞
+	go func() {
+		for _, callback := range pm.statusChangeCallbacks {
+			func() {
+				defer func() {
+					if r := recover(); r != nil {
+						logger.WithFields(logrus.Fields{
+							"device_id":     deviceID,
+							"protocol_port": protocolPort,
+							"old_status":    oldStatus,
+							"new_status":    newStatus,
+							"error":         r,
+						}).Error("端口状态变化回调函数执行失败")
+					}
+				}()
+
+				callback(deviceID, protocolPort, oldStatus, newStatus, data)
+			}()
+		}
+
+		logger.WithFields(logrus.Fields{
+			"device_id":      deviceID,
+			"protocol_port":  protocolPort,
+			"old_status":     oldStatus,
+			"new_status":     newStatus,
+			"callback_count": len(pm.statusChangeCallbacks),
+		}).Debug("端口状态变化回调已触发")
+	}()
 }
 
 // updateDevicePortMapping 更新设备端口映射

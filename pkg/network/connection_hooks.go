@@ -531,6 +531,9 @@ func (ch *ConnectionHooks) OnConnectionLost(conn ziface.IConnection) {
 		ch.onConnectionClosed(conn, disconnectReason)
 	}
 
+	// TODO: 发送设备离线通知 - 暂时移除以避免循环导入
+	// 可以在设备服务中处理设备离线通知
+
 	// 如果有设备ID，通知设备监控器
 	if deviceID != "" && ch.onDeviceDisconnect != nil {
 		disconnectType := "normal"

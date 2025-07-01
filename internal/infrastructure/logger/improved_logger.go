@@ -24,6 +24,7 @@ type ImprovedLogger struct {
 	logger           *logrus.Logger
 	config           *config.LoggerConfig
 	communicationLog *logrus.Logger
+	dailyRotator     *DailyRotator // 按日期分割的轮转器
 }
 
 // InitCommunicationLogger 初始化专用通信日志
@@ -110,43 +111,95 @@ func (il *ImprovedLogger) InitImproved(cfg *config.LoggerConfig) error {
 	}
 
 	// 4. 设置输出目标
-	writers := []io.Writer{os.Stdout}
+	var writers []io.Writer
 
-	// 5. 实现真正的日志轮转
-	if cfg.FilePath != "" {
-		// 确保日志目录存在
-		logDir := filepath.Dir(cfg.FilePath)
-		if err := os.MkdirAll(logDir, 0o755); err != nil {
-			return fmt.Errorf("创建日志目录失败: %w", err)
+	// 控制台输出
+	if cfg.EnableConsole {
+		writers = append(writers, os.Stdout)
+	}
+
+	// 5. 文件输出配置
+	if cfg.EnableFile {
+		// 处理兼容性：如果使用旧的FilePath配置
+		if cfg.FilePath != "" && cfg.FileDir == "" {
+			cfg.FileDir = filepath.Dir(cfg.FilePath)
+			filename := filepath.Base(cfg.FilePath)
+			// 移除扩展名作为前缀
+			if ext := filepath.Ext(filename); ext != "" {
+				cfg.FilePrefix = strings.TrimSuffix(filename, ext)
+			} else {
+				cfg.FilePrefix = filename
+			}
 		}
 
-		// 使用lumberjack实现日志轮转
-		rotatingWriter := &lumberjack.Logger{
-			Filename:   cfg.FilePath,
-			MaxSize:    cfg.MaxSizeMB,  // MB
-			MaxBackups: cfg.MaxBackups, // 保留的备份文件数
-			MaxAge:     cfg.MaxAgeDays, // 保留的天数
-			Compress:   true,           // 压缩旧文件
-			LocalTime:  true,           // 使用本地时间
+		// 设置默认值
+		if cfg.FileDir == "" {
+			cfg.FileDir = "./logs"
+		}
+		if cfg.FilePrefix == "" {
+			cfg.FilePrefix = "gateway"
+		}
+		if cfg.RotationType == "" {
+			cfg.RotationType = "daily" // 默认按日期分割
 		}
 
-		writers = append(writers, rotatingWriter)
+		// 根据轮转类型选择轮转器
+		switch cfg.RotationType {
+		case "daily":
+			// 按日期分割
+			il.dailyRotator = NewDailyRotator(cfg.FileDir, cfg.FilePrefix, cfg.MaxAgeDays)
+			il.dailyRotator.Compress = cfg.Compress
+			writers = append(writers, il.dailyRotator)
+
+		case "size":
+			// 按大小分割（使用lumberjack）
+			rotatingWriter := &lumberjack.Logger{
+				Filename:   filepath.Join(cfg.FileDir, cfg.FilePrefix+".log"),
+				MaxSize:    cfg.MaxSizeMB,
+				MaxBackups: cfg.MaxBackups,
+				MaxAge:     cfg.MaxAgeDays,
+				Compress:   cfg.Compress,
+				LocalTime:  true,
+			}
+			writers = append(writers, rotatingWriter)
+
+		default:
+			return fmt.Errorf("不支持的轮转类型: %s (支持: daily, size)", cfg.RotationType)
+		}
 	}
 
 	// 6. 创建多路输出
+	if len(writers) == 0 {
+		// 如果没有配置任何输出，默认输出到控制台
+		writers = append(writers, os.Stdout)
+	}
 	multiWriter := io.MultiWriter(writers...)
 	il.logger.SetOutput(multiWriter)
 
 	// 7. 输出初始化信息
-	il.logger.WithFields(logrus.Fields{
-		"level":        cfg.Level,
-		"format":       cfg.Format,
-		"file_path":    cfg.FilePath,
-		"max_size_mb":  cfg.MaxSizeMB,
-		"max_backups":  cfg.MaxBackups,
-		"max_age_days": cfg.MaxAgeDays,
-		"hex_dump":     cfg.LogHexDump,
-	}).Info("日志系统初始化完成")
+	logFields := logrus.Fields{
+		"level":          cfg.Level,
+		"format":         cfg.Format,
+		"enable_console": cfg.EnableConsole,
+		"enable_file":    cfg.EnableFile,
+		"rotation_type":  cfg.RotationType,
+		"max_age_days":   cfg.MaxAgeDays,
+		"hex_dump":       cfg.LogHexDump,
+	}
+
+	if cfg.EnableFile {
+		logFields["file_dir"] = cfg.FileDir
+		logFields["file_prefix"] = cfg.FilePrefix
+		if cfg.RotationType == "size" {
+			logFields["max_size_mb"] = cfg.MaxSizeMB
+			logFields["max_backups"] = cfg.MaxBackups
+		}
+		if il.dailyRotator != nil {
+			logFields["current_file"] = il.dailyRotator.GetCurrentFilePath()
+		}
+	}
+
+	il.logger.WithFields(logFields).Info("统一日志系统初始化完成")
 
 	return nil
 }

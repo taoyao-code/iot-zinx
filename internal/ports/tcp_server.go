@@ -69,7 +69,7 @@ func (s *TCPServer) initialize() error {
 	// 设置Zinx服务器配置
 	zconf.GlobalObject.Name = zinxCfg.Name
 	zconf.GlobalObject.Host = s.cfg.TCPServer.Host
-	zconf.GlobalObject.TCPPort = zinxCfg.TCPPort
+	zconf.GlobalObject.TCPPort = s.cfg.TCPServer.Port // 使用主配置的端口
 	zconf.GlobalObject.Version = zinxCfg.Version
 	zconf.GlobalObject.MaxConn = zinxCfg.MaxConn
 	zconf.GlobalObject.MaxPacketSize = uint32(zinxCfg.MaxPacketSize)
@@ -278,7 +278,7 @@ func (s *TCPServer) startServer() error {
 			}
 		}()
 
-		logger.Infof("TCP服务器启动在 %s:%d", s.cfg.TCPServer.Host, s.cfg.TCPServer.Zinx.TCPPort)
+		logger.Infof("TCP服务器启动在 %s:%d", s.cfg.TCPServer.Host, s.cfg.TCPServer.Port)
 		s.server.Serve() // 阻塞调用
 		startChan <- fmt.Errorf("服务器意外停止")
 	}()

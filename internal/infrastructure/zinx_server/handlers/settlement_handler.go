@@ -11,6 +11,7 @@ import (
 	"github.com/bujia-iot/iot-zinx/internal/infrastructure/logger"
 	"github.com/bujia-iot/iot-zinx/pkg/constants"
 	"github.com/bujia-iot/iot-zinx/pkg/monitor"
+	"github.com/bujia-iot/iot-zinx/pkg/notification"
 	"github.com/bujia-iot/iot-zinx/pkg/protocol"
 	"github.com/bujia-iot/iot-zinx/pkg/session"
 	"github.com/sirupsen/logrus"
@@ -123,6 +124,26 @@ func (h *SettlementHandler) processSettlement(decodedFrame *protocol.DecodedDNYF
 	// 调用业务层处理结算
 	deviceService := app.GetServiceManager().DeviceService
 	success := deviceService.HandleSettlement(deviceId, settlementData)
+
+	// 发送结算通知
+	integrator := notification.GetGlobalNotificationIntegrator()
+	if integrator.IsEnabled() {
+		// 转换结算数据为通知格式
+		notificationData := map[string]interface{}{
+			"port_number":   settlementData.GunNumber,
+			"total_energy":  settlementData.ElectricEnergy,
+			"total_fee":     settlementData.TotalFee,
+			"charge_fee":    settlementData.ChargeFee,
+			"service_fee":   settlementData.ServiceFee,
+			"start_time":    settlementData.StartTime.Unix(),
+			"end_time":      settlementData.EndTime.Unix(),
+			"order_id":      settlementData.OrderID,
+			"card_number":   settlementData.CardNumber,
+			"stop_reason":   settlementData.StopReason,
+			"settlement_id": fmt.Sprintf("SETTLE_%s_%d", deviceId, time.Now().Unix()),
+		}
+		integrator.NotifySettlement(decodedFrame, conn, notificationData)
+	}
 
 	// 构建响应数据
 	var responseData []byte

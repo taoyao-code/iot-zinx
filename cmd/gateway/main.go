@@ -29,6 +29,7 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"fmt"
 	"os"
@@ -41,6 +42,8 @@ import (
 	"github.com/bujia-iot/iot-zinx/internal/infrastructure/logger"
 	"github.com/bujia-iot/iot-zinx/internal/infrastructure/redis"
 	"github.com/bujia-iot/iot-zinx/internal/ports"
+	"github.com/bujia-iot/iot-zinx/pkg/core"
+	"github.com/bujia-iot/iot-zinx/pkg/notification"
 	"github.com/bujia-iot/iot-zinx/pkg/utils"
 )
 
@@ -89,6 +92,32 @@ func main() {
 		})
 	}
 
+	// 初始化通知系统
+	ctx := context.Background()
+	if err := notification.InitGlobalNotificationIntegrator(ctx); err != nil {
+		improvedLogger.Error("初始化通知系统失败", map[string]interface{}{
+			"error": err.Error(),
+		})
+	} else {
+		improvedLogger.Info("通知系统初始化完成", map[string]interface{}{
+			"component": "notification",
+			"status":    "initialized",
+		})
+
+		// 注册端口状态变化回调
+		if notification.GetGlobalNotificationIntegrator().IsEnabled() {
+			portManager := core.GetPortManager()
+			portManager.RegisterStatusChangeCallback(func(deviceID string, portNumber int, oldStatus, newStatus string, data map[string]interface{}) {
+				// 发送端口状态变化通知
+				notification.GetGlobalNotificationIntegrator().NotifyPortStatusChange(deviceID, portNumber, oldStatus, newStatus, data)
+			})
+
+			improvedLogger.Info("端口状态变化通知已启用", map[string]interface{}{
+				"callback_registered": true,
+			})
+		}
+	}
+
 	// 启动HTTP API服务器
 	go func() {
 		improvedLogger.Info("正在启动HTTP API服务器...", map[string]interface{}{
@@ -133,6 +162,18 @@ func main() {
 	<-c
 
 	improvedLogger.Info("接收到停止信号，开始关闭...", nil)
+
+	// 停止通知系统
+	if err := notification.StopGlobalNotificationIntegrator(ctx); err != nil {
+		improvedLogger.Error("停止通知系统失败", map[string]interface{}{
+			"error": err.Error(),
+		})
+	} else {
+		improvedLogger.Info("通知系统已停止", map[string]interface{}{
+			"component": "notification",
+			"status":    "stopped",
+		})
+	}
 
 	// 关闭Redis连接
 	if err := redis.Close(); err != nil {
