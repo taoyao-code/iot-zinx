@@ -262,12 +262,29 @@ func (n *NotificationIntegrator) GetStats() map[string]interface{} {
 		}
 	}
 
+	stats := n.service.GetStats()
+
 	return map[string]interface{}{
 		"enabled":            true,
 		"queue_length":       n.service.GetQueueLength(),
 		"retry_queue_length": n.service.GetRetryQueueLength(),
 		"running":            n.service.IsRunning(),
+		"total_sent":         stats.TotalSent,
+		"total_success":      stats.TotalSuccess,
+		"total_failed":       stats.TotalFailed,
+		"success_rate":       stats.SuccessRate,
+		"avg_response_time":  stats.AvgResponseTime.String(),
+		"last_update_time":   stats.LastUpdateTime.Format("2006-01-02 15:04:05"),
+		"endpoint_stats":     stats.EndpointStats,
 	}
+}
+
+// GetDetailedStats 获取详细统计信息
+func (n *NotificationIntegrator) GetDetailedStats() *NotificationStats {
+	if !n.enabled {
+		return nil
+	}
+	return n.service.GetStats()
 }
 
 // 全局通知集成器实例

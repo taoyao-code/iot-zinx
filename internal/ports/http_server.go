@@ -33,6 +33,9 @@ func StartHTTPServer() error {
 	// 注册API路由
 	registerHTTPHandlers(r)
 
+	// 注册通知相关路由
+	http.RegisterNotificationRoutes(r)
+
 	// 启动HTTP服务器
 	addr := config.FormatHTTPAddress()
 	logger.Infof("HTTP API服务器启动在 %s", addr)

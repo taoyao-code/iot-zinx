@@ -6,12 +6,13 @@ import (
 
 // NotificationEvent 通知事件
 type NotificationEvent struct {
-	EventID    string                 `json:"event_id"`    // 事件ID
-	EventType  string                 `json:"event_type"`  // 事件类型
-	DeviceID   string                 `json:"device_id"`   // 设备ID
-	PortNumber int                    `json:"port_number"` // 端口号
-	Timestamp  time.Time              `json:"timestamp"`   // 时间戳
-	Data       map[string]interface{} `json:"data"`        // 事件数据
+	EventID      string                 `json:"event_id"`      // 事件ID
+	EventType    string                 `json:"event_type"`    // 事件类型
+	DeviceID     string                 `json:"device_id"`     // 设备ID
+	PortNumber   int                    `json:"port_number"`   // 端口号
+	Timestamp    time.Time              `json:"timestamp"`     // 时间戳
+	Data         map[string]interface{} `json:"data"`          // 事件数据
+	AttemptCount int                    `json:"attempt_count"` // 重试次数
 }
 
 // NotificationConfig 通知配置
@@ -40,6 +41,31 @@ type RetryConfig struct {
 	InitialInterval time.Duration `yaml:"initial_interval"` // 初始重试间隔
 	MaxInterval     time.Duration `yaml:"max_interval"`     // 最大重试间隔
 	Multiplier      float64       `yaml:"multiplier"`       // 重试间隔倍数
+}
+
+// NotificationStats 通知统计
+type NotificationStats struct {
+	TotalSent       int64                     `json:"total_sent"`        // 总发送数
+	TotalSuccess    int64                     `json:"total_success"`     // 总成功数
+	TotalFailed     int64                     `json:"total_failed"`      // 总失败数
+	TotalRetried    int64                     `json:"total_retried"`     // 总重试数
+	SuccessRate     float64                   `json:"success_rate"`      // 成功率
+	AvgResponseTime time.Duration             `json:"avg_response_time"` // 平均响应时间
+	LastUpdateTime  time.Time                 `json:"last_update_time"`  // 最后更新时间
+	EndpointStats   map[string]*EndpointStats `json:"endpoint_stats"`    // 端点统计
+}
+
+// EndpointStats 端点统计
+type EndpointStats struct {
+	Name            string        `json:"name"`              // 端点名称
+	TotalSent       int64         `json:"total_sent"`        // 总发送数
+	TotalSuccess    int64         `json:"total_success"`     // 总成功数
+	TotalFailed     int64         `json:"total_failed"`      // 总失败数
+	TotalRetried    int64         `json:"total_retried"`     // 总重试数
+	SuccessRate     float64       `json:"success_rate"`      // 成功率
+	AvgResponseTime time.Duration `json:"avg_response_time"` // 平均响应时间
+	LastSuccess     time.Time     `json:"last_success"`      // 最后成功时间
+	LastFailure     time.Time     `json:"last_failure"`      // 最后失败时间
 }
 
 // 事件类型常量
