@@ -11,6 +11,7 @@ import (
 	"github.com/bujia-iot/iot-zinx/internal/infrastructure/logger"
 	"github.com/bujia-iot/iot-zinx/pkg"
 	"github.com/bujia-iot/iot-zinx/pkg/constants"
+	"github.com/bujia-iot/iot-zinx/pkg/notification"
 	"github.com/bujia-iot/iot-zinx/pkg/protocol"
 	"github.com/bujia-iot/iot-zinx/pkg/session"
 	"github.com/sirupsen/logrus"
@@ -180,6 +181,9 @@ func (h *HeartbeatHandler) processHeartbeat(decodedFrame *protocol.DecodedDNYFra
 		"remoteAddr":        conn.RemoteAddr().String(),
 		"timestamp":         nowStr,
 	}).Info("设备心跳处理完成")
+
+	// 发送设备心跳通知
+	h.sendDeviceHeartbeatNotification(decodedFrame, conn, deviceId, iccid, data)
 }
 
 // updateHeartbeatTime 更新心跳时间 - 使用统一架构
@@ -231,6 +235,9 @@ func (h *HeartbeatHandler) parseSimplifiedHeartbeatPortStatus(data []byte, devic
 
 	// 🔧 关键修复：监控充电状态变化
 	h.monitorChargingStatusChanges(deviceId, portStatuses, conn, deviceSession)
+
+	// 发送端口心跳状态通知
+	h.sendPortHeartbeatNotification(deviceId, portStatuses, voltage, conn)
 
 	// 记录心跳详细信息
 	logger.WithFields(logrus.Fields{
@@ -367,5 +374,75 @@ func getPortStatusDesc(status uint8) string {
 		return "检测电路故障"
 	default:
 		return fmt.Sprintf("未知状态(0x%02X)", status)
+	}
+}
+
+// sendDeviceHeartbeatNotification 发送设备心跳通知
+func (h *HeartbeatHandler) sendDeviceHeartbeatNotification(decodedFrame *protocol.DecodedDNYFrame, conn ziface.IConnection, deviceId, iccid string, data []byte) {
+	integrator := notification.GetGlobalNotificationIntegrator()
+	if !integrator.IsEnabled() {
+		return
+	}
+
+	// 构建心跳通知数据
+	heartbeatData := map[string]interface{}{
+		"device_id":      deviceId,
+		"iccid":          iccid,
+		"command":        fmt.Sprintf("0x%02X", decodedFrame.Command),
+		"message_id":     fmt.Sprintf("0x%04X", decodedFrame.MessageID),
+		"data_length":    len(data),
+		"conn_id":        conn.GetConnID(),
+		"remote_addr":    conn.RemoteAddr().String(),
+		"heartbeat_time": time.Now().Unix(),
+	}
+
+	// 发送通知
+	integrator.NotifyDeviceHeartbeat(decodedFrame, conn, heartbeatData)
+}
+
+// sendPortHeartbeatNotification 发送端口心跳状态通知
+func (h *HeartbeatHandler) sendPortHeartbeatNotification(deviceId string, portStatuses []uint8, voltage uint16, conn ziface.IConnection) {
+	integrator := notification.GetGlobalNotificationIntegrator()
+	if !integrator.IsEnabled() {
+		return
+	}
+
+	// 为每个端口发送状态通知
+	for portIndex, status := range portStatuses {
+		portNumber := portIndex + 1
+
+		// 构建端口状态数据
+		portData := map[string]interface{}{
+			"device_id":      deviceId,
+			"port_number":    portNumber,
+			"port_status":    status,
+			"status_desc":    notification.GetPortStatusDescription(status),
+			"is_charging":    notification.IsChargingStatus(status),
+			"voltage":        notification.FormatVoltage(voltage),
+			"voltage_raw":    voltage,
+			"conn_id":        conn.GetConnID(),
+			"remote_addr":    conn.RemoteAddr().String(),
+			"heartbeat_time": time.Now().Unix(),
+		}
+
+		// 发送端口心跳通知
+		integrator.NotifyPortHeartbeat(deviceId, portNumber, portData)
+
+		// 如果端口状态发生变化，发送端口状态变化通知
+		// TODO: 这里需要实现状态变化检测逻辑，比较当前状态与上次状态
+		// 暂时简化处理，只在充电状态时发送状态变化通知
+		if notification.IsChargingStatus(status) {
+			statusChangeData := map[string]interface{}{
+				"device_id":       deviceId,
+				"port_number":     portNumber,
+				"current_status":  status,
+				"status_desc":     notification.GetPortStatusDescription(status),
+				"previous_status": "unknown", // TODO: 实现状态历史记录
+				"is_charging":     true,
+				"voltage":         notification.FormatVoltage(voltage),
+				"change_time":     time.Now().Unix(),
+			}
+			integrator.NotifyPortStatusChange(deviceId, portNumber, "unknown", notification.GetPortStatusDescription(status), statusChangeData)
+		}
 	}
 }

@@ -125,7 +125,7 @@ func (h *SettlementHandler) processSettlement(decodedFrame *protocol.DecodedDNYF
 	deviceService := app.GetServiceManager().DeviceService
 	success := deviceService.HandleSettlement(deviceId, settlementData)
 
-	// 发送结算通知
+	// 发送结算通知和充电结束通知
 	integrator := notification.GetGlobalNotificationIntegrator()
 	if integrator.IsEnabled() {
 		// 转换结算数据为通知格式
@@ -142,7 +142,23 @@ func (h *SettlementHandler) processSettlement(decodedFrame *protocol.DecodedDNYF
 			"stop_reason":   settlementData.StopReason,
 			"settlement_id": fmt.Sprintf("SETTLE_%s_%d", deviceId, time.Now().Unix()),
 		}
+
+		// 发送结算通知
 		integrator.NotifySettlement(decodedFrame, conn, notificationData)
+
+		// 发送充电结束通知（结算通常意味着充电结束）
+		chargeDuration := int64(settlementData.EndTime.Sub(settlementData.StartTime).Seconds())
+		chargingEndData := map[string]interface{}{
+			"port_number":          settlementData.GunNumber,
+			"order_id":             settlementData.OrderID,
+			"total_energy":         settlementData.ElectricEnergy,
+			"charge_duration":      chargeDuration,
+			"start_time":           settlementData.StartTime.Format(constants.TimeFormatDefault),
+			"end_time":             settlementData.EndTime.Format(constants.TimeFormatDefault),
+			"stop_reason":          settlementData.StopReason,
+			"settlement_triggered": true,
+		}
+		integrator.NotifyChargingEnd(decodedFrame, conn, chargingEndData)
 	}
 
 	// 构建响应数据

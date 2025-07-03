@@ -121,10 +121,9 @@ func (h *ChargeControlHandler) processChargeControlResponse(decodedFrame *protoc
 		"orderNumber":  orderNumber,
 	}).Info("充电控制响应解析完成")
 
-	// 发送充电开始/结束通知
+	// 发送充电控制通知
 	integrator := notification.GetGlobalNotificationIntegrator()
-	if integrator.IsEnabled() && responseCode == 0x00 {
-		// 根据响应判断是充电开始还是结束
+	if integrator.IsEnabled() {
 		notificationData := map[string]interface{}{
 			"port_number":   portNumber,
 			"order_number":  orderNumber,
@@ -133,9 +132,31 @@ func (h *ChargeControlHandler) processChargeControlResponse(decodedFrame *protoc
 			"device_id":     deviceID,
 		}
 
-		// 这里简化处理，实际应该根据业务逻辑判断是开始还是结束
-		// 可以通过查询设备状态或订单状态来判断
-		integrator.NotifyChargingStart(decodedFrame, conn, notificationData)
+		if responseCode == 0x00 {
+			// 成功响应，需要判断是开始还是结束
+			// 通过解析原始数据中的充电命令来判断
+			if len(data) >= 1 {
+				chargeCommand := data[0] // 第一个字节是充电命令
+				switch chargeCommand {
+				case 0x01: // 开始充电
+					integrator.NotifyChargingStart(decodedFrame, conn, notificationData)
+				case 0x00: // 停止充电
+					notificationData["stop_reason"] = "manual_stop"
+					integrator.NotifyChargingEnd(decodedFrame, conn, notificationData)
+				default:
+					// 其他命令，默认当作开始处理
+					integrator.NotifyChargingStart(decodedFrame, conn, notificationData)
+				}
+			} else {
+				// 数据不足，默认当作开始处理
+				integrator.NotifyChargingStart(decodedFrame, conn, notificationData)
+			}
+		} else {
+			// 失败响应
+			notificationData["failure_reason"] = statusDesc
+			notificationData["error_code"] = responseCode
+			integrator.NotifyChargingFailed(decodedFrame, conn, notificationData)
+		}
 	}
 
 	// 🔧 核心功能：更新连接活动时间和确认命令

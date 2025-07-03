@@ -203,6 +203,18 @@ func (s *NotificationService) SendChargingEndNotification(deviceID string, portN
 	return s.SendNotification(event)
 }
 
+// SendChargingFailedNotification 发送充电失败通知
+func (s *NotificationService) SendChargingFailedNotification(deviceID string, portNumber int, data map[string]interface{}) error {
+	event := &NotificationEvent{
+		EventType:  EventTypeChargingFailed,
+		DeviceID:   deviceID,
+		PortNumber: portNumber,
+		Data:       data,
+		Timestamp:  time.Now(),
+	}
+	return s.SendNotification(event)
+}
+
 // SendSettlementNotification 发送结算通知
 func (s *NotificationService) SendSettlementNotification(deviceID string, portNumber int, data map[string]interface{}) error {
 	event := &NotificationEvent{

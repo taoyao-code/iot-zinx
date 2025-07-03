@@ -10,20 +10,22 @@ package constants
 
 const (
 	// 心跳类命令
-	CmdHeartbeat      = 0x01 // 设备心跳包(旧版)
-	CmdPowerHeartbeat = 0x06 // 端口充电时功率心跳包
-	CmdMainHeartbeat  = 0x11 // 主机状态心跳包
+	CmdHeartbeat        = 0x01 // 设备心跳包(旧版)
+	CmdPowerHeartbeat   = 0x06 // 端口充电时功率心跳包
+	CmdMainHeartbeat    = 0x11 // 主机状态心跳包
 	CmdMainStatusReport = 0x17 // 主机状态包上报
-	CmdDeviceHeart    = 0x21 // 设备心跳包/分机心跳
+	CmdDeviceHeart      = 0x21 // 设备心跳包/分机心跳
 
 	// 注册类命令
 	CmdDeviceRegister = 0x20 // 设备注册包
 
 	// 充电控制类命令
-	CmdSwipeCard     = 0x02 // 刷卡操作
-	CmdSettlement    = 0x03 // 结算消费信息上传
-	CmdOrderConfirm  = 0x04 // 充电端口订单确认
-	
+	CmdSwipeCard             = 0x02 // 刷卡操作
+	CmdSettlement            = 0x03 // 结算消费信息上传
+	CmdOrderConfirm          = 0x04 // 充电端口订单确认
+	CmdTimeBillingSettlement = 0x23 // 分时收费结算专用（2025-2-10新增）
+	CmdPortPowerHeartbeat    = 0x26 // 端口充电时功率心跳包（扩展版本）
+
 	// 时间同步类命令
 	CmdGetServerTime = 0x12 // 主机获取服务器时间
 	CmdDeviceTime    = 0x22 // 设备获取服务器时间
@@ -33,11 +35,11 @@ const (
 	CmdUpgradeOldReq  = 0x15 // 主机请求固件升级（老版本）
 
 	// 设备管理类命令
-	CmdDeviceVersion  = 0x35 // 上传分机版本号与设备类型
-	CmdAlarm          = 0x42 // 报警推送
+	CmdDeviceVersion = 0x35 // 上传分机版本号与设备类型
+	CmdAlarm         = 0x42 // 报警推送
 
 	// 轮询类命令
-	CmdPoll           = 0x00 // 主机轮询完整指令
+	CmdPoll = 0x00 // 主机轮询完整指令
 )
 
 // ============================================================================
@@ -49,29 +51,29 @@ const (
 	CmdNetworkStatus = 0x81 // 查询设备联网状态
 
 	// 充电控制类命令
-	CmdChargeControl  = 0x82 // 服务器开始、停止充电操作
-	CmdModifyCharge   = 0x8A // 服务器修改充电时长/电量
+	CmdChargeControl = 0x82 // 服务器开始、停止充电操作
+	CmdModifyCharge  = 0x8A // 服务器修改充电时长/电量
 
 	// 配置类命令
-	CmdParamSetting   = 0x83 // 设置运行参数1.1
-	CmdParamSetting2  = 0x84 // 设置运行参数1.2
+	CmdParamSetting    = 0x83 // 设置运行参数1.1
+	CmdParamSetting2   = 0x84 // 设置运行参数1.2
 	CmdMaxTimeAndPower = 0x85 // 设置最大充电时长、过载功率
-	CmdPlayVoice      = 0x89 // 播放语音
-	CmdSetQRCode      = 0x8E // 修改二维码地址
-	CmdReadEEPROM     = 0x8B // 读取EEPROM
-	CmdWriteEEPROM    = 0x8C // 修改EEPROM
-	CmdSetWorkMode    = 0x8D // 设置设备的工作模式
-	CmdSkipShortCheck = 0x95 // 跳过短路检测
-	CmdSetTCCardMode  = 0x8F // 设置TC刷卡模式
+	CmdPlayVoice       = 0x89 // 播放语音
+	CmdSetQRCode       = 0x8E // 修改二维码地址
+	CmdReadEEPROM      = 0x8B // 读取EEPROM
+	CmdWriteEEPROM     = 0x8C // 修改EEPROM
+	CmdSetWorkMode     = 0x8D // 设置设备的工作模式
+	CmdSkipShortCheck  = 0x95 // 跳过短路检测
+	CmdSetTCCardMode   = 0x8F // 设置TC刷卡模式
 
 	// 控制类命令
-	CmdRebootMain     = 0x31 // 重启主机指令
-	CmdRebootComm     = 0x32 // 重启通讯模块
-	CmdClearUpgrade   = 0x33 // 清空升级分机数据
-	CmdChangeIP       = 0x34 // 更改IP地址
-	CmdSetFSKParam    = 0x3A // 设置FSK主机参数及分机号
+	CmdRebootMain      = 0x31 // 重启主机指令
+	CmdRebootComm      = 0x32 // 重启通讯模块
+	CmdClearUpgrade    = 0x33 // 清空升级分机数据
+	CmdChangeIP        = 0x34 // 更改IP地址
+	CmdSetFSKParam     = 0x3A // 设置FSK主机参数及分机号
 	CmdRequestFSKParam = 0x3B // 请求服务器FSK主机参数
-	CmdDeviceLocate   = 0x96 // 声光寻找设备功能
+	CmdDeviceLocate    = 0x96 // 声光寻找设备功能
 
 	// 升级类命令
 	CmdUpgradeSlave   = 0xE0 // 设备固件升级(分机)
@@ -100,9 +102,9 @@ const (
 // GetCommandCategory 根据命令ID获取命令分类
 func GetCommandCategory(commandID uint8) string {
 	// 心跳类命令
-	if commandID == CmdHeartbeat || commandID == CmdPowerHeartbeat || 
-	   commandID == CmdMainHeartbeat || commandID == CmdMainStatusReport || 
-	   commandID == CmdDeviceHeart {
+	if commandID == CmdHeartbeat || commandID == CmdPowerHeartbeat ||
+		commandID == CmdMainHeartbeat || commandID == CmdMainStatusReport ||
+		commandID == CmdDeviceHeart || commandID == CmdPortPowerHeartbeat {
 		return CategoryHeartbeat
 	}
 
@@ -112,26 +114,26 @@ func GetCommandCategory(commandID uint8) string {
 	}
 
 	// 充电控制类命令
-	if commandID == CmdSwipeCard || commandID == CmdSettlement || 
-	   commandID == CmdOrderConfirm || commandID == CmdChargeControl || 
-	   commandID == CmdModifyCharge {
+	if commandID == CmdSwipeCard || commandID == CmdSettlement ||
+		commandID == CmdOrderConfirm || commandID == CmdChargeControl ||
+		commandID == CmdModifyCharge || commandID == CmdTimeBillingSettlement {
 		return CategoryCharging
 	}
 
 	// 配置类命令
-	if commandID == CmdParamSetting || commandID == CmdParamSetting2 || 
-	   commandID == CmdMaxTimeAndPower || commandID == CmdPlayVoice || 
-	   commandID == CmdSetQRCode || commandID == CmdReadEEPROM || 
-	   commandID == CmdWriteEEPROM || commandID == CmdSetWorkMode || 
-	   commandID == CmdSkipShortCheck || commandID == CmdSetTCCardMode {
+	if commandID == CmdParamSetting || commandID == CmdParamSetting2 ||
+		commandID == CmdMaxTimeAndPower || commandID == CmdPlayVoice ||
+		commandID == CmdSetQRCode || commandID == CmdReadEEPROM ||
+		commandID == CmdWriteEEPROM || commandID == CmdSetWorkMode ||
+		commandID == CmdSkipShortCheck || commandID == CmdSetTCCardMode {
 		return CategoryConfiguration
 	}
 
 	// 升级类命令
-	if commandID == CmdUpgradeRequest || commandID == CmdUpgradeOldReq || 
-	   commandID == CmdUpgradeSlave || commandID == CmdUpgradePower || 
-	   commandID == CmdUpgradeMain || commandID == CmdUpgradeOld || 
-	   commandID == CmdUpgradeMainNew {
+	if commandID == CmdUpgradeRequest || commandID == CmdUpgradeOldReq ||
+		commandID == CmdUpgradeSlave || commandID == CmdUpgradePower ||
+		commandID == CmdUpgradeMain || commandID == CmdUpgradeOld ||
+		commandID == CmdUpgradeMainNew {
 		return CategoryUpgrade
 	}
 
@@ -141,10 +143,10 @@ func GetCommandCategory(commandID uint8) string {
 	}
 
 	// 控制类命令
-	if commandID == CmdRebootMain || commandID == CmdRebootComm || 
-	   commandID == CmdClearUpgrade || commandID == CmdChangeIP || 
-	   commandID == CmdSetFSKParam || commandID == CmdRequestFSKParam || 
-	   commandID == CmdDeviceLocate {
+	if commandID == CmdRebootMain || commandID == CmdRebootComm ||
+		commandID == CmdClearUpgrade || commandID == CmdChangeIP ||
+		commandID == CmdSetFSKParam || commandID == CmdRequestFSKParam ||
+		commandID == CmdDeviceLocate {
 		return CategoryControl
 	}
 
@@ -160,7 +162,7 @@ func GetCommandCategory(commandID uint8) string {
 // GetCommandPriority 获取命令优先级
 func GetCommandPriority(commandID uint8) int {
 	category := GetCommandCategory(commandID)
-	
+
 	switch category {
 	case CategoryRegistration:
 		return 0 // 最高优先级
@@ -205,12 +207,12 @@ func IsUpgradeCommand(commandID uint8) bool {
 func IsHeartbeatCommand(commandID uint8) bool {
 	return commandID == CmdHeartbeat || commandID == CmdPowerHeartbeat ||
 		commandID == CmdMainHeartbeat || commandID == CmdMainStatusReport ||
-		commandID == CmdDeviceHeart
+		commandID == CmdDeviceHeart || commandID == CmdPortPowerHeartbeat
 }
 
 // IsChargingCommand 判断是否为充电控制类命令
 func IsChargingCommand(commandID uint8) bool {
 	return commandID == CmdSwipeCard || commandID == CmdSettlement ||
 		commandID == CmdOrderConfirm || commandID == CmdChargeControl ||
-		commandID == CmdModifyCharge
+		commandID == CmdModifyCharge || commandID == CmdTimeBillingSettlement
 }

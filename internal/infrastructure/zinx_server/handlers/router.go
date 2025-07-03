@@ -26,10 +26,11 @@ func RegisterRouters(server ziface.IServer) {
 
 	// 二、心跳类消息处理器
 	// ----------------------------------------------------------------------------
-	server.AddRouter(constants.CmdHeartbeat, &HeartbeatHandler{})             // 0x01 设备心跳包(旧版)
-	server.AddRouter(constants.CmdDeviceHeart, &HeartbeatHandler{})           // 0x21 设备心跳包/分机心跳
-	server.AddRouter(constants.CmdMainHeartbeat, &MainHeartbeatHandler{})     // 0x11 主机心跳
-	server.AddRouter(constants.CmdPowerHeartbeat, NewPowerHeartbeatHandler()) // 0x06 功率心跳
+	server.AddRouter(constants.CmdHeartbeat, &HeartbeatHandler{})                     // 0x01 设备心跳包(旧版)
+	server.AddRouter(constants.CmdDeviceHeart, &HeartbeatHandler{})                   // 0x21 设备心跳包/分机心跳
+	server.AddRouter(constants.CmdMainHeartbeat, &MainHeartbeatHandler{})             // 0x11 主机心跳
+	server.AddRouter(constants.CmdPowerHeartbeat, NewPowerHeartbeatHandler())         // 0x06 功率心跳
+	server.AddRouter(constants.CmdPortPowerHeartbeat, NewPortPowerHeartbeatHandler()) // 0x26 端口充电时功率心跳包（扩展版本）
 
 	// 三、设备注册与状态查询
 	// ----------------------------------------------------------------------------
@@ -46,6 +47,7 @@ func RegisterRouters(server ziface.IServer) {
 	server.AddRouter(constants.CmdSwipeCard, &SwipeCardHandler{})                                               // 0x02 刷卡操作
 	server.AddRouter(constants.CmdChargeControl, NewChargeControlHandler(monitor.GetGlobalConnectionMonitor())) // 0x82 充电控制
 	server.AddRouter(constants.CmdSettlement, &SettlementHandler{})                                             // 0x03 结算消费信息上传
+	server.AddRouter(constants.CmdTimeBillingSettlement, NewTimeBillingSettlementHandler())                     // 0x23 分时收费结算专用
 
 	// 六、参数设置
 	// ----------------------------------------------------------------------------

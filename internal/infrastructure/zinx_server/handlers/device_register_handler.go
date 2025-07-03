@@ -293,6 +293,9 @@ func (h *DeviceRegisterHandler) handleDeviceRegister(deviceId string, physicalId
 			"remote_addr":   conn.RemoteAddr().String(),
 		}
 		integrator.NotifyDeviceOnline(conn, deviceId, deviceData)
+
+		// 发送设备注册详细通知
+		h.sendDeviceRegisterNotification(deviceId, physicalId, iccidFromProp, conn, data)
 	}
 
 	// 9. 通知设备服务设备上线 - 🔧 修复：确保每次注册都更新设备状态
@@ -536,5 +539,82 @@ func (h *DeviceRegisterHandler) CleanupExpiredStates() {
 
 	if len(expiredDevices) > 0 {
 		logger.WithField("cleanedCount", len(expiredDevices)).Info("清理过期设备注册状态完成")
+	}
+}
+
+// sendDeviceRegisterNotification 发送设备注册详细通知
+func (h *DeviceRegisterHandler) sendDeviceRegisterNotification(deviceId string, physicalId uint32, iccid string, conn ziface.IConnection, data []byte) {
+	integrator := notification.GetGlobalNotificationIntegrator()
+	if !integrator.IsEnabled() {
+		return
+	}
+
+	// 解析设备注册包中的详细信息
+	deviceInfo := h.parseDeviceRegisterData(data)
+
+	// 构建设备注册通知数据
+	registerData := map[string]interface{}{
+		"device_id":           deviceId,
+		"physical_id":         fmt.Sprintf("0x%08X", physicalId),
+		"physical_id_decimal": physicalId,
+		"iccid":               iccid,
+		"conn_id":             conn.GetConnID(),
+		"remote_addr":         conn.RemoteAddr().String(),
+		"register_time":       time.Now().Unix(),
+		"command":             "0x20",
+		"data_length":         len(data),
+	}
+
+	// 添加解析出的设备信息
+	for key, value := range deviceInfo {
+		registerData[key] = value
+	}
+
+	// 发送设备注册通知
+	integrator.NotifyDeviceRegister(deviceId, registerData)
+}
+
+// parseDeviceRegisterData 解析设备注册包数据
+func (h *DeviceRegisterHandler) parseDeviceRegisterData(data []byte) map[string]interface{} {
+	deviceInfo := make(map[string]interface{})
+
+	if len(data) == 0 {
+		return deviceInfo
+	}
+
+	// 根据协议文档解析设备注册包数据
+	// 设备注册包通常包含设备类型、固件版本等信息
+	// 这里需要根据实际协议格式进行解析
+
+	// 示例解析（需要根据实际协议调整）
+	if len(data) >= 1 {
+		deviceInfo["device_type"] = data[0]
+		deviceInfo["device_type_desc"] = h.getDeviceTypeDescription(data[0])
+	}
+
+	if len(data) >= 4 {
+		// 假设字节1-3是固件版本
+		firmwareVersion := fmt.Sprintf("%d.%d.%d", data[1], data[2], data[3])
+		deviceInfo["firmware_version"] = firmwareVersion
+	}
+
+	// 添加原始数据用于调试
+	deviceInfo["raw_data_hex"] = fmt.Sprintf("%X", data)
+	deviceInfo["raw_data_length"] = len(data)
+
+	return deviceInfo
+}
+
+// getDeviceTypeDescription 获取设备类型描述
+func (h *DeviceRegisterHandler) getDeviceTypeDescription(deviceType uint8) string {
+	switch deviceType {
+	case 0x01:
+		return "AP3000充电桩"
+	case 0x02:
+		return "AP3000-2充电桩"
+	case 0x03:
+		return "AP3000-4充电桩"
+	default:
+		return fmt.Sprintf("未知设备类型(0x%02X)", deviceType)
 	}
 }

@@ -408,6 +408,122 @@ func (n *NotificationIntegrator) NotifyPortOffline(deviceID string, portNumber i
 	}
 }
 
+// NotifyDeviceHeartbeat 发送设备心跳通知
+func (n *NotificationIntegrator) NotifyDeviceHeartbeat(decodedFrame *protocol.DecodedDNYFrame, conn ziface.IConnection, heartbeatData map[string]interface{}) {
+	if !n.enabled {
+		return
+	}
+
+	// 创建设备心跳事件
+	event := &NotificationEvent{
+		EventType: EventTypeDeviceHeartbeat,
+		DeviceID:  decodedFrame.DeviceID,
+		Data:      heartbeatData,
+		Timestamp: time.Now(),
+	}
+
+	// 发送通知
+	if err := n.service.SendNotification(event); err != nil {
+		logger.Error("发送设备心跳通知失败: " + err.Error())
+	}
+}
+
+// NotifyPortHeartbeat 发送端口心跳通知
+func (n *NotificationIntegrator) NotifyPortHeartbeat(deviceID string, portNumber int, portData map[string]interface{}) {
+	if !n.enabled {
+		return
+	}
+
+	// 创建端口心跳事件
+	event := &NotificationEvent{
+		EventType:  EventTypePortHeartbeat,
+		DeviceID:   deviceID,
+		PortNumber: portNumber,
+		Data:       portData,
+		Timestamp:  time.Now(),
+	}
+
+	// 发送通知
+	if err := n.service.SendNotification(event); err != nil {
+		logger.Error("发送端口心跳通知失败: " + err.Error())
+	}
+}
+
+// NotifyPowerHeartbeat 发送功率心跳通知
+func (n *NotificationIntegrator) NotifyPowerHeartbeat(deviceID string, portNumber int, powerData map[string]interface{}) {
+	if !n.enabled {
+		return
+	}
+
+	// 创建功率心跳事件
+	event := &NotificationEvent{
+		EventType:  EventTypePowerHeartbeat,
+		DeviceID:   deviceID,
+		PortNumber: portNumber,
+		Data:       powerData,
+		Timestamp:  time.Now(),
+	}
+
+	// 发送通知
+	if err := n.service.SendNotification(event); err != nil {
+		logger.Error("发送功率心跳通知失败: " + err.Error())
+	}
+}
+
+// NotifyDeviceRegister 发送设备注册通知
+func (n *NotificationIntegrator) NotifyDeviceRegister(deviceID string, registerData map[string]interface{}) {
+	if !n.enabled {
+		return
+	}
+
+	// 创建设备注册事件
+	event := &NotificationEvent{
+		EventType: EventTypeDeviceRegister,
+		DeviceID:  deviceID,
+		Data:      registerData,
+		Timestamp: time.Now(),
+	}
+
+	// 发送通知
+	if err := n.service.SendNotification(event); err != nil {
+		logger.Error("发送设备注册通知失败: " + err.Error())
+	}
+}
+
+// NotifyChargingFailed 发送充电失败通知
+func (n *NotificationIntegrator) NotifyChargingFailed(decodedFrame *protocol.DecodedDNYFrame, conn ziface.IConnection, chargingFailedData map[string]interface{}) {
+	if !n.enabled {
+		return
+	}
+
+	deviceID := decodedFrame.DeviceID
+
+	// 从充电失败数据中提取端口号
+	portNumber := 0
+	if port, ok := chargingFailedData["port_number"]; ok {
+		if p, ok := port.(int); ok {
+			portNumber = p
+		}
+	}
+
+	data := map[string]interface{}{
+		"conn_id":     conn.GetConnID(),
+		"remote_addr": conn.RemoteAddr().String(),
+		"message_id":  fmt.Sprintf("0x%04X", decodedFrame.MessageID),
+		"command":     fmt.Sprintf("0x%02X", decodedFrame.Command),
+		"failed_time": time.Now().Unix(),
+	}
+
+	// 合并充电失败数据
+	for k, v := range chargingFailedData {
+		data[k] = v
+	}
+
+	if err := n.service.SendChargingFailedNotification(deviceID, portNumber, data); err != nil {
+		logger.Error("发送充电失败通知失败: " + err.Error())
+	}
+}
+
 // 辅助函数
 func parseDuration(s string, defaultValue time.Duration) time.Duration {
 	if d, err := time.ParseDuration(s); err == nil {

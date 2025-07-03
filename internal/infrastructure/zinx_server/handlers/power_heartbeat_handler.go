@@ -11,6 +11,7 @@ import (
 	"github.com/bujia-iot/iot-zinx/pkg/constants"
 	"github.com/bujia-iot/iot-zinx/pkg/monitor"
 	"github.com/bujia-iot/iot-zinx/pkg/network"
+	"github.com/bujia-iot/iot-zinx/pkg/notification"
 	"github.com/bujia-iot/iot-zinx/pkg/protocol"
 	"github.com/bujia-iot/iot-zinx/pkg/session"
 	"github.com/sirupsen/logrus"
@@ -225,4 +226,61 @@ func (h *PowerHeartbeatHandler) processPowerHeartbeat(decodedFrame *protocol.Dec
 	// 🔧 修复：更新自定义心跳管理器的连接活动时间
 	// 这是解决连接超时问题的关键修复
 	network.UpdateConnectionActivity(conn)
+
+	// 发送功率心跳通知
+	h.sendPowerHeartbeatNotification(decodedFrame, conn, deviceId, logFields, isCharging)
+}
+
+// sendPowerHeartbeatNotification 发送功率心跳通知
+func (h *PowerHeartbeatHandler) sendPowerHeartbeatNotification(decodedFrame *protocol.DecodedDNYFrame, conn ziface.IConnection, deviceId string, logFields logrus.Fields, isCharging bool) {
+	integrator := notification.GetGlobalNotificationIntegrator()
+	if !integrator.IsEnabled() {
+		return
+	}
+
+	// 从logFields中提取数据
+	portNumber, _ := logFields["portNumber"].(int)
+	chargingStatus, _ := logFields["chargingStatus"].(string)
+	chargeDuration, _ := logFields["chargeDuration"].(uint16)
+	cumulativeEnergy, _ := logFields["cumulativeEnergy"].(uint16)
+	realtimePower, _ := logFields["realtimePower"].(uint16)
+
+	// 构建功率心跳数据
+	powerData := map[string]interface{}{
+		"device_id":             deviceId,
+		"port_number":           portNumber,
+		"charging_status":       chargingStatus,
+		"is_charging":           isCharging,
+		"charge_duration":       chargeDuration,
+		"cumulative_energy":     notification.FormatEnergy(cumulativeEnergy),
+		"cumulative_energy_raw": cumulativeEnergy,
+		"realtime_power":        notification.FormatPower(realtimePower),
+		"realtime_power_raw":    realtimePower,
+		"conn_id":               conn.GetConnID(),
+		"remote_addr":           conn.RemoteAddr().String(),
+		"command":               fmt.Sprintf("0x%02X", decodedFrame.Command),
+		"message_id":            fmt.Sprintf("0x%04X", decodedFrame.MessageID),
+		"heartbeat_time":        time.Now().Unix(),
+	}
+
+	// 发送功率心跳通知
+	integrator.NotifyPowerHeartbeat(deviceId, portNumber, powerData)
+
+	// 如果正在充电，同时发送充电功率通知
+	if isCharging {
+		chargingPowerData := map[string]interface{}{
+			"device_id":             deviceId,
+			"port_number":           portNumber,
+			"realtime_power":        notification.FormatPower(realtimePower),
+			"realtime_power_raw":    realtimePower,
+			"cumulative_energy":     notification.FormatEnergy(cumulativeEnergy),
+			"cumulative_energy_raw": cumulativeEnergy,
+			"charge_duration":       chargeDuration,
+			"charging_status":       chargingStatus,
+			"power_time":            time.Now().Unix(),
+		}
+
+		// 发送充电功率通知
+		integrator.NotifyPowerHeartbeat(deviceId, portNumber, chargingPowerData)
+	}
 }
