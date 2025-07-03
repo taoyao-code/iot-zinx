@@ -49,6 +49,10 @@ const (
 const (
 	// 查询类命令
 	CmdNetworkStatus = 0x81 // 查询设备联网状态
+	CmdQueryParam1   = 0x90 // 查询运行参数1.1 (83指令内容)
+	CmdQueryParam2   = 0x91 // 查询运行参数1.2 (84指令内容)
+	CmdQueryParam3   = 0x92 // 查询运行参数2 (85指令内容)
+	CmdQueryParam4   = 0x93 // 查询用户卡参数 (86指令内容)
 
 	// 充电控制类命令
 	CmdChargeControl = 0x82 // 服务器开始、停止充电操作
@@ -138,7 +142,9 @@ func GetCommandCategory(commandID uint8) string {
 	}
 
 	// 查询类命令
-	if commandID == CmdNetworkStatus || commandID == CmdPoll {
+	if commandID == CmdNetworkStatus || commandID == CmdPoll ||
+		commandID == CmdQueryParam1 || commandID == CmdQueryParam2 ||
+		commandID == CmdQueryParam3 || commandID == CmdQueryParam4 {
 		return CategoryQuery
 	}
 

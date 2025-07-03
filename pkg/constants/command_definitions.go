@@ -59,6 +59,10 @@ func initDefaultCommands() {
 
 		// 查询类命令
 		{ID: CmdNetworkStatus, Name: "查询设备联网状态", Description: "查询设备联网状态", Category: CategoryQuery, Priority: 3},
+		{ID: CmdQueryParam1, Name: "查询运行参数1.1", Description: "查询83指令设置的运行参数1.1", Category: CategoryQuery, Priority: 3},
+		{ID: CmdQueryParam2, Name: "查询运行参数1.2", Description: "查询84指令设置的运行参数1.2", Category: CategoryQuery, Priority: 3},
+		{ID: CmdQueryParam3, Name: "查询运行参数2", Description: "查询85指令设置的最大充电时长、过载功率", Category: CategoryQuery, Priority: 3},
+		{ID: CmdQueryParam4, Name: "查询用户卡参数", Description: "查询86指令设置的用户卡参数", Category: CategoryQuery, Priority: 3},
 		{ID: CmdPoll, Name: "主机轮询完整指令", Description: "主机轮询完整指令", Category: CategoryQuery, Priority: 4},
 
 		// 升级类命令

@@ -76,16 +76,20 @@ func RegisterRouters(server ziface.IServer) {
 
 	// 九、🔧 修复：启用缺失的命令处理器，解决msgID = 0错误
 	// ----------------------------------------------------------------------------
-	server.AddRouter(constants.CmdPoll, &GenericCommandHandler{})            // 0x00 主机轮询完整指令
-	server.AddRouter(constants.CmdOrderConfirm, &GenericCommandHandler{})    // 0x04 充电端口订单确认
-	server.AddRouter(constants.CmdUpgradeRequest, &GenericCommandHandler{})  // 0x05 设备主动请求升级
-	server.AddRouter(constants.CmdParamSetting2, &GenericCommandHandler{})   // 0x84 设置运行参数1.2
-	server.AddRouter(constants.CmdMaxTimeAndPower, &GenericCommandHandler{}) // 0x85 设置最大充电时长、过载功率
-	server.AddRouter(constants.CmdModifyCharge, &GenericCommandHandler{})    // 0x8A 服务器修改充电时长/电量
-	server.AddRouter(constants.CmdRebootMain, &GenericCommandHandler{})      // 0x31 重启主机指令
-	server.AddRouter(constants.CmdRebootComm, &GenericCommandHandler{})      // 0x32 重启通讯模块
-	server.AddRouter(constants.CmdClearUpgrade, &GenericCommandHandler{})    // 0x33 清空升级分机数据
-	server.AddRouter(constants.CmdChangeIP, &GenericCommandHandler{})        // 0x34 更改IP地址
+	server.AddRouter(constants.CmdPoll, &GenericCommandHandler{})               // 0x00 主机轮询完整指令
+	server.AddRouter(constants.CmdOrderConfirm, &GenericCommandHandler{})       // 0x04 充电端口订单确认
+	server.AddRouter(constants.CmdUpgradeRequest, &GenericCommandHandler{})     // 0x05 设备主动请求升级
+	server.AddRouter(constants.CmdParamSetting2, NewParamSetting2Handler())     // 0x84 设置运行参数1.2
+	server.AddRouter(constants.CmdMaxTimeAndPower, NewMaxTimeAndPowerHandler()) // 0x85 设置最大充电时长、过载功率
+	server.AddRouter(constants.CmdModifyCharge, NewModifyChargeHandler())       // 0x8A 服务器修改充电时长/电量
+	server.AddRouter(constants.CmdQueryParam1, NewQueryParamHandler())          // 0x90 查询运行参数1.1
+	server.AddRouter(constants.CmdQueryParam2, NewQueryParamHandler())          // 0x91 查询运行参数1.2
+	server.AddRouter(constants.CmdQueryParam3, NewQueryParamHandler())          // 0x92 查询运行参数2
+	server.AddRouter(constants.CmdQueryParam4, NewQueryParamHandler())          // 0x93 查询用户卡参数
+	server.AddRouter(constants.CmdRebootMain, &GenericCommandHandler{})         // 0x31 重启主机指令
+	server.AddRouter(constants.CmdRebootComm, &GenericCommandHandler{})         // 0x32 重启通讯模块
+	server.AddRouter(constants.CmdClearUpgrade, &GenericCommandHandler{})       // 0x33 清空升级分机数据
+	server.AddRouter(constants.CmdChangeIP, &GenericCommandHandler{})           // 0x34 更改IP地址
 	// 🔧 修复：移除重复的CmdDeviceVersion注册，已在第57行注册
 	// server.AddRouter(CmdDeviceVersion, &GenericCommandHandler{})   // 0x35 上传分机版本号与设备类型
 	server.AddRouter(constants.CmdSetFSKParam, &GenericCommandHandler{})     // 0x3A 设置FSK主机参数及分机号
