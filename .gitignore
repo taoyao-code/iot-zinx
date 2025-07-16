@@ -71,8 +71,6 @@ debug.log
 .DS_Store
 Thumbs.db
 
-*.yaml
-
 **/tmp/*
 
 internal/docs

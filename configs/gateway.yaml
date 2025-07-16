@@ -1,0 +1,205 @@
+# 充电设备网关配置文件
+# Gateway Configuration
+
+# TCP服务器配置 (Zinx)
+tcpServer:
+  # 基础配置
+  host: "0.0.0.0" # 监听地址
+  port: 7054 # TCP端口
+
+  # 超时配置
+  initialReadDeadlineSeconds: 180 # 🔧 修复：增加到3分钟，用于等待ICCID
+  defaultReadDeadlineSeconds: 300 # 🔧 优化：调整为5分钟，更符合实际网络环境
+  tcpWriteTimeoutSeconds: 90 # TCP写超时90秒 - 🔧 优化：增加写超时减少连接失败
+  tcpReadTimeoutSeconds: 300 # TCP读超时300秒
+
+  # 缓冲区配置
+  sendBufferSize: 262144 # 发送缓冲区256KB - 🔧 优化：增加缓冲区减少积压
+  receiveBufferSize: 131072 # 接收缓冲区128KB
+
+  # TCP选项
+  keepAlive: true # 启用TCP Keep-Alive
+  keepAlivePeriodSeconds: 15 # Keep-Alive探测间隔15秒 - 🔧 优化：更频繁检测连接状态
+  tcpNoDelay: true # 禁用Nagle算法，提高实时性
+
+  # 队列配置
+  sendQueueSize: 1024 # 发送队列大小
+  readQueueSize: 1024 # 读取队列大小
+  writeChannelBuffer: 512 # 写通道缓冲区
+  readChannelBuffer: 512 # 读通道缓冲区
+
+  # Zinx框架配置
+  zinx:
+    name: "Charging Gateway TCP Server" # 服务器名称
+    version: "1.0" # 服务器版本
+    maxConn: 3000 # 最大连接数
+    workerPoolSize: 10 # 线程池大小
+    maxWorkerTaskLen: 1024 # 任务队列长度
+    maxPacketSize: 2048 # 最大数据包大小
+
+# HTTP API服务器配置 (Gin)
+httpApiServer:
+  host: "0.0.0.0"
+  port: 7055
+  auth:
+    sharedKey: "changeme-in-production" # 共享密钥，用于BP认证
+    allowedIPs: ["127.0.0.1", "localhost"] # 允许访问的IP列表
+  timeoutSeconds: 30 # 请求超时时间
+
+# Redis配置
+redis:
+  address: "172.18.0.9" # Redis服务器地址
+  password: "123456" # Redis密码
+  db: 0 # Redis数据库索引
+  poolSize: 10 # 连接池大小
+  minIdleConns: 5 # 最小空闲连接数
+  dialTimeout: 5 # 连接超时时间（秒）
+  readTimeout: 3 # 读取超时时间（秒）
+  writeTimeout: 3 # 写入超时时间（秒）
+
+# 统一日志配置
+logger:
+  # 基础配置
+  level: "info" # 日志级别: trace, debug, info, warn, error, fatal, panic
+  format: "json" # 输出格式: json, text
+  enableConsole: true # 是否输出到控制台
+  enableStructured: true # 是否启用结构化日志
+  logHexDump: true # 是否记录十六进制数据
+
+  # 文件输出配置
+  enableFile: true # 是否输出到文件
+  fileDir: "./logs" # 日志文件目录
+  filePrefix: "gateway" # 日志文件前缀
+
+  # 轮转配置
+  rotationType: "daily" # 轮转类型: size, daily
+  maxSizeMB: 100 # 按大小轮转: 最大文件大小(MB)
+  maxBackups: 10 # 按大小轮转: 最大备份文件数
+  maxAgeDays: 30 # 保留天数
+  compress: true # 是否压缩旧文件
+
+  # 兼容性字段 (废弃，但保留以避免配置错误)
+  filePath: "" # 废弃: 使用 fileDir + filePrefix
+
+# 超时配置
+timeouts:
+  deviceInitSeconds: 30 # 设备初始化超时时间，在此时间内必须完成ICCID上报和注册
+  dnyResponseSeconds: 40 # DNY协议响应超时时间，超过后尝试重发
+  heartbeatIntervalSeconds: 60 # 心跳间隔
+  linkHeartbeatIntervalSeconds: 30 # "link"心跳间隔
+
+# 设备连接配置
+deviceConnection:
+  # 心跳超时时间（秒）- 这是 HeartbeatManager 使用的，应大于 ReadDeadline
+  heartbeatTimeoutSeconds: 180 # 🔧 优化：调整为3分钟，及时检测连接超时
+  # 心跳检查间隔（秒）
+  heartbeatIntervalSeconds: 30
+  # 心跳警告阈值（秒）
+  heartbeatWarningThreshold: 300 # 🔧 修复：增加到5分钟警告
+  # 会话超时时间（分钟）
+  sessionTimeoutMinutes: 60 # 会话超时60分钟
+
+  # 🔧 新增：差异化超时策略
+  timeouts:
+    # 注册响应超时（秒）- 设备注册必须快速响应
+    registerTimeoutSeconds: 30
+    # 心跳响应超时（秒）- 心跳包应该快速处理
+    heartbeatResponseTimeoutSeconds: 10
+    # 数据传输超时（秒）- 业务数据传输可以相对宽松
+    # 🔧 优化：充电控制命令需要更长超时，应对网络波动
+    dataTransferTimeoutSeconds: 90
+    # 默认写操作超时（秒）- 用于未明确分类的操作
+    # 🔧 优化：增加默认写超时，减少TCP写超时频率
+    defaultWriteTimeoutSeconds: 60
+
+# 连接健康检查配置
+healthCheck:
+  interval: 60 # 健康检查间隔（秒）
+  timeoutThreshold: 180 # 超时阈值（秒）
+  failureThreshold: 3 # 连续失败阈值
+  enableNetworkDiagnosis: true # 启用网络诊断
+  bufferHealthWarningLevel: 0.7 # 缓冲区警告水位
+  bufferHealthCriticalLevel: 0.9 # 缓冲区严重水位
+
+# 发送重试配置
+retry:
+  maxRetries: 5 # 最大重试次数
+  initialDelayMs: 500 # 初始延迟（毫秒）
+  maxDelayMs: 5000 # 最大延迟（毫秒）
+  backoffFactor: 1.5 # 退避因子
+  enableRetryOnTimeout: true # 超时时启用重试
+  enableRetryOnNetworkError: true # 网络错误时启用重试
+
+# 第三方平台通知配置
+notification:
+  enabled: true # 是否启用通知系统
+  queue_size: 10000 # 通知队列大小
+  workers: 5 # 工作协程数
+
+  # 端口状态实时同步配置
+  port_status_sync:
+    enabled: true # 是否启用端口状态实时同步
+    debounce_interval: "2s" # 防抖间隔，避免频繁推送
+
+  # 端点配置
+  endpoints:
+    # 计费系统端点
+    - name: "billing_system" # 端点名称
+      type: "billing" # 端点类型: billing, operation
+      url: "https://bujia.tyxxtb.com/cdz/chargeCallback" # 计费系统回调URL
+      headers:
+        Content-Type: "application/json"
+        Authorization: "Bearer ${BILLING_API_TOKEN}"
+      timeout: "10s"
+      event_types:
+        - "device_online" # 设备上线
+        - "device_offline" # 设备离线
+        - "device_register" # 设备注册
+        - "charging_start" # 充电开始
+        - "charging_end" # 充电结束
+        - "charging_failed" # 充电失败
+        - "charging_power" # 充电功率实时数据
+        - "power_heartbeat" # 功率心跳
+        - "settlement" # 结算
+        - "device_error" # 设备错误
+        - "port_status_change" # 端口状态变化
+        - "port_error" # 端口故障
+        - "port_online" # 端口上线
+        - "port_offline" # 端口离线
+        - "device_heartbeat" # 设备心跳
+        - "port_heartbeat" # 端口心跳
+      enabled: true
+
+    # # 运营平台端点
+    # - name: "operation_platform" # 端点名称
+    #   type: "operation" # 端点类型: billing, operation
+    #   url: "https://operation.bujia.tyxxtb.com/api/notifications" # 运营平台回调URL
+    #   headers:
+    #     Content-Type: "application/json"
+    #     X-API-Key: "${OPERATION_API_KEY}"
+    #   timeout: "10s"
+    #   event_types:
+    #     - "device_online" # 设备上线
+    #     - "device_offline" # 设备离线
+    #     - "device_register" # 设备注册
+    #     - "device_heartbeat" # 设备心跳
+    #     - "device_error" # 设备错误
+    #     - "charging_start" # 充电开始
+    #     - "charging_end" # 充电结束
+    #     - "charging_failed" # 充电失败
+    #     - "settlement" # 结算
+    #     - "port_status_change" # 端口状态变化
+    #     - "port_heartbeat" # 端口心跳
+    #     - "port_error" # 端口故障
+    #     - "port_online" # 端口上线
+    #     - "port_offline" # 端口离线
+    #     - "power_heartbeat" # 功率心跳
+    #     - "charging_power" # 充电功率实时数据
+    #   enabled: true
+
+  # 重试配置
+  retry:
+    max_attempts: 3
+    initial_interval: "1s"
+    max_interval: "30s"
+    multiplier: 2.0

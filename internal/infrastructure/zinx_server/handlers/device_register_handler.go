@@ -13,6 +13,7 @@ import (
 	"github.com/bujia-iot/iot-zinx/internal/infrastructure/logger"
 	"github.com/bujia-iot/iot-zinx/pkg"
 	"github.com/bujia-iot/iot-zinx/pkg/constants"
+	"github.com/bujia-iot/iot-zinx/pkg/core"
 	"github.com/bujia-iot/iot-zinx/pkg/network"
 	"github.com/bujia-iot/iot-zinx/pkg/notification"
 	"github.com/bujia-iot/iot-zinx/pkg/protocol"
@@ -195,10 +196,11 @@ func (h *DeviceRegisterHandler) handleDeviceRegister(deviceId string, physicalId
 		return
 	}
 
-	// 🔧 使用设备组管理器：主从设备注册处理
+	// 🔧 修复：同时注册到设备组管理器和统一连接管理器
 	unifiedSystem := pkg.GetUnifiedSystem()
 	physicalIdStr := fmt.Sprintf("%d", physicalId)
 
+	// 1. 注册到设备组管理器（用于主从设备管理）
 	regErr := unifiedSystem.GroupManager.RegisterDevice(conn, deviceId, physicalIdStr, iccidFromProp)
 	if regErr != nil {
 		logger.WithFields(logrus.Fields{
@@ -208,6 +210,28 @@ func (h *DeviceRegisterHandler) handleDeviceRegister(deviceId string, physicalId
 		}).Error("DeviceRegisterHandler: 设备组注册失败")
 		h.sendRegisterErrorResponse(deviceId, physicalId, messageID, conn, "设备注册失败")
 		return
+	}
+
+	// 2. 🔧 修复：注册到统一连接管理器（用于设备查找）
+	connectionMgr := core.GetUnifiedConnectionManager()
+	if connectionMgr != nil {
+		connRegErr := connectionMgr.RegisterDevice(conn, deviceId, physicalIdStr, iccidFromProp)
+		if connRegErr != nil {
+			logger.WithFields(logrus.Fields{
+				"deviceId": deviceId,
+				"connID":   conn.GetConnID(),
+				"error":    connRegErr.Error(),
+			}).Error("DeviceRegisterHandler: 统一连接管理器注册失败")
+			h.sendRegisterErrorResponse(deviceId, physicalId, messageID, conn, "连接管理器注册失败")
+			return
+		}
+
+		logger.WithFields(logrus.Fields{
+			"deviceId": deviceId,
+			"connID":   conn.GetConnID(),
+		}).Info("设备已成功注册到统一连接管理器")
+	} else {
+		logger.WithField("deviceId", deviceId).Warn("统一连接管理器未初始化")
 	}
 
 	// 验证注册是否成功 - 使用设备组管理器验证

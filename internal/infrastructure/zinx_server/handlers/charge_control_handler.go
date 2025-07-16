@@ -134,22 +134,35 @@ func (h *ChargeControlHandler) processChargeControlResponse(decodedFrame *protoc
 
 		if responseCode == 0x00 {
 			// 成功响应，需要判断是开始还是结束
-			// 通过解析原始数据中的充电命令来判断
-			if len(data) >= 1 {
-				chargeCommand := data[0] // 第一个字节是充电命令
-				switch chargeCommand {
-				case 0x01: // 开始充电
-					integrator.NotifyChargingStart(decodedFrame, conn, notificationData)
-				case 0x00: // 停止充电
-					notificationData["stop_reason"] = "manual_stop"
-					integrator.NotifyChargingEnd(decodedFrame, conn, notificationData)
-				default:
-					// 其他命令，默认当作开始处理
-					integrator.NotifyChargingStart(decodedFrame, conn, notificationData)
-				}
-			} else {
-				// 数据不足，默认当作开始处理
+			// 🔧 修复：从命令管理器中获取原始发送的充电命令
+			chargeCommand := h.getOriginalChargeCommand(decodedFrame, conn)
+
+			logger.WithFields(logrus.Fields{
+				"connID":        conn.GetConnID(),
+				"deviceId":      deviceID,
+				"messageID":     fmt.Sprintf("0x%04X", messageID),
+				"chargeCommand": fmt.Sprintf("0x%02X", chargeCommand),
+			}).Debug("获取到原始充电命令")
+
+			switch chargeCommand {
+			case 0x01: // 开始充电
 				integrator.NotifyChargingStart(decodedFrame, conn, notificationData)
+			case 0x00: // 停止充电
+				notificationData["stop_reason"] = "manual_stop"
+				integrator.NotifyChargingEnd(decodedFrame, conn, notificationData)
+			case 0x03: // 查询状态
+				// 查询命令不需要发送充电开始/结束通知
+				logger.WithFields(logrus.Fields{
+					"connID":   conn.GetConnID(),
+					"deviceId": deviceID,
+				}).Debug("查询命令响应，跳过充电通知")
+			default:
+				// 未知命令，记录警告但不发送通知
+				logger.WithFields(logrus.Fields{
+					"connID":        conn.GetConnID(),
+					"deviceId":      deviceID,
+					"chargeCommand": fmt.Sprintf("0x%02X", chargeCommand),
+				}).Warn("未知的充电命令，跳过通知")
 			}
 		} else {
 			// 失败响应
@@ -168,4 +181,59 @@ func (h *ChargeControlHandler) processChargeControlResponse(decodedFrame *protoc
 			cmdManager.ConfirmCommand(physicalID, decodedFrame.MessageID, 0x82)
 		}
 	}
+}
+
+// getOriginalChargeCommand 从命令管理器中获取原始发送的充电命令
+func (h *ChargeControlHandler) getOriginalChargeCommand(decodedFrame *protocol.DecodedDNYFrame, conn ziface.IConnection) byte {
+	// 获取物理ID
+	physicalID, err := decodedFrame.GetPhysicalIDAsUint32()
+	if err != nil {
+		logger.WithFields(logrus.Fields{
+			"connID":   conn.GetConnID(),
+			"deviceId": decodedFrame.DeviceID,
+			"error":    err.Error(),
+		}).Error("无法获取物理ID")
+		return 0xFF // 返回无效值
+	}
+
+	// 从命令管理器获取原始命令数据
+	cmdManager := network.GetCommandManager()
+	if cmdManager == nil {
+		logger.Error("命令管理器未初始化")
+		return 0xFF
+	}
+
+	// 生成命令键
+	cmdKey := cmdManager.GenerateCommandKey(conn, physicalID, decodedFrame.MessageID, 0x82)
+
+	// 获取命令条目
+	if cmdEntry := cmdManager.GetCommand(cmdKey); cmdEntry != nil {
+		// 从命令数据中提取充电命令（位于第6个字节）
+		if len(cmdEntry.Data) > 6 {
+			chargeCommand := cmdEntry.Data[6]
+			logger.WithFields(logrus.Fields{
+				"connID":        conn.GetConnID(),
+				"deviceId":      decodedFrame.DeviceID,
+				"cmdKey":        cmdKey,
+				"chargeCommand": fmt.Sprintf("0x%02X", chargeCommand),
+				"dataLen":       len(cmdEntry.Data),
+			}).Debug("成功从命令管理器获取充电命令")
+			return chargeCommand
+		} else {
+			logger.WithFields(logrus.Fields{
+				"connID":   conn.GetConnID(),
+				"deviceId": decodedFrame.DeviceID,
+				"dataLen":  len(cmdEntry.Data),
+			}).Error("命令数据长度不足")
+		}
+	} else {
+		logger.WithFields(logrus.Fields{
+			"connID":   conn.GetConnID(),
+			"deviceId": decodedFrame.DeviceID,
+			"cmdKey":   cmdKey,
+		}).Warn("未找到对应的命令条目")
+	}
+
+	// 如果无法获取原始命令，返回无效值
+	return 0xFF
 }

@@ -810,6 +810,19 @@ func SetDeviceRegistrationChecker(fn DeviceRegistrationCheckerType) {
 	DeviceRegistrationChecker = fn
 }
 
+// GetCommand 获取命令条目（用于调试和状态查询）
+func (cm *CommandManager) GetCommand(cmdKey string) *CommandEntry {
+	cm.lock.Lock()
+	defer cm.lock.Unlock()
+
+	if entry, exists := cm.commands[cmdKey]; exists {
+		// 返回副本，避免外部修改
+		entryCopy := *entry
+		return &entryCopy
+	}
+	return nil
+}
+
 // GetCommandDescription 获取命令描述 - 使用统一的命令注册表
 func GetCommandDescription(command uint8) string {
 	return constants.GetCommandDescription(command)
