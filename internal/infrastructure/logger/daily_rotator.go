@@ -99,7 +99,7 @@ func (r *DailyRotator) checkRotation() error {
 // openNewFile 打开新的日志文件
 func (r *DailyRotator) openNewFile(date string) error {
 	// 确保目录存在
-	if err := os.MkdirAll(r.BaseDir, 0755); err != nil {
+	if err := os.MkdirAll(r.BaseDir, 0o755); err != nil {
 		return fmt.Errorf("创建日志目录失败: %w", err)
 	}
 
@@ -108,7 +108,7 @@ func (r *DailyRotator) openNewFile(date string) error {
 	filepath := filepath.Join(r.BaseDir, filename)
 
 	// 打开文件（追加模式）
-	file, err := os.OpenFile(filepath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
+	file, err := os.OpenFile(filepath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
 	if err != nil {
 		return fmt.Errorf("打开日志文件失败: %w", err)
 	}
