@@ -198,3 +198,22 @@ help:
 # 确保输出目录存在
 $(OUTPUT_DIR):
 	mkdir -p $(OUTPUT_DIR)
+
+# 格式化代码
+fmt:
+	@echo "==> Formatting code..."
+	@go fmt ./...
+
+
+# 运行测试
+test:
+	@go test -v ./...
+
+# 运行代码检查
+lint:
+	@golangci-lint run
+
+# 生成测试覆盖率报告
+cover:
+	@go test -coverprofile=coverage.out ./...
+	@go tool cover -html=coverage.out -o coverage.html

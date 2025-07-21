@@ -68,7 +68,11 @@ func (chc *ConnectionHealthChecker) Start() error {
 	chc.running = true
 
 	// 启动写缓冲区监控器
-	chc.writeBufferMonitor.Start()
+	if err := chc.writeBufferMonitor.Start(); err != nil {
+		logger.WithFields(logrus.Fields{
+			"error": err.Error(),
+		}).Warn("启动写缓冲监控器失败")
+	}
 
 	go chc.healthCheckLoop()
 

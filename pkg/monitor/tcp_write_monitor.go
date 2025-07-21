@@ -47,7 +47,7 @@ func (m *TCPWriteMonitor) RecordWriteAttempt() {
 // RecordWriteSuccess 记录写入成功
 func (m *TCPWriteMonitor) RecordWriteSuccess(connID uint32, dataSize int) {
 	atomic.AddInt64(&m.stats.SuccessCount, 1)
-	
+
 	m.mutex.Lock()
 	m.stats.LastSuccessTime = time.Now()
 	m.mutex.Unlock()
@@ -62,11 +62,11 @@ func (m *TCPWriteMonitor) RecordWriteSuccess(connID uint32, dataSize int) {
 // RecordWriteFailure 记录写入失败
 func (m *TCPWriteMonitor) RecordWriteFailure(connID uint32, dataSize int, err error, isTimeout bool) {
 	atomic.AddInt64(&m.stats.FailureCount, 1)
-	
+
 	if isTimeout {
 		atomic.AddInt64(&m.stats.TimeoutCount, 1)
 	}
-	
+
 	m.mutex.Lock()
 	m.stats.LastFailureTime = time.Now()
 	m.mutex.Unlock()
@@ -83,7 +83,7 @@ func (m *TCPWriteMonitor) RecordWriteFailure(connID uint32, dataSize int, err er
 // RecordWriteRetry 记录写入重试
 func (m *TCPWriteMonitor) RecordWriteRetry(connID uint32, retryCount int) {
 	atomic.AddInt64(&m.stats.RetryCount, 1)
-	
+
 	m.logger.WithFields(logrus.Fields{
 		"connID":     connID,
 		"retryCount": retryCount,
@@ -95,7 +95,7 @@ func (m *TCPWriteMonitor) RecordWriteRetry(connID uint32, retryCount int) {
 func (m *TCPWriteMonitor) GetStats() TCPWriteStats {
 	m.mutex.RLock()
 	defer m.mutex.RUnlock()
-	
+
 	return TCPWriteStats{
 		TotalAttempts:   atomic.LoadInt64(&m.stats.TotalAttempts),
 		SuccessCount:    atomic.LoadInt64(&m.stats.SuccessCount),
@@ -113,7 +113,7 @@ func (m *TCPWriteMonitor) GetSuccessRate() float64 {
 	if total == 0 {
 		return 0.0
 	}
-	
+
 	success := atomic.LoadInt64(&m.stats.SuccessCount)
 	return float64(success) / float64(total) * 100.0
 }
@@ -124,7 +124,7 @@ func (m *TCPWriteMonitor) GetTimeoutRate() float64 {
 	if total == 0 {
 		return 0.0
 	}
-	
+
 	timeout := atomic.LoadInt64(&m.stats.TimeoutCount)
 	return float64(timeout) / float64(total) * 100.0
 }
@@ -135,18 +135,18 @@ func (m *TCPWriteMonitor) LogStats() {
 	successRate := m.GetSuccessRate()
 	timeoutRate := m.GetTimeoutRate()
 	uptime := time.Since(m.startTime)
-	
+
 	m.logger.WithFields(logrus.Fields{
-		"totalAttempts":   stats.TotalAttempts,
-		"successCount":    stats.SuccessCount,
-		"failureCount":    stats.FailureCount,
-		"timeoutCount":    stats.TimeoutCount,
-		"retryCount":      stats.RetryCount,
-		"successRate":     successRate,
-		"timeoutRate":     timeoutRate,
-		"uptime":          uptime.String(),
-		"lastFailure":     stats.LastFailureTime.Format("2006-01-02 15:04:05"),
-		"lastSuccess":     stats.LastSuccessTime.Format("2006-01-02 15:04:05"),
+		"totalAttempts": stats.TotalAttempts,
+		"successCount":  stats.SuccessCount,
+		"failureCount":  stats.FailureCount,
+		"timeoutCount":  stats.TimeoutCount,
+		"retryCount":    stats.RetryCount,
+		"successRate":   successRate,
+		"timeoutRate":   timeoutRate,
+		"uptime":        uptime.String(),
+		"lastFailure":   stats.LastFailureTime.Format("2006-01-02 15:04:05"),
+		"lastSuccess":   stats.LastSuccessTime.Format("2006-01-02 15:04:05"),
 	}).Info("📊 TCP写入统计报告")
 }
 

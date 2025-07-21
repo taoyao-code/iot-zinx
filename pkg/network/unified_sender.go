@@ -145,7 +145,11 @@ func (s *UnifiedSender) Start() error {
 	s.commandQueue.Start()
 
 	// 启动缓冲区监控
-	s.bufferMonitor.Start()
+	if err := s.bufferMonitor.Start(); err != nil {
+		logger.WithFields(logrus.Fields{
+			"error": err.Error(),
+		}).Warn("启动缓冲监控器失败")
+	}
 
 	logger.WithFields(logrus.Fields{
 		"max_workers":   s.config.MaxWorkers,
@@ -354,7 +358,12 @@ func (s *UnifiedSender) isConnectionHealthy(conn ziface.IConnection) bool {
 				return false
 			}
 			// 重置写超时
-			tcpConn.SetWriteDeadline(time.Time{})
+			if err := tcpConn.SetWriteDeadline(time.Time{}); err != nil {
+				logger.WithFields(logrus.Fields{
+					"connID": conn.GetConnID(),
+					"error":  err.Error(),
+				}).Warn("清除写超时失败")
+			}
 		}
 	}
 
@@ -632,7 +641,11 @@ var globalUnifiedSender *UnifiedSender
 // InitGlobalSender 初始化全局发送器
 func InitGlobalSender() {
 	globalUnifiedSender = NewUnifiedSender()
-	globalUnifiedSender.Start()
+	if err := globalUnifiedSender.Start(); err != nil {
+		logger.WithFields(logrus.Fields{
+			"error": err.Error(),
+		}).Error("启动全局统一发送器失败")
+	}
 }
 
 // GetGlobalSender 获取全局发送器

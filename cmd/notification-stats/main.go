@@ -33,7 +33,11 @@ func main() {
 	if err := notification.InitGlobalNotificationIntegrator(ctx); err != nil {
 		log.Fatalf("初始化通知系统失败: %v", err)
 	}
-	defer notification.StopGlobalNotificationIntegrator(ctx)
+	defer func() {
+		if err := notification.StopGlobalNotificationIntegrator(ctx); err != nil {
+			log.Printf("停止全局通知集成器失败: %v", err)
+		}
+	}()
 
 	integrator := notification.GetGlobalNotificationIntegrator()
 	if !integrator.IsEnabled() {

@@ -14,10 +14,15 @@ const (
 
 // 协议相关常量
 const (
-	IOT_SIM_CARD_LENGTH = 20     // ICCID长度
-	IOT_LINK_HEARTBEAT  = "link" // Link心跳字符串
+	IotSimCardLength = 20     // ICCID长度
+	IotLinkHeartbeat = "link" // Link心跳字符串
 	// 使用统一的协议常量
-	DNY_MIN_PACKET_LEN  = MinPacketSize // 已弃用，使用 MinPacketSize
+	DnyMinPacketLen = MinPacketSize // 已弃用，使用 MinPacketSize
+
+	// 向后兼容的别名
+	IOT_SIM_CARD_LENGTH = IotSimCardLength // 已弃用，使用 IotSimCardLength
+	IOT_LINK_HEARTBEAT  = IotLinkHeartbeat // 已弃用，使用 IotLinkHeartbeat
+	DNY_MIN_PACKET_LEN  = DnyMinPacketLen  // 已弃用，使用 DnyMinPacketLen
 
 	// 连接缓冲区管理常量
 	ConnectionBufferKey = "dny_connection_buffer" // 连接缓冲区属性键
@@ -31,8 +36,8 @@ const (
 	ICCIDValidPrefix   = "89"   // ICCID有效前缀（ITU-T E.118标准，电信行业标识符）
 	DNYMinHeaderLength = 5      // DNY协议最小头部长度("DNY" + 长度字段)
 	// 使用统一的协议常量
-	DNYHeaderMagic     = ProtocolHeader // 已弃用，使用 ProtocolHeader
-	DNYChecksumLength  = 2      // DNY校验和长度
+	DNYHeaderMagic    = ProtocolHeader // 已弃用，使用 ProtocolHeader
+	DNYChecksumLength = 2              // DNY校验和长度
 )
 
 // DNY命令名称映射 - 向后兼容性包装器

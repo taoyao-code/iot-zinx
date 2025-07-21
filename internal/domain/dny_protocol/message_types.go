@@ -64,7 +64,7 @@ func (d *DeviceRegisterData) UnmarshalBinary(data []byte) error {
 	workMode := data[5]
 
 	// 电源板版本号 (2字节, 小端序) - 可选字段
-	var powerBoardVersion uint16 = 0
+	var powerBoardVersion uint16
 	if len(data) >= 8 {
 		powerBoardVersion = binary.LittleEndian.Uint16(data[6:8])
 	}
@@ -106,7 +106,7 @@ func (h *LinkHeartbeatData) MarshalBinary() ([]byte, error) {
 	return []byte{}, nil
 }
 
-func (h *LinkHeartbeatData) UnmarshalBinary(data []byte) error {
+func (h *LinkHeartbeatData) UnmarshalBinary(_ []byte) error {
 	h.Timestamp = time.Now()
 	return nil
 }
@@ -139,7 +139,10 @@ func (s *SwipeCardRequestData) MarshalBinary() ([]byte, error) {
 	minute := uint8(s.SwipeTime.Minute())
 	second := uint8(s.SwipeTime.Second())
 
-	binary.Write(buf, binary.LittleEndian, year)
+	if err := binary.Write(buf, binary.LittleEndian, year); err != nil {
+		// 忽略错误，因为写入bytes.Buffer通常不会失败
+		_ = err
+	}
 	buf.WriteByte(month)
 	buf.WriteByte(day)
 	buf.WriteByte(hour)
@@ -345,19 +348,34 @@ func (p *PowerHeartbeatData) MarshalBinary() ([]byte, error) {
 	buf.WriteByte(p.GunNumber)
 
 	// 电压 (2字节, 小端序)
-	binary.Write(buf, binary.LittleEndian, p.Voltage)
+	if err := binary.Write(buf, binary.LittleEndian, p.Voltage); err != nil {
+		// 忽略错误，因为写入bytes.Buffer通常不会失败
+		_ = err
+	}
 
 	// 电流 (2字节, 小端序)
-	binary.Write(buf, binary.LittleEndian, p.Current)
+	if err := binary.Write(buf, binary.LittleEndian, p.Current); err != nil {
+		// 忽略错误，因为写入bytes.Buffer通常不会失败
+		_ = err
+	}
 
 	// 功率 (4字节, 小端序)
-	binary.Write(buf, binary.LittleEndian, p.Power)
+	if err := binary.Write(buf, binary.LittleEndian, p.Power); err != nil {
+		// 忽略错误，因为写入bytes.Buffer通常不会失败
+		_ = err
+	}
 
 	// 累计电量 (4字节, 小端序)
-	binary.Write(buf, binary.LittleEndian, p.ElectricEnergy)
+	if err := binary.Write(buf, binary.LittleEndian, p.ElectricEnergy); err != nil {
+		// 忽略错误，因为写入bytes.Buffer通常不会失败
+		_ = err
+	}
 
 	// 温度 (2字节, 小端序)
-	binary.Write(buf, binary.LittleEndian, p.Temperature)
+	if err := binary.Write(buf, binary.LittleEndian, p.Temperature); err != nil {
+		// 忽略错误，因为写入bytes.Buffer通常不会失败
+		_ = err
+	}
 
 	// 充电状态 (1字节)
 	buf.WriteByte(p.Status)
@@ -420,7 +438,10 @@ func (m *MainHeartbeatData) MarshalBinary() ([]byte, error) {
 	}
 
 	// 设备温度 (2字节, 小端序)
-	binary.Write(buf, binary.LittleEndian, m.Temperature)
+	if err := binary.Write(buf, binary.LittleEndian, m.Temperature); err != nil {
+		// 忽略错误，因为写入bytes.Buffer通常不会失败
+		_ = err
+	}
 
 	// 信号强度 (1字节)
 	buf.WriteByte(m.SignalStrength)
@@ -492,13 +513,22 @@ func (c *ChargeControlData) MarshalBinary() ([]byte, error) {
 	buf.Write(orderBytes)
 
 	// 最大功率 (4字节, 小端序)
-	binary.Write(buf, binary.LittleEndian, c.MaxPower)
+	if err := binary.Write(buf, binary.LittleEndian, c.MaxPower); err != nil {
+		// 忽略错误，因为写入bytes.Buffer通常不会失败
+		_ = err
+	}
 
 	// 最大电量 (4字节, 小端序)
-	binary.Write(buf, binary.LittleEndian, c.MaxEnergy)
+	if err := binary.Write(buf, binary.LittleEndian, c.MaxEnergy); err != nil {
+		// 忽略错误，因为写入bytes.Buffer通常不会失败
+		_ = err
+	}
 
 	// 最大时间 (4字节, 小端序)
-	binary.Write(buf, binary.LittleEndian, c.MaxTime)
+	if err := binary.Write(buf, binary.LittleEndian, c.MaxTime); err != nil {
+		// 忽略错误，因为写入bytes.Buffer通常不会失败
+		_ = err
+	}
 
 	return buf.Bytes(), nil
 }
@@ -546,7 +576,10 @@ func (p *ParameterSettingData) MarshalBinary() ([]byte, error) {
 	buf.WriteByte(p.ParameterType)
 
 	// 参数ID (2字节, 小端序)
-	binary.Write(buf, binary.LittleEndian, p.ParameterID)
+	if err := binary.Write(buf, binary.LittleEndian, p.ParameterID); err != nil {
+		// 忽略错误，因为写入bytes.Buffer通常不会失败
+		_ = err
+	}
 
 	// 参数值 (变长)
 	buf.Write(p.Value)
@@ -588,7 +621,10 @@ func (d *DeviceHeartbeatData) MarshalBinary() ([]byte, error) {
 	buf := bytes.NewBuffer(make([]byte, 0, 5+len(d.PortStatuses)))
 
 	// 电压 (2字节，小端序)
-	binary.Write(buf, binary.LittleEndian, d.Voltage)
+	if err := binary.Write(buf, binary.LittleEndian, d.Voltage); err != nil {
+		// 忽略错误，因为写入bytes.Buffer通常不会失败
+		_ = err
+	}
 
 	// 端口数量 (1字节)
 	buf.WriteByte(d.PortCount)
@@ -650,7 +686,10 @@ func writeTimeBytes(buf *bytes.Buffer, t time.Time) {
 	minute := uint8(t.Minute())
 	second := uint8(t.Second())
 
-	binary.Write(buf, binary.LittleEndian, year)
+	if err := binary.Write(buf, binary.LittleEndian, year); err != nil {
+		// 忽略错误，因为写入bytes.Buffer通常不会失败
+		_ = err
+	}
 	buf.WriteByte(month)
 	buf.WriteByte(day)
 	buf.WriteByte(hour)

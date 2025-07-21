@@ -79,10 +79,21 @@ func (m *UnifiedConnectionMonitor) OnConnectionClosed(conn ziface.IConnection) {
 
 	// 移除会话
 	if session.DeviceID != "" {
-		m.sessionManager.RemoveSession(session.DeviceID, "连接关闭")
+		if err := m.sessionManager.RemoveSession(session.DeviceID, "连接关闭"); err != nil {
+			logger.WithFields(logrus.Fields{
+				"deviceID": session.DeviceID,
+				"connID":   connID,
+				"error":    err.Error(),
+			}).Warn("移除会话失败")
+		}
 	} else {
 		// 未注册的连接，直接清理
-		m.sessionManager.cleanupSession(session, "连接关闭（未注册）")
+		if err := m.sessionManager.cleanupSession(session, "连接关闭（未注册）"); err != nil {
+			logger.WithFields(logrus.Fields{
+				"connID": connID,
+				"error":  err.Error(),
+			}).Warn("清理未注册会话失败")
+		}
 	}
 
 	// 清理设备组管理器中的连接

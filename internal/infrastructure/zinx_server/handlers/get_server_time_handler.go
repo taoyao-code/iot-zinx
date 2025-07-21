@@ -87,7 +87,12 @@ func (h *GetServerTimeHandler) Handle(request ziface.IRequest) {
 	}
 
 	// 3. 从帧数据更新设备会话
-	h.UpdateDeviceSessionFromFrame(deviceSession, decodedFrame)
+	if err := h.UpdateDeviceSessionFromFrame(deviceSession, decodedFrame); err != nil {
+		logger.WithFields(logrus.Fields{
+			"deviceID": decodedFrame.DeviceID,
+			"error":    err.Error(),
+		}).Warn("更新设备会话失败")
+	}
 
 	// 4. 🔧 修复：时间同步流控检查，避免频繁处理
 	physicalId := binary.LittleEndian.Uint32(decodedFrame.RawPhysicalID)

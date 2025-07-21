@@ -265,7 +265,12 @@ func OnDeviceNotAlive(conn ziface.IConnection) {
 			// 批量更新分机设备状态为离线
 			if UpdateDeviceStatusFunc != nil {
 				for _, slaveDeviceID := range slaveDevices {
-					UpdateDeviceStatusFunc(slaveDeviceID, constants.DeviceStatusOffline)
+					if err := UpdateDeviceStatusFunc(slaveDeviceID, constants.DeviceStatusOffline); err != nil {
+						logger.WithFields(logrus.Fields{
+							"slaveDeviceID": slaveDeviceID,
+							"error":         err.Error(),
+						}).Warn("更新分机设备状态为离线失败")
+					}
 				}
 			}
 		}
@@ -273,7 +278,12 @@ func OnDeviceNotAlive(conn ziface.IConnection) {
 
 	// 更新设备状态为离线
 	if UpdateDeviceStatusFunc != nil {
-		UpdateDeviceStatusFunc(deviceID, constants.DeviceStatusOffline)
+		if err := UpdateDeviceStatusFunc(deviceID, constants.DeviceStatusOffline); err != nil {
+			logger.WithFields(logrus.Fields{
+				"deviceID": deviceID,
+				"error":    err.Error(),
+			}).Warn("更新设备状态为离线失败")
+		}
 	}
 
 	// 通过DeviceSession管理连接状态

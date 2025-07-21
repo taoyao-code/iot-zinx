@@ -26,7 +26,7 @@ type ConnectionGroupManager struct {
 	groups      sync.Map // connID → *ConnectionDeviceGroup
 	deviceIndex sync.Map // deviceID → *ConnectionDeviceGroup
 	iccidIndex  sync.Map // iccid → *ConnectionDeviceGroup
-	mutex       sync.Mutex
+	// mutex       sync.Mutex // 未使用，已注释
 }
 
 // DeviceInfo 设备信息结构

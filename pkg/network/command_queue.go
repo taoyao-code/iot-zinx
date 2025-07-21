@@ -231,8 +231,7 @@ func (cq *CommandQueue) processCommand(workerID int, cmd *QueuedCommand) {
 	}
 
 	// 执行命令 - 统一使用 UnifiedSender
-	var err error
-	err = SendRaw(cmd.Connection, cmd.Data)
+	err := SendRaw(cmd.Connection, cmd.Data)
 
 	duration := time.Since(startTime)
 

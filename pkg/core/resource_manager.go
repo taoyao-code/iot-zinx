@@ -142,7 +142,11 @@ var (
 func GetResourceManager() *ResourceManager {
 	globalResourceManagerOnce.Do(func() {
 		globalResourceManager = NewResourceManager()
-		globalResourceManager.Start()
+		if err := globalResourceManager.Start(); err != nil {
+			logger.WithFields(logrus.Fields{
+				"error": err.Error(),
+			}).Error("启动全局资源管理器失败")
+		}
 		logger.Info("统一资源管理器已初始化并启动")
 	})
 	return globalResourceManager

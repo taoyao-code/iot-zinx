@@ -37,7 +37,7 @@ func (h *SimCardHandler) Handle(request ziface.IRequest) {
 	}).Info("SimCardHandler: Handle method called")
 
 	// 验证ICCID格式 - 符合ITU-T E.118标准
-	if len(data) == constants.IOT_SIM_CARD_LENGTH && h.isValidICCIDStrict(data) {
+	if len(data) == constants.IotSimCardLength && h.isValidICCIDStrict(data) {
 		iccidStr := string(data)
 		now := time.Now()
 
@@ -100,7 +100,7 @@ func (h *SimCardHandler) Handle(request ziface.IRequest) {
 // isValidICCIDStrict 严格验证ICCID格式 - 符合ITU-T E.118标准
 // ICCID固定长度为20字节，十六进制字符(0-9,A-F)，以"89"开头
 func (h *SimCardHandler) isValidICCIDStrict(data []byte) bool {
-	if len(data) != constants.IOT_SIM_CARD_LENGTH {
+	if len(data) != constants.IotSimCardLength {
 		return false
 	}
 

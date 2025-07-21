@@ -52,7 +52,7 @@ func (pm *ConnectionPropertyManager) HasProperty(key string) bool {
 
 // Clear 清空所有属性
 func (pm *ConnectionPropertyManager) Clear() {
-	pm.properties.Range(func(key, value interface{}) bool {
+	pm.properties.Range(func(key, _ interface{}) bool {
 		pm.properties.Delete(key)
 		return true
 	})
@@ -61,7 +61,7 @@ func (pm *ConnectionPropertyManager) Clear() {
 // PropertyCount 获取属性数量
 func (pm *ConnectionPropertyManager) PropertyCount() int {
 	count := 0
-	pm.properties.Range(func(key, value interface{}) bool {
+	pm.properties.Range(func(_, value interface{}) bool {
 		count++
 		return true
 	})

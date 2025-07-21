@@ -19,20 +19,20 @@ type ModifyChargeHandler struct {
 
 // ModifyChargeRequest 修改充电请求数据结构
 type ModifyChargeRequest struct {
-	PortNumber     uint8  // 端口号
-	ModifyType     uint8  // 修改类型：0=修改时长，1=修改电量
-	ModifyValue    uint32 // 修改值：时长(秒)或电量(0.01度)
-	OrderNumber    string // 订单编号
-	ReasonCode     uint8  // 修改原因码
+	PortNumber  uint8  // 端口号
+	ModifyType  uint8  // 修改类型：0=修改时长，1=修改电量
+	ModifyValue uint32 // 修改值：时长(秒)或电量(0.01度)
+	OrderNumber string // 订单编号
+	ReasonCode  uint8  // 修改原因码
 }
 
 // ModifyChargeResponse 修改充电响应数据结构
 type ModifyChargeResponse struct {
-	PortNumber  uint8  // 端口号
-	ResponseCode uint8  // 响应码：0=成功，其他=失败
-	CurrentTime uint32 // 当前剩余时长(秒)
+	PortNumber    uint8  // 端口号
+	ResponseCode  uint8  // 响应码：0=成功，其他=失败
+	CurrentTime   uint32 // 当前剩余时长(秒)
 	CurrentEnergy uint32 // 当前剩余电量(0.01度)
-	OrderNumber string // 订单编号
+	OrderNumber   string // 订单编号
 }
 
 // NewModifyChargeHandler 创建修改充电处理器
@@ -105,9 +105,9 @@ func (h *ModifyChargeHandler) processModifyChargeResponse(decodedFrame *protocol
 
 	// 解析响应数据
 	response := &ModifyChargeResponse{
-		PortNumber:    data[0],
-		ResponseCode:  data[1],
-		CurrentTime:   uint32(data[2]) | uint32(data[3])<<8 | uint32(data[4])<<16 | uint32(data[5])<<24,
+		PortNumber:   data[0],
+		ResponseCode: data[1],
+		CurrentTime:  uint32(data[2]) | uint32(data[3])<<8 | uint32(data[4])<<16 | uint32(data[5])<<24,
 	}
 
 	// 如果数据长度足够，解析剩余电量

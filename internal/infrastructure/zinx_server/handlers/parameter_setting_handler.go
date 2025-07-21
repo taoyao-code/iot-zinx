@@ -51,7 +51,12 @@ func (h *ParameterSettingHandler) Handle(request ziface.IRequest) {
 	}
 
 	// 3. 从帧数据更新设备会话
-	h.UpdateDeviceSessionFromFrame(deviceSession, decodedFrame)
+	if err := h.UpdateDeviceSessionFromFrame(deviceSession, decodedFrame); err != nil {
+		logger.WithFields(logrus.Fields{
+			"deviceID": decodedFrame.DeviceID,
+			"error":    err.Error(),
+		}).Warn("更新设备会话失败")
+	}
 
 	// 4. 处理参数设置业务逻辑
 	h.processParameterSetting(decodedFrame, conn, deviceSession)

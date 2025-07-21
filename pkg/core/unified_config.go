@@ -9,36 +9,36 @@ const (
 	DefaultMonitorInterval = 30 * time.Second // 默认监控间隔
 	DefaultCleanupInterval = 5 * time.Minute  // 默认清理间隔
 	DefaultGCInterval      = 2 * time.Minute  // 默认GC间隔
-	
+
 	// === 消息ID管理配置 ===
-	DefaultMaxMessageID   = 65535            // 最大消息ID (uint16最大值)
-	DefaultMessageTimeout = 5 * time.Minute  // 默认消息超时时间
-	MinMessageID         = 1                 // 最小消息ID (避免使用0)
-	
+	DefaultMaxMessageID   = 65535           // 最大消息ID (uint16最大值)
+	DefaultMessageTimeout = 5 * time.Minute // 默认消息超时时间
+	MinMessageID          = 1               // 最小消息ID (避免使用0)
+
 	// === 并发控制配置 ===
-	DefaultMaxGoroutines = 1000              // 默认最大Goroutine数
-	DefaultPoolSize      = 10                // 默认池大小
-	DefaultQueueSize     = 100               // 默认队列大小
-	DefaultLockTimeout   = 30 * time.Second  // 默认锁超时时间
-	
+	DefaultMaxGoroutines = 1000             // 默认最大Goroutine数
+	DefaultPoolSize      = 10               // 默认池大小
+	DefaultQueueSize     = 100              // 默认队列大小
+	DefaultLockTimeout   = 30 * time.Second // 默认锁超时时间
+
 	// === 资源管理配置 ===
-	DefaultMaxBufferPools    = 100                // 默认最大缓冲区池数
-	DefaultMaxObjectPools    = 100                // 默认最大对象池数
-	DefaultBufferSize        = 4096               // 默认缓冲区大小
-	DefaultMaxBuffersPerPool = 1000               // 默认每个池的最大缓冲区数
-	DefaultRecycleWorkers    = 5                  // 默认回收工作协程数
-	DefaultMemoryThreshold   = 100 * 1024 * 1024  // 默认内存阈值 (100MB)
-	
+	DefaultMaxBufferPools    = 100               // 默认最大缓冲区池数
+	DefaultMaxObjectPools    = 100               // 默认最大对象池数
+	DefaultBufferSize        = 4096              // 默认缓冲区大小
+	DefaultMaxBuffersPerPool = 1000              // 默认每个池的最大缓冲区数
+	DefaultRecycleWorkers    = 5                 // 默认回收工作协程数
+	DefaultMemoryThreshold   = 100 * 1024 * 1024 // 默认内存阈值 (100MB)
+
 	// === 连接管理配置 ===
-	DefaultMaxConnections     = 10000            // 默认最大连接数
-	DefaultConnectionTimeout  = 30 * time.Second // 默认连接超时时间
-	DefaultHeartbeatInterval  = 60 * time.Second // 默认心跳间隔
-	DefaultSessionTimeout     = 10 * time.Minute // 默认会话超时时间
-	
+	DefaultMaxConnections    = 10000            // 默认最大连接数
+	DefaultConnectionTimeout = 30 * time.Second // 默认连接超时时间
+	DefaultHeartbeatInterval = 60 * time.Second // 默认心跳间隔
+	DefaultSessionTimeout    = 10 * time.Minute // 默认会话超时时间
+
 	// === 端口管理配置 ===
 	MinPortNumber = 1  // API最小端口号(1-based)
 	MaxPortNumber = 16 // API最大端口号(1-based)
-	
+
 	// === 监控配置 ===
 	DefaultUpdateInterval     = 10 * time.Second // 默认更新间隔
 	DefaultAlertCheckInterval = 30 * time.Second // 默认告警检查间隔
@@ -67,11 +67,11 @@ var DefaultTimeouts = &UnifiedTimeouts{
 
 // UnifiedIntervals 统一间隔配置
 type UnifiedIntervals struct {
-	Monitor     time.Duration `json:"monitor"`
-	Cleanup     time.Duration `json:"cleanup"`
-	GC          time.Duration `json:"gc"`
-	Update      time.Duration `json:"update"`
-	AlertCheck  time.Duration `json:"alert_check"`
+	Monitor    time.Duration `json:"monitor"`
+	Cleanup    time.Duration `json:"cleanup"`
+	GC         time.Duration `json:"gc"`
+	Update     time.Duration `json:"update"`
+	AlertCheck time.Duration `json:"alert_check"`
 }
 
 // DefaultIntervals 默认间隔配置
@@ -85,15 +85,15 @@ var DefaultIntervals = &UnifiedIntervals{
 
 // UnifiedLimits 统一限制配置
 type UnifiedLimits struct {
-	MaxConnections     int   `json:"max_connections"`
-	MaxDevices         int   `json:"max_devices"`
-	MaxGoroutines      int   `json:"max_goroutines"`
-	MaxBufferPools     int   `json:"max_buffer_pools"`
-	MaxObjectPools     int   `json:"max_object_pools"`
-	MaxBuffersPerPool  int   `json:"max_buffers_per_pool"`
-	MaxAlerts          int   `json:"max_alerts"`
-	MaxMessageID       int   `json:"max_message_id"`
-	MemoryThreshold    int64 `json:"memory_threshold"`
+	MaxConnections    int   `json:"max_connections"`
+	MaxDevices        int   `json:"max_devices"`
+	MaxGoroutines     int   `json:"max_goroutines"`
+	MaxBufferPools    int   `json:"max_buffer_pools"`
+	MaxObjectPools    int   `json:"max_object_pools"`
+	MaxBuffersPerPool int   `json:"max_buffers_per_pool"`
+	MaxAlerts         int   `json:"max_alerts"`
+	MaxMessageID      int   `json:"max_message_id"`
+	MemoryThreshold   int64 `json:"memory_threshold"`
 }
 
 // DefaultLimits 默认限制配置

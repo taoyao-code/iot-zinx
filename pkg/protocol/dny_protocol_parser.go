@@ -22,11 +22,11 @@ import (
 
 const (
 	// 使用统一的协议常量
-	HeaderDNY          = constants.ProtocolHeader // 已弃用，使用 constants.ProtocolHeader
-	HeaderLink         = "link"
+	HeaderDNY  = constants.ProtocolHeader // 已弃用，使用 constants.ProtocolHeader
+	HeaderLink = "link"
 	// 使用统一的协议常量
 	MinPacketLength    = constants.MinPacketSize // 已弃用，使用 constants.MinPacketSize
-	LinkPacketLength   = 4  // link
+	LinkPacketLength   = 4                       // link
 	PhysicalIDLength   = 4
 	MessageIDLength    = 2
 	CommandLength      = 1
@@ -206,11 +206,20 @@ func BuildDNYResponsePacketUnified(msg *dny_protocol.Message) ([]byte, error) {
 
 	// 1. 写入包头和长度
 	packet.WriteString(HeaderDNY)
-	binary.Write(packet, binary.LittleEndian, contentLen)
+	if err := binary.Write(packet, binary.LittleEndian, contentLen); err != nil {
+		// 忽略错误，因为写入bytes.Buffer通常不会失败
+		_ = err
+	}
 
 	// 2. 写入核心内容
-	binary.Write(packet, binary.LittleEndian, msg.PhysicalId)
-	binary.Write(packet, binary.LittleEndian, msg.MessageId)
+	if err := binary.Write(packet, binary.LittleEndian, msg.PhysicalId); err != nil {
+		// 忽略错误，因为写入bytes.Buffer通常不会失败
+		_ = err
+	}
+	if err := binary.Write(packet, binary.LittleEndian, msg.MessageId); err != nil {
+		// 忽略错误，因为写入bytes.Buffer通常不会失败
+		_ = err
+	}
 	packet.WriteByte(byte(msg.CommandId))
 	packet.Write(msg.Data)
 
@@ -223,7 +232,10 @@ func BuildDNYResponsePacketUnified(msg *dny_protocol.Message) ([]byte, error) {
 	}
 
 	// 4. 写入校验和
-	binary.Write(packet, binary.LittleEndian, checksum)
+	if err := binary.Write(packet, binary.LittleEndian, checksum); err != nil {
+		// 忽略错误，因为写入bytes.Buffer通常不会失败
+		_ = err
+	}
 
 	return packet.Bytes(), nil
 }

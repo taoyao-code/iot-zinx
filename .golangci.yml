@@ -1,0 +1,42 @@
+# .golangci.yml
+run:
+  timeout: 5m
+  issues-exit-code: 1
+
+linters-settings:
+  gocyclo:
+    min-complexity: 10
+  goconst:
+    min-len: 3
+    min-occurrences: 2
+  goimports:
+    local-prefixes: github.com/yourorg/yourproject
+  misspell:
+    locale: US
+
+linters:
+  enable:
+    - gofmt
+    - gofumpt
+    - errcheck
+    - gosimple
+    - govet
+    - ineffassign
+    - staticcheck
+    - typecheck
+    - unused
+    - gocyclo
+    - goconst
+    - goimports
+    - misspell
+    - revive
+  disable:
+    - deadcode
+    - varcheck
+
+issues:
+  exclude-rules:
+    - path: _test\.go
+      linters:
+        - gocyclo
+        - errcheck

@@ -52,7 +52,12 @@ func (h *SettlementHandler) Handle(request ziface.IRequest) {
 	}
 
 	// 3. 从帧数据更新设备会话
-	h.UpdateDeviceSessionFromFrame(deviceSession, decodedFrame)
+	if err := h.UpdateDeviceSessionFromFrame(deviceSession, decodedFrame); err != nil {
+		logger.WithFields(logrus.Fields{
+			"deviceID": decodedFrame.DeviceID,
+			"error":    err.Error(),
+		}).Warn("更新设备会话失败")
+	}
 
 	// 4. 处理结算业务逻辑
 	h.processSettlement(decodedFrame, conn, deviceSession)

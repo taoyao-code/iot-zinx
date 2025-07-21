@@ -239,9 +239,19 @@ func (ch *ConnectionHooks) setupTCPParametersWithInitialDeadline(conn ziface.ICo
 func (ch *ConnectionHooks) setupTCPParameters(conn ziface.IConnection, now time.Time) {
 	if tcpConn, ok := conn.GetTCPConnection().(*net.TCPConn); ok {
 		// 设置TCP KeepAlive参数，适应移动网络的弱连接特性
-		tcpConn.SetKeepAlive(true)
+		if err := tcpConn.SetKeepAlive(true); err != nil {
+			logger.WithFields(logrus.Fields{
+				"connID": conn.GetConnID(),
+				"error":  err.Error(),
+			}).Warn("设置TCP KeepAlive失败")
+		}
 		// 使用配置的保活探测间隔
-		tcpConn.SetKeepAlivePeriod(ch.keepAlivePeriod)
+		if err := tcpConn.SetKeepAlivePeriod(ch.keepAlivePeriod); err != nil {
+			logger.WithFields(logrus.Fields{
+				"connID": conn.GetConnID(),
+				"error":  err.Error(),
+			}).Warn("设置TCP KeepAlive周期失败")
+		}
 
 		// 设置读写超时
 		readDeadline := now.Add(ch.readDeadLine)

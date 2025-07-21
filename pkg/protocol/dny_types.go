@@ -86,14 +86,14 @@ func (df *DecodedDNYFrame) GetDeviceNumber() (uint32, error) {
 	if df.FrameType != FrameTypeStandard || len(df.RawPhysicalID) != 4 {
 		return 0, errors.New("not a standard frame or RawPhysicalID is invalid")
 	}
-	
+
 	// 🔧 修复：使用安全的binary.LittleEndian.Uint32方法替代手动位移
 	// 获取完整的物理ID
 	fullID, err := df.GetPhysicalIDAsUint32()
 	if err != nil {
 		return 0, err
 	}
-	
+
 	// 提取后3字节作为设备编号（屏蔽最高字节，即设备识别码）
 	// 例如：原始小端 40 aa ce 04 -> 设备编号是 ce aa 40 (小端) = 0x40aace (大端)
 	return fullID & 0x00FFFFFF, nil

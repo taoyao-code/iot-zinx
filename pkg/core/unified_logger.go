@@ -162,7 +162,7 @@ func (ul *UnifiedLogger) LogDebug(event string, fields logrus.Fields) {
 }
 
 // shouldLog 检查是否应该记录日志
-func (ul *UnifiedLogger) shouldLog(category string, level logrus.Level) bool {
+func (ul *UnifiedLogger) shouldLog(_ string, level logrus.Level) bool {
 	return logrus.GetLevel() <= level
 }
 

@@ -64,3 +64,6 @@ type IDeviceGroupManager interface {
 	// 已废弃的方法，保留用于向后兼容
 	GetGroupStatistics() map[string]interface{}
 }
+
+// === 全局监控器访问函数 ===
+// 注意：这些函数在global.go中实现，这里只是声明

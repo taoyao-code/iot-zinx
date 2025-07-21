@@ -336,7 +336,25 @@ func (m *UnifiedConnectionManager) GetConnectionInfo(connID uint64) (*Connection
 	connInfo := connInfoInterface.(*ConnectionInfo)
 	// 返回副本，避免并发修改
 	connInfo.mutex.RLock()
-	infoCopy := *connInfo
+	infoCopy := ConnectionInfo{
+		ConnID:          connInfo.ConnID,
+		Connection:      connInfo.Connection,
+		DeviceID:        connInfo.DeviceID,
+		PhysicalID:      connInfo.PhysicalID,
+		ICCID:           connInfo.ICCID,
+		RemoteAddr:      connInfo.RemoteAddr,
+		State:           connInfo.State,
+		DeviceStatus:    connInfo.DeviceStatus,
+		ConnectionState: connInfo.ConnectionState,
+		ConnectedAt:     connInfo.ConnectedAt,
+		RegisteredAt:    connInfo.RegisteredAt,
+		LastHeartbeat:   connInfo.LastHeartbeat,
+		LastActivity:    connInfo.LastActivity,
+		HeartbeatCount:  connInfo.HeartbeatCount,
+		CommandCount:    connInfo.CommandCount,
+		DataBytesIn:     connInfo.DataBytesIn,
+		DataBytesOut:    connInfo.DataBytesOut,
+	}
 	connInfo.mutex.RUnlock()
 
 	return &infoCopy, true
@@ -352,7 +370,25 @@ func (m *UnifiedConnectionManager) GetDeviceInfo(deviceID string) (*ConnectionIn
 	connInfo := connInfoInterface.(*ConnectionInfo)
 	// 返回副本，避免并发修改
 	connInfo.mutex.RLock()
-	infoCopy := *connInfo
+	infoCopy := ConnectionInfo{
+		ConnID:          connInfo.ConnID,
+		Connection:      connInfo.Connection,
+		DeviceID:        connInfo.DeviceID,
+		PhysicalID:      connInfo.PhysicalID,
+		ICCID:           connInfo.ICCID,
+		RemoteAddr:      connInfo.RemoteAddr,
+		State:           connInfo.State,
+		DeviceStatus:    connInfo.DeviceStatus,
+		ConnectionState: connInfo.ConnectionState,
+		ConnectedAt:     connInfo.ConnectedAt,
+		RegisteredAt:    connInfo.RegisteredAt,
+		LastHeartbeat:   connInfo.LastHeartbeat,
+		LastActivity:    connInfo.LastActivity,
+		HeartbeatCount:  connInfo.HeartbeatCount,
+		CommandCount:    connInfo.CommandCount,
+		DataBytesIn:     connInfo.DataBytesIn,
+		DataBytesOut:    connInfo.DataBytesOut,
+	}
 	connInfo.mutex.RUnlock()
 
 	return &infoCopy, true

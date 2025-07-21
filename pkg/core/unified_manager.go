@@ -145,7 +145,12 @@ func (m *UnifiedSessionManager) RegisterDevice(conn ziface.IConnection, deviceID
 			}).Info("设备切换连接")
 
 			// 清理旧连接
-			m.cleanupSession(existing, "设备切换连接")
+			if err := m.cleanupSession(existing, "设备切换连接"); err != nil {
+				logger.WithFields(logrus.Fields{
+					"deviceID": deviceID,
+					"error":    err.Error(),
+				}).Warn("清理旧会话失败")
+			}
 		}
 	}
 
@@ -308,7 +313,12 @@ func (m *UnifiedSessionManager) performCleanup() {
 
 	// 清理过期会话
 	for _, session := range expiredSessions {
-		m.cleanupSession(session, "心跳超时")
+		if err := m.cleanupSession(session, "心跳超时"); err != nil {
+			logger.WithFields(logrus.Fields{
+				"deviceID": session.DeviceID,
+				"error":    err.Error(),
+			}).Warn("清理过期会话失败")
+		}
 	}
 
 	// 更新清理时间

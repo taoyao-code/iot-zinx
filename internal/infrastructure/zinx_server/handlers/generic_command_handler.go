@@ -51,7 +51,12 @@ func (h *GenericCommandHandler) Handle(request ziface.IRequest) {
 
 	// 3. 更新设备会话信息
 	if deviceSession != nil {
-		h.UpdateDeviceSessionFromFrame(deviceSession, decodedFrame)
+		if err := h.UpdateDeviceSessionFromFrame(deviceSession, decodedFrame); err != nil {
+			logger.WithFields(logrus.Fields{
+				"deviceID": decodedFrame.DeviceID,
+				"error":    err.Error(),
+			}).Warn("更新设备会话失败")
+		}
 	}
 
 	// 4. 记录处理日志

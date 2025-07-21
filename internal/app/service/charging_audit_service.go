@@ -302,7 +302,11 @@ func (s *ChargingAuditService) flushToFile() {
 		}
 	}
 
-	s.logFile.Sync()
+	if err := s.logFile.Sync(); err != nil {
+		logger.WithFields(logrus.Fields{
+			"error": err.Error(),
+		}).Warn("同步日志文件失败")
+	}
 
 	// 清空内存中的日志
 	s.mu.Lock()

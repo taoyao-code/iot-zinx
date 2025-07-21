@@ -85,3 +85,33 @@ internal/docs
 /cmd/*/main
 gateway
 gateway.exe
+
+# 二进制文件
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# 测试相关
+*.test
+*.out
+coverage.out
+coverage.html
+
+# 依赖目录
+vendor/
+
+# 构建输出
+dist/
+build/
+
+# IDE文件
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# 环境配置
+.env
+.env.local

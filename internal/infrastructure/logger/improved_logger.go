@@ -263,7 +263,9 @@ func (il *ImprovedLogger) InitWithConsole(cfg *config.LoggerConfig) error {
 		if err != nil {
 			fmt.Printf("测试文件权限失败: %v\n", err)
 		} else {
-			testFile.WriteString("测试写入权限")
+			if _, err := testFile.WriteString("测试写入权限"); err != nil {
+				fmt.Printf("写入测试失败: %v\n", err)
+			}
 			testFile.Close()
 			os.Remove(testFileName)
 			fmt.Println("文件权限测试成功")

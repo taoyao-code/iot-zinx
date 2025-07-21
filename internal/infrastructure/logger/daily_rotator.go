@@ -12,17 +12,17 @@ import (
 // DailyRotator 按日期分割的日志轮转器
 type DailyRotator struct {
 	// 基础配置
-	BaseDir     string // 日志基础目录
-	FilePrefix  string // 文件前缀，如 "gateway"
-	MaxAge      int    // 保留天数
-	Compress    bool   // 是否压缩旧文件
-	LocalTime   bool   // 是否使用本地时间
+	BaseDir    string // 日志基础目录
+	FilePrefix string // 文件前缀，如 "gateway"
+	MaxAge     int    // 保留天数
+	Compress   bool   // 是否压缩旧文件
+	LocalTime  bool   // 是否使用本地时间
 
 	// 内部状态
 	mu          sync.Mutex
 	currentFile *os.File
 	currentDate string
-	
+
 	// 清理配置
 	cleanupEnabled bool
 	lastCleanup    time.Time
@@ -124,7 +124,7 @@ func (r *DailyRotator) cleanup() {
 	}
 
 	cutoff := time.Now().AddDate(0, 0, -r.MaxAge)
-	
+
 	// 扫描日志目录
 	entries, err := os.ReadDir(r.BaseDir)
 	if err != nil {
@@ -151,7 +151,7 @@ func (r *DailyRotator) cleanup() {
 		// 检查是否过期
 		if info.ModTime().Before(cutoff) {
 			filepath := filepath.Join(r.BaseDir, name)
-			
+
 			// 如果启用压缩，先压缩再删除
 			if r.Compress && !r.isCompressed(name) {
 				if err := r.compressFile(filepath); err == nil {
@@ -215,10 +215,10 @@ func (r *DailyRotator) GetCurrentFilePath() string {
 // MultiWriter 创建多路输出器，同时写入控制台和日志文件
 func NewMultiWriter(rotator *DailyRotator, enableConsole bool) io.Writer {
 	writers := []io.Writer{rotator}
-	
+
 	if enableConsole {
 		writers = append(writers, os.Stdout)
 	}
-	
+
 	return io.MultiWriter(writers...)
 }

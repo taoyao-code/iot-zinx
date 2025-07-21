@@ -153,7 +153,11 @@ var (
 func GetConcurrencyController() *ConcurrencyController {
 	globalConcurrencyControllerOnce.Do(func() {
 		globalConcurrencyController = NewConcurrencyController()
-		globalConcurrencyController.Start()
+		if err := globalConcurrencyController.Start(); err != nil {
+			logger.WithFields(logrus.Fields{
+				"error": err.Error(),
+			}).Error("启动全局并发控制器失败")
+		}
 		logger.Info("统一并发控制器已初始化并启动")
 	})
 	return globalConcurrencyController
