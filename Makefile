@@ -40,7 +40,7 @@ DNY_PARSER_DIR=./cmd/dny-parser
 # 输出目录
 OUTPUT_DIR=./bin
 
-.PHONY: all build clean test help swagger build-all build-gateway build-client build-server-api build-dny-parser run-gateway run-client run-server-api run-dny-parser
+.PHONY: all build clean test help swagger build-all build-gateway build-client build-server-api build-dny-parser run-gateway run-client run-server-api run-dny-parser fmt lint cover test
 
 all: build-all
 
