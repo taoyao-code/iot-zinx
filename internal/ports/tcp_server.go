@@ -42,9 +42,6 @@ func (s *TCPServer) Start() error {
 		return err
 	}
 
-	// 🔧 使用统一架构：不再启动旧的心跳管理器
-	// s.startHeartbeatManager() // 已被统一架构替代
-
 	// 正确初始化包依赖关系，传入必要的依赖
 	s.initializePackageDependencies()
 

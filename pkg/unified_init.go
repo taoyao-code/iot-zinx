@@ -168,6 +168,4 @@ func SetupUnifiedMonitorCompatibility() {
 	Monitor.GetGlobalMonitor = func() monitor.IConnectionMonitor {
 		return core.GetUnifiedSystem().Monitor
 	}
-	// 🔧 清理：删除废弃的设备监控器引用
-	// 统一架构中不再需要单独的设备监控器
 }
