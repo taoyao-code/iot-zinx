@@ -1,13 +1,53 @@
 package handlers
 
 import (
+	"time"
+
 	"github.com/aceld/zinx/ziface"
 	"github.com/bujia-iot/iot-zinx/pkg/constants"
+	"github.com/bujia-iot/iot-zinx/pkg/databus"
 	"github.com/bujia-iot/iot-zinx/pkg/monitor"
+	"github.com/sirupsen/logrus"
 )
 
 // RegisterRouters 注册所有路由
 func RegisterRouters(server ziface.IServer) {
+	registerLegacyRouters(server)
+}
+
+// RegisterEnhancedRouters 注册Enhanced Handler路由
+func RegisterEnhancedRouters(server ziface.IServer, dataBus databus.DataBus) error {
+	logger := logrus.WithField("component", "enhanced_router")
+	logger.Info("开始注册Enhanced Handler路由")
+
+	// 创建Enhanced Router Manager
+	config := &MigrationConfig{
+		EnableAutoSwitch:    false, // 默认关闭自动切换
+		MigrationMode:       "manual",
+		HealthCheckInterval: 1 * time.Minute,
+		RollbackThreshold:   0.1,
+	}
+
+	routerManager := NewEnhancedRouterManager(server, dataBus, config)
+
+	// 初始化Enhanced Handler系统
+	if err := routerManager.InitializeEnhancedHandlers(); err != nil {
+		logger.WithError(err).Error("Enhanced Handler系统初始化失败")
+		return err
+	}
+
+	// 注册Enhanced Handler到服务器
+	if err := routerManager.RegisterToServer(); err != nil {
+		logger.WithError(err).Error("Enhanced Handler注册失败")
+		return err
+	}
+
+	logger.Info("Enhanced Handler路由注册完成")
+	return nil
+}
+
+// registerLegacyRouters 注册Legacy路由 (原有的RegisterRouters逻辑)
+func registerLegacyRouters(server ziface.IServer) {
 	// ============================================================================
 	// 注册消息处理路由
 	// 说明：DNY解码器会处理原始数据，根据不同情况设置消息ID：
