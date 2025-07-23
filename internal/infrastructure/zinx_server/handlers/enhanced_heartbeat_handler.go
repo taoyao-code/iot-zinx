@@ -11,31 +11,28 @@ import (
 	"github.com/sirupsen/logrus"
 )
 
-// EnhancedHeartbeatHandler 重构后的心跳处理Handler
-// Phase 2.2.3 - 使用协议数据适配器重构心跳处理
+// EnhancedHeartbeatHandler 重构后的心跳处理Handler - Enhanced Only
+// Phase 2.x - 纯Enhanced架构，统一使用协议数据适配器
 type EnhancedHeartbeatHandler struct {
 	logger          *logrus.Logger
 	dataBus         databus.DataBus
 	protocolAdapter *adapters.ProtocolDataAdapter
-	legacyHandler   *HeartbeatHandler // 保留旧处理器作为备用
-	useNewAdapter   bool              // 控制是否使用新适配器
-	stats           *HeartbeatStats   // 心跳处理统计
+	stats           *HeartbeatStats // 心跳处理统计
 }
 
-// HeartbeatStats 心跳处理统计信息
+// HeartbeatStats 心跳处理统计信息 - Enhanced版本
 type HeartbeatStats struct {
-	TotalHeartbeats  int64     `json:"total_heartbeats"`
-	SuccessfulNew    int64     `json:"successful_new"`
-	SuccessfulLegacy int64     `json:"successful_legacy"`
-	FailedNew        int64     `json:"failed_new"`
-	FailedLegacy     int64     `json:"failed_legacy"`
-	FallbackCount    int64     `json:"fallback_count"`
-	LastHeartbeat    time.Time `json:"last_heartbeat"`
-	DeviceCount      int64     `json:"device_count"`     // 活跃设备数量
-	AverageInterval  float64   `json:"average_interval"` // 平均心跳间隔(秒)
+	TotalHeartbeats        int64         `json:"total_heartbeats"`
+	SuccessfulNew          int64         `json:"successful_new"`
+	FailedNew              int64         `json:"failed_new"`
+	LastHeartbeat          time.Time     `json:"last_heartbeat"`
+	DeviceCount            int64         `json:"device_count"`             // 活跃设备数量
+	AverageInterval        float64       `json:"average_interval"`         // 平均心跳间隔(秒)
+	LastHeartbeatDuration  time.Duration `json:"last_heartbeat_duration"`  // 最后一次心跳处理时长
+	TotalHeartbeatDuration time.Duration `json:"total_heartbeat_duration"` // 总处理时长
 }
 
-// NewEnhancedHeartbeatHandler 创建增强的心跳处理Handler
+// NewEnhancedHeartbeatHandler 创建Enhanced心跳处理Handler - 纯Enhanced版本
 func NewEnhancedHeartbeatHandler(dataBus databus.DataBus) *EnhancedHeartbeatHandler {
 	logger := logrus.New()
 	logger.SetLevel(logrus.InfoLevel)
@@ -44,7 +41,6 @@ func NewEnhancedHeartbeatHandler(dataBus databus.DataBus) *EnhancedHeartbeatHand
 		logger:          logger,
 		dataBus:         dataBus,
 		protocolAdapter: adapters.NewProtocolDataAdapter(dataBus),
-		useNewAdapter:   true, // 默认使用新适配器
 		stats:           &HeartbeatStats{},
 	}
 }
@@ -61,52 +57,31 @@ func (h *EnhancedHeartbeatHandler) Handle(request ziface.IRequest) {
 
 	h.logger.WithFields(logrus.Fields{
 		"conn_id":          connID,
-		"adapter_mode":     h.getAdapterMode(),
+		"handler_mode":     "enhanced_only",
 		"total_heartbeats": h.stats.TotalHeartbeats,
 	}).Debug("处理心跳请求")
 
-	var err error
-
-	// 使用新的协议数据适配器处理
-	if h.useNewAdapter {
-		err = h.handleWithNewAdapter(request)
-		if err != nil {
-			h.stats.FailedNew++
-			h.logger.WithFields(logrus.Fields{
-				"conn_id": connID,
-				"error":   err.Error(),
-			}).Error("新适配器心跳处理失败")
-
-			// 如果启用了备用处理器，则回退
-			if h.legacyHandler != nil {
-				h.stats.FallbackCount++
-				h.logger.WithField("conn_id", connID).Info("心跳处理回退到旧处理器")
-				h.handleWithLegacyHandler(request)
-				return
-			}
-		} else {
-			h.stats.SuccessfulNew++
-		}
+	// 统一使用Enhanced协议数据适配器处理
+	err := h.handleWithEnhancedAdapter(request)
+	if err != nil {
+		h.stats.FailedNew++
+		h.logger.WithFields(logrus.Fields{
+			"conn_id": connID,
+			"error":   err.Error(),
+		}).Error("Enhanced适配器心跳处理失败")
 	} else {
-		// 使用旧处理器
-		err = h.handleWithLegacyHandler(request)
-		if err != nil {
-			h.stats.FailedLegacy++
-		} else {
-			h.stats.SuccessfulLegacy++
-		}
+		h.stats.SuccessfulNew++
+		h.logger.WithField("conn_id", connID).Debug("Enhanced心跳处理成功")
 	}
 
+	// 记录处理时长
 	duration := time.Since(start)
-	h.logger.WithFields(logrus.Fields{
-		"conn_id":     connID,
-		"duration_ms": duration.Milliseconds(),
-		"success":     err == nil,
-	}).Debug("心跳处理完成")
+	h.stats.LastHeartbeatDuration = duration
+	h.stats.TotalHeartbeatDuration += duration
 }
 
-// handleWithNewAdapter 使用新适配器处理心跳
-func (h *EnhancedHeartbeatHandler) handleWithNewAdapter(request ziface.IRequest) error {
+// handleWithEnhancedAdapter 使用Enhanced适配器处理心跳
+func (h *EnhancedHeartbeatHandler) handleWithEnhancedAdapter(request ziface.IRequest) error {
 	// 从请求中提取DNY消息
 	msg, err := h.extractProtocolMessage(request)
 	if err != nil {
@@ -131,15 +106,6 @@ func (h *EnhancedHeartbeatHandler) handleWithNewAdapter(request ziface.IRequest)
 	}
 
 	return nil
-}
-
-// handleWithLegacyHandler 使用旧处理器处理心跳
-func (h *EnhancedHeartbeatHandler) handleWithLegacyHandler(request ziface.IRequest) error {
-	if h.legacyHandler != nil {
-		h.legacyHandler.Handle(request)
-		return nil
-	}
-	return fmt.Errorf("legacy handler not available")
 }
 
 // extractProtocolMessage 从请求中提取协议消息
@@ -178,65 +144,29 @@ func (h *EnhancedHeartbeatHandler) sendResponse(request ziface.IRequest, respons
 	return nil
 }
 
-// SetLegacyHandler 设置备用的旧处理器
-func (h *EnhancedHeartbeatHandler) SetLegacyHandler(legacy *HeartbeatHandler) {
-	h.legacyHandler = legacy
-	h.logger.Info("已设置备用的心跳处理器")
-}
-
-// UseNewAdapter 控制是否使用新适配器
-func (h *EnhancedHeartbeatHandler) UseNewAdapter(use bool) {
-	h.useNewAdapter = use
-	h.logger.WithField("use_new_adapter", use).Info("切换心跳适配器模式")
-}
-
-// getAdapterMode 获取当前适配器模式描述
-func (h *EnhancedHeartbeatHandler) getAdapterMode() string {
-	if h.useNewAdapter {
-		if h.legacyHandler != nil {
-			return "new_with_fallback"
-		}
-		return "new_only"
-	}
-	return "legacy_only"
-}
-
 // GetStats 获取心跳处理统计信息
 func (h *EnhancedHeartbeatHandler) GetStats() *HeartbeatStats {
 	return h.stats
 }
 
-// GetStatsMap 获取统计信息的Map格式
+// GetStatsMap 获取统计信息的Map格式 - Enhanced版本
 func (h *EnhancedHeartbeatHandler) GetStatsMap() map[string]interface{} {
 	stats := make(map[string]interface{})
 
-	// 新适配器统计
-	stats["new_adapter"] = map[string]interface{}{
-		"enabled":    h.useNewAdapter,
+	// Enhanced适配器统计
+	stats["enhanced_adapter"] = map[string]interface{}{
 		"successful": h.stats.SuccessfulNew,
 		"failed":     h.stats.FailedNew,
 	}
 
-	// 旧处理器统计
-	stats["legacy_handler"] = map[string]interface{}{
-		"available":  h.legacyHandler != nil,
-		"successful": h.stats.SuccessfulLegacy,
-		"failed":     h.stats.FailedLegacy,
-	}
-
-	// 心跳专属统计
-	stats["heartbeat_metrics"] = map[string]interface{}{
-		"total_heartbeats": h.stats.TotalHeartbeats,
-		"device_count":     h.stats.DeviceCount,
-		"average_interval": h.stats.AverageInterval,
-		"last_heartbeat":   h.stats.LastHeartbeat,
-	}
-
 	// 总体统计
 	stats["overall"] = map[string]interface{}{
-		"fallback_count": h.stats.FallbackCount,
-		"success_rate":   h.getSuccessRate(),
-		"adapter_mode":   h.getAdapterMode(),
+		"total_heartbeats": h.stats.TotalHeartbeats,
+		"success_rate":     h.getSuccessRate(),
+		"handler_mode":     "enhanced_only",
+		"last_heartbeat":   h.stats.LastHeartbeat,
+		"device_count":     h.stats.DeviceCount,
+		"average_interval": h.stats.AverageInterval,
 	}
 
 	return stats
@@ -247,9 +177,7 @@ func (h *EnhancedHeartbeatHandler) getSuccessRate() float64 {
 	if h.stats.TotalHeartbeats == 0 {
 		return 0.0
 	}
-
-	successful := h.stats.SuccessfulNew + h.stats.SuccessfulLegacy
-	return float64(successful) / float64(h.stats.TotalHeartbeats) * 100.0
+	return float64(h.stats.SuccessfulNew) / float64(h.stats.TotalHeartbeats) * 100.0
 }
 
 // ResetStats 重置统计信息

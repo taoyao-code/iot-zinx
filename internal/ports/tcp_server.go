@@ -1,9 +1,7 @@
 package ports
 
 import (
-	"context"
 	"fmt"
-	"os"
 	"time"
 
 	"github.com/aceld/zinx/zconf"
@@ -13,7 +11,6 @@ import (
 	"github.com/bujia-iot/iot-zinx/internal/infrastructure/logger"
 	"github.com/bujia-iot/iot-zinx/internal/infrastructure/zinx_server/handlers"
 	"github.com/bujia-iot/iot-zinx/pkg"
-	"github.com/bujia-iot/iot-zinx/pkg/databus"
 	"github.com/bujia-iot/iot-zinx/pkg/network"
 	"github.com/bujia-iot/iot-zinx/pkg/protocol"
 )
@@ -98,75 +95,17 @@ func (s *TCPServer) initialize() error {
 	return nil
 }
 
-// registerRoutes 注册路由
+// registerRoutes 注册路由 - Phase 2.x 重构后统一使用Enhanced架构
 func (s *TCPServer) registerRoutes() {
-	// 检查是否启用Enhanced Handler模式
-	useEnhanced := s.shouldUseEnhancedHandlers()
+	logger.Info("注册Enhanced Handler路由")
 
-	if useEnhanced {
-		logger.Info("启用Enhanced Handler模式")
+	// 直接使用统一的路由注册，内部已实现Enhanced优先，Legacy回退
+	handlers.RegisterRouters(s.server)
 
-		// 获取DataBus实例
-		dataBus := s.getDataBusInstance()
-		if dataBus == nil {
-			logger.Error("无法获取DataBus实例，回退到Legacy Handler模式")
-			handlers.RegisterRouters(s.server)
-			return
-		}
-
-		// 注册Enhanced Handler
-		if err := handlers.RegisterEnhancedRouters(s.server, dataBus); err != nil {
-			logger.Error("Enhanced Handler注册失败，回退到Legacy Handler模式", "error", err.Error())
-			handlers.RegisterRouters(s.server)
-			return
-		}
-
-		logger.Info("Enhanced Handler模式启用成功")
-	} else {
-		logger.Info("使用Legacy Handler模式")
-		handlers.RegisterRouters(s.server)
-	}
+	logger.Info("路由注册完成")
 }
 
-// shouldUseEnhancedHandlers 检查是否应该使用Enhanced Handler
-func (s *TCPServer) shouldUseEnhancedHandlers() bool {
-	// 检查环境变量
-	if os.Getenv("IOT_ZINX_USE_ENHANCED_HANDLERS") == "true" {
-		return true
-	}
-
-	// 检查配置文件（如果有的话）
-	// 注意：当前配置结构中没有EnableEnhancedHandlers字段
-	// 这是预留的配置扩展点，未来可以在config中添加此字段
-
-	// 默认关闭Enhanced模式，保证稳定性
-	return false
-}
-
-// getDataBusInstance 获取DataBus实例
-func (s *TCPServer) getDataBusInstance() databus.DataBus {
-	// 创建默认的DataBus配置
-	config := databus.DefaultDataBusConfig()
-	config.Name = "tcp_server_databus"
-	config.Environment = "production"
-
-	// 创建DataBus实例
-	dataBusImpl := databus.NewDataBus(config)
-	if dataBusImpl == nil {
-		logger.Error("创建DataBus实例失败")
-		return nil
-	}
-
-	// 启动DataBus
-	ctx := context.Background()
-	if err := dataBusImpl.Start(ctx); err != nil {
-		logger.Error("启动DataBus失败", "error", err.Error())
-		return nil
-	}
-
-	logger.Info("DataBus实例创建并启动成功")
-	return dataBusImpl
-} // initializePackageDependencies 初始化包依赖关系，使用统一架构
+// initializePackageDependencies 初始化包依赖关系，使用统一架构
 func (s *TCPServer) initializePackageDependencies() {
 	// 🔧 使用统一架构：初始化统一架构组件
 	pkg.InitUnifiedArchitecture()

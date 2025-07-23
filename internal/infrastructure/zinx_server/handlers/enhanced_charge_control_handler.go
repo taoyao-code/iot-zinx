@@ -19,9 +19,7 @@ type EnhancedChargeControlHandler struct {
 	logger          *logrus.Logger
 	dataBus         databus.DataBus
 	protocolAdapter *adapters.ProtocolDataAdapter
-	legacyHandler   *ChargeControlHandler // 保留旧处理器作为备用
-	useNewAdapter   bool                  // 控制是否使用新适配器
-	stats           *ChargeControlStats   // 充电控制统计
+	stats           *ChargeControlStats // 充电控制统计
 
 	// 充电状态缓存
 	chargeStates map[string]*ChargeState // device_id -> charge_state
@@ -77,7 +75,6 @@ func NewEnhancedChargeControlHandler(dataBus databus.DataBus) *EnhancedChargeCon
 		logger:          logger,
 		dataBus:         dataBus,
 		protocolAdapter: adapters.NewProtocolDataAdapter(dataBus),
-		useNewAdapter:   true, // 默认使用新适配器
 		stats:           &ChargeControlStats{},
 		chargeStates:    make(map[string]*ChargeState),
 	}
@@ -95,7 +92,7 @@ func (h *EnhancedChargeControlHandler) Handle(request ziface.IRequest) {
 
 	h.logger.WithFields(logrus.Fields{
 		"conn_id":               connID,
-		"adapter_mode":          h.getAdapterMode(),
+		"adapter_mode":          "enhanced_only",
 		"total_charge_requests": h.stats.TotalChargeRequests,
 	}).Debug("处理充电控制请求")
 
@@ -105,35 +102,17 @@ func (h *EnhancedChargeControlHandler) Handle(request ziface.IRequest) {
 
 	var err error
 
-	// 使用新的协议数据适配器处理
-	if h.useNewAdapter {
-		err = h.handleWithNewAdapter(request, commandType)
-		if err != nil {
-			h.stats.FailedNew++
-			h.logger.WithFields(logrus.Fields{
-				"conn_id":      connID,
-				"command_type": commandType,
-				"error":        err.Error(),
-			}).Error("新适配器充电控制处理失败")
-
-			// 如果启用了备用处理器，则回退
-			if h.legacyHandler != nil {
-				h.stats.FallbackCount++
-				h.logger.WithField("conn_id", connID).Info("充电控制处理回退到旧处理器")
-				h.handleWithLegacyHandler(request)
-				return
-			}
-		} else {
-			h.stats.SuccessfulNew++
-		}
+	// 使用Enhanced协议数据适配器处理
+	err = h.handleWithNewAdapter(request, commandType)
+	if err != nil {
+		h.stats.FailedNew++
+		h.logger.WithFields(logrus.Fields{
+			"conn_id":      connID,
+			"command_type": commandType,
+			"error":        err.Error(),
+		}).Error("Enhanced充电控制处理失败")
 	} else {
-		// 使用旧处理器
-		err = h.handleWithLegacyHandler(request)
-		if err != nil {
-			h.stats.FailedLegacy++
-		} else {
-			h.stats.SuccessfulLegacy++
-		}
+		h.stats.SuccessfulNew++
 	}
 
 	// 更新充电状态（如果适用）
@@ -174,15 +153,6 @@ func (h *EnhancedChargeControlHandler) handleWithNewAdapter(request ziface.IRequ
 	}
 
 	return nil
-}
-
-// handleWithLegacyHandler 使用旧处理器处理充电控制
-func (h *EnhancedChargeControlHandler) handleWithLegacyHandler(request ziface.IRequest) error {
-	if h.legacyHandler != nil {
-		h.legacyHandler.Handle(request)
-		return nil
-	}
-	return fmt.Errorf("legacy handler not available")
 }
 
 // extractProtocolMessage 从请求中提取协议消息
@@ -333,29 +303,6 @@ func (h *EnhancedChargeControlHandler) updateAverageSessionDuration(newDuration 
 	}
 }
 
-// SetLegacyHandler 设置备用的旧处理器
-func (h *EnhancedChargeControlHandler) SetLegacyHandler(legacy *ChargeControlHandler) {
-	h.legacyHandler = legacy
-	h.logger.Info("已设置备用的充电控制处理器")
-}
-
-// UseNewAdapter 控制是否使用新适配器
-func (h *EnhancedChargeControlHandler) UseNewAdapter(use bool) {
-	h.useNewAdapter = use
-	h.logger.WithField("use_new_adapter", use).Info("切换充电控制适配器模式")
-}
-
-// getAdapterMode 获取当前适配器模式描述
-func (h *EnhancedChargeControlHandler) getAdapterMode() string {
-	if h.useNewAdapter {
-		if h.legacyHandler != nil {
-			return "new_with_fallback"
-		}
-		return "new_only"
-	}
-	return "legacy_only"
-}
-
 // GetStats 获取充电控制统计信息
 func (h *EnhancedChargeControlHandler) GetStats() *ChargeControlStats {
 	return h.stats
@@ -365,18 +312,11 @@ func (h *EnhancedChargeControlHandler) GetStats() *ChargeControlStats {
 func (h *EnhancedChargeControlHandler) GetStatsMap() map[string]interface{} {
 	stats := make(map[string]interface{})
 
-	// 新适配器统计
-	stats["new_adapter"] = map[string]interface{}{
-		"enabled":    h.useNewAdapter,
+	// Enhanced适配器统计
+	stats["enhanced_adapter"] = map[string]interface{}{
+		"enabled":    true,
 		"successful": h.stats.SuccessfulNew,
 		"failed":     h.stats.FailedNew,
-	}
-
-	// 旧处理器统计
-	stats["legacy_handler"] = map[string]interface{}{
-		"available":  h.legacyHandler != nil,
-		"successful": h.stats.SuccessfulLegacy,
-		"failed":     h.stats.FailedLegacy,
 	}
 
 	// 充电控制专属统计
@@ -394,9 +334,8 @@ func (h *EnhancedChargeControlHandler) GetStatsMap() map[string]interface{} {
 
 	// 总体统计
 	stats["overall"] = map[string]interface{}{
-		"fallback_count": h.stats.FallbackCount,
-		"success_rate":   h.getSuccessRate(),
-		"adapter_mode":   h.getAdapterMode(),
+		"success_rate": h.getSuccessRate(),
+		"adapter_mode": "enhanced_only",
 	}
 
 	return stats
@@ -408,7 +347,7 @@ func (h *EnhancedChargeControlHandler) getSuccessRate() float64 {
 		return 0.0
 	}
 
-	successful := h.stats.SuccessfulNew + h.stats.SuccessfulLegacy
+	successful := h.stats.SuccessfulNew
 	return float64(successful) / float64(h.stats.TotalChargeRequests) * 100.0
 }
 

@@ -18,9 +18,7 @@ type EnhancedPortPowerHeartbeatHandler struct {
 	logger          *logrus.Logger
 	dataBus         databus.DataBus
 	protocolAdapter *adapters.ProtocolDataAdapter
-	legacyHandler   *PortPowerHeartbeatHandler // 保留旧处理器作为备用
-	useNewAdapter   bool                       // 控制是否使用新适配器
-	stats           *PortPowerStats            // 端口功率统计
+	stats           *PortPowerStats // 端口功率统计
 
 	// 去重机制
 	lastHeartbeatTime map[string]time.Time
@@ -51,7 +49,6 @@ func NewEnhancedPortPowerHeartbeatHandler(dataBus databus.DataBus) *EnhancedPort
 		logger:            logger,
 		dataBus:           dataBus,
 		protocolAdapter:   adapters.NewProtocolDataAdapter(dataBus),
-		useNewAdapter:     true, // 默认使用新适配器
 		stats:             &PortPowerStats{},
 		lastHeartbeatTime: make(map[string]time.Time),
 	}
@@ -69,7 +66,7 @@ func (h *EnhancedPortPowerHeartbeatHandler) Handle(request ziface.IRequest) {
 
 	h.logger.WithFields(logrus.Fields{
 		"conn_id":               connID,
-		"adapter_mode":          h.getAdapterMode(),
+		"adapter_mode":          "enhanced_only",
 		"total_port_heartbeats": h.stats.TotalPortHeartbeats,
 	}).Debug("处理端口功率心跳请求")
 
@@ -82,34 +79,16 @@ func (h *EnhancedPortPowerHeartbeatHandler) Handle(request ziface.IRequest) {
 
 	var err error
 
-	// 使用新的协议数据适配器处理
-	if h.useNewAdapter {
-		err = h.handleWithNewAdapter(request)
-		if err != nil {
-			h.stats.FailedNew++
-			h.logger.WithFields(logrus.Fields{
-				"conn_id": connID,
-				"error":   err.Error(),
-			}).Error("新适配器端口功率处理失败")
-
-			// 如果启用了备用处理器，则回退
-			if h.legacyHandler != nil {
-				h.stats.FallbackCount++
-				h.logger.WithField("conn_id", connID).Info("端口功率处理回退到旧处理器")
-				h.handleWithLegacyHandler(request)
-				return
-			}
-		} else {
-			h.stats.SuccessfulNew++
-		}
+	// 使用Enhanced协议数据适配器处理
+	err = h.handleWithNewAdapter(request)
+	if err != nil {
+		h.stats.FailedNew++
+		h.logger.WithFields(logrus.Fields{
+			"conn_id": connID,
+			"error":   err.Error(),
+		}).Error("Enhanced端口功率处理失败")
 	} else {
-		// 使用旧处理器
-		err = h.handleWithLegacyHandler(request)
-		if err != nil {
-			h.stats.FailedLegacy++
-		} else {
-			h.stats.SuccessfulLegacy++
-		}
+		h.stats.SuccessfulNew++
 	}
 
 	// 更新心跳时间
@@ -152,15 +131,6 @@ func (h *EnhancedPortPowerHeartbeatHandler) handleWithNewAdapter(request ziface.
 	}
 
 	return nil
-}
-
-// handleWithLegacyHandler 使用旧处理器处理端口功率心跳
-func (h *EnhancedPortPowerHeartbeatHandler) handleWithLegacyHandler(request ziface.IRequest) error {
-	if h.legacyHandler != nil {
-		h.legacyHandler.Handle(request)
-		return nil
-	}
-	return fmt.Errorf("legacy handler not available")
 }
 
 // extractProtocolMessage 从请求中提取协议消息
@@ -258,27 +228,6 @@ func (h *EnhancedPortPowerHeartbeatHandler) updatePortPowerStats(msg *dny_protoc
 			h.stats.AveragePowerPerPort = h.stats.TotalPowerReported / float64(h.stats.ActivePorts)
 		}
 	}
-} // SetLegacyHandler 设置备用的旧处理器
-func (h *EnhancedPortPowerHeartbeatHandler) SetLegacyHandler(legacy *PortPowerHeartbeatHandler) {
-	h.legacyHandler = legacy
-	h.logger.Info("已设置备用的端口功率心跳处理器")
-}
-
-// UseNewAdapter 控制是否使用新适配器
-func (h *EnhancedPortPowerHeartbeatHandler) UseNewAdapter(use bool) {
-	h.useNewAdapter = use
-	h.logger.WithField("use_new_adapter", use).Info("切换端口功率心跳适配器模式")
-}
-
-// getAdapterMode 获取当前适配器模式描述
-func (h *EnhancedPortPowerHeartbeatHandler) getAdapterMode() string {
-	if h.useNewAdapter {
-		if h.legacyHandler != nil {
-			return "new_with_fallback"
-		}
-		return "new_only"
-	}
-	return "legacy_only"
 }
 
 // GetStats 获取端口功率统计信息
@@ -290,18 +239,11 @@ func (h *EnhancedPortPowerHeartbeatHandler) GetStats() *PortPowerStats {
 func (h *EnhancedPortPowerHeartbeatHandler) GetStatsMap() map[string]interface{} {
 	stats := make(map[string]interface{})
 
-	// 新适配器统计
-	stats["new_adapter"] = map[string]interface{}{
-		"enabled":    h.useNewAdapter,
+	// Enhanced适配器统计
+	stats["enhanced_adapter"] = map[string]interface{}{
+		"enabled":    true,
 		"successful": h.stats.SuccessfulNew,
 		"failed":     h.stats.FailedNew,
-	}
-
-	// 旧处理器统计
-	stats["legacy_handler"] = map[string]interface{}{
-		"available":  h.legacyHandler != nil,
-		"successful": h.stats.SuccessfulLegacy,
-		"failed":     h.stats.FailedLegacy,
 	}
 
 	// 端口功率专属统计
@@ -316,9 +258,8 @@ func (h *EnhancedPortPowerHeartbeatHandler) GetStatsMap() map[string]interface{}
 
 	// 总体统计
 	stats["overall"] = map[string]interface{}{
-		"fallback_count": h.stats.FallbackCount,
-		"success_rate":   h.getSuccessRate(),
-		"adapter_mode":   h.getAdapterMode(),
+		"success_rate": h.getSuccessRate(),
+		"adapter_mode": "enhanced_only",
 	}
 
 	return stats
@@ -330,7 +271,7 @@ func (h *EnhancedPortPowerHeartbeatHandler) getSuccessRate() float64 {
 		return 0.0
 	}
 
-	successful := h.stats.SuccessfulNew + h.stats.SuccessfulLegacy
+	successful := h.stats.SuccessfulNew
 	return float64(successful) / float64(h.stats.TotalPortHeartbeats) * 100.0
 }
 

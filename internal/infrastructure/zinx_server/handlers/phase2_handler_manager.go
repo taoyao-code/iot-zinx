@@ -98,11 +98,7 @@ func (m *Phase2HandlerManager) InitializeHandlers() error {
 	// 初始化充电控制Handler
 	m.enhancedChargeControl = NewEnhancedChargeControlHandler(m.dataBus)
 
-	// 配置Handler适配器模式
-	m.enhancedDeviceRegister.UseNewAdapter(m.enableNewHandlers)
-	m.enhancedHeartbeat.UseNewAdapter(m.enableNewHandlers)
-	m.enhancedPortPowerHeartbeat.UseNewAdapter(m.enableNewHandlers)
-	m.enhancedChargeControl.UseNewAdapter(m.enableNewHandlers)
+	// Enhanced handlers无需额外配置，已默认使用Enhanced模式
 
 	// 注册Handler到服务器
 	m.registerHandlers()
@@ -129,28 +125,17 @@ func (m *Phase2HandlerManager) registerHandlers() {
 	m.logger.Info("所有Phase 2.2 Handler已注册到服务器")
 }
 
-// SwitchToNewHandlers 切换到新处理器
+// SwitchToNewHandlers 切换到Enhanced处理器 - 已默认使用Enhanced模式
 func (m *Phase2HandlerManager) SwitchToNewHandlers() {
 	m.enableNewHandlers = true
 
-	if m.enhancedDeviceRegister != nil {
-		m.enhancedDeviceRegister.UseNewAdapter(true)
-	}
-	if m.enhancedHeartbeat != nil {
-		m.enhancedHeartbeat.UseNewAdapter(true)
-	}
-	if m.enhancedPortPowerHeartbeat != nil {
-		m.enhancedPortPowerHeartbeat.UseNewAdapter(true)
-	}
-	if m.enhancedChargeControl != nil {
-		m.enhancedChargeControl.UseNewAdapter(true)
-	}
+	// Enhanced handlers已默认启用，无需额外配置
 
 	// 更新统计信息
 	m.statsMutex.Lock()
 	m.stats.TotalSwitches++
 	m.stats.LastSwitch = time.Now()
-	m.stats.ActiveHandlerMode = m.getHandlerMode()
+	m.stats.ActiveHandlerMode = "enhanced_only"
 	m.statsMutex.Unlock()
 
 	m.logger.Info("已切换到新的Phase 2.2处理器")

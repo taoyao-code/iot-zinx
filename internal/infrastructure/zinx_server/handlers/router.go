@@ -10,9 +10,26 @@ import (
 	"github.com/sirupsen/logrus"
 )
 
-// RegisterRouters 注册所有路由
+// RegisterRouters 注册所有路由 - Phase 2.x 重构后统一使用Enhanced架构
 func RegisterRouters(server ziface.IServer) {
-	registerLegacyRouters(server)
+	// 创建默认DataBus实例
+	dataBus := createDefaultDataBus()
+
+	// 直接注册Enhanced路由，移除Legacy路由
+	if err := RegisterEnhancedRouters(server, dataBus); err != nil {
+		logger := logrus.WithField("component", "router")
+		logger.WithError(err).Error("Enhanced路由注册失败，回退到Legacy路由")
+		// 如果Enhanced路由失败，回退到Legacy路由确保服务可用
+		registerLegacyRouters(server)
+	}
+}
+
+// createDefaultDataBus 创建默认DataBus实例
+func createDefaultDataBus() databus.DataBus {
+	config := databus.DefaultDataBusConfig()
+	config.Name = "router_databus"
+	dataBus := databus.NewDataBus(config)
+	return dataBus
 }
 
 // RegisterEnhancedRouters 注册Enhanced Handler路由

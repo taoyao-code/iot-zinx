@@ -1,7 +1,6 @@
 package handlers
 
 import (
-	"fmt"
 	"time"
 
 	"github.com/aceld/zinx/ziface"
@@ -16,23 +15,20 @@ type EnhancedDeviceRegisterHandler struct {
 	logger          *logrus.Logger
 	dataBus         databus.DataBus
 	registerAdapter *adapters.DeviceRegisterAdapter
-	legacyHandler   *DeviceRegisterHandler // 保留旧处理器作为备用
-	useNewAdapter   bool                   // 控制是否使用新适配器
-	stats           *HandlerStats          // 处理统计
+	stats           *HandlerStats // 处理统计
 }
 
-// HandlerStats 处理统计信息
+// HandlerStats 处理统计信息 - Enhanced版本
 type HandlerStats struct {
-	TotalRequests    int64     `json:"total_requests"`
-	SuccessfulNew    int64     `json:"successful_new"`
-	SuccessfulLegacy int64     `json:"successful_legacy"`
-	FailedNew        int64     `json:"failed_new"`
-	FailedLegacy     int64     `json:"failed_legacy"`
-	FallbackCount    int64     `json:"fallback_count"`
-	LastActivity     time.Time `json:"last_activity"`
+	TotalRequests        int64         `json:"total_requests"`
+	SuccessfulNew        int64         `json:"successful_new"`
+	FailedNew            int64         `json:"failed_new"`
+	LastActivity         time.Time     `json:"last_activity"`
+	LastRequestDuration  time.Duration `json:"last_request_duration"`
+	TotalRequestDuration time.Duration `json:"total_request_duration"`
 }
 
-// NewEnhancedDeviceRegisterHandler 创建增强的设备注册Handler
+// NewEnhancedDeviceRegisterHandler 创建设备注册处理器 - 纯Enhanced版本
 func NewEnhancedDeviceRegisterHandler(dataBus databus.DataBus) *EnhancedDeviceRegisterHandler {
 	logger := logrus.New()
 	logger.SetLevel(logrus.InfoLevel)
@@ -41,12 +37,11 @@ func NewEnhancedDeviceRegisterHandler(dataBus databus.DataBus) *EnhancedDeviceRe
 		logger:          logger,
 		dataBus:         dataBus,
 		registerAdapter: adapters.NewDeviceRegisterAdapter(dataBus),
-		useNewAdapter:   true, // 默认使用新适配器
 		stats:           &HandlerStats{},
 	}
 }
 
-// Handle 处理设备注册请求
+// Handle 处理设备注册请求 - Enhanced专用版本
 // 实现 ziface.IRouter 接口
 func (h *EnhancedDeviceRegisterHandler) Handle(request ziface.IRequest) {
 	start := time.Now()
@@ -58,87 +53,33 @@ func (h *EnhancedDeviceRegisterHandler) Handle(request ziface.IRequest) {
 
 	h.logger.WithFields(logrus.Fields{
 		"conn_id":        connID,
-		"adapter_mode":   h.getAdapterMode(),
+		"handler_mode":   "enhanced_only",
 		"total_requests": h.stats.TotalRequests,
 	}).Info("处理设备注册请求")
 
-	var err error
-
-	// 使用新的协议数据适配器处理
-	if h.useNewAdapter {
-		err = h.handleWithNewAdapter(request)
-		if err != nil {
-			h.stats.FailedNew++
-			h.logger.WithFields(logrus.Fields{
-				"conn_id": connID,
-				"error":   err.Error(),
-			}).Error("新适配器处理失败")
-
-			// 如果启用了备用处理器，则回退
-			if h.legacyHandler != nil {
-				h.stats.FallbackCount++
-				h.logger.WithField("conn_id", connID).Info("回退到旧处理器")
-				h.handleWithLegacyHandler(request)
-				return
-			}
-		} else {
-			h.stats.SuccessfulNew++
-		}
+	// 统一使用Enhanced适配器处理
+	err := h.handleWithEnhancedAdapter(request)
+	if err != nil {
+		h.stats.FailedNew++
+		h.logger.WithFields(logrus.Fields{
+			"conn_id": connID,
+			"error":   err.Error(),
+		}).Error("Enhanced适配器处理失败")
 	} else {
-		// 使用旧处理器
-		err = h.handleWithLegacyHandler(request)
-		if err != nil {
-			h.stats.FailedLegacy++
-		} else {
-			h.stats.SuccessfulLegacy++
-		}
+		h.stats.SuccessfulNew++
+		h.logger.WithField("conn_id", connID).Debug("Enhanced设备注册处理成功")
 	}
 
+	// 记录处理时长
 	duration := time.Since(start)
-	h.logger.WithFields(logrus.Fields{
-		"conn_id":     connID,
-		"duration_ms": duration.Milliseconds(),
-		"success":     err == nil,
-	}).Debug("设备注册处理完成")
+	h.stats.LastRequestDuration = duration
+	h.stats.TotalRequestDuration += duration
 }
 
-// handleWithNewAdapter 使用新适配器处理设备注册
-func (h *EnhancedDeviceRegisterHandler) handleWithNewAdapter(request ziface.IRequest) error {
-	// 使用新的设备注册适配器 - 代码大幅简化！
-	// 原来需要600+行的复杂逻辑，现在只需要一行
+// handleWithEnhancedAdapter 使用Enhanced适配器处理设备注册
+func (h *EnhancedDeviceRegisterHandler) handleWithEnhancedAdapter(request ziface.IRequest) error {
+	// 使用Enhanced设备注册适配器 - 纯Enhanced架构
 	return h.registerAdapter.HandleRequest(request)
-}
-
-// handleWithLegacyHandler 使用旧处理器处理设备注册
-func (h *EnhancedDeviceRegisterHandler) handleWithLegacyHandler(request ziface.IRequest) error {
-	if h.legacyHandler != nil {
-		h.legacyHandler.Handle(request)
-		return nil
-	}
-	return fmt.Errorf("legacy handler not available")
-}
-
-// SetLegacyHandler 设置备用的旧处理器
-func (h *EnhancedDeviceRegisterHandler) SetLegacyHandler(legacy *DeviceRegisterHandler) {
-	h.legacyHandler = legacy
-	h.logger.Info("已设置备用的旧处理器")
-}
-
-// UseNewAdapter 控制是否使用新适配器
-func (h *EnhancedDeviceRegisterHandler) UseNewAdapter(use bool) {
-	h.useNewAdapter = use
-	h.logger.WithField("use_new_adapter", use).Info("切换适配器模式")
-}
-
-// getAdapterMode 获取当前适配器模式描述
-func (h *EnhancedDeviceRegisterHandler) getAdapterMode() string {
-	if h.useNewAdapter {
-		if h.legacyHandler != nil {
-			return "new_with_fallback"
-		}
-		return "new_only"
-	}
-	return "legacy_only"
 }
 
 // GetStats 获取处理统计信息
@@ -150,26 +91,17 @@ func (h *EnhancedDeviceRegisterHandler) GetStats() *HandlerStats {
 func (h *EnhancedDeviceRegisterHandler) GetStatsMap() map[string]interface{} {
 	stats := make(map[string]interface{})
 
-	// 新适配器统计
-	stats["new_adapter"] = map[string]interface{}{
-		"enabled":    h.useNewAdapter,
+	// Enhanced适配器统计
+	stats["enhanced_adapter"] = map[string]interface{}{
 		"successful": h.stats.SuccessfulNew,
 		"failed":     h.stats.FailedNew,
-	}
-
-	// 旧处理器统计
-	stats["legacy_handler"] = map[string]interface{}{
-		"available":  h.legacyHandler != nil,
-		"successful": h.stats.SuccessfulLegacy,
-		"failed":     h.stats.FailedLegacy,
 	}
 
 	// 总体统计
 	stats["overall"] = map[string]interface{}{
 		"total_requests": h.stats.TotalRequests,
-		"fallback_count": h.stats.FallbackCount,
 		"success_rate":   h.getSuccessRate(),
-		"adapter_mode":   h.getAdapterMode(),
+		"handler_mode":   "enhanced_only",
 		"last_activity":  h.stats.LastActivity,
 	}
 
@@ -182,8 +114,7 @@ func (h *EnhancedDeviceRegisterHandler) getSuccessRate() float64 {
 		return 0.0
 	}
 
-	successful := h.stats.SuccessfulNew + h.stats.SuccessfulLegacy
-	return float64(successful) / float64(h.stats.TotalRequests) * 100.0
+	return float64(h.stats.SuccessfulNew) / float64(h.stats.TotalRequests) * 100.0
 }
 
 // ResetStats 重置统计信息
