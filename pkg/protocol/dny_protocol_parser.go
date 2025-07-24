@@ -22,11 +22,11 @@ import (
 
 const (
 	// 使用统一的协议常量
-	HeaderDNY  = constants.ProtocolHeader // 已弃用，使用 constants.ProtocolHeader
+	HeaderDNY  = constants.ProtocolHeader
 	HeaderLink = "link"
 	// 使用统一的协议常量
-	MinPacketLength    = constants.MinPacketSize // 已弃用，使用 constants.MinPacketSize
-	LinkPacketLength   = 4                       // link
+	MinPacketLength    = constants.MinPacketSize
+	LinkPacketLength   = 4 // link
 	PhysicalIDLength   = 4
 	MessageIDLength    = 2
 	CommandLength      = 1
@@ -56,7 +56,7 @@ func ParseDNYProtocolData(data []byte) (*dny_protocol.Message, error) {
 
 	// 🔧 修复：统一ICCID识别逻辑 - 符合ITU-T E.118标准
 	// ICCID固定长度为20字节，十六进制字符(0-9,A-F)，以"89"开头
-	if dataLen == constants.IOT_SIM_CARD_LENGTH && isValidICCIDStrict(data) {
+	if dataLen == constants.IotSimCardLength && isValidICCIDStrict(data) {
 		msg.MessageType = "iccid"
 		msg.ICCIDValue = string(data) // 直接使用原始数据作为ICCID，符合文档描述
 		return msg, nil
@@ -332,27 +332,25 @@ func IsSpecialMessage(data []byte) bool {
 	dataStr := string(data)
 
 	// 检查是否为ICCID（数字字符串，通常20位）
-	if isValidICCID(data) && len(data) == constants.IOT_SIM_CARD_LENGTH {
+	if isValidICCID(data) && len(data) == constants.IotSimCardLength {
 		return true
 	}
 
 	// 检查是否为link心跳
-	if strings.TrimSpace(dataStr) == constants.IOT_LINK_HEARTBEAT {
+	if strings.TrimSpace(dataStr) == constants.IotLinkHeartbeat {
 		return true
 	}
 
 	return false
 }
 
-// 🔧 已删除过时的isAllDigits函数，统一使用isValidICCIDStrict进行ICCID验证
-
 // isValidICCID 检查字节数组是否为有效的ICCID格式
-// 🔧 修复：统一使用严格验证逻辑，符合ITU-T E.118标准
+// 使用严格验证逻辑，符合ITU-T E.118标准
 func isValidICCID(data []byte) bool {
 	return isValidICCIDStrict(data)
 }
 
-// IsValidICCIDPrefix 检查数据是否符合ICCID前缀格式（为兼容文档中的函数名）
+// IsValidICCIDPrefix 检查数据是否符合ICCID前缀格式
 // 🔧 修复：统一使用严格验证逻辑，确保所有ICCID验证函数返回一致结果
 func IsValidICCIDPrefix(data []byte) bool {
 	return isValidICCIDStrict(data)
@@ -362,7 +360,7 @@ func IsValidICCIDPrefix(data []byte) bool {
 // isValidICCIDStrict 严格验证ICCID格式 - 符合ITU-T E.118标准
 // ICCID固定长度为20字节，十六进制字符(0-9,A-F)，以"89"开头
 func isValidICCIDStrict(data []byte) bool {
-	if len(data) != constants.IOT_SIM_CARD_LENGTH {
+	if len(data) != constants.IotSimCardLength {
 		return false
 	}
 
@@ -450,14 +448,14 @@ func SplitPacketsFromBuffer(buffer []byte) ([][]byte, []byte, error) {
 		}
 
 		// 尝试识别ICCID (20字节，以"89"开头)
-		if remaining >= constants.IOT_SIM_CARD_LENGTH {
-			candidate := buffer[offset : offset+constants.IOT_SIM_CARD_LENGTH]
+		if remaining >= constants.IotSimCardLength {
+			candidate := buffer[offset : offset+constants.IotSimCardLength]
 			if isValidICCIDStrict(candidate) {
 				packets = append(packets, candidate)
-				offset += constants.IOT_SIM_CARD_LENGTH
+				offset += constants.IotSimCardLength
 				logger.WithFields(logrus.Fields{
 					"packetType": "iccid",
-					"packetLen":  constants.IOT_SIM_CARD_LENGTH,
+					"packetLen":  constants.IotSimCardLength,
 					"iccid":      string(candidate),
 				}).Debug("SplitPacketsFromBuffer: 提取ICCID包")
 				continue

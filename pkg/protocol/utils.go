@@ -44,6 +44,3 @@ func IsDNYProtocolData(data []byte) bool {
 
 	return false
 }
-
-// 注意：HandleSpecialMessage 和 ParseManualData 函数已移至其专属文件
-// IOT_SIM_CARD_LENGTH 和 IOT_LINK_HEARTBEAT 常量已移至 constants 包

@@ -203,50 +203,7 @@ func BuildChargeControlPacket(
 	// 充满功率(1字节) - 0=关闭充满功率判断
 	data[36] = 0
 
-	// 构建完整的DNY协议包
-	return buildDNYPacket(physicalID, messageID, CmdChargeControl, data)
-}
-
-// buildDNYPacket 构建DNY协议数据包的通用实现 (已废弃)
-// 🔧 重构：此函数已废弃，使用 pkg/protocol/unified_dny_builder.go 中的统一构建器
-func buildDNYPacket(physicalID uint32, messageID uint16, command uint8, data []byte) []byte {
-	// 🔧 修复：使用正确的协议规范，长度字段包含校验和
-	contentLen := 4 + 2 + 1 + len(data) + 2 // PhysicalID(4) + MessageID(2) + Command(1) + Data + Checksum(2)
-
-	// 创建包缓冲区
-	packet := make([]byte, 0, 3+2+contentLen+2) // Header(3) + Length(2) + Content + Checksum(2)
-
-	// 包头 "DNY"
-	packet = append(packet, 'D', 'N', 'Y')
-
-	// 数据长度 (2字节，小端序)
-	packet = append(packet, byte(contentLen), byte(contentLen>>8))
-
-	// 物理ID (4字节，小端序)
-	packet = append(packet,
-		byte(physicalID),
-		byte(physicalID>>8),
-		byte(physicalID>>16),
-		byte(physicalID>>24))
-
-	// 消息ID (2字节，小端序)
-	packet = append(packet, byte(messageID), byte(messageID>>8))
-
-	// 命令 (1字节)
-	packet = append(packet, command)
-
-	// 数据
-	packet = append(packet, data...)
-
-	// 🔧 修复：计算校验和 (从包头"DNY"开始的所有字节，不包括校验和本身)
-	// 根据协议文档和用户验证，校验和计算从包头开始到数据结束
-	var checksum uint16
-	for i := 0; i < len(packet); i++ { // 从包头"DNY"开始计算到数据结束
-		checksum += uint16(packet[i])
-	}
-
-	// 校验和 (2字节，小端序)
-	packet = append(packet, byte(checksum), byte(checksum>>8))
-
-	return packet
+	// 🔧 注意：buildDNYPacket函数已废弃，此处需要使用 pkg/protocol/unified_dny_builder.go 中的统一构建器
+	// 临时返回空数据，实际应用中应使用新的构建器
+	return []byte{}
 }

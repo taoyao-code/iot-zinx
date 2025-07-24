@@ -8,8 +8,7 @@ import (
 )
 
 // ISession 统一会话接口
-// 同时被旧的DeviceSession和新的UnifiedSession实现
-// 提供统一的会话访问接口，确保向后兼容性
+// 统一的会话访问接口
 type ISession interface {
 	// === 核心标识 ===
 	GetDeviceID() string
@@ -149,71 +148,6 @@ var DefaultSessionManagerConfig = &SessionManagerConfig{
 	EnableEvents:     true,
 }
 
-// ILegacySessionManager 旧会话管理器兼容接口
-// 为现有代码提供向后兼容性
-type ILegacySessionManager interface {
-	CreateSession(deviceID string, conn ziface.IConnection) *DeviceSession
-	GetSession(deviceID string) (*DeviceSession, bool)
-	GetSessionByConnID(connID uint64) (*DeviceSession, bool)
-	RemoveSession(deviceID string) bool
-	GetSessionStatistics() map[string]interface{}
-	ForEachSession(callback func(deviceID string, session *DeviceSession) bool)
-	GetAllSessions() map[string]*DeviceSession
-}
-
-// ISessionAdapter 会话适配器接口
-// 用于在新旧会话系统之间进行适配
-type ISessionAdapter interface {
-	// 适配器管理
-	SetUnifiedManager(manager ISessionManager)
-	GetUnifiedManager() ISessionManager
-
-	// 会话转换
-	ConvertToLegacy(session ISession) *DeviceSession
-	ConvertFromLegacy(legacySession *DeviceSession) ISession
-
-	// 兼容接口
-	GetDeviceSession(conn ziface.IConnection) *DeviceSession
-	CreateLegacyManager() ILegacySessionManager
-}
-
-// ISessionMigrator 会话迁移器接口
-// 用于将旧会话数据迁移到新系统
-type ISessionMigrator interface {
-	// 迁移操作
-	MigrateFromLegacySessions(legacySessions map[string]*DeviceSession) error
-	MigrateFromBackup(backupFile string) error
-
-	// 验证操作
-	ValidateMigration(legacySessions map[string]*DeviceSession) error
-	GetMigrationStats() *MigrationStats
-
-	// 备份操作
-	CreateBackup(legacySessions map[string]*DeviceSession) error
-	RestoreFromBackup(backupFile string) error
-}
-
-// MigrationStats 迁移统计信息
-type MigrationStats struct {
-	TotalSessions    int       `json:"total_sessions"`
-	MigratedSessions int       `json:"migrated_sessions"`
-	FailedSessions   int       `json:"failed_sessions"`
-	SkippedSessions  int       `json:"skipped_sessions"`
-	StartTime        time.Time `json:"start_time"`
-	EndTime          time.Time `json:"end_time"`
-	Duration         string    `json:"duration"`
-	BackupPath       string    `json:"backup_path"`
-	Errors           []string  `json:"errors"`
-}
-
-// MigrationConfig 迁移配置
-type MigrationConfig struct {
-	BackupDir       string `json:"backup_dir"`        // 备份目录
-	DryRun          bool   `json:"dry_run"`           // 是否为试运行
-	ValidateAfter   bool   `json:"validate_after"`    // 迁移后是否验证
-	ContinueOnError bool   `json:"continue_on_error"` // 遇到错误是否继续
-}
-
 // === 全局函数接口 ===
 
 // GetGlobalSessionManager 获取全局会话管理器
@@ -241,16 +175,4 @@ type ISessionMonitor interface {
 	OnDeviceOnline(deviceID string)
 	OnDeviceOffline(deviceID string)
 	OnDeviceHeartbeat(deviceID string)
-}
-
-// GetSessionAdapter 获取会话适配器
-func GetSessionAdapter() ISessionAdapter {
-	// 实现将在adapter包中提供
-	return nil
-}
-
-// GetSessionMigrator 获取会话迁移器
-func GetSessionMigrator(manager ISessionManager, config *MigrationConfig) ISessionMigrator {
-	// 实现将在adapter包中提供
-	return nil
 }

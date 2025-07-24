@@ -1,12 +1,12 @@
 package pkg
 
 import (
+	"sync/atomic"
 	"time"
 
 	"github.com/aceld/zinx/ziface"
 	"github.com/bujia-iot/iot-zinx/internal/infrastructure/logger"
 	"github.com/bujia-iot/iot-zinx/pkg/constants"
-	"github.com/bujia-iot/iot-zinx/pkg/core"
 	"github.com/bujia-iot/iot-zinx/pkg/monitor"
 	"github.com/bujia-iot/iot-zinx/pkg/network"
 	"github.com/bujia-iot/iot-zinx/pkg/protocol"
@@ -15,6 +15,9 @@ import (
 
 // 全局连接监控器变量（从 pkg/init.go 迁移）
 var globalConnectionMonitor monitor.IConnectionMonitor
+
+// 全局消息ID计数器（替代core.MessageIDManager）
+var globalMessageIDCounter uint64
 
 // 设备状态常量
 const (
@@ -48,7 +51,6 @@ type ProtocolExport struct {
 	NewDNYDecoder         func() ziface.IDecoder
 
 	// 数据解析相关
-	ParseManualData          func(hexData string, description string)
 	ParseDNYData             func(data []byte) (*protocol.DNYParseResult, error)
 	ParseDNYHexString        func(hexStr string) (*protocol.DNYParseResult, error)
 	ParseDNYDataWithConsumed func(data []byte) (*protocol.DNYParseResult, int, error)
@@ -85,7 +87,6 @@ type ProtocolExport struct {
 var Protocol = ProtocolExport{
 	NewDNYDataPackFactory:    protocol.NewDNYDataPackFactory,
 	NewDNYDecoder:            protocol.NewDNYDecoder,
-	ParseManualData:          protocol.ParseManualData,
 	ParseDNYData:             protocol.ParseDNYData,
 	ParseDNYHexString:        protocol.ParseDNYHexString,
 	ParseDNYDataWithConsumed: protocol.ParseDNYDataWithConsumed,
@@ -95,8 +96,8 @@ var Protocol = ProtocolExport{
 	IsHexString:            protocol.IsHexString,
 	IsAllDigits:            protocol.IsAllDigits,
 	HandleSpecialMessage:   protocol.IsSpecialMessage, // 修正：指向统一解析器中的函数
-	IOT_SIM_CARD_LENGTH:    constants.IOT_SIM_CARD_LENGTH,
-	IOT_LINK_HEARTBEAT:     constants.IOT_LINK_HEARTBEAT,
+	IOT_SIM_CARD_LENGTH:    constants.IotSimCardLength,
+	IOT_LINK_HEARTBEAT:     constants.IotLinkHeartbeat,
 	NewRawDataHook:         protocol.NewRawDataHook,
 	DefaultRawDataHandler:  protocol.DefaultRawDataHandler,
 	PrintRawData:           protocol.PrintRawData,
@@ -106,7 +107,10 @@ var Protocol = ProtocolExport{
 	BuildDNYRequestPacket:  protocol.BuildDNYRequestPacket,
 	NeedConfirmation:       protocol.NeedConfirmation,
 	GetNextMessageID: func() uint16 {
-		return core.GetMessageIDManager().GetNextMessageID()
+		// 使用原子操作确保并发安全
+		id := atomic.AddUint64(&globalMessageIDCounter, 1)
+		// 限制在uint16范围内，避免0值
+		return uint16((id % 65535) + 1)
 	},
 }
 
@@ -174,15 +178,8 @@ var Network = struct {
 type MonitorInterface struct {
 	GetGlobalMonitor func() monitor.IConnectionMonitor
 
-	// 🔧 新增：设备组管理接口
-	GetDeviceGroupManager func() monitor.IDeviceGroupManager
-	GetSessionManager     func() monitor.ISessionManager
-
-	// 🔧 清理：删除废弃的设备监控器接口
-	// 统一架构中不再需要单独的设备监控器
-
-	// 🔧 清理：删除废弃的设备会话管理和设备组管理接口
-	// 这些功能已集成到 core.GetGlobalConnectionGroupManager() 中
+	// 会话管理接口
+	GetSessionManager func() monitor.ISessionManager
 
 	// 连接管理
 	GetConnectionByDeviceId  func(deviceId string) (ziface.IConnection, bool)
@@ -197,16 +194,9 @@ var Monitor = MonitorInterface{
 		return globalConnectionMonitor
 	},
 
-	// 🔧 统一架构：这些功能已集成到统一架构中
-	GetDeviceGroupManager: func() monitor.IDeviceGroupManager {
-		return nil // 统一架构中不再需要单独的设备组管理器
-	},
 	GetSessionManager: func() monitor.ISessionManager {
 		return nil // 统一架构中不再需要单独的会话管理器
 	},
-
-	// 🔧 清理：废弃的设备监控器和会话管理功能已删除
-	// 统一架构中这些功能已集成到 core.GetGlobalConnectionGroupManager() 中
 
 	// 连接管理实现
 	GetConnectionByDeviceId: func(deviceId string) (ziface.IConnection, bool) {

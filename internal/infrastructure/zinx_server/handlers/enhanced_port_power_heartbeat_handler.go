@@ -28,11 +28,8 @@ type EnhancedPortPowerHeartbeatHandler struct {
 // PortPowerStats 端口功率心跳统计信息
 type PortPowerStats struct {
 	TotalPortHeartbeats int64     `json:"total_port_heartbeats"`
-	SuccessfulNew       int64     `json:"successful_new"`
-	SuccessfulLegacy    int64     `json:"successful_legacy"`
-	FailedNew           int64     `json:"failed_new"`
-	FailedLegacy        int64     `json:"failed_legacy"`
-	FallbackCount       int64     `json:"fallback_count"`
+	SuccessfulProcessed int64     `json:"successful_processed"`
+	FailedProcessed     int64     `json:"failed_processed"`
 	LastPortHeartbeat   time.Time `json:"last_port_heartbeat"`
 	ActivePorts         int64     `json:"active_ports"`           // 活跃端口数量
 	TotalPowerReported  float64   `json:"total_power_reported"`   // 总功率(W)
@@ -82,13 +79,13 @@ func (h *EnhancedPortPowerHeartbeatHandler) Handle(request ziface.IRequest) {
 	// 使用Enhanced协议数据适配器处理
 	err = h.handleWithNewAdapter(request)
 	if err != nil {
-		h.stats.FailedNew++
+		h.stats.FailedProcessed++
 		h.logger.WithFields(logrus.Fields{
 			"conn_id": connID,
 			"error":   err.Error(),
 		}).Error("Enhanced端口功率处理失败")
 	} else {
-		h.stats.SuccessfulNew++
+		h.stats.SuccessfulProcessed++
 	}
 
 	// 更新心跳时间
@@ -242,8 +239,8 @@ func (h *EnhancedPortPowerHeartbeatHandler) GetStatsMap() map[string]interface{}
 	// Enhanced适配器统计
 	stats["enhanced_adapter"] = map[string]interface{}{
 		"enabled":    true,
-		"successful": h.stats.SuccessfulNew,
-		"failed":     h.stats.FailedNew,
+		"successful": h.stats.SuccessfulProcessed,
+		"failed":     h.stats.FailedProcessed,
 	}
 
 	// 端口功率专属统计
@@ -271,7 +268,7 @@ func (h *EnhancedPortPowerHeartbeatHandler) getSuccessRate() float64 {
 		return 0.0
 	}
 
-	successful := h.stats.SuccessfulNew
+	successful := h.stats.SuccessfulProcessed
 	return float64(successful) / float64(h.stats.TotalPortHeartbeats) * 100.0
 }
 

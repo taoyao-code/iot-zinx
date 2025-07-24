@@ -14,7 +14,6 @@ import (
 )
 
 // LinkHeartbeatHandler 处理"link"心跳 (命令ID: 0xFF02)
-// 注意：不继承DNYHandlerBase，因为这是特殊消息，不是标准DNY格式
 // 使用新的DNYFrameHandlerBase来实现统一的帧处理
 type LinkHeartbeatHandler struct {
 	protocol.DNYFrameHandlerBase

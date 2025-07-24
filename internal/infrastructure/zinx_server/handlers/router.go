@@ -1,34 +1,75 @@
 package handlers
 
 import (
+	"context"
+	"fmt"
 	"time"
 
 	"github.com/aceld/zinx/ziface"
-	"github.com/bujia-iot/iot-zinx/pkg/constants"
 	"github.com/bujia-iot/iot-zinx/pkg/databus"
-	"github.com/bujia-iot/iot-zinx/pkg/monitor"
 	"github.com/sirupsen/logrus"
 )
 
 // RegisterRouters 注册所有路由 - Phase 2.x 重构后统一使用Enhanced架构
 func RegisterRouters(server ziface.IServer) {
+	// 添加panic恢复机制
+	defer func() {
+		if r := recover(); r != nil {
+			logger := logrus.WithField("component", "router")
+			logger.WithField("panic", r).Fatal("路由注册过程中发生panic，系统退出")
+		}
+	}()
+
+	// 参数验证
+	if server == nil {
+		logger := logrus.WithField("component", "router")
+		logger.Fatal("服务器实例为nil，无法注册路由")
+		return
+	}
+
+	logger := logrus.WithField("component", "router")
+	logger.Info("开始注册路由系统")
+
 	// 创建默认DataBus实例
 	dataBus := createDefaultDataBus()
-
-	// 直接注册Enhanced路由，移除Legacy路由
-	if err := RegisterEnhancedRouters(server, dataBus); err != nil {
-		logger := logrus.WithField("component", "router")
-		logger.WithError(err).Error("Enhanced路由注册失败，回退到Legacy路由")
-		// 如果Enhanced路由失败，回退到Legacy路由确保服务可用
-		registerLegacyRouters(server)
+	if dataBus == nil {
+		logger.Fatal("DataBus创建失败，无法继续")
+		return
 	}
+
+	// 直接注册Enhanced路由，不允许回退
+	if err := RegisterEnhancedRouters(server, dataBus); err != nil {
+		logger.WithError(err).Fatal("Enhanced路由注册失败，系统退出")
+	}
+
+	logger.Info("路由系统注册完成")
 }
 
 // createDefaultDataBus 创建默认DataBus实例
 func createDefaultDataBus() databus.DataBus {
+	logger := logrus.WithField("component", "router_databus")
+	logger.Info("开始创建DataBus实例")
+
 	config := databus.DefaultDataBusConfig()
+	if config == nil {
+		logger.Error("获取DataBus默认配置失败")
+		return nil
+	}
+
 	config.Name = "router_databus"
 	dataBus := databus.NewDataBus(config)
+	if dataBus == nil {
+		logger.Error("创建DataBus实例失败")
+		return nil
+	}
+
+	// 启动DataBus
+	if err := dataBus.Start(context.Background()); err != nil {
+		logger.WithError(err).Error("DataBus启动失败")
+		return nil
+	}
+
+	logger.Info("DataBus实例创建并启动成功")
 	return dataBus
 }
 
@@ -37,15 +78,35 @@ func RegisterEnhancedRouters(server ziface.IServer, dataBus databus.DataBus) err
 	logger := logrus.WithField("component", "enhanced_router")
 	logger.Info("开始注册Enhanced Handler路由")
 
+	// 参数验证
+	if server == nil {
+		logger.Error("服务器实例为nil")
+		return fmt.Errorf("服务器实例为nil，无法注册路由")
+	}
+
+	if dataBus == nil {
+		logger.Error("DataBus实例为nil")
+		return fmt.Errorf("DataBus实例为nil，无法注册路由")
+	}
+
+	// 添加panic恢复机制
+	defer func() {
+		if r := recover(); r != nil {
+			logger.WithField("panic", r).Error("Enhanced路由注册过程中发生panic")
+			// 不要re-panic，而是返回错误
+		}
+	}()
+
 	// 创建Enhanced Router Manager
 	config := &MigrationConfig{
-		EnableAutoSwitch:    false, // 默认关闭自动切换
-		MigrationMode:       "manual",
 		HealthCheckInterval: 1 * time.Minute,
-		RollbackThreshold:   0.1,
 	}
 
 	routerManager := NewEnhancedRouterManager(server, dataBus, config)
+	if routerManager == nil {
+		logger.Error("Enhanced Router Manager创建失败")
+		return fmt.Errorf("Enhanced Router Manager创建失败")
+	}
 
 	// 初始化Enhanced Handler系统
 	if err := routerManager.InitializeEnhancedHandlers(); err != nil {
@@ -61,102 +122,4 @@ func RegisterEnhancedRouters(server ziface.IServer, dataBus databus.DataBus) err
 
 	logger.Info("Enhanced Handler路由注册完成")
 	return nil
-}
-
-// registerLegacyRouters 注册Legacy路由 (原有的RegisterRouters逻辑)
-func registerLegacyRouters(server ziface.IServer) {
-	// ============================================================================
-	// 注册消息处理路由
-	// 说明：DNY解码器会处理原始数据，根据不同情况设置消息ID：
-	// 1. 特殊消息：设置为特定的消息ID（0xFF01-0xFF0F范围）
-	// 2. DNY协议消息：设置为DNY命令码（例如0x01、0x11等）
-	// 3. 解析失败消息：设置为特殊的错误ID（0xFFFF）
-	// ============================================================================
-
-	// 一、特殊消息处理器（非DNY协议数据，没有标准DNY包头）
-	// ----------------------------------------------------------------------------
-	server.AddRouter(constants.MsgIDICCID, &SimCardHandler{})               // SIM卡号/ICCID处理 - 处理20位纯数字ICCID上报
-	server.AddRouter(constants.MsgIDLinkHeartbeat, &LinkHeartbeatHandler{}) // link心跳处理 - 处理"link"字符串心跳
-
-	// 用于处理无法识别的数据类型（解析错误或格式不符合预期）
-	server.AddRouter(constants.MsgIDUnknown, &NonDNYDataHandler{}) // 处理解析失败或未知类型的数据
-
-	// 二、心跳类消息处理器
-	// ----------------------------------------------------------------------------
-	server.AddRouter(constants.CmdHeartbeat, &HeartbeatHandler{})                     // 0x01 设备心跳包(旧版)
-	server.AddRouter(constants.CmdDeviceHeart, &HeartbeatHandler{})                   // 0x21 设备心跳包/分机心跳
-	server.AddRouter(constants.CmdMainHeartbeat, &MainHeartbeatHandler{})             // 0x11 主机心跳
-	server.AddRouter(constants.CmdPowerHeartbeat, NewPowerHeartbeatHandler())         // 0x06 功率心跳
-	server.AddRouter(constants.CmdPortPowerHeartbeat, NewPortPowerHeartbeatHandler()) // 0x26 端口充电时功率心跳包（扩展版本）
-
-	// 三、设备注册与状态查询
-	// ----------------------------------------------------------------------------
-	server.AddRouter(constants.CmdDeviceRegister, &DeviceRegisterHandler{}) // 0x20 设备注册包
-	server.AddRouter(constants.CmdNetworkStatus, &DeviceStatusHandler{})    // 0x81 查询设备联网状态
-
-	// 四、时间同步
-	// ----------------------------------------------------------------------------
-	server.AddRouter(constants.CmdDeviceTime, NewGetServerTimeHandler())    // 0x22 设备获取服务器时间
-	server.AddRouter(constants.CmdGetServerTime, NewGetServerTimeHandler()) // 0x12 主机获取服务器时间
-
-	// 五、业务逻辑
-	// ----------------------------------------------------------------------------
-	server.AddRouter(constants.CmdSwipeCard, &SwipeCardHandler{})                                               // 0x02 刷卡操作
-	server.AddRouter(constants.CmdChargeControl, NewChargeControlHandler(monitor.GetGlobalConnectionMonitor())) // 0x82 充电控制
-	server.AddRouter(constants.CmdSettlement, &SettlementHandler{})                                             // 0x03 结算消费信息上传
-	server.AddRouter(constants.CmdTimeBillingSettlement, NewTimeBillingSettlementHandler())                     // 0x23 分时收费结算专用
-
-	// 六、参数设置
-	// ----------------------------------------------------------------------------
-	server.AddRouter(constants.CmdParamSetting, &ParameterSettingHandler{}) // 0x83 设置运行参数1.1
-
-	// 七、设备管理
-	// ----------------------------------------------------------------------------
-	server.AddRouter(constants.CmdDeviceLocate, NewDeviceLocateHandler()) // 0x96 声光寻找设备功能
-
-	// 七、设备版本信息
-	// ----------------------------------------------------------------------------
-	server.AddRouter(constants.CmdDeviceVersion, &DeviceVersionHandler{}) // 0x35 上传分机版本号与设备类型
-
-	// 八、🔧 修复：添加缺失的命令处理器，解决"api msgID = X is not FOUND!"错误
-	// ----------------------------------------------------------------------------
-	// 根据日志分析，以下命令ID缺少对应的处理器，使用通用处理器临时处理
-	server.AddRouter(0x07, &GenericCommandHandler{})                          // 0x07 未定义命令
-	server.AddRouter(0x0F, &GenericCommandHandler{})                          // 0x0F 未定义命令
-	server.AddRouter(0x10, &GenericCommandHandler{})                          // 0x10 未定义命令
-	server.AddRouter(0x13, &GenericCommandHandler{})                          // 0x13 未定义命令
-	server.AddRouter(0x14, &GenericCommandHandler{})                          // 0x14 未定义命令
-	server.AddRouter(constants.CmdUpgradeOldReq, &GenericCommandHandler{})    // 0x15 主机请求固件升级（老版本）
-	server.AddRouter(0x16, &GenericCommandHandler{})                          // 0x16 未定义命令
-	server.AddRouter(constants.CmdMainStatusReport, &GenericCommandHandler{}) // 0x17 主机状态包上报
-	server.AddRouter(0x18, &GenericCommandHandler{})                          // 0x18 未定义命令
-
-	// 九、🔧 修复：启用缺失的命令处理器，解决msgID = 0错误
-	// ----------------------------------------------------------------------------
-	server.AddRouter(constants.CmdPoll, &GenericCommandHandler{})               // 0x00 主机轮询完整指令
-	server.AddRouter(constants.CmdOrderConfirm, &GenericCommandHandler{})       // 0x04 充电端口订单确认
-	server.AddRouter(constants.CmdUpgradeRequest, &GenericCommandHandler{})     // 0x05 设备主动请求升级
-	server.AddRouter(constants.CmdParamSetting2, NewParamSetting2Handler())     // 0x84 设置运行参数1.2
-	server.AddRouter(constants.CmdMaxTimeAndPower, NewMaxTimeAndPowerHandler()) // 0x85 设置最大充电时长、过载功率
-	server.AddRouter(constants.CmdModifyCharge, NewModifyChargeHandler())       // 0x8A 服务器修改充电时长/电量
-	server.AddRouter(constants.CmdQueryParam1, NewQueryParamHandler())          // 0x90 查询运行参数1.1
-	server.AddRouter(constants.CmdQueryParam2, NewQueryParamHandler())          // 0x91 查询运行参数1.2
-	server.AddRouter(constants.CmdQueryParam3, NewQueryParamHandler())          // 0x92 查询运行参数2
-	server.AddRouter(constants.CmdQueryParam4, NewQueryParamHandler())          // 0x93 查询用户卡参数
-	server.AddRouter(constants.CmdRebootMain, &GenericCommandHandler{})         // 0x31 重启主机指令
-	server.AddRouter(constants.CmdRebootComm, &GenericCommandHandler{})         // 0x32 重启通讯模块
-	server.AddRouter(constants.CmdClearUpgrade, &GenericCommandHandler{})       // 0x33 清空升级分机数据
-	server.AddRouter(constants.CmdChangeIP, &GenericCommandHandler{})           // 0x34 更改IP地址
-	// 🔧 修复：移除重复的CmdDeviceVersion注册，已在第57行注册
-	// server.AddRouter(CmdDeviceVersion, &GenericCommandHandler{})   // 0x35 上传分机版本号与设备类型
-	server.AddRouter(constants.CmdSetFSKParam, &GenericCommandHandler{})     // 0x3A 设置FSK主机参数及分机号
-	server.AddRouter(constants.CmdRequestFSKParam, &GenericCommandHandler{}) // 0x3B 请求服务器FSK主机参数
-	server.AddRouter(uint32(constants.CmdAlarm), &GenericCommandHandler{})   // 0x42 报警推送
-
-	// 十、固件升级相关（复杂功能，暂未实现）
-	// ----------------------------------------------------------------------------
-	// server.AddRouter(CmdUpgradeSlave, &UpgradeSlaveHandler{})     // 0xE0 设备固件升级(分机)
-	// server.AddRouter(CmdUpgradePower, &UpgradePowerHandler{})     // 0xE1 设备固件升级(电源板)
-	// server.AddRouter(CmdUpgradeMain, &UpgradeMainHandler{})       // 0xE2 设备固件升级(主机统一)
-	// server.AddRouter(CmdUpgradeOld, &UpgradeOldHandler{})         // 0xF8 设备固件升级(旧版)
 }

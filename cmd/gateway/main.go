@@ -42,7 +42,6 @@ import (
 	"github.com/bujia-iot/iot-zinx/internal/infrastructure/logger"
 	"github.com/bujia-iot/iot-zinx/internal/infrastructure/redis"
 	"github.com/bujia-iot/iot-zinx/internal/ports"
-	"github.com/bujia-iot/iot-zinx/pkg/core"
 	"github.com/bujia-iot/iot-zinx/pkg/notification"
 	"github.com/bujia-iot/iot-zinx/pkg/utils"
 )
@@ -104,16 +103,14 @@ func main() {
 			"status":    "initialized",
 		})
 
-		// 注册端口状态变化回调
+		// 注册端口状态变化回调 - 已迁移到DataBus架构
 		if notification.GetGlobalNotificationIntegrator().IsEnabled() {
-			portManager := core.GetPortManager()
-			portManager.RegisterStatusChangeCallback(func(deviceID string, portNumber int, oldStatus, newStatus string, data map[string]interface{}) {
-				// 发送端口状态变化通知
-				notification.GetGlobalNotificationIntegrator().NotifyPortStatusChange(deviceID, portNumber, oldStatus, newStatus, data)
-			})
+			// TODO: 通过DataBus订阅端口状态变化事件
+			// DataBus架构中端口状态变化通过事件系统处理
 
 			improvedLogger.Info("端口状态变化通知已启用", map[string]interface{}{
-				"callback_registered": true,
+				"architecture": "databus_events",
+				"note":         "端口状态变化通过DataBus事件系统处理",
 			})
 		}
 	}

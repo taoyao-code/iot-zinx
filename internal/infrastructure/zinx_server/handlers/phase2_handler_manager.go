@@ -5,7 +5,6 @@ import (
 	"time"
 
 	"github.com/aceld/zinx/ziface"
-	"github.com/bujia-iot/iot-zinx/pkg/constants"
 	"github.com/bujia-iot/iot-zinx/pkg/databus"
 	"github.com/sirupsen/logrus"
 )
@@ -119,10 +118,9 @@ func (m *Phase2HandlerManager) InitializeHandlers() error {
 
 // registerHandlers 注册所有Handler到服务器
 func (m *Phase2HandlerManager) registerHandlers() {
-	// 注册设备注册Handler
-	m.server.AddRouter(constants.CmdDeviceRegister, m.enhancedDeviceRegister)
-
-	m.logger.Info("所有Phase 2.2 Handler已注册到服务器")
+	// 注意：实际的路由注册现在由EnhancedRouterManager统一处理
+	// 这里只是保留方法结构，避免影响现有调用
+	m.logger.Info("Phase 2.2 Handler管理器就绪（路由注册由EnhancedRouterManager处理）")
 }
 
 // SwitchToNewHandlers 切换到Enhanced处理器 - 已默认使用Enhanced模式
@@ -145,11 +143,11 @@ func (m *Phase2HandlerManager) SwitchToNewHandlers() {
 func (m *Phase2HandlerManager) getHandlerMode() string {
 	if m.enableNewHandlers {
 		if m.enableFallback {
-			return "new_with_fallback"
+			return "enhanced_with_fallback"
 		}
-		return "new_only"
+		return "enhanced_only"
 	}
-	return "legacy_only"
+	return "enhanced_only" // 默认使用Enhanced模式
 }
 
 // GetHandlerStats 获取所有Handler的统计信息

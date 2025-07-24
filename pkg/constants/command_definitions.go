@@ -78,30 +78,3 @@ func initDefaultCommands() {
 	// 批量注册命令
 	registry.RegisterBatch(commands)
 }
-
-// GetCommandPriorityByType 根据命令类型获取优先级（兼容旧版本）
-func GetCommandPriorityByType(command uint8) int {
-	return GetCommandPriority(command)
-}
-
-// 向后兼容的命令映射（保持与原DNYCommandMap的兼容性）
-type LegacyCommandInfo struct {
-	Name        string
-	Description string
-}
-
-// GetLegacyCommandMap 获取向后兼容的命令映射
-func GetLegacyCommandMap() map[byte]LegacyCommandInfo {
-	registry := GetGlobalCommandRegistry()
-	allCommands := registry.GetAllCommands()
-
-	legacyMap := make(map[byte]LegacyCommandInfo)
-	for id, info := range allCommands {
-		legacyMap[byte(id)] = LegacyCommandInfo{
-			Name:        info.Name,
-			Description: info.Description,
-		}
-	}
-
-	return legacyMap
-}

@@ -32,11 +32,8 @@ type ChargeControlStats struct {
 	StartChargeRequests    int64     `json:"start_charge_requests"`
 	StopChargeRequests     int64     `json:"stop_charge_requests"`
 	StatusQueryRequests    int64     `json:"status_query_requests"`
-	SuccessfulNew          int64     `json:"successful_new"`
-	SuccessfulLegacy       int64     `json:"successful_legacy"`
-	FailedNew              int64     `json:"failed_new"`
-	FailedLegacy           int64     `json:"failed_legacy"`
-	FallbackCount          int64     `json:"fallback_count"`
+	SuccessfulProcessed    int64     `json:"successful_processed"`
+	FailedProcessed        int64     `json:"failed_processed"`
 	LastChargeRequest      time.Time `json:"last_charge_request"`
 	ActiveChargingSessions int64     `json:"active_charging_sessions"`
 	TotalEnergyDelivered   float64   `json:"total_energy_delivered_kwh"`   // 总能量(kWh)
@@ -105,14 +102,14 @@ func (h *EnhancedChargeControlHandler) Handle(request ziface.IRequest) {
 	// 使用Enhanced协议数据适配器处理
 	err = h.handleWithNewAdapter(request, commandType)
 	if err != nil {
-		h.stats.FailedNew++
+		h.stats.FailedProcessed++
 		h.logger.WithFields(logrus.Fields{
 			"conn_id":      connID,
 			"command_type": commandType,
 			"error":        err.Error(),
 		}).Error("Enhanced充电控制处理失败")
 	} else {
-		h.stats.SuccessfulNew++
+		h.stats.SuccessfulProcessed++
 	}
 
 	// 更新充电状态（如果适用）
@@ -315,8 +312,8 @@ func (h *EnhancedChargeControlHandler) GetStatsMap() map[string]interface{} {
 	// Enhanced适配器统计
 	stats["enhanced_adapter"] = map[string]interface{}{
 		"enabled":    true,
-		"successful": h.stats.SuccessfulNew,
-		"failed":     h.stats.FailedNew,
+		"successful": h.stats.SuccessfulProcessed,
+		"failed":     h.stats.FailedProcessed,
 	}
 
 	// 充电控制专属统计
@@ -347,7 +344,7 @@ func (h *EnhancedChargeControlHandler) getSuccessRate() float64 {
 		return 0.0
 	}
 
-	successful := h.stats.SuccessfulNew
+	successful := h.stats.SuccessfulProcessed
 	return float64(successful) / float64(h.stats.TotalChargeRequests) * 100.0
 }
 

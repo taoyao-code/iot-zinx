@@ -9,7 +9,6 @@ import (
 )
 
 // DNYParseResult DNY协议解析结果
-// 兼容性结构体，保留API兼容性，但内部使用统一的解析逻辑
 type DNYParseResult struct {
 	PacketHeader string // DNY
 	Length       uint16
@@ -25,47 +24,7 @@ type DNYParseResult struct {
 	CommandName   string
 }
 
-// ParseManualData 手动解析十六进制数据 - 简化版本，主要用于调试
-func ParseManualData(hexData, description string) {
-	// 解析十六进制字符串
-	cleanHex := make([]byte, 0, len(hexData))
-	for i := 0; i < len(hexData); i++ {
-		char := hexData[i]
-		if (char >= '0' && char <= '9') || (char >= 'a' && char <= 'f') || (char >= 'A' && char <= 'F') {
-			cleanHex = append(cleanHex, char)
-		}
-	}
-
-	// 解码十六进制字符串
-	data, err := hex.DecodeString(string(cleanHex))
-	if err != nil {
-		fmt.Printf("❌ [%s] 十六进制解析失败: %v\n", description, err)
-		return
-	}
-
-	// 使用统一解析器解析二进制数据
-	dnyMsg, err := ParseDNYProtocolData(data)
-	if err != nil {
-		fmt.Printf("❌ [%s] DNY协议解析失败: %v\n", description, err)
-		return
-	}
-
-	// 创建兼容性结果并输出
-	result := &DNYParseResult{
-		PacketHeader:  "DNY",
-		PhysicalID:    dnyMsg.GetPhysicalId(),
-		Command:       uint8(dnyMsg.GetMsgID()),
-		Data:          dnyMsg.GetData(),
-		RawData:       dnyMsg.GetRawData(),
-		CommandName:   GetCommandName(uint8(dnyMsg.GetMsgID())),
-		ChecksumValid: true, // 简化处理
-	}
-
-	fmt.Printf("✅ [%s] %s\n", description, result.String())
-}
-
 // ParseDNYData 统一的DNY协议解析函数
-// 🔧 兼容性包装器：内部使用统一的解析逻辑，但保持API兼容性
 func ParseDNYData(data []byte) (*DNYParseResult, error) {
 	// 使用统一的解析函数
 	dnyMsg, err := ParseDNYProtocolData(data)
@@ -73,7 +32,7 @@ func ParseDNYData(data []byte) (*DNYParseResult, error) {
 		return nil, err
 	}
 
-	// 转换为兼容的返回类型
+	// 转换为标准返回类型
 	result := &DNYParseResult{
 		PacketHeader: "DNY",
 		PhysicalID:   dnyMsg.GetPhysicalId(),
@@ -112,7 +71,6 @@ func ParseDNYData(data []byte) (*DNYParseResult, error) {
 }
 
 // ParseDNYDataWithConsumed 解析DNY协议数据并返回消费的字节数
-// 🔧 兼容性包装器：内部使用统一的解析逻辑，但保持API兼容性
 func ParseDNYDataWithConsumed(data []byte) (*DNYParseResult, int, error) {
 	result, err := ParseDNYData(data)
 	if err != nil {
@@ -125,14 +83,13 @@ func ParseDNYDataWithConsumed(data []byte) (*DNYParseResult, int, error) {
 }
 
 // ParseMultipleDNYFrames 解析包含多个DNY帧的数据包
-// 🔧 兼容性包装器：内部使用统一的解析逻辑，但保持API兼容性
 func ParseMultipleDNYFrames(data []byte) ([]*DNYParseResult, error) {
 	var results []*DNYParseResult
 	offset := 0
 
 	for offset < len(data) {
 		// 检查剩余数据是否足够解析一个DNY帧
-		if len(data[offset:]) < constants.DNY_MIN_PACKET_LEN {
+		if len(data[offset:]) < constants.MinPacketSize {
 			break
 		}
 
@@ -161,7 +118,6 @@ func ParseMultipleDNYFrames(data []byte) ([]*DNYParseResult, error) {
 }
 
 // ParseDNYHexString 解析十六进制字符串格式的DNY协议数据
-// 🔧 兼容性包装器：内部使用统一的解析逻辑，但保持API兼容性
 func ParseDNYHexString(hexStr string) (*DNYParseResult, error) {
 	// 清理十六进制字符串，只保留有效字符
 	cleanHex := make([]byte, 0, len(hexStr))
@@ -191,11 +147,3 @@ func (r *DNYParseResult) String() string {
 	return fmt.Sprintf("命令: 0x%02X (%s), 物理ID: 0x%08X, 消息ID: 0x%04X, 数据长度: %d, 校验: %v",
 		r.Command, r.CommandName, r.PhysicalID, r.MessageID, len(r.Data), r.ChecksumValid)
 }
-
-// 🔧 架构重构说明：
-// 此文件现已改为兼容性包装层，内部使用统一的DNY协议解析函数
-// 所有解析函数内部调用 ParseDNYProtocolData 保证解析逻辑一致
-// 此设计确保:
-// 1. 保持API兼容性，现有代码不需要修改
-// 2. 解析逻辑统一，避免重复实现导致的不一致
-// 3. 未来可以逐步迁移到直接使用 ParseDNYProtocolData

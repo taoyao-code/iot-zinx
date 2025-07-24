@@ -15,7 +15,6 @@ import (
 )
 
 // SimCardHandler 处理SIM卡号上报 (命令ID: 0xFF01)
-// 注意：不继承DNYHandlerBase，因为这是特殊消息，不是标准DNY格式
 type SimCardHandler struct {
 	znet.BaseRouter
 }

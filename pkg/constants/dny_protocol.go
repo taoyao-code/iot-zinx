@@ -16,13 +16,6 @@ const (
 const (
 	IotSimCardLength = 20     // ICCID长度
 	IotLinkHeartbeat = "link" // Link心跳字符串
-	// 使用统一的协议常量
-	DnyMinPacketLen = MinPacketSize // 已弃用，使用 MinPacketSize
-
-	// 向后兼容的别名
-	IOT_SIM_CARD_LENGTH = IotSimCardLength // 已弃用，使用 IotSimCardLength
-	IOT_LINK_HEARTBEAT  = IotLinkHeartbeat // 已弃用，使用 IotLinkHeartbeat
-	DNY_MIN_PACKET_LEN  = DnyMinPacketLen  // 已弃用，使用 DnyMinPacketLen
 
 	// 连接缓冲区管理常量
 	ConnectionBufferKey = "dny_connection_buffer" // 连接缓冲区属性键
@@ -32,19 +25,8 @@ const (
 	LinkMessagePayload = "link" // Link心跳消息内容（文档兼容性）
 	ICCIDMinLength     = 19     // ICCID最小长度
 	ICCIDMaxLength     = 25     // ICCID最大长度
-	ICCIDMessageLength = 20     // ICCID标准长度（文档兼容性）
+	ICCIDMessageLength = 20     // ICCID标准长度
 	ICCIDValidPrefix   = "89"   // ICCID有效前缀（ITU-T E.118标准，电信行业标识符）
 	DNYMinHeaderLength = 5      // DNY协议最小头部长度("DNY" + 长度字段)
-	// 使用统一的协议常量
-	DNYHeaderMagic    = ProtocolHeader // 已弃用，使用 ProtocolHeader
-	DNYChecksumLength = 2              // DNY校验和长度
+	DNYChecksumLength  = 2      // DNY校验和长度
 )
-
-// DNY命令名称映射 - 向后兼容性包装器
-// 使用统一的命令注册表，但保持原有API兼容性
-var DNYCommandMap = func() map[byte]LegacyCommandInfo {
-	return GetLegacyCommandMap()
-}()
-
-// 向后兼容性别名 - 重用LegacyCommandInfo结构
-// 新代码应使用统一的命令注册表API

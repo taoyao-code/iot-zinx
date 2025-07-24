@@ -1,10 +1,9 @@
 # Go Pkg
-GO_PKG_MOD=iot-platform
+GO_PKG_MOD=github.com/bujia-iot/iot-zinx
 # Go 项目各组件名称
 GATEWAY_NAME=iot_gateway
-CLIENT_NAME=client
-SERVER_API_NAME=server-api
-DNY_PARSER_NAME=dny-parser
+DEVICE_SIMULATOR_NAME=device-simulator
+NOTIFICATION_STATS_NAME=notification-stats
 # Go 编译器
 GO=go
 # Go 构建命令
@@ -34,18 +33,17 @@ TARGET_PLATFORM ?=
 
 # 程序入口文件
 GATEWAY_DIR=./cmd/gateway
-CLIENT_DIR=./cmd/client
-SERVER_API_DIR=./cmd/server-api
-DNY_PARSER_DIR=./cmd/dny-parser
+DEVICE_SIMULATOR_DIR=./cmd/device-simulator
+NOTIFICATION_STATS_DIR=./cmd/notification-stats
 # 输出目录
 OUTPUT_DIR=./bin
 
-.PHONY: all build clean test help swagger build-all build-gateway build-client build-server-api build-dny-parser run-gateway run-client run-server-api run-dny-parser fmt lint cover test
+.PHONY: all build clean test help swagger build-all build-gateway build-device-simulator build-notification-stats run-gateway run-device-simulator run-notification-stats fmt lint cover tidy
 
 all: build-all
 
 # 构建所有组件
-build-all: build-gateway build-client build-server-api build-dny-parser
+build-all: build-gateway build-device-simulator build-notification-stats
 
 # 构建网关组件
 build-gateway: $(OUTPUT_DIR)
@@ -60,44 +58,31 @@ build-gateway: $(OUTPUT_DIR)
 	fi
 	@echo "==> Gateway build complete."
 
-# 构建客户端组件
-build-client: $(OUTPUT_DIR)
-	@echo "==> Building Client..."
+# 构建设备模拟器组件
+build-device-simulator: $(OUTPUT_DIR)
+	@echo "==> Building Device Simulator..."
 	@if [ -n "$(TARGET_PLATFORM)" ]; then \
-		echo "  Building Client for $(TARGET_PLATFORM)"; \
+		echo "  Building Device Simulator for $(TARGET_PLATFORM)"; \
 		GOOS_VAL=$$(echo $(TARGET_PLATFORM) | cut -d'/' -f1); \
 		GOARCH_VAL=$$(echo $(TARGET_PLATFORM) | cut -d'/' -f2); \
-		env CGO_ENABLED=0 GOOS=$$GOOS_VAL GOARCH=$$GOARCH_VAL $(GOBUILD) -o $(OUTPUT_DIR)/$(CLIENT_NAME)_$$GOOS_VAL_$$GOARCH_VAL -ldflags="-s -w" -trimpath $(CLIENT_DIR); \
+		env CGO_ENABLED=0 GOOS=$$GOOS_VAL GOARCH=$$GOARCH_VAL $(GOBUILD) -o $(OUTPUT_DIR)/$(DEVICE_SIMULATOR_NAME)_$$GOOS_VAL_$$GOARCH_VAL -ldflags="-s -w" -trimpath $(DEVICE_SIMULATOR_DIR); \
 	else \
-		env CGO_ENABLED=0 GOOS=$(DEFAULT_GOOS) GOARCH=$(DEFAULT_GOARCH) $(GOBUILD) -o $(OUTPUT_DIR)/$(CLIENT_NAME) -ldflags="-s -w" -trimpath $(CLIENT_DIR); \
+		env CGO_ENABLED=0 GOOS=$(DEFAULT_GOOS) GOARCH=$(DEFAULT_GOARCH) $(GOBUILD) -o $(OUTPUT_DIR)/$(DEVICE_SIMULATOR_NAME) -ldflags="-s -w" -trimpath $(DEVICE_SIMULATOR_DIR); \
 	fi
-	@echo "==> Client build complete."
+	@echo "==> Device Simulator build complete."
 
-# 构建服务端API组件
-build-server-api: $(OUTPUT_DIR)
-	@echo "==> Building Server API..."
+# 构建通知统计组件
+build-notification-stats: $(OUTPUT_DIR)
+	@echo "==> Building Notification Stats..."
 	@if [ -n "$(TARGET_PLATFORM)" ]; then \
-		echo "  Building Server API for $(TARGET_PLATFORM)"; \
+		echo "  Building Notification Stats for $(TARGET_PLATFORM)"; \
 		GOOS_VAL=$$(echo $(TARGET_PLATFORM) | cut -d'/' -f1); \
 		GOARCH_VAL=$$(echo $(TARGET_PLATFORM) | cut -d'/' -f2); \
-		env CGO_ENABLED=0 GOOS=$$GOOS_VAL GOARCH=$$GOARCH_VAL $(GOBUILD) -o $(OUTPUT_DIR)/$(SERVER_API_NAME)_$$GOOS_VAL_$$GOARCH_VAL -ldflags="-s -w" -trimpath $(SERVER_API_DIR); \
+		env CGO_ENABLED=0 GOOS=$$GOOS_VAL GOARCH=$$GOARCH_VAL $(GOBUILD) -o $(OUTPUT_DIR)/$(NOTIFICATION_STATS_NAME)_$$GOOS_VAL_$$GOARCH_VAL -ldflags="-s -w" -trimpath $(NOTIFICATION_STATS_DIR); \
 	else \
-		env CGO_ENABLED=0 GOOS=$(DEFAULT_GOOS) GOARCH=$(DEFAULT_GOARCH) $(GOBUILD) -o $(OUTPUT_DIR)/$(SERVER_API_NAME) -ldflags="-s -w" -trimpath $(SERVER_API_DIR); \
+		env CGO_ENABLED=0 GOOS=$(DEFAULT_GOOS) GOARCH=$(DEFAULT_GOARCH) $(GOBUILD) -o $(OUTPUT_DIR)/$(NOTIFICATION_STATS_NAME) -ldflags="-s -w" -trimpath $(NOTIFICATION_STATS_DIR); \
 	fi
-	@echo "==> Server API build complete."
-
-# 构建DNY解析器工具
-build-dny-parser: $(OUTPUT_DIR)
-	@echo "==> Building DNY parser tool..."
-	@if [ -n "$(TARGET_PLATFORM)" ]; then \
-		echo "  Building DNY parser for $(TARGET_PLATFORM)"; \
-		GOOS_VAL=$$(echo $(TARGET_PLATFORM) | cut -d'/' -f1); \
-		GOARCH_VAL=$$(echo $(TARGET_PLATFORM) | cut -d'/' -f2); \
-		env CGO_ENABLED=0 GOOS=$$GOOS_VAL GOARCH=$$GOARCH_VAL $(GOBUILD) -o $(OUTPUT_DIR)/$(DNY_PARSER_NAME)_$$GOOS_VAL_$$GOARCH_VAL -ldflags="-s -w" -trimpath $(DNY_PARSER_DIR); \
-	else \
-		env CGO_ENABLED=0 GOOS=$(DEFAULT_GOOS) GOARCH=$(DEFAULT_GOARCH) $(GOBUILD) -o $(OUTPUT_DIR)/$(DNY_PARSER_NAME) -ldflags="-s -w" -trimpath $(DNY_PARSER_DIR); \
-	fi
-	@echo "==> DNY parser tool built."
+	@echo "==> Notification Stats build complete."
 
 # 构建所有组件的多平台版本
 build-multi-platform: $(OUTPUT_DIR)
@@ -107,9 +92,8 @@ build-multi-platform: $(OUTPUT_DIR)
 		GOARCH_VAL=$$(echo $$PLATFORM | cut -d'/' -f2); \
 		echo "  Building for $$GOOS_VAL/$$GOARCH_VAL"; \
 		env CGO_ENABLED=0 GOOS=$$GOOS_VAL GOARCH=$$GOARCH_VAL $(GOBUILD) -o $(OUTPUT_DIR)/$(GATEWAY_NAME)_$$GOOS_VAL_$$GOARCH_VAL -ldflags="-s -w" -trimpath $(GATEWAY_DIR) || echo "❌ Gateway build failed for $$GOOS_VAL/$$GOARCH_VAL"; \
-		env CGO_ENABLED=0 GOOS=$$GOOS_VAL GOARCH=$$GOARCH_VAL $(GOBUILD) -o $(OUTPUT_DIR)/$(CLIENT_NAME)_$$GOOS_VAL_$$GOARCH_VAL -ldflags="-s -w" -trimpath $(CLIENT_DIR) || echo "❌ Client build failed for $$GOOS_VAL/$$GOARCH_VAL"; \
-		env CGO_ENABLED=0 GOOS=$$GOOS_VAL GOARCH=$$GOARCH_VAL $(GOBUILD) -o $(OUTPUT_DIR)/$(SERVER_API_NAME)_$$GOOS_VAL_$$GOARCH_VAL -ldflags="-s -w" -trimpath $(SERVER_API_DIR) || echo "❌ Server-API build failed for $$GOOS_VAL/$$GOARCH_VAL"; \
-		env CGO_ENABLED=0 GOOS=$$GOOS_VAL GOARCH=$$GOARCH_VAL $(GOBUILD) -o $(OUTPUT_DIR)/$(DNY_PARSER_NAME)_$$GOOS_VAL_$$GOARCH_VAL -ldflags="-s -w" -trimpath $(DNY_PARSER_DIR) || echo "❌ DNY-Parser build failed for $$GOOS_VAL/$$GOARCH_VAL"; \
+		env CGO_ENABLED=0 GOOS=$$GOOS_VAL GOARCH=$$GOARCH_VAL $(GOBUILD) -o $(OUTPUT_DIR)/$(DEVICE_SIMULATOR_NAME)_$$GOOS_VAL_$$GOARCH_VAL -ldflags="-s -w" -trimpath $(DEVICE_SIMULATOR_DIR) || echo "❌ Device Simulator build failed for $$GOOS_VAL/$$GOARCH_VAL"; \
+		env CGO_ENABLED=0 GOOS=$$GOOS_VAL GOARCH=$$GOARCH_VAL $(GOBUILD) -o $(OUTPUT_DIR)/$(NOTIFICATION_STATS_NAME)_$$GOOS_VAL_$$GOARCH_VAL -ldflags="-s -w" -trimpath $(NOTIFICATION_STATS_DIR) || echo "❌ Notification Stats build failed for $$GOOS_VAL/$$GOARCH_VAL"; \
 	done; \
 	echo "==> Multi-platform build complete."
 
@@ -118,20 +102,15 @@ run-gateway:
 	@echo "==> Running Gateway..."
 	@$(GO) run $(GATEWAY_DIR)
 
-# 运行客户端组件
-run-client:
-	@echo "==> Running Client..."
-	@$(GO) run $(CLIENT_DIR)
+# 运行设备模拟器组件
+run-device-simulator:
+	@echo "==> Running Device Simulator..."
+	@$(GO) run $(DEVICE_SIMULATOR_DIR)
 
-# 运行服务端API组件
-run-server-api:
-	@echo "==> Running Server API..."
-	@$(GO) run $(SERVER_API_DIR)
-
-# 运行DNY解析器工具
-run-dny-parser:
-	@echo "==> Running DNY parser tool..."
-	@$(GO) run $(DNY_PARSER_DIR)
+# 运行通知统计组件
+run-notification-stats:
+	@echo "==> Running Notification Stats..."
+	@$(GO) run $(NOTIFICATION_STATS_DIR)
 
 # 为兼容旧版本，保留原有构建命令
 build: build-gateway
@@ -166,33 +145,43 @@ help:
 	@echo ""
 	@echo "Usage: make [target]"
 	@echo ""
+	@echo "IoT-Zinx Gateway Project - Build System"
+	@echo "========================================"
+	@echo ""
 	@echo "Targets:"
-	@echo "  all                Builds all components (default)"
-	@echo "  build-all          Builds all components (gateway, client, server-api, dny-parser)"
-	@echo "  build-gateway      Builds only the gateway component"
-	@echo "  build-client       Builds only the client component"
-	@echo "  build-server-api   Builds only the server-api component"
-	@echo "  build-dny-parser   Builds only the dny-parser component"
-	@echo "  build-multi-platform  Builds all components for multiple platforms"
-	@echo "                     Default platforms: $(PLATFORMS)"
-	@echo "  run-gateway        Runs the gateway component"
-	@echo "  run-client         Runs the client component"
-	@echo "  run-server-api     Runs the server-api component"
-	@echo "  run-dny-parser     Runs the dny-parser component"
-	@echo "  clean              Cleans build artifacts"
-	@echo "  test               Runs tests"
-	@echo "  tidy               Tidies go.mod file"
-	@echo "  swagger            Generates Swagger API documentation"
-	@echo "  help               Shows this help message"
+	@echo "  all                      Builds all components (default)"
+	@echo "  build-all                Builds all components (gateway, device-simulator, notification-stats)"
+	@echo "  build-gateway            Builds only the gateway component"
+	@echo "  build-device-simulator   Builds only the device simulator component"
+	@echo "  build-notification-stats Builds only the notification stats component"
+	@echo "  build-multi-platform     Builds all components for multiple platforms"
+	@echo "                           Default platforms: $(PLATFORMS)"
+	@echo "  run-gateway              Runs the gateway component"
+	@echo "  run-device-simulator     Runs the device simulator component"
+	@echo "  run-notification-stats   Runs the notification stats component"
+	@echo "  clean                    Cleans build artifacts"
+	@echo "  test                     Runs tests"
+	@echo "  tidy                     Tidies go.mod file"
+	@echo "  fmt                      Formats Go code"
+	@echo "  lint                     Runs code linter (requires golangci-lint)"
+	@echo "  cover                    Generates test coverage report"
+	@echo "  swagger                  Generates Swagger API documentation"
+	@echo "  help                     Shows this help message"
 	@echo ""
 	@echo "Options:"
-	@echo "  TARGET_PLATFORM    Build for a specific platform (format: os/arch)"
-	@echo "                     Example: make build-gateway TARGET_PLATFORM=linux/arm64"
+	@echo "  TARGET_PLATFORM          Build for a specific platform (format: os/arch)"
+	@echo "                           Example: make build-gateway TARGET_PLATFORM=linux/arm64"
 	@echo ""
 	@echo "Current Settings:"
-	@echo "  Default OS:        $(DEFAULT_GOOS)"
-	@echo "  Default Arch:      $(DEFAULT_GOARCH)"
-	@echo "  Output Directory:  $(OUTPUT_DIR)"
+	@echo "  Module:                  $(GO_PKG_MOD)"
+	@echo "  Default OS:              $(DEFAULT_GOOS)"
+	@echo "  Default Arch:            $(DEFAULT_GOARCH)"
+	@echo "  Output Directory:        $(OUTPUT_DIR)"
+	@echo ""
+	@echo "Components:"
+	@echo "  Gateway:                 IoT charging device gateway server"
+	@echo "  Device Simulator:        Test device simulator for development"
+	@echo "  Notification Stats:      Notification system statistics tool"
 	@echo ""
 
 # 确保输出目录存在
@@ -204,16 +193,14 @@ fmt:
 	@echo "==> Formatting code..."
 	@go fmt ./...
 
-
-# 运行测试
-test:
-	@go test -v ./...
-
 # 运行代码检查
 lint:
+	@echo "==> Running linter..."
 	@golangci-lint run
 
 # 生成测试覆盖率报告
 cover:
+	@echo "==> Generating test coverage report..."
 	@go test -coverprofile=coverage.out ./...
 	@go tool cover -html=coverage.out -o coverage.html
+	@echo "==> Coverage report generated: coverage.html"

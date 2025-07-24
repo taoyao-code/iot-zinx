@@ -11,10 +11,8 @@ import (
 	"github.com/bujia-iot/iot-zinx/internal/infrastructure/logger"
 	"github.com/bujia-iot/iot-zinx/pkg"
 	"github.com/bujia-iot/iot-zinx/pkg/constants"
-	"github.com/bujia-iot/iot-zinx/pkg/core"
 	"github.com/bujia-iot/iot-zinx/pkg/errors"
 	"github.com/bujia-iot/iot-zinx/pkg/network"
-	"github.com/bujia-iot/iot-zinx/pkg/utils"
 	"github.com/gin-gonic/gin"
 	"github.com/sirupsen/logrus"
 )
@@ -264,7 +262,6 @@ func HandleSendDNYCommand(c *gin.Context) {
 		}
 	}
 
-	// 🔧 使用网络层统一发送器发送命令
 	sender := network.GetGlobalSender()
 	if sender == nil {
 		c.JSON(http.StatusInternalServerError, APIResponse{
@@ -274,38 +271,19 @@ func HandleSendDNYCommand(c *gin.Context) {
 		return
 	}
 
-	// 获取设备连接
-	conn, exists := core.GetGlobalConnectionGroupManager().GetConnectionByDeviceID(req.DeviceID)
-	if !exists {
-		c.JSON(http.StatusNotFound, APIResponse{
-			Code:    404,
-			Message: "设备不存在或未连接",
+	// 获取设备服务
+	ctx := GetGlobalHandlerContext()
+	if ctx == nil || ctx.DeviceService == nil {
+		c.JSON(http.StatusInternalServerError, APIResponse{
+			Code:    500,
+			Message: "系统错误: 设备服务未初始化",
 		})
 		return
 	}
 
-	// 解析设备ID为物理ID
-	physicalID, err := utils.ParseDeviceIDToPhysicalID(req.DeviceID)
+	// 通过设备服务发送DNY命令
+	messageID, err := ctx.DeviceService.SendDNYCommandToDevice(req.DeviceID, req.Command, data, req.MessageID)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, APIResponse{
-			Code:    400,
-			Message: "设备ID格式错误: " + err.Error(),
-		})
-		return
-	}
-
-	// 生成消息ID
-	messageID := pkg.Protocol.GetNextMessageID()
-
-	// 发送DNY命令
-	err = pkg.Protocol.SendDNYRequest(conn, physicalID, messageID, req.Command, data)
-	if err != nil {
-		logger.WithFields(logrus.Fields{
-			"deviceId": req.DeviceID,
-			"command":  fmt.Sprintf("0x%02X", req.Command),
-			"error":    err.Error(),
-		}).Error("发送DNY命令到设备失败")
-
 		c.JSON(http.StatusInternalServerError, APIResponse{
 			Code:    500,
 			Message: "发送命令失败: " + err.Error(),
@@ -313,20 +291,11 @@ func HandleSendDNYCommand(c *gin.Context) {
 		return
 	}
 
-	logger.WithFields(logrus.Fields{
-		"deviceId":  req.DeviceID,
-		"command":   fmt.Sprintf("0x%02X", req.Command),
-		"messageId": fmt.Sprintf("0x%04X", messageID),
-		"connId":    conn.GetConnID(),
-		"dataHex":   hex.EncodeToString(data),
-	}).Info("发送DNY命令到设备成功")
-
 	c.JSON(http.StatusOK, APIResponse{
 		Code:    0,
 		Message: "DNY命令发送成功",
 		Data: gin.H{
 			"messageId": fmt.Sprintf("0x%04X", messageID),
-			"connId":    conn.GetConnID(),
 		},
 	})
 }
@@ -372,41 +341,12 @@ func HandleQueryDeviceStatus(c *gin.Context) {
 		return
 	}
 
-	// 获取设备连接
-	conn, exists := core.GetGlobalConnectionGroupManager().GetConnectionByDeviceID(deviceID)
-	if !exists {
-		c.JSON(http.StatusNotFound, APIResponse{
-			Code:    404,
-			Message: "设备不存在或未连接",
-		})
-		return
-	}
-
-	// 解析设备ID为物理ID
-	physicalID, err := utils.ParseDeviceIDToPhysicalID(deviceID)
+	// 通过设备服务查询设备状态
+	messageID, err := ctx.DeviceService.SendDNYCommandToDevice(deviceID, 0x81, []byte{}, 0)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, APIResponse{
-			Code:    400,
-			Message: "设备ID格式错误: " + err.Error(),
-		})
-		return
-	}
-
-	// 生成消息ID
-	messageID := pkg.Protocol.GetNextMessageID()
-
-	// 发送查询状态命令(0x81)
-	err = pkg.Protocol.SendDNYRequest(conn, physicalID, messageID, 0x81, []byte{})
-	if err != nil {
-		logger.WithFields(logrus.Fields{
-			"deviceId": deviceID,
-			"command":  "0x81",
-			"error":    err.Error(),
-		}).Error("发送查询命令失败")
-
 		c.JSON(http.StatusInternalServerError, APIResponse{
 			Code:    500,
-			Message: "发送查询命令失败: " + err.Error(),
+			Message: "查询设备状态失败: " + err.Error(),
 		})
 		return
 	}
@@ -415,7 +355,6 @@ func HandleQueryDeviceStatus(c *gin.Context) {
 		"deviceId":  deviceID,
 		"command":   "0x81",
 		"messageId": fmt.Sprintf("0x%04X", messageID),
-		"connId":    conn.GetConnID(),
 	}).Info("查询设备状态命令发送成功")
 
 	c.JSON(http.StatusOK, APIResponse{
@@ -425,7 +364,6 @@ func HandleQueryDeviceStatus(c *gin.Context) {
 			"deviceId":  deviceID,
 			"command":   "0x81",
 			"messageId": fmt.Sprintf("0x%04X", messageID),
-			"connId":    conn.GetConnID(),
 		},
 	})
 }
@@ -614,31 +552,18 @@ func HandleDeviceLocate(c *gin.Context) {
 		return
 	}
 
-	// 获取设备连接
-	conn, exists := core.GetGlobalConnectionGroupManager().GetConnectionByDeviceID(req.DeviceID)
-	if !exists {
-		c.JSON(http.StatusNotFound, APIResponse{
-			Code:    404,
-			Message: "设备不存在或未连接",
+	// 获取设备服务
+	ctx := GetGlobalHandlerContext()
+	if ctx == nil || ctx.DeviceService == nil {
+		c.JSON(http.StatusInternalServerError, APIResponse{
+			Code:    500,
+			Message: "系统错误: 设备服务未初始化",
 		})
 		return
 	}
 
-	// 解析设备ID为物理ID
-	physicalID, err := utils.ParseDeviceIDToPhysicalID(req.DeviceID)
-	if err != nil {
-		c.JSON(http.StatusBadRequest, APIResponse{
-			Code:    400,
-			Message: "设备ID格式错误: " + err.Error(),
-		})
-		return
-	}
-
-	// 生成消息ID
-	messageID := pkg.Protocol.GetNextMessageID()
-
-	// 发送设备定位命令(0x96)
-	err = pkg.Protocol.SendDNYRequest(conn, physicalID, messageID, 0x96, data)
+	// 通过设备服务发送设备定位命令
+	messageID, err := ctx.DeviceService.SendDNYCommandToDevice(req.DeviceID, 0x96, data, 0)
 	if err != nil {
 		logger.WithFields(logrus.Fields{
 			"deviceID":   req.DeviceID,
@@ -657,7 +582,6 @@ func HandleDeviceLocate(c *gin.Context) {
 		"deviceID":   req.DeviceID,
 		"locateTime": req.LocateTime,
 		"messageID":  fmt.Sprintf("0x%04X", messageID),
-		"connId":     conn.GetConnID(),
 	}).Info("设备定位命令发送成功")
 
 	c.JSON(http.StatusOK, APIResponse{
@@ -667,7 +591,6 @@ func HandleDeviceLocate(c *gin.Context) {
 			"deviceID":   req.DeviceID,
 			"locateTime": req.LocateTime,
 			"messageID":  fmt.Sprintf("0x%04X", messageID),
-			"connId":     conn.GetConnID(),
 		},
 	})
 }

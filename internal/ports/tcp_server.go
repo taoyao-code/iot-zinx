@@ -1,6 +1,7 @@
 package ports
 
 import (
+	"context"
 	"fmt"
 	"time"
 
@@ -11,8 +12,11 @@ import (
 	"github.com/bujia-iot/iot-zinx/internal/infrastructure/logger"
 	"github.com/bujia-iot/iot-zinx/internal/infrastructure/zinx_server/handlers"
 	"github.com/bujia-iot/iot-zinx/pkg"
+	"github.com/bujia-iot/iot-zinx/pkg/constants"
+	"github.com/bujia-iot/iot-zinx/pkg/databus"
 	"github.com/bujia-iot/iot-zinx/pkg/network"
 	"github.com/bujia-iot/iot-zinx/pkg/protocol"
+	"github.com/sirupsen/logrus"
 )
 
 // TCPServer 封装TCP服务器功能
@@ -20,12 +24,19 @@ type TCPServer struct {
 	server           ziface.IServer    // Zinx服务器实例
 	cfg              *config.Config    // 配置文件实例
 	heartbeatManager *HeartbeatManager // HeartbeatManager 心跳管理器实例
+	dataBus          databus.DataBus   // DataBus 实例
 }
 
 // NewTCPServer 创建新的TCP服务器实例
 func NewTCPServer() *TCPServer {
+	// 创建DataBus实例
+	dataBusConfig := databus.DefaultDataBusConfig()
+	dataBusConfig.Name = "tcp_server_databus"
+	dataBus := databus.NewDataBus(dataBusConfig)
+
 	return &TCPServer{
-		cfg: config.GetConfig(),
+		cfg:     config.GetConfig(),
+		dataBus: dataBus,
 	}
 }
 
@@ -99,21 +110,16 @@ func (s *TCPServer) initialize() error {
 func (s *TCPServer) registerRoutes() {
 	logger.Info("注册Enhanced Handler路由")
 
-	// 直接使用统一的路由注册，内部已实现Enhanced优先，Legacy回退
+	// 使用Enhanced架构的路由注册
 	handlers.RegisterRouters(s.server)
 
 	logger.Info("路由注册完成")
 }
 
-// initializePackageDependencies 初始化包依赖关系，使用统一架构
+// initializePackageDependencies 初始化包依赖关系，使用Enhanced架构
 func (s *TCPServer) initializePackageDependencies() {
-	// 🔧 使用统一架构：初始化统一架构组件
-	pkg.InitUnifiedArchitecture()
-
-	// 设置向后兼容性
-	pkg.SetupUnifiedMonitorCompatibility()
-
-	logger.Info("统一架构已正确初始化")
+	// Enhanced架构使用DataBus进行初始化，无需额外的包依赖初始化
+	logger.Info("Enhanced架构依赖已就绪")
 }
 
 // setupConnectionHooks 设置连接钩子
@@ -126,7 +132,7 @@ func (s *TCPServer) setupConnectionHooks() {
 	if deviceCfg.Timeouts.DefaultWriteTimeoutSeconds > 0 {
 		writeTimeout = time.Duration(deviceCfg.Timeouts.DefaultWriteTimeoutSeconds) * time.Second
 	} else {
-		writeTimeout = readTimeout // 向后兼容，如果未配置则使用读超时
+		writeTimeout = readTimeout // 如果未配置则使用读超时
 	}
 
 	keepAliveTimeout := time.Duration(deviceCfg.HeartbeatIntervalSeconds) * time.Second
@@ -138,22 +144,75 @@ func (s *TCPServer) setupConnectionHooks() {
 		keepAliveTimeout, // KeepAlive周期
 	)
 
-	// 设置连接建立回调 - 使用统一架构
+	// 设置连接建立回调 - 使用DataBus事件架构
 	connectionHooks.SetOnConnectionEstablishedFunc(func(conn ziface.IConnection) {
-		// 🔧 使用统一架构：统一处理连接建立
-		pkg.GetUnifiedSystem().HandleConnectionEstablished(conn)
+		// 🔧 使用DataBus：发布设备数据
+		if s.dataBus != nil {
+			deviceData := &databus.DeviceData{
+				DeviceID:    "", // 将在协议解析后设置
+				ConnID:      conn.GetConnID(),
+				RemoteAddr:  conn.GetConnection().RemoteAddr().String(),
+				ConnectedAt: time.Now(),
+				CreatedAt:   time.Now(),
+				UpdatedAt:   time.Now(),
+			}
 
-		// 🔧 使用统一架构：连接活动时间由统一架构管理
-		// 旧的心跳管理器已被统一架构替代
+			ctx := context.Background()
+			s.dataBus.PublishDeviceData(ctx, "", deviceData)
+		}
+
+		logger.WithFields(logrus.Fields{
+			"connId": conn.GetConnID(),
+			"remote": conn.GetConnection().RemoteAddr().String(),
+		}).Info("新设备连接建立")
 	})
 
-	// 设置连接关闭回调 - 使用统一架构
+	// 设置连接关闭回调 - 使用DataBus事件架构
 	connectionHooks.SetOnConnectionClosedFunc(func(conn ziface.IConnection) {
-		// 🔧 使用统一架构：统一处理连接关闭
-		pkg.GetUnifiedSystem().HandleConnectionClosed(conn)
+		// 🔧 使用DataBus：发布设备数据更新
+		if s.dataBus != nil {
+			deviceData := &databus.DeviceData{
+				DeviceID:  "", // 从连接属性获取
+				ConnID:    conn.GetConnID(),
+				UpdatedAt: time.Now(),
+			}
 
-		// 🔧 使用统一架构：连接清理由统一架构管理
-		// 旧的心跳管理器已被统一架构替代
+			// 尝试从连接属性获取设备ID
+			deviceID, _ := conn.GetProperty(constants.PropKeyDeviceId)
+			if id, ok := deviceID.(string); ok {
+				deviceData.DeviceID = id
+			}
+
+			ctx := context.Background()
+			s.dataBus.PublishDeviceData(ctx, deviceData.DeviceID, deviceData)
+		}
+
+		logger.WithFields(logrus.Fields{
+			"connId": conn.GetConnID(),
+		}).Info("设备连接关闭")
+	}) // 设置连接关闭回调 - 使用DataBus事件架构
+	connectionHooks.SetOnConnectionClosedFunc(func(conn ziface.IConnection) {
+		// 🔧 使用DataBus：发布连接关闭事件
+		if s.dataBus != nil {
+			deviceData := &databus.DeviceData{
+				DeviceID:  "", // 从连接属性获取
+				ConnID:    conn.GetConnID(),
+				UpdatedAt: time.Now(),
+			}
+
+			// 尝试从连接属性获取设备ID
+			deviceID, _ := conn.GetProperty(constants.PropKeyDeviceId)
+			if id, ok := deviceID.(string); ok {
+				deviceData.DeviceID = id
+			}
+
+			ctx := context.Background()
+			s.dataBus.PublishDeviceData(ctx, deviceData.DeviceID, deviceData)
+		}
+
+		logger.WithFields(logrus.Fields{
+			"connId": conn.GetConnID(),
+		}).Info("设备连接关闭")
 	})
 
 	// 设置连接钩子到服务器
@@ -208,29 +267,10 @@ func (s *TCPServer) startHeartbeatManager() {
 
 // startMaintenanceTasks 启动维护任务（优先级2和3的定期清理）
 func (s *TCPServer) startMaintenanceTasks() {
-	// 🚀 优先级2：启动设备注册状态清理任务
-	go s.startRegistrationCleanupTask()
-
-	// 🚀 优先级3：启动连接健康指标清理任务
+	// 🚀 启动连接健康指标清理任务
 	go s.startConnectionHealthCleanupTask()
 
-	logger.Info("✅ 维护任务已启动（注册状态清理 + 连接健康清理）")
-}
-
-// startRegistrationCleanupTask 启动设备注册状态清理任务
-func (s *TCPServer) startRegistrationCleanupTask() {
-	ticker := time.NewTicker(30 * time.Minute) // 每30分钟清理一次
-	defer ticker.Stop()
-
-	for {
-		select {
-		case <-ticker.C:
-			// 获取设备注册处理器并执行清理
-			if handler := s.getDeviceRegisterHandler(); handler != nil {
-				handler.CleanupExpiredStates()
-			}
-		}
-	}
+	logger.Info("✅ 维护任务已启动（连接健康清理）")
 }
 
 // startConnectionHealthCleanupTask 启动连接健康指标清理任务
@@ -248,16 +288,6 @@ func (s *TCPServer) startConnectionHealthCleanupTask() {
 			}
 		}
 	}
-}
-
-// getDeviceRegisterHandler 获取设备注册处理器实例
-func (s *TCPServer) getDeviceRegisterHandler() interface {
-	CleanupExpiredStates()
-} {
-	// 这里需要实现获取处理器的逻辑
-	// 由于处理器是注册到路由中的，我们可能需要通过其他方式访问
-	// 为了简化，我们直接创建一个新实例来执行清理
-	return &handlers.DeviceRegisterHandler{}
 }
 
 // startServer 启动服务器并等待

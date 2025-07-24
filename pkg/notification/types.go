@@ -92,9 +92,6 @@ const (
 	EventTypePortOnline       = "port_online"        // 端口上线
 	EventTypePortOffline      = "port_offline"       // 端口离线
 	EventTypePortHeartbeat    = "port_heartbeat"     // 端口心跳状态
-
-	// 状态事件 (废弃，使用更具体的端口状态事件)
-	EventTypeStatusChange = "status_change" // 状态变化
 )
 
 // 端点类型常量
