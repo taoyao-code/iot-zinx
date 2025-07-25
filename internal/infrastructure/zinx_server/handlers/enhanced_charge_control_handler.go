@@ -154,9 +154,9 @@ func (h *EnhancedChargeControlHandler) handleWithNewAdapter(request ziface.IRequ
 
 // extractProtocolMessage 从请求中提取协议消息
 func (h *EnhancedChargeControlHandler) extractProtocolMessage(request ziface.IRequest) (interface{}, error) {
-	// 获取解码后的DNY帧
+	// 获取解码后的DNY消息
 	conn := request.GetConnection()
-	frameData, err := conn.GetProperty("decoded_dny_frame")
+	frameData, err := conn.GetProperty("dny_message")
 	if err != nil {
 		return nil, fmt.Errorf("未找到解码后的协议帧: %v", err)
 	}
@@ -195,7 +195,7 @@ func (h *EnhancedChargeControlHandler) parseChargeCommandType(request ziface.IRe
 
 	// 示例实现：从连接属性或消息内容中解析
 	conn := request.GetConnection()
-	frameData, err := conn.GetProperty("decoded_dny_frame")
+	frameData, err := conn.GetProperty("dny_message")
 	if err != nil {
 		return ChargeCommandUnknown
 	}

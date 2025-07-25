@@ -110,9 +110,9 @@ func (h *EnhancedHeartbeatHandler) handleWithEnhancedAdapter(request ziface.IReq
 
 // extractProtocolMessage 从请求中提取协议消息
 func (h *EnhancedHeartbeatHandler) extractProtocolMessage(request ziface.IRequest) (interface{}, error) {
-	// 获取解码后的DNY帧
+	// 获取解码后的DNY消息
 	conn := request.GetConnection()
-	frameData, err := conn.GetProperty("decoded_dny_frame")
+	frameData, err := conn.GetProperty("dny_message")
 	if err != nil {
 		return nil, fmt.Errorf("未找到解码后的协议帧: %v", err)
 	}
