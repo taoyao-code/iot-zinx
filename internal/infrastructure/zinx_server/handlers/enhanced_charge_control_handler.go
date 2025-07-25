@@ -7,15 +7,16 @@ import (
 	"time"
 
 	"github.com/aceld/zinx/ziface"
-	"github.com/bujia-iot/iot-zinx/internal/domain/dny_protocol"
 	"github.com/bujia-iot/iot-zinx/pkg/databus"
 	"github.com/bujia-iot/iot-zinx/pkg/databus/adapters"
+	"github.com/bujia-iot/iot-zinx/pkg/protocol"
 	"github.com/sirupsen/logrus"
 )
 
 // EnhancedChargeControlHandler 重构后的充电控制处理Handler
 // Phase 2.2.3 - 使用协议数据适配器重构充电控制处理
 type EnhancedChargeControlHandler struct {
+	protocol.DNYFrameHandlerBase
 	logger          *logrus.Logger
 	dataBus         databus.DataBus
 	protocolAdapter *adapters.ProtocolDataAdapter
@@ -127,15 +128,9 @@ func (h *EnhancedChargeControlHandler) Handle(request ziface.IRequest) {
 // handleWithNewAdapter 使用新适配器处理充电控制
 func (h *EnhancedChargeControlHandler) handleWithNewAdapter(request ziface.IRequest, commandType ChargeCommandType) error {
 	// 从请求中提取DNY消息
-	msg, err := h.extractProtocolMessage(request)
+	dnyMsg, err := h.ExtractUnifiedMessage(request)
 	if err != nil {
 		return fmt.Errorf("提取协议消息失败: %v", err)
-	}
-
-	// 类型断言为*dny_protocol.Message
-	dnyMsg, ok := msg.(*dny_protocol.Message)
-	if !ok {
-		return fmt.Errorf("协议消息类型错误")
 	}
 
 	// 使用协议数据适配器处理
@@ -150,25 +145,6 @@ func (h *EnhancedChargeControlHandler) handleWithNewAdapter(request ziface.IRequ
 	}
 
 	return nil
-}
-
-// extractProtocolMessage 从请求中提取协议消息
-func (h *EnhancedChargeControlHandler) extractProtocolMessage(request ziface.IRequest) (interface{}, error) {
-	// 从请求的响应数据中获取DNY消息（由解码器设置）
-	if responseData := request.GetResponse(); responseData != nil {
-		return responseData, nil
-	}
-
-	// 如果响应数据为空，尝试从请求属性获取
-	if req, ok := request.(interface {
-		GetProperty(key string) (interface{}, error)
-	}); ok {
-		if frameData, err := req.GetProperty("dny_message"); err == nil && frameData != nil {
-			return frameData, nil
-		}
-	}
-
-	return nil, fmt.Errorf("未找到解码后的协议帧")
 }
 
 // sendResponse 发送响应数据
@@ -196,36 +172,24 @@ func (h *EnhancedChargeControlHandler) parseChargeCommandType(request ziface.IRe
 	// 这里需要根据实际的DNY协议格式解析命令类型
 	// 目前返回未知类型，实际实现需要解析消息内容
 
-	// 示例实现：从请求响应数据或属性中解析
-	var frameData interface{}
-	if responseData := request.GetResponse(); responseData != nil {
-		frameData = responseData
-	} else if req, ok := request.(interface {
-		GetProperty(key string) (interface{}, error)
-	}); ok {
-		if data, err := req.GetProperty("dny_message"); err == nil {
-			frameData = data
-		}
-	}
-
-	if frameData == nil {
+	// 示例实现：从请求中提取DNY消息
+	dnyMsg, err := h.ExtractUnifiedMessage(request)
+	if err != nil {
 		return ChargeCommandUnknown
 	}
 
-	if dnyMsg, ok := frameData.(*dny_protocol.Message); ok {
-		// 根据DNY协议的命令字段判断
-		// 这里需要根据实际协议格式实现
-		if len(dnyMsg.Data) > 0 {
-			switch dnyMsg.Data[0] {
-			case 0x01: // 假设0x01表示开始充电
-				return ChargeCommandStart
-			case 0x02: // 假设0x02表示停止充电
-				return ChargeCommandStop
-			case 0x03: // 假设0x03表示查询状态
-				return ChargeCommandStatus
-			default:
-				return ChargeCommandUnknown
-			}
+	// 根据DNY协议的命令字段判断
+	// 这里需要根据实际协议格式实现
+	if len(dnyMsg.Data) > 0 {
+		switch dnyMsg.Data[0] {
+		case 0x01: // 假设0x01表示开始充电
+			return ChargeCommandStart
+		case 0x02: // 假设0x02表示停止充电
+			return ChargeCommandStop
+		case 0x03: // 假设0x03表示查询状态
+			return ChargeCommandStatus
+		default:
+			return ChargeCommandUnknown
 		}
 	}
 

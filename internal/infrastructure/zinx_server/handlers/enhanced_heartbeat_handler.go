@@ -5,15 +5,16 @@ import (
 	"time"
 
 	"github.com/aceld/zinx/ziface"
-	"github.com/bujia-iot/iot-zinx/internal/domain/dny_protocol"
 	"github.com/bujia-iot/iot-zinx/pkg/databus"
 	"github.com/bujia-iot/iot-zinx/pkg/databus/adapters"
+	"github.com/bujia-iot/iot-zinx/pkg/protocol"
 	"github.com/sirupsen/logrus"
 )
 
 // EnhancedHeartbeatHandler 重构后的心跳处理Handler - Enhanced Only
 // Phase 2.x - 纯Enhanced架构，统一使用协议数据适配器
 type EnhancedHeartbeatHandler struct {
+	protocol.DNYFrameHandlerBase
 	logger          *logrus.Logger
 	dataBus         databus.DataBus
 	protocolAdapter *adapters.ProtocolDataAdapter
@@ -83,15 +84,9 @@ func (h *EnhancedHeartbeatHandler) Handle(request ziface.IRequest) {
 // handleWithEnhancedAdapter 使用Enhanced适配器处理心跳
 func (h *EnhancedHeartbeatHandler) handleWithEnhancedAdapter(request ziface.IRequest) error {
 	// 从请求中提取DNY消息
-	msg, err := h.extractProtocolMessage(request)
+	dnyMsg, err := h.ExtractUnifiedMessage(request)
 	if err != nil {
 		return fmt.Errorf("提取协议消息失败: %v", err)
-	}
-
-	// 类型断言为*dny_protocol.Message
-	dnyMsg, ok := msg.(*dny_protocol.Message)
-	if !ok {
-		return fmt.Errorf("协议消息类型错误")
 	}
 
 	// 使用协议数据适配器处理
@@ -106,25 +101,6 @@ func (h *EnhancedHeartbeatHandler) handleWithEnhancedAdapter(request ziface.IReq
 	}
 
 	return nil
-}
-
-// extractProtocolMessage 从请求中提取协议消息
-func (h *EnhancedHeartbeatHandler) extractProtocolMessage(request ziface.IRequest) (interface{}, error) {
-	// 从请求的响应数据中获取DNY消息（由解码器设置）
-	if responseData := request.GetResponse(); responseData != nil {
-		return responseData, nil
-	}
-
-	// 如果响应数据为空，尝试从请求属性获取
-	if req, ok := request.(interface {
-		GetProperty(key string) (interface{}, error)
-	}); ok {
-		if frameData, err := req.GetProperty("dny_message"); err == nil && frameData != nil {
-			return frameData, nil
-		}
-	}
-
-	return nil, fmt.Errorf("未找到解码后的协议帧")
 }
 
 // sendResponse 发送响应数据
