@@ -154,18 +154,21 @@ func (h *EnhancedChargeControlHandler) handleWithNewAdapter(request ziface.IRequ
 
 // extractProtocolMessage 从请求中提取协议消息
 func (h *EnhancedChargeControlHandler) extractProtocolMessage(request ziface.IRequest) (interface{}, error) {
-	// 获取解码后的DNY消息
-	conn := request.GetConnection()
-	frameData, err := conn.GetProperty("dny_message")
-	if err != nil {
-		return nil, fmt.Errorf("未找到解码后的协议帧: %v", err)
+	// 从请求的响应数据中获取DNY消息（由解码器设置）
+	if responseData := request.GetResponse(); responseData != nil {
+		return responseData, nil
 	}
 
-	if frameData == nil {
-		return nil, fmt.Errorf("协议帧数据为空")
+	// 如果响应数据为空，尝试从请求属性获取
+	if req, ok := request.(interface {
+		GetProperty(key string) (interface{}, error)
+	}); ok {
+		if frameData, err := req.GetProperty("dny_message"); err == nil && frameData != nil {
+			return frameData, nil
+		}
 	}
 
-	return frameData, nil
+	return nil, fmt.Errorf("未找到解码后的协议帧")
 }
 
 // sendResponse 发送响应数据
@@ -193,10 +196,19 @@ func (h *EnhancedChargeControlHandler) parseChargeCommandType(request ziface.IRe
 	// 这里需要根据实际的DNY协议格式解析命令类型
 	// 目前返回未知类型，实际实现需要解析消息内容
 
-	// 示例实现：从连接属性或消息内容中解析
-	conn := request.GetConnection()
-	frameData, err := conn.GetProperty("dny_message")
-	if err != nil {
+	// 示例实现：从请求响应数据或属性中解析
+	var frameData interface{}
+	if responseData := request.GetResponse(); responseData != nil {
+		frameData = responseData
+	} else if req, ok := request.(interface {
+		GetProperty(key string) (interface{}, error)
+	}); ok {
+		if data, err := req.GetProperty("dny_message"); err == nil {
+			frameData = data
+		}
+	}
+
+	if frameData == nil {
 		return ChargeCommandUnknown
 	}
 
