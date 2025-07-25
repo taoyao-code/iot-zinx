@@ -48,9 +48,9 @@ func (d *DeviceData) Validate() error {
 		return fmt.Errorf("iccid is required")
 	}
 
-	// 验证ICCID格式（19-20位十六进制字符，符合ITU-T E.118标准）
-	if matched, _ := regexp.MatchString(`^[0-9A-Fa-f]{19,20}$`, d.ICCID); !matched {
-		return fmt.Errorf("iccid must be 19-20 character hexadecimal string")
+	// 验证ICCID格式（固定20位十六进制字符，符合ITU-T E.118标准，必须以89开头）
+	if matched, _ := regexp.MatchString(`^89[0-9A-Fa-f]{18}$`, d.ICCID); !matched {
+		return fmt.Errorf("iccid must be exactly 20 character hexadecimal string starting with '89'")
 	}
 
 	if d.ConnID == 0 {
