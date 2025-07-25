@@ -118,6 +118,10 @@ func (s *TCPServer) registerRoutes() {
 
 // initializePackageDependencies 初始化包依赖关系，使用Enhanced架构
 func (s *TCPServer) initializePackageDependencies() {
+	// 初始化全局发送器
+	network.InitGlobalSender()
+	logger.Info("全局发送器已初始化")
+
 	// Enhanced架构使用DataBus进行初始化，无需额外的包依赖初始化
 	logger.Info("Enhanced架构依赖已就绪")
 }
