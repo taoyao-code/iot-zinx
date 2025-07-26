@@ -9,7 +9,6 @@ import (
 	"time"
 
 	"github.com/aceld/zinx/ziface"
-	"github.com/bujia-iot/iot-zinx/internal/domain/dny_protocol"
 	"github.com/bujia-iot/iot-zinx/internal/infrastructure/logger"
 	"github.com/bujia-iot/iot-zinx/pkg/constants"
 	"github.com/bujia-iot/iot-zinx/pkg/network"
@@ -386,22 +385,22 @@ func NeedConfirmation(command uint8) bool {
 	}
 
 	// 心跳类命令不需要确认（兼容性检查）
-	if command == dny_protocol.CmdHeartbeat ||
-		command == uint8(dny_protocol.CmdDeviceHeart) ||
-		command == dny_protocol.CmdMainHeartbeat ||
-		command == dny_protocol.CmdDeviceHeart {
+	if command == constants.CmdHeartbeat ||
+		command == uint8(constants.CmdDeviceHeart) ||
+		command == constants.CmdMainHeartbeat ||
+		command == constants.CmdDeviceHeart {
 		return false
 	}
 
 	// 根据协议规范，以下命令服务器不需要应答（兼容性检查）
-	if command == dny_protocol.CmdMainHeartbeat || // 0x11 主机状态心跳包
-		command == dny_protocol.CmdDeviceVersion || // 0x35 上传分机版本号与设备类型
-		command == dny_protocol.CmdNetworkStatus { // 0x81 查询设备联网状态
+	if command == constants.CmdMainHeartbeat || // 0x11 主机状态心跳包
+		command == constants.CmdDeviceVersion || // 0x35 上传分机版本号与设备类型
+		command == constants.CmdNetworkStatus { // 0x81 查询设备联网状态
 		return false
 	}
 
 	// 充电控制命令需要确认
-	if command == dny_protocol.CmdChargeControl {
+	if command == constants.CmdChargeControl {
 		return true
 	}
 

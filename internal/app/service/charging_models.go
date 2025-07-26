@@ -2,6 +2,8 @@ package service
 
 import (
 	"time"
+
+	"github.com/sirupsen/logrus"
 )
 
 // ChargingRequest 充电请求结构体
@@ -76,12 +78,18 @@ func GetUnifiedChargingService() *EnhancedChargingService {
 	if globalUnifiedChargingService == nil {
 		// 创建默认的充电服务（使用临时配置）
 		config := DefaultEnhancedChargingConfig()
+
+		// 创建logger实例
+		logger := logrus.New()
+		logger.SetLevel(logrus.InfoLevel)
+
 		globalUnifiedChargingService = &EnhancedChargingService{
 			responseTracker: GetGlobalCommandTracker(),
 			config:          config,
 			subscriptions:   make(map[string]interface{}),
 			sessions:        make(map[string]*ChargingSession),
 			stats:           &ChargingServiceStats{},
+			logger:          logger, // 添加logger初始化
 		}
 	}
 	return globalUnifiedChargingService

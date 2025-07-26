@@ -31,7 +31,7 @@ type ServiceManager struct {
 func GetServiceManager() *ServiceManager {
 	once.Do(func() {
 		serviceManager = &ServiceManager{
-			DeviceService: service.NewDeviceService(),
+			DeviceService: service.NewEnhancedDeviceService(),
 			// 初始化其他服务
 		}
 	})

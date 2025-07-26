@@ -105,14 +105,27 @@ const (
 	StatusSuccess = 0x00 // 成功
 	StatusError   = 0xFF // 错误
 
+	// 充电控制命令码（0x82命令数据部分）
+	ChargeCommandStop  = 0x00 // 停止充电
+	ChargeCommandStart = 0x01 // 开始充电
+	ChargeCommandQuery = 0x03 // 查询状态
+
 	// 充电控制状态码（0x82命令响应）
-	ChargeStatusSuccess          = 0x00 // 成功
-	ChargeStatusNoCharger        = 0x01 // 端口未插充电器
-	ChargeStatusSameState        = 0x02 // 端口状态相同
-	ChargeStatusPortFault        = 0x03 // 端口故障
-	ChargeStatusInvalidPort      = 0x04 // 无此端口号
-	ChargeStatusPowerOverload    = 0x05 // 多路设备功率超标
-	ChargeStatusStorageCorrupted = 0x06 // 存储器损坏
+	ChargeStatusSuccess           = 0x00 // 成功
+	ChargeStatusNoCharger         = 0x01 // 端口未插充电器
+	ChargeStatusSameState         = 0x02 // 端口状态相同
+	ChargeStatusPortFault         = 0x03 // 端口故障
+	ChargeStatusInvalidPort       = 0x04 // 无此端口号
+	ChargeStatusPowerOverload     = 0x05 // 多路设备功率超标
+	ChargeStatusStorageCorrupted  = 0x06 // 存储器损坏
+	ChargeStatusMultipleWaitPorts = 0x07 // 有多个待充端口
+	ChargeStatusRelayFault        = 0x08 // 继电器坏或保险丝断
+	ChargeStatusRelayStuck        = 0x09 // 继电器粘连
+	ChargeStatusShortCircuit      = 0x0A // 负载短路
+	ChargeStatusSmokeAlarm        = 0x0B // 烟感报警
+	ChargeStatusOverVoltage       = 0x0C // 过压
+	ChargeStatusUnderVoltage      = 0x0D // 欠压
+	ChargeStatusNoResponse        = 0x0E // 未响应
 
 	// 🔧 修复：设备状态定义已在 status.go 中定义，删除重复定义
 

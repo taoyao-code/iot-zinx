@@ -79,18 +79,15 @@ func (adapter *DeviceRegisterAdapter) HandleRequest(request ziface.IRequest) err
 
 // extractProtocolMessage 从Zinx请求中提取协议消息
 func (adapter *DeviceRegisterAdapter) extractProtocolMessage(request ziface.IRequest) (*dny_protocol.Message, error) {
-	// 从请求中获取统一消息对象
-	if req, ok := request.(interface {
-		GetProperty(key string) (interface{}, error)
-	}); ok {
-		if msgProp, err := req.GetProperty("dny_message"); err == nil && msgProp != nil {
-			if msg, ok := msgProp.(*dny_protocol.Message); ok {
-				return msg, nil
-			}
+	// 1. 尝试从责任链的附加数据中获取已解析的 *dny_protocol.Message
+	// DNY_Decoder应该通过chain.ProceedWithIMessage传递解码后的统一消息对象
+	if attachedData := request.GetResponse(); attachedData != nil {
+		if unifiedMsg, ok := attachedData.(*dny_protocol.Message); ok {
+			return unifiedMsg, nil
 		}
 	}
 
-	// 如果无法从属性获取，尝试直接解析数据
+	// 2. 如果没有找到附加数据，尝试直接解析数据
 	rawData := request.GetData()
 	if len(rawData) == 0 {
 		return nil, fmt.Errorf("请求数据为空")
@@ -113,7 +110,7 @@ func (adapter *DeviceRegisterAdapter) sendResponse(conn ziface.IConnection, orig
 			conn,
 			originalMsg.PhysicalId,
 			originalMsg.MessageId,
-			dny_protocol.CmdDeviceRegister,
+			constants.CmdDeviceRegister,
 			responseData,
 		)
 	}

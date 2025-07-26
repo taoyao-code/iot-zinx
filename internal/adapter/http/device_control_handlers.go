@@ -6,6 +6,8 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/aceld/zinx/ziface"
+	"github.com/bujia-iot/iot-zinx/internal/app/service"
 	"github.com/bujia-iot/iot-zinx/internal/infrastructure/logger"
 	"github.com/bujia-iot/iot-zinx/pkg/constants"
 	"github.com/bujia-iot/iot-zinx/pkg/network"
@@ -16,12 +18,24 @@ import (
 // DeviceControlHandlers 设备控制API处理器
 type DeviceControlHandlers struct {
 	commandManager *network.CommandManager
+	deviceService  service.DeviceServiceInterface
 }
 
 // NewDeviceControlHandlers 创建设备控制API处理器
 func NewDeviceControlHandlers() *DeviceControlHandlers {
+	// 获取全局处理器上下文中的设备服务
+	ctx := GetGlobalHandlerContext()
+	var deviceService service.DeviceServiceInterface
+	if ctx != nil && ctx.DeviceService != nil {
+		deviceService = ctx.DeviceService
+	} else {
+		// 如果没有设备服务，创建增强设备服务
+		deviceService = service.NewEnhancedDeviceService()
+	}
+
 	return &DeviceControlHandlers{
 		commandManager: network.GetCommandManager(),
+		deviceService:  deviceService,
 	}
 }
 
@@ -492,21 +506,24 @@ func (h *DeviceControlHandlers) validateMaxTimeAndPowerRequest(req *MaxTimeAndPo
 }
 
 // getDeviceConnection 获取设备连接
-func (h *DeviceControlHandlers) getDeviceConnection(deviceID string) (interface{}, error) {
-	// 这里应该从连接管理器获取设备连接
-	// 暂时简化实现，直接返回成功
-	// 在实际实现中，应该检查设备是否在线
+func (h *DeviceControlHandlers) getDeviceConnection(deviceID string) (ziface.IConnection, error) {
+	// 检查设备服务是否可用
+	if h.deviceService == nil {
+		return nil, fmt.Errorf("设备服务未初始化")
+	}
 
-	// TODO: 实现真正的设备连接检查
-	// monitor := network.GetConnectionMonitor()
-	// if monitor == nil {
-	//     return nil, fmt.Errorf("连接监控器不可用")
-	// }
-	// if !monitor.IsDeviceOnline(deviceID) {
-	//     return nil, fmt.Errorf("设备 %s 未连接", deviceID)
-	// }
+	// 检查设备是否在线
+	if !h.deviceService.IsDeviceOnline(deviceID) {
+		return nil, fmt.Errorf("设备 %s 未连接或离线", deviceID)
+	}
 
-	return "mock_connection", nil
+	// 获取设备连接对象
+	conn, exists := h.deviceService.GetDeviceConnection(deviceID)
+	if !exists {
+		return nil, fmt.Errorf("无法获取设备 %s 的连接对象", deviceID)
+	}
+
+	return conn, nil
 }
 
 // sendCommand 发送命令到设备
@@ -517,26 +534,45 @@ func (h *DeviceControlHandlers) sendCommand(deviceID string, commandCode uint8, 
 		return "", fmt.Errorf("设备ID格式错误: %v", err)
 	}
 
-	// 生成命令ID用于跟踪
-	commandID := fmt.Sprintf("CMD_%s_%02X_%d", deviceID, commandCode, time.Now().Unix())
+	// 获取设备连接
+	conn, err := h.getDeviceConnection(deviceID)
+	if err != nil {
+		return "", fmt.Errorf("获取设备连接失败: %v", err)
+	}
 
-	// TODO: 实现真正的命令发送逻辑
-	// 这里需要：
-	// 1. 获取设备连接
-	// 2. 生成消息ID
-	// 3. 构建协议帧
-	// 4. 发送到设备
-	// 5. 注册到命令管理器等待响应
+	// 生成消息ID
+	messageID := h.generateMessageID()
+
+	// 生成命令ID用于跟踪
+	commandID := fmt.Sprintf("CMD_%s_%02X_%04X_%d", deviceID, commandCode, messageID, time.Now().Unix())
+
+	// 使用统一发送器发送DNY命令
+	err = network.SendCommand(conn, physicalID, messageID, commandCode, data)
+	if err != nil {
+		return "", fmt.Errorf("发送命令失败: %v", err)
+	}
+
+	// 注册到命令管理器等待响应
+	if h.commandManager != nil {
+		h.commandManager.RegisterCommand(conn, physicalID, messageID, commandCode, data)
+	}
 
 	logger.WithFields(logrus.Fields{
 		"deviceID":   deviceID,
 		"physicalID": fmt.Sprintf("0x%08X", physicalID),
 		"command":    fmt.Sprintf("0x%02X", commandCode),
+		"messageID":  fmt.Sprintf("0x%04X", messageID),
 		"commandID":  commandID,
 		"dataLen":    len(data),
-	}).Info("模拟发送命令到设备")
+	}).Info("发送命令到设备")
 
 	return commandID, nil
+}
+
+// generateMessageID 生成消息ID
+func (h *DeviceControlHandlers) generateMessageID() uint16 {
+	// 使用时间戳的低16位作为消息ID，确保在短时间内的唯一性
+	return uint16(time.Now().UnixNano() & 0xFFFF)
 }
 
 // parseDeviceID 解析设备ID

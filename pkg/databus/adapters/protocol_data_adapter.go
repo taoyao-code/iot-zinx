@@ -84,8 +84,12 @@ func (p *ProtocolDataAdapter) processStandardMessage(ctx context.Context, msg *d
 	switch msg.CommandId {
 	case constants.CmdDeviceRegister:
 		return p.processDeviceRegister(ctx, msg, conn)
+	case constants.CmdDeviceHeart:
+		return p.processDeviceHeartbeat(ctx, msg, conn)
 	case constants.CmdChargeControl:
 		return p.processChargeControl(ctx, msg, conn)
+	case constants.CmdPortPowerHeartbeat:
+		return p.processPortPowerHeartbeat(ctx, msg, conn)
 	default:
 		// 未知命令，记录但不报错
 		return p.processUnknownCommand(ctx, msg, conn)
@@ -134,6 +138,73 @@ func (p *ProtocolDataAdapter) processDeviceRegister(ctx context.Context, msg *dn
 			"iccid":      deviceData.ICCID,
 			"event_type": "device_register",
 		},
+	}, nil
+}
+
+// processDeviceHeartbeat 处理设备心跳 (0x21)
+func (p *ProtocolDataAdapter) processDeviceHeartbeat(ctx context.Context, msg *dny_protocol.Message, conn ziface.IConnection) (*ProcessResult, error) {
+	// 更新设备最后活动时间
+	// 发布心跳协议数据到DataBus
+	protocolData := &databus.ProtocolData{
+		ConnID:    conn.GetConnID(),
+		DeviceID:  fmt.Sprintf("%08X", msg.PhysicalId),
+		Direction: "ingress",
+		RawBytes:  msg.RawData,
+		Command:   uint8(msg.CommandId),
+		MessageID: msg.MessageId,
+		Payload:   msg.Data,
+		ParsedData: map[string]interface{}{
+			"message_type": msg.MessageType,
+			"command_id":   msg.CommandId,
+			"physical_id":  msg.PhysicalId,
+		},
+		Timestamp:   time.Now(),
+		ProcessedAt: time.Now(),
+		Status:      "processed",
+		Version:     1,
+	}
+
+	if err := p.dataBus.PublishProtocolData(ctx, conn.GetConnID(), protocolData); err != nil {
+		p.logger.WithError(err).Warn("发布心跳协议数据失败")
+	}
+
+	return &ProcessResult{
+		Success:       true,
+		ShouldRespond: false,
+		Message:       "设备心跳处理完成",
+	}, nil
+}
+
+// processPortPowerHeartbeat 处理端口功率心跳 (0x26)
+func (p *ProtocolDataAdapter) processPortPowerHeartbeat(ctx context.Context, msg *dny_protocol.Message, conn ziface.IConnection) (*ProcessResult, error) {
+	// 发布端口功率协议数据到DataBus
+	protocolData := &databus.ProtocolData{
+		ConnID:    conn.GetConnID(),
+		DeviceID:  fmt.Sprintf("%08X", msg.PhysicalId),
+		Direction: "ingress",
+		RawBytes:  msg.RawData,
+		Command:   uint8(msg.CommandId),
+		MessageID: msg.MessageId,
+		Payload:   msg.Data,
+		ParsedData: map[string]interface{}{
+			"message_type": msg.MessageType,
+			"command_id":   msg.CommandId,
+			"physical_id":  msg.PhysicalId,
+		},
+		Timestamp:   time.Now(),
+		ProcessedAt: time.Now(),
+		Status:      "processed",
+		Version:     1,
+	}
+
+	if err := p.dataBus.PublishProtocolData(ctx, conn.GetConnID(), protocolData); err != nil {
+		p.logger.WithError(err).Warn("发布端口功率协议数据失败")
+	}
+
+	return &ProcessResult{
+		Success:       true,
+		ShouldRespond: false,
+		Message:       "端口功率心跳处理完成",
 	}, nil
 }
 
