@@ -32,6 +32,12 @@ func NewDeviceRegisterAdapter(dataBus databus.DataBus) *DeviceRegisterAdapter {
 func (adapter *DeviceRegisterAdapter) HandleRequest(request ziface.IRequest) error {
 	conn := request.GetConnection()
 
+	// 🔧 增加安全检查，防止空指针
+	if conn == nil {
+		adapter.logger.Error("连接对象为空")
+		return fmt.Errorf("连接对象为空")
+	}
+
 	// 从请求中提取协议消息
 	msg, err := adapter.extractProtocolMessage(request)
 	if err != nil {
@@ -42,6 +48,12 @@ func (adapter *DeviceRegisterAdapter) HandleRequest(request ziface.IRequest) err
 		return err
 	}
 
+	// 🔧 增加协议消息安全检查
+	if msg == nil {
+		adapter.logger.WithField("conn_id", conn.GetConnID()).Error("协议消息为空")
+		return fmt.Errorf("协议消息为空")
+	}
+
 	// 使用协议数据适配器处理消息
 	result, err := adapter.protocolAdapter.ProcessProtocolMessage(msg, conn)
 	if err != nil {
@@ -50,6 +62,12 @@ func (adapter *DeviceRegisterAdapter) HandleRequest(request ziface.IRequest) err
 			"error":   err.Error(),
 		}).Error("协议消息处理失败")
 		return err
+	}
+
+	// 🔧 增加结果安全检查
+	if result == nil {
+		adapter.logger.WithField("conn_id", conn.GetConnID()).Error("协议处理结果为空")
+		return fmt.Errorf("协议处理结果为空")
 	}
 
 	// 发送响应（如果需要）

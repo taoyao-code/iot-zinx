@@ -42,9 +42,17 @@ type ProcessResult struct {
 // NewProtocolDataAdapter 创建协议数据适配器
 func NewProtocolDataAdapter(dataBus databus.DataBus) *ProtocolDataAdapter {
 	adapter := &ProtocolDataAdapter{
-		dataBus:         dataBus,
-		logger:          logger.WithField("component", "ProtocolDataAdapter"),
-		responseHandler: network.GetGlobalResponseHandler(),
+		dataBus: dataBus,
+		logger:  logger.WithField("component", "ProtocolDataAdapter"),
+	}
+
+	// 🔧 安全初始化响应处理器，增加空指针检查
+	if responseHandler := network.GetGlobalResponseHandler(); responseHandler != nil {
+		adapter.responseHandler = responseHandler
+	} else {
+		// 如果全局响应处理器未初始化，创建一个临时的
+		adapter.logger.Warn("全局响应处理器未初始化，创建临时响应处理器")
+		adapter.responseHandler = network.NewResponseHandler()
 	}
 
 	return adapter
@@ -69,8 +77,13 @@ func (p *ProtocolDataAdapter) ProcessProtocolMessage(msg *dny_protocol.Message, 
 	// 获取设备ID
 	deviceID := fmt.Sprintf("%08X", msg.PhysicalId)
 
-	// 处理设备响应消息
-	p.responseHandler.HandleDeviceResponse(deviceID, msg)
+	// 🔧 安全调用响应处理器，防止空指针
+	if p.responseHandler != nil {
+		// 处理设备响应消息
+		p.responseHandler.HandleDeviceResponse(deviceID, msg)
+	} else {
+		p.logger.Warn("响应处理器为空，跳过响应处理")
+	}
 
 	// 根据消息类型路由到对应的处理器
 	switch msg.MessageType {
@@ -107,12 +120,28 @@ func (p *ProtocolDataAdapter) processStandardMessage(ctx context.Context, msg *d
 
 // processDeviceRegister 处理设备注册
 func (p *ProtocolDataAdapter) processDeviceRegister(ctx context.Context, msg *dny_protocol.Message, conn ziface.IConnection) (*ProcessResult, error) {
+	// 🔧 安全检查：防止空指针
+	if msg == nil {
+		return p.createErrorResult(fmt.Errorf("协议消息为空"))
+	}
+	if conn == nil {
+		return p.createErrorResult(fmt.Errorf("连接对象为空"))
+	}
+
+	// 🔧 安全获取远程地址，防止空指针
+	var remoteAddr string
+	if conn.RemoteAddr() != nil {
+		remoteAddr = conn.RemoteAddr().String()
+	} else {
+		remoteAddr = "unknown"
+	}
+
 	// 构建设备数据
 	deviceData := &databus.DeviceData{
 		DeviceID:    fmt.Sprintf("%08X", msg.PhysicalId),
 		PhysicalID:  msg.PhysicalId,
 		ConnID:      conn.GetConnID(),
-		RemoteAddr:  conn.RemoteAddr().String(),
+		RemoteAddr:  remoteAddr,
 		DeviceType:  1, // 默认设备类型
 		PortCount:   4, // 默认端口数量
 		ConnectedAt: time.Now(),

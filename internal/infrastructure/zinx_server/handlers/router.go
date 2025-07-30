@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/aceld/zinx/ziface"
+	"github.com/bujia-iot/iot-zinx/internal/app"
 	"github.com/bujia-iot/iot-zinx/pkg/databus"
 	"github.com/sirupsen/logrus"
 )
@@ -69,9 +70,15 @@ func createDefaultDataBus() databus.DataBus {
 		return nil
 	}
 
+	// 🔧 新增：将DataBus实例设置为全局实例
+	app.SetGlobalDataBus(dataBus)
+	logger.Info("DataBus实例已设置为全局实例")
+
 	logger.Info("DataBus实例创建并启动成功")
 	return dataBus
 }
+
+// getServiceManager 获取ServiceManager实例 - 已移除，使用全局DataBus注册表
 
 // RegisterEnhancedRouters 注册Enhanced Handler路由
 func RegisterEnhancedRouters(server ziface.IServer, dataBus databus.DataBus) error {

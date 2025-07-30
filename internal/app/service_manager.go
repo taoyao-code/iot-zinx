@@ -4,6 +4,7 @@ import (
 	"sync"
 
 	"github.com/bujia-iot/iot-zinx/internal/app/service"
+	"github.com/bujia-iot/iot-zinx/pkg/databus"
 	"github.com/redis/go-redis/v9"
 )
 
@@ -21,6 +22,9 @@ type ServiceManager struct {
 	// Redis客户端
 	redisClient *redis.Client
 
+	// DataBus实例
+	dataBus databus.DataBus
+
 	// 后续可以添加其他服务
 	// CardService *service.CardService
 	// OrderService *service.OrderService
@@ -36,6 +40,21 @@ func GetServiceManager() *ServiceManager {
 		}
 	})
 	return serviceManager
+}
+
+// SetDataBus 设置DataBus实例
+func (m *ServiceManager) SetDataBus(dataBus databus.DataBus) {
+	m.dataBus = dataBus
+
+	// 如果设备服务是 EnhancedDeviceService，则更新其DataBus引用
+	if enhancedService, ok := m.DeviceService.(*service.EnhancedDeviceService); ok {
+		enhancedService.SetDataBus(dataBus)
+	}
+}
+
+// GetDataBus 获取DataBus实例
+func (m *ServiceManager) GetDataBus() databus.DataBus {
+	return m.dataBus
 }
 
 // Init 初始化所有服务

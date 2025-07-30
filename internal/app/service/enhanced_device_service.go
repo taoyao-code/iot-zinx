@@ -4,12 +4,14 @@ import (
 	"context"
 	"fmt"
 	"strconv"
+	"sync"
 	"time"
 
 	"github.com/aceld/zinx/ziface"
 	"github.com/bujia-iot/iot-zinx/internal/domain/dny_protocol"
 	"github.com/bujia-iot/iot-zinx/internal/infrastructure/logger"
 	"github.com/bujia-iot/iot-zinx/pkg/constants"
+	"github.com/bujia-iot/iot-zinx/pkg/databus"
 	"github.com/bujia-iot/iot-zinx/pkg/network"
 	"github.com/bujia-iot/iot-zinx/pkg/session"
 	"github.com/sirupsen/logrus"
@@ -21,15 +23,39 @@ type EnhancedDeviceService struct {
 	sessionManager session.ISessionManager
 	logger         *logrus.Logger
 	responseWaiter *network.ResponseWaiter
+	dataBus        databus.DataBus
+	subscriptions  map[string]interface{}
+	subMutex       sync.RWMutex
 }
 
 // NewEnhancedDeviceService 创建增强设备服务
 func NewEnhancedDeviceService() *EnhancedDeviceService {
-	return &EnhancedDeviceService{
+	service := &EnhancedDeviceService{
 		sessionManager: session.GetGlobalSessionManager(),
 		logger:         logger.GetLogger(),
 		responseWaiter: network.GetGlobalResponseWaiter(),
+		subscriptions:  make(map[string]interface{}),
 	}
+
+	// 尝试获取DataBus实例
+	if dataBus := getGlobalDataBus(); dataBus != nil {
+		service.dataBus = dataBus
+		// 启动时订阅DataBus事件
+		go func() {
+			if err := service.subscribeToDataBusEvents(); err != nil {
+				service.logger.WithError(err).Error("订阅DataBus事件失败")
+			}
+		}()
+	}
+
+	return service
+}
+
+// getGlobalDataBus 获取全局DataBus实例（兼容性函数）
+func getGlobalDataBus() databus.DataBus {
+	// 从全局注册表获取DataBus实例
+	// 需要避免循环导入，使用延迟加载方式
+	return nil // 暂时返回nil，DataBus将通过SetDataBus方法设置
 }
 
 // GetDeviceStatus 获取设备状态
@@ -463,6 +489,148 @@ func (s *EnhancedDeviceService) saveSettlementData(record *SettlementRecord) err
 func (s *EnhancedDeviceService) sendSettlementNotification(deviceID string, record *SettlementRecord) {
 	// 这里可以集成通知服务发送结算通知
 	// 通过DataBus发布结算完成事件
+}
+
+// === DataBus 事件订阅方法 ===
+
+// subscribeToDataBusEvents 订阅DataBus事件
+func (s *EnhancedDeviceService) subscribeToDataBusEvents() error {
+	if s.dataBus == nil {
+		s.logger.Debug("DataBus未初始化，跳过事件订阅")
+		return nil
+	}
+
+	s.logger.Info("开始订阅DataBus设备事件")
+
+	// 订阅设备事件
+	if err := s.dataBus.SubscribeDeviceEvents(s.handleDeviceEvent); err != nil {
+		s.logger.WithError(err).Error("订阅设备事件失败")
+		return err
+	}
+
+	// 订阅状态变更事件
+	if err := s.dataBus.SubscribeStateChanges(s.handleStateChangeEvent); err != nil {
+		s.logger.WithError(err).Error("订阅状态变更事件失败")
+		return err
+	}
+
+	s.logger.Info("DataBus设备事件订阅完成")
+	return nil
+}
+
+// handleDeviceEvent 处理设备事件
+func (s *EnhancedDeviceService) handleDeviceEvent(event databus.DeviceEvent) {
+	s.logger.WithFields(logrus.Fields{
+		"event_type": event.Type,
+		"device_id":  event.DeviceID,
+		"timestamp":  event.Timestamp,
+	}).Debug("收到设备事件")
+
+	switch event.Type {
+	case "device.data.updated", "device_registered":
+		s.handleDeviceRegistrationEvent(event)
+	case "device_connected":
+		s.handleDeviceConnectedEvent(event)
+	case "device_disconnected":
+		s.handleDeviceDisconnectedEvent(event)
+	default:
+		s.logger.WithField("event_type", event.Type).Debug("未处理的设备事件类型")
+	}
+}
+
+// handleStateChangeEvent 处理状态变更事件
+func (s *EnhancedDeviceService) handleStateChangeEvent(event databus.StateChangeEvent) {
+	s.logger.WithFields(logrus.Fields{
+		"device_id": event.DeviceID,
+		"old_state": event.OldState,
+		"new_state": event.NewState,
+	}).Debug("收到状态变更事件")
+
+	// 同步状态到SessionManager
+	if s.sessionManager != nil && event.NewState != nil {
+		deviceID := event.DeviceID
+		if deviceSession, exists := s.sessionManager.GetSession(deviceID); exists {
+			// 更新设备会话的最后活动时间
+			if unifiedSession, ok := deviceSession.(*session.UnifiedSession); ok {
+				unifiedSession.UpdateActivity()
+			}
+		}
+	}
+}
+
+// handleDeviceRegistrationEvent 处理设备注册事件
+func (s *EnhancedDeviceService) handleDeviceRegistrationEvent(event databus.DeviceEvent) {
+	if event.Data == nil {
+		s.logger.WithField("device_id", event.DeviceID).Warn("设备注册事件数据为空")
+		return
+	}
+
+	deviceData := event.Data
+	s.logger.WithFields(logrus.Fields{
+		"device_id":   deviceData.DeviceID,
+		"physical_id": fmt.Sprintf("0x%08X", deviceData.PhysicalID),
+		"iccid":       deviceData.ICCID,
+		"conn_id":     deviceData.ConnID,
+		"remote_addr": deviceData.RemoteAddr,
+	}).Info("处理设备注册事件，同步到SessionManager")
+
+	// 确保SessionManager中有对应的设备会话
+	if s.sessionManager != nil {
+		// 通过设备ID查找会话，如果不存在则尝试通过ICCID查找
+		if _, exists := s.sessionManager.GetSession(deviceData.DeviceID); !exists {
+			s.logger.WithFields(logrus.Fields{
+				"device_id": deviceData.DeviceID,
+				"iccid":     deviceData.ICCID,
+			}).Info("SessionManager中未找到设备会话，尝试注册新设备")
+
+			// 注册设备到SessionManager
+			if err := s.sessionManager.RegisterDevice(
+				deviceData.DeviceID,
+				fmt.Sprintf("%08X", deviceData.PhysicalID),
+				deviceData.ICCID,
+				deviceData.DeviceVersion,
+				deviceData.DeviceType,
+				false, // directMode
+			); err != nil {
+				s.logger.WithFields(logrus.Fields{
+					"device_id": deviceData.DeviceID,
+					"error":     err.Error(),
+				}).Error("注册设备到SessionManager失败")
+			} else {
+				s.logger.WithField("device_id", deviceData.DeviceID).Info("设备已成功注册到SessionManager")
+			}
+		}
+	}
+}
+
+// handleDeviceConnectedEvent 处理设备连接事件
+func (s *EnhancedDeviceService) handleDeviceConnectedEvent(event databus.DeviceEvent) {
+	s.logger.WithField("device_id", event.DeviceID).Debug("处理设备连接事件")
+	// 可以在这里添加设备连接的特殊处理逻辑
+}
+
+// handleDeviceDisconnectedEvent 处理设备断开连接事件
+func (s *EnhancedDeviceService) handleDeviceDisconnectedEvent(event databus.DeviceEvent) {
+	s.logger.WithField("device_id", event.DeviceID).Debug("处理设备断开连接事件")
+	// 可以在这里添加设备断开连接的特殊处理逻辑
+}
+
+// === DataBus 管理方法 ===
+
+// SetDataBus 设置DataBus实例并启动事件订阅
+func (s *EnhancedDeviceService) SetDataBus(dataBus databus.DataBus) {
+	s.subMutex.Lock()
+	defer s.subMutex.Unlock()
+
+	s.dataBus = dataBus
+	if dataBus != nil {
+		s.logger.Info("设置DataBus实例，开始订阅事件")
+		go func() {
+			if err := s.subscribeToDataBusEvents(); err != nil {
+				s.logger.WithError(err).Error("订阅DataBus事件失败")
+			}
+		}()
+	}
 }
 
 // === 辅助方法 ===
