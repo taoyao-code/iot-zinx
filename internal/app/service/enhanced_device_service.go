@@ -97,11 +97,13 @@ func (s *EnhancedDeviceService) GetAllDevices() []DeviceInfo {
 			continue
 		}
 
+		// 🔧 修复：正确判断设备在线状态
+		state := deviceSession.GetState()
 		device := DeviceInfo{
 			DeviceID:      deviceID,
 			ICCID:         deviceSession.GetICCID(),
-			IsOnline:      deviceSession.GetState() == constants.StateRegistered,
-			Status:        s.mapStateToDeviceStatus(deviceSession.GetState()),
+			IsOnline:      state == constants.StateRegistered || state == constants.StateOnline,
+			Status:        s.mapStateToDeviceStatus(state),
 			RemoteAddr:    deviceSession.GetRemoteAddr(),
 			ConnectedAt:   deviceSession.GetConnectedAt(),
 			LastHeartbeat: deviceSession.GetLastHeartbeat(),
@@ -151,11 +153,13 @@ func (s *EnhancedDeviceService) GetDeviceConnectionInfo(deviceID string) (*Devic
 		return nil, fmt.Errorf("设备 %s 不存在", deviceID)
 	}
 
+	// 🔧 修复：正确判断设备在线状态
+	state := deviceSession.GetState()
 	info := &DeviceConnectionInfo{
 		DeviceID:      deviceID,
 		ICCID:         deviceSession.GetICCID(),
-		IsOnline:      deviceSession.GetState() == constants.StateRegistered,
-		Status:        s.mapStateToString(deviceSession.GetState()),
+		IsOnline:      state == constants.StateRegistered || state == constants.StateOnline,
+		Status:        s.mapStateToString(state),
 		RemoteAddr:    deviceSession.GetRemoteAddr(),
 		LastHeartbeat: deviceSession.GetLastHeartbeat(),
 		HeartbeatTime: deviceSession.GetLastHeartbeat().Format("2006-01-02 15:04:05"),
@@ -176,7 +180,10 @@ func (s *EnhancedDeviceService) IsDeviceOnline(deviceID string) bool {
 		return false
 	}
 
-	return deviceSession.GetState() == constants.StateRegistered
+	// 🔧 修复：同时支持已注册(StateRegistered)和在线(StateOnline)状态
+	// 设备注册后为StateRegistered，心跳更新后变为StateOnline，两种状态都应认为在线
+	state := deviceSession.GetState()
+	return state == constants.StateRegistered || state == constants.StateOnline
 }
 
 // GetDeviceConnection 获取设备连接对象
@@ -652,9 +659,9 @@ func (s *EnhancedDeviceService) generateMessageID() uint16 {
 // mapStateToDeviceStatus 将连接状态映射到设备状态
 func (s *EnhancedDeviceService) mapStateToDeviceStatus(state constants.DeviceConnectionState) constants.DeviceStatus {
 	switch state {
-	case constants.StateRegistered:
+	case constants.StateRegistered, constants.StateOnline:
 		return constants.DeviceStatusOnline
-	case constants.StateDisconnected:
+	case constants.StateDisconnected, constants.StateOffline:
 		return constants.DeviceStatusOffline
 	default:
 		return constants.DeviceStatusUnknown
@@ -666,9 +673,9 @@ func (s *EnhancedDeviceService) mapStateToString(state constants.DeviceConnectio
 	switch state {
 	case constants.StateConnected:
 		return "connected"
-	case constants.StateRegistered:
+	case constants.StateRegistered, constants.StateOnline:
 		return "online"
-	case constants.StateDisconnected:
+	case constants.StateDisconnected, constants.StateOffline:
 		return "offline"
 	default:
 		return "unknown"

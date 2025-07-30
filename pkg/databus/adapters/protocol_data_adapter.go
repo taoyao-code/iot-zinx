@@ -3,6 +3,7 @@ package adapters
 import (
 	"context"
 	"fmt"
+	"sync"
 	"time"
 
 	"github.com/aceld/zinx/ziface"
@@ -14,6 +15,26 @@ import (
 	"github.com/bujia-iot/iot-zinx/pkg/databus"
 	"github.com/bujia-iot/iot-zinx/pkg/network"
 )
+
+// 全局TCPDataBusIntegrator实例，避免循环导入
+var (
+	globalTCPIntegrator *TCPDataBusIntegrator
+	integratorMutex     sync.RWMutex
+)
+
+// 设置全局TCPDataBusIntegrator实例
+func SetTCPIntegrator(integrator *TCPDataBusIntegrator) {
+	integratorMutex.Lock()
+	defer integratorMutex.Unlock()
+	globalTCPIntegrator = integrator
+}
+
+// 获取全局TCPDataBusIntegrator实例
+func getTCPIntegrator() *TCPDataBusIntegrator {
+	integratorMutex.RLock()
+	defer integratorMutex.RUnlock()
+	return globalTCPIntegrator
+}
 
 // ProtocolDataAdapter 协议数据适配器
 // 负责将协议解析结果转换为DataBus标准格式，实现协议层与数据层的解耦
@@ -160,6 +181,27 @@ func (p *ProtocolDataAdapter) processDeviceRegister(ctx context.Context, msg *dn
 	err := p.dataBus.PublishDeviceData(ctx, deviceData.DeviceID, deviceData)
 	if err != nil {
 		return p.createErrorResult(fmt.Errorf("发布设备数据失败: %v", err))
+	}
+
+	// 🔧 新增：调用TCPDataBusIntegrator进行完整的设备注册流程
+	// 这确保设备注册事件正确传播到SessionManager和其他组件
+	if integrator := getTCPIntegrator(); integrator != nil {
+		// 提取设备信息
+		deviceID := deviceData.DeviceID
+		physicalID := fmt.Sprintf("%08X", msg.PhysicalId)
+		iccid := deviceData.ICCID
+		deviceType := uint16(deviceData.DeviceType)
+
+		// 调用集成器的设备注册方法
+		if regErr := integrator.OnDeviceRegistered(conn, deviceID, physicalID, iccid, deviceType); regErr != nil {
+			p.logger.WithFields(logrus.Fields{
+				"device_id": deviceID,
+				"error":     regErr.Error(),
+			}).Error("TCPDataBusIntegrator设备注册失败")
+			// 不返回错误，因为DataBus发布已成功，这只是额外的集成
+		} else {
+			p.logger.WithField("device_id", deviceID).Debug("TCPDataBusIntegrator设备注册成功")
+		}
 	}
 
 	// 构建响应数据

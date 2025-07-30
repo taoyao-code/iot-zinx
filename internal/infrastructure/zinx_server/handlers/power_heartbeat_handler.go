@@ -232,6 +232,20 @@ func (h *PowerHeartbeatHandler) processPowerHeartbeat(decodedFrame *protocol.Dec
 	// 这是解决连接超时问题的关键修复
 	network.UpdateConnectionActivity(conn)
 
+	// 🔧 关键修复：调用全局SessionManager更新心跳状态，触发StateRegistered→StateOnline转换
+	if globalSessionManager := session.GetGlobalSessionManager(); globalSessionManager != nil {
+		if err := globalSessionManager.UpdateHeartbeat(deviceId); err != nil {
+			logger.WithFields(logrus.Fields{
+				"deviceID": deviceId,
+				"error":    err.Error(),
+			}).Debug("SessionManager心跳更新失败")
+		} else {
+			logger.WithFields(logrus.Fields{
+				"deviceID": deviceId,
+			}).Debug("SessionManager心跳更新成功，设备状态已转换为在线")
+		}
+	}
+
 	// 发送功率心跳通知
 	h.sendPowerHeartbeatNotification(decodedFrame, conn, deviceId, logFields, isCharging)
 }

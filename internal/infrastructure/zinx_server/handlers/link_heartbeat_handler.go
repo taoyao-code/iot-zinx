@@ -10,6 +10,7 @@ import (
 	"github.com/bujia-iot/iot-zinx/pkg/constants"
 	"github.com/bujia-iot/iot-zinx/pkg/network"
 	"github.com/bujia-iot/iot-zinx/pkg/protocol"
+	"github.com/bujia-iot/iot-zinx/pkg/session"
 	"github.com/sirupsen/logrus"
 )
 
@@ -70,6 +71,23 @@ func (h *LinkHeartbeatHandler) Handle(request ziface.IRequest) {
 	// Link心跳信息已通过network.UpdateConnectionActivity处理，无需额外属性
 	// 调用统一的连接活动更新函数
 	network.UpdateConnectionActivity(conn)
+
+	// 🔧 关键修复：调用全局SessionManager更新心跳状态，触发StateRegistered→StateOnline转换
+	if globalSessionManager := session.GetGlobalSessionManager(); globalSessionManager != nil {
+		// 从DeviceSession获取设备ID
+		if deviceSession != nil && deviceSession.DeviceID != "" {
+			if err := globalSessionManager.UpdateHeartbeat(deviceSession.DeviceID); err != nil {
+				logger.WithFields(logrus.Fields{
+					"deviceID": deviceSession.DeviceID,
+					"error":    err.Error(),
+				}).Debug("SessionManager心跳更新失败")
+			} else {
+				logger.WithFields(logrus.Fields{
+					"deviceID": deviceSession.DeviceID,
+				}).Debug("SessionManager心跳更新成功，设备状态已转换为在线")
+			}
+		}
+	}
 
 	// 2. 重置TCP ReadDeadline - 使用优化后的配置
 	defaultReadDeadlineSeconds := config.GetConfig().TCPServer.DefaultReadDeadlineSeconds

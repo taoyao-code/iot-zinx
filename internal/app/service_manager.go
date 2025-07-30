@@ -38,6 +38,11 @@ func GetServiceManager() *ServiceManager {
 			DeviceService: service.NewEnhancedDeviceService(),
 			// 初始化其他服务
 		}
+
+		// 确保设备服务正确初始化
+		if serviceManager.DeviceService == nil {
+			panic("设备服务初始化失败")
+		}
 	})
 	return serviceManager
 }

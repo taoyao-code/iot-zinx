@@ -131,4 +131,21 @@ func (h *MainHeartbeatHandler) updateMainHeartbeatTime(conn ziface.IConnection, 
 	// 关键修复：调用统一的连接活动更新函数
 	// 这会通知HeartbeatManager，防止连接因不活动而超时
 	network.UpdateConnectionActivity(conn)
+
+	// 🔧 关键修复：调用全局SessionManager更新心跳状态，触发StateRegistered→StateOnline转换
+	if globalSessionManager := session.GetGlobalSessionManager(); globalSessionManager != nil {
+		// 从DeviceSession获取设备ID
+		if deviceSession != nil && deviceSession.DeviceID != "" {
+			if err := globalSessionManager.UpdateHeartbeat(deviceSession.DeviceID); err != nil {
+				logger.WithFields(logrus.Fields{
+					"deviceID": deviceSession.DeviceID,
+					"error":    err.Error(),
+				}).Debug("SessionManager心跳更新失败")
+			} else {
+				logger.WithFields(logrus.Fields{
+					"deviceID": deviceSession.DeviceID,
+				}).Debug("SessionManager心跳更新成功，设备状态已转换为在线")
+			}
+		}
+	}
 }

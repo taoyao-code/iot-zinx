@@ -12,8 +12,8 @@ import (
 	"github.com/bujia-iot/iot-zinx/internal/infrastructure/logger"
 	"github.com/bujia-iot/iot-zinx/internal/infrastructure/zinx_server/handlers"
 	"github.com/bujia-iot/iot-zinx/pkg"
-	"github.com/bujia-iot/iot-zinx/pkg/constants"
 	"github.com/bujia-iot/iot-zinx/pkg/databus"
+	"github.com/bujia-iot/iot-zinx/pkg/databus/adapters"
 	"github.com/bujia-iot/iot-zinx/pkg/network"
 	"github.com/bujia-iot/iot-zinx/pkg/protocol"
 	"github.com/sirupsen/logrus"
@@ -21,10 +21,11 @@ import (
 
 // TCPServer 封装TCP服务器功能
 type TCPServer struct {
-	server           ziface.IServer    // Zinx服务器实例
-	cfg              *config.Config    // 配置文件实例
-	heartbeatManager *HeartbeatManager // HeartbeatManager 心跳管理器实例
-	dataBus          databus.DataBus   // DataBus 实例
+	server            ziface.IServer                 // Zinx服务器实例
+	cfg               *config.Config                 // 配置文件实例
+	heartbeatManager  *HeartbeatManager              // HeartbeatManager 心跳管理器实例
+	dataBus           databus.DataBus                // DataBus 实例
+	dataBusIntegrator *adapters.TCPDataBusIntegrator // TCPDataBus集成器
 }
 
 // NewTCPServer 创建新的TCP服务器实例
@@ -34,9 +35,24 @@ func NewTCPServer() *TCPServer {
 	dataBusConfig.Name = "tcp_server_databus"
 	dataBus := databus.NewDataBus(dataBusConfig)
 
+	// 创建事件发布器
+	eventPublisher := databus.NewEventPublisher()
+
+	// 创建TCPDataBusIntegrator配置
+	integratorConfig := &adapters.TCPIntegratorConfig{
+		EnableConnectionAdapter: true,
+		EnableEventPublisher:    true,
+		EnableSessionManager:    true,
+		EnableProtocolBridge:    true,
+	}
+
+	// 创建TCPDataBusIntegrator
+	dataBusIntegrator := adapters.NewTCPDataBusIntegrator(dataBus, eventPublisher, integratorConfig)
+
 	return &TCPServer{
-		cfg:     config.GetConfig(),
-		dataBus: dataBus,
+		cfg:               config.GetConfig(),
+		dataBus:           dataBus,
+		dataBusIntegrator: dataBusIntegrator,
 	}
 }
 
@@ -53,6 +69,14 @@ func (s *TCPServer) Start() error {
 		return err
 	}
 
+	// 启动DataBus
+	if err := s.startDataBus(); err != nil {
+		return err
+	}
+
+	// 设置全局集成器
+	SetGlobalTCPIntegrator(s.dataBusIntegrator)
+
 	// 正确初始化包依赖关系，传入必要的依赖
 	s.initializePackageDependencies()
 
@@ -67,6 +91,22 @@ func (s *TCPServer) Start() error {
 
 	// 启动服务器
 	return s.startServer()
+}
+
+// startDataBus 启动DataBus
+func (s *TCPServer) startDataBus() error {
+	if s.dataBus == nil {
+		return fmt.Errorf("DataBus实例为空")
+	}
+
+	// 启动DataBus
+	ctx := context.Background()
+	if err := s.dataBus.Start(ctx); err != nil {
+		return fmt.Errorf("DataBus启动失败: %w", err)
+	}
+
+	logger.Info("DataBus启动成功")
+	return nil
 }
 
 // initialize 初始化服务器配置
@@ -122,6 +162,15 @@ func (s *TCPServer) initializePackageDependencies() {
 	network.InitGlobalSender()
 	logger.Info("全局发送器已初始化")
 
+	// 🔧 设置全局TCPDataBusIntegrator实例，确保adapters可以访问
+	if s.dataBusIntegrator != nil {
+		// 通过pkg/databus/adapters包中的SetTCPIntegrator方法设置
+		adapters.SetTCPIntegrator(s.dataBusIntegrator)
+		logger.Info("全局TCPDataBusIntegrator已设置")
+	} else {
+		logger.Warn("TCPDataBusIntegrator为空，无法设置全局实例")
+	}
+
 	// Enhanced架构使用DataBus进行初始化，无需额外的包依赖初始化
 	logger.Info("Enhanced架构依赖已就绪")
 }
@@ -148,26 +197,16 @@ func (s *TCPServer) setupConnectionHooks() {
 		keepAliveTimeout, // KeepAlive周期
 	)
 
-	// 设置连接建立回调 - 使用DataBus事件架构
+	// 设置连接建立回调 - 使用TCPDataBusIntegrator
 	connectionHooks.SetOnConnectionEstablishedFunc(func(conn ziface.IConnection) {
-		// 🔧 使用DataBus：发布设备数据
-		if s.dataBus != nil {
-			// 使用临时连接ID作为设备标识，直到获得真实设备ID
-			tempDeviceID := fmt.Sprintf("temp_%d", conn.GetConnID())
-			deviceData := &databus.DeviceData{
-				DeviceID:    tempDeviceID,
-				ConnID:      conn.GetConnID(),
-				RemoteAddr:  conn.GetConnection().RemoteAddr().String(),
-				ConnectedAt: time.Now(),
-				CreatedAt:   time.Now(),
-				UpdatedAt:   time.Now(),
+		// 使用DataBus集成器处理连接建立
+		if s.dataBusIntegrator != nil {
+			if err := s.dataBusIntegrator.OnConnectionEstablished(conn); err != nil {
+				logger.WithFields(logrus.Fields{
+					"conn_id": conn.GetConnID(),
+					"error":   err.Error(),
+				}).Error("DataBus集成器处理连接建立失败")
 			}
-
-			ctx := context.Background()
-			s.dataBus.PublishDeviceData(ctx, tempDeviceID, deviceData)
-			
-			// 设置临时设备ID到连接属性，避免空字符串问题
-			conn.SetProperty("temp_device_id", tempDeviceID)
 		}
 
 		logger.WithFields(logrus.Fields{
@@ -176,47 +215,16 @@ func (s *TCPServer) setupConnectionHooks() {
 		}).Info("新设备连接建立")
 	})
 
-	// 设置连接关闭回调 - 使用DataBus事件架构
+	// 设置连接关闭回调 - 使用TCPDataBusIntegrator
 	connectionHooks.SetOnConnectionClosedFunc(func(conn ziface.IConnection) {
-		// 🔧 使用DataBus：发布设备数据更新
-		if s.dataBus != nil {
-			deviceData := &databus.DeviceData{
-				DeviceID:  "", // 从连接属性获取
-				ConnID:    conn.GetConnID(),
-				UpdatedAt: time.Now(),
+		// 使用DataBus集成器处理连接关闭
+		if s.dataBusIntegrator != nil {
+			if err := s.dataBusIntegrator.OnConnectionClosed(conn); err != nil {
+				logger.WithFields(logrus.Fields{
+					"conn_id": conn.GetConnID(),
+					"error":   err.Error(),
+				}).Error("DataBus集成器处理连接关闭失败")
 			}
-
-			// 尝试从连接属性获取设备ID
-			deviceID, _ := conn.GetProperty(constants.PropKeyDeviceId)
-			if id, ok := deviceID.(string); ok {
-				deviceData.DeviceID = id
-			}
-
-			ctx := context.Background()
-			s.dataBus.PublishDeviceData(ctx, deviceData.DeviceID, deviceData)
-		}
-
-		logger.WithFields(logrus.Fields{
-			"connId": conn.GetConnID(),
-		}).Info("设备连接关闭")
-	}) // 设置连接关闭回调 - 使用DataBus事件架构
-	connectionHooks.SetOnConnectionClosedFunc(func(conn ziface.IConnection) {
-		// 🔧 使用DataBus：发布连接关闭事件
-		if s.dataBus != nil {
-			deviceData := &databus.DeviceData{
-				DeviceID:  "", // 从连接属性获取
-				ConnID:    conn.GetConnID(),
-				UpdatedAt: time.Now(),
-			}
-
-			// 尝试从连接属性获取设备ID
-			deviceID, _ := conn.GetProperty(constants.PropKeyDeviceId)
-			if id, ok := deviceID.(string); ok {
-				deviceData.DeviceID = id
-			}
-
-			ctx := context.Background()
-			s.dataBus.PublishDeviceData(ctx, deviceData.DeviceID, deviceData)
 		}
 
 		logger.WithFields(logrus.Fields{
@@ -225,9 +233,7 @@ func (s *TCPServer) setupConnectionHooks() {
 	})
 
 	// 设置连接钩子到服务器
-	// 设置连接建立钩子到服务器
 	s.server.SetOnConnStart(connectionHooks.OnConnectionStart)
-	// 设置连接停止钩子到服务器
 	s.server.SetOnConnStop(connectionHooks.OnConnectionStop)
 }
 
