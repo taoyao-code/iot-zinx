@@ -186,7 +186,15 @@ func (db *DataBusImpl) Health() HealthStatus {
 	}
 
 	details["running"] = db.running
-	details["subscribers_count"] = len(db.subscribers)
+
+	// 🔧 修复：添加nil检查，防止空指针异常
+	if db.subscribers != nil {
+		details["subscribers_count"] = len(db.subscribers)
+	} else {
+		details["subscribers_count"] = 0
+	}
+
+	// DataBusMetrics是struct类型，总是可访问
 	details["metrics"] = db.metrics.GetSummary()
 
 	return HealthStatus{
@@ -200,6 +208,14 @@ func (db *DataBusImpl) Health() HealthStatus {
 func (db *DataBusImpl) PublishDeviceData(ctx context.Context, deviceID string, data *DeviceData) error {
 	if !db.running {
 		return fmt.Errorf("DataBus is not running")
+	}
+
+	// 🔧 修复：添加nil检查
+	if db.deviceDataManager == nil {
+		return fmt.Errorf("device data manager is not initialized")
+	}
+	if db.eventBus == nil {
+		return fmt.Errorf("event bus is not initialized")
 	}
 
 	// 数据验证

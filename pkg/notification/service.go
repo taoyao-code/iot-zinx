@@ -11,7 +11,7 @@ import (
 	"time"
 
 	"github.com/bujia-iot/iot-zinx/internal/infrastructure/logger"
-	"github.com/bujia-iot/iot-zinx/internal/infrastructure/redis"
+	"github.com/redis/go-redis/v9"
 	"github.com/google/uuid"
 	"github.com/sirupsen/logrus"
 )
@@ -32,7 +32,7 @@ type NotificationService struct {
 	wg      sync.WaitGroup
 
 	// Redis客户端（用于重试队列持久化）
-	redisClient interface{}
+	redisClient *redis.Client
 
 	// 统计信息
 	stats   *NotificationStats
@@ -72,7 +72,7 @@ func NewNotificationService(config *NotificationConfig) (*NotificationService, e
 		httpClient:  httpClient,
 		eventQueue:  make(chan *NotificationEvent, config.QueueSize),
 		retryQueue:  make(chan *NotificationEvent, config.QueueSize),
-		redisClient: redis.GetClient(), // 复用现有Redis连接
+		redisClient: nil, // Redis客户端将在Start方法中设置
 		stats:       stats,
 	}
 
@@ -91,6 +91,11 @@ func (s *NotificationService) Start(ctx context.Context) error {
 	}
 
 	s.ctx, s.cancel = context.WithCancel(ctx)
+
+	// 初始化Redis客户端
+	// 注意：这里我们使用服务管理器中的Redis客户端
+	// 由于可能无法导入service_manager包，我们改为在初始化时注入
+	// 或者在调用Start方法之前设置Redis客户端
 
 	// 启动工作协程
 	for i := 0; i < s.config.Workers; i++ {
@@ -454,19 +459,65 @@ func (s *NotificationService) scheduleRetry(event *NotificationEvent, endpoint N
 		"retry_delay":   delay.String(),
 	}).Warn("📤 通知推送安排重试")
 
-	// TODO: 实现Redis重试队列
-	// 暂时简化处理，直接加入内存重试队列
-	select {
-	case s.retryQueue <- event:
-		// 重试队列加入成功
-	default:
+	// 检查Redis客户端是否可用
+	if s.redisClient == nil {
 		logger.WithFields(logrus.Fields{
 			"component":  "notification",
-			"action":     "retry_queue_full",
+			"action":     "redis_unavailable",
 			"event_id":   event.EventID,
 			"event_type": event.EventType,
 			"endpoint":   endpoint.Name,
-		}).Error("📤 通知推送失败 - 重试队列已满，丢弃事件")
+		}).Warn("📤 Redis客户端不可用，跳过持久化")
+		return
+	}
+
+	// 实现Redis重试队列持久化
+	ctx := context.Background()
+	retryKey := "notification:retry:events"
+	
+	eventData, err := json.Marshal(event)
+	if err != nil {
+		logger.WithFields(logrus.Fields{
+			"component":  "notification",
+			"action":     "serialize_retry_event",
+			"event_id":   event.EventID,
+			"event_type": event.EventType,
+			"endpoint":   endpoint.Name,
+			"error":      err.Error(),
+		}).Error("📤 序列化重试事件失败")
+		return
+	}
+
+	// 尝试加入内存重试队列
+	select {
+	case s.retryQueue <- event:
+		// 内存重试队列加入成功，同时持久化到Redis
+		if _, err := s.redisClient.LPush(ctx, retryKey, string(eventData)).Result(); err != nil {
+			logger.WithFields(logrus.Fields{
+				"component":  "notification",
+				"action":     "persist_retry_event",
+				"event_id":   event.EventID,
+				"error":      err.Error(),
+			}).Error("📤 持久化重试事件到Redis失败")
+		}
+	default:
+		// 内存队列已满，直接持久化到Redis
+		if _, err := s.redisClient.LPush(ctx, retryKey, string(eventData)).Result(); err != nil {
+			logger.WithFields(logrus.Fields{
+				"component":  "notification",
+				"action":     "retry_queue_full_persist",
+				"event_id":   event.EventID,
+				"error":      err.Error(),
+			}).Error("📤 通知推送失败 - 队列已满且Redis持久化失败")
+		} else {
+			logger.WithFields(logrus.Fields{
+				"component":  "notification",
+				"action":     "retry_queued_redis",
+				"event_id":   event.EventID,
+				"event_type": event.EventType,
+				"endpoint":   endpoint.Name,
+			}).Info("📤 重试事件已加入Redis队列")
+		}
 	}
 }
 
@@ -573,8 +624,95 @@ func (s *NotificationService) GetStats() *NotificationStats {
 
 // loadRetryEvents 从Redis加载重试事件
 func (s *NotificationService) loadRetryEvents() {
-	// TODO: 实现Redis重试事件加载
-	// 暂时简化处理，不从Redis加载
+	// 检查Redis客户端是否可用
+	if s.redisClient == nil {
+		return
+	}
+
+	retryKey := "notification:retry:events"
+	
+	// 从Redis获取所有待重试事件
+	ctx := context.Background()
+	result, err := s.redisClient.LRange(ctx, retryKey, 0, -1).Result()
+	if err != nil {
+		logger.WithFields(logrus.Fields{
+			"component": "notification",
+			"action":    "load_retry_events",
+			"error":     err.Error(),
+		}).Error("从Redis加载重试事件失败")
+		return
+	}
+
+	if len(result) == 0 {
+		return
+	}
+
+	logger.WithFields(logrus.Fields{
+		"component":    "notification",
+		"action":       "load_retry_events",
+		"event_count":  len(result),
+	}).Info("从Redis加载重试事件")
+
+	// 解析并重入重试队列
+	loadedCount := 0
+	for _, item := range result {
+		var event NotificationEvent
+		if err := json.Unmarshal([]byte(item), &event); err != nil {
+			logger.WithFields(logrus.Fields{
+				"component": "notification",
+				"action":    "parse_retry_event",
+				"error":     err.Error(),
+				"data":      item,
+			}).Error("解析重试事件失败")
+			continue
+		}
+
+		// 检查是否已经过期
+		if time.Since(event.Timestamp) > 24*time.Hour {
+			logger.WithFields(logrus.Fields{
+				"component": "notification",
+				"action":    "skip_expired_event",
+				"event_id":  event.EventID,
+				"event_age": time.Since(event.Timestamp).String(),
+			}).Debug("跳过过期重试事件")
+			continue
+		}
+
+		// 加入重试队列
+		select {
+		case s.retryQueue <- &event:
+			loadedCount++
+			logger.WithFields(logrus.Fields{
+				"component": "notification",
+				"action":    "enqueue_retry_event",
+				"event_id":  event.EventID,
+				"event_type": event.EventType,
+			}).Debug("重试事件已加入队列")
+		default:
+			logger.WithFields(logrus.Fields{
+				"component": "notification",
+				"action":    "retry_queue_full",
+				"event_id":  event.EventID,
+			}).Warn("重试队列已满，丢弃事件")
+		}
+	}
+
+	// 清空Redis中的重试事件
+	if loadedCount > 0 {
+		if _, err := s.redisClient.Del(ctx, retryKey).Result(); err != nil {
+			logger.WithFields(logrus.Fields{
+				"component": "notification",
+				"action":    "clear_retry_events",
+				"error":     err.Error(),
+			}).Error("清空Redis重试事件失败")
+		} else {
+			logger.WithFields(logrus.Fields{
+				"component":     "notification",
+				"action":        "clear_retry_events",
+				"loaded_count":  loadedCount,
+			}).Info("已清空Redis重试事件")
+		}
+	}
 }
 
 // GetQueueLength 获取队列长度
@@ -585,6 +723,11 @@ func (s *NotificationService) GetQueueLength() int {
 // GetRetryQueueLength 获取重试队列长度
 func (s *NotificationService) GetRetryQueueLength() int {
 	return len(s.retryQueue)
+}
+
+// SetRedisClient 设置Redis客户端
+func (s *NotificationService) SetRedisClient(client *redis.Client) {
+	s.redisClient = client
 }
 
 // IsRunning 检查服务是否运行

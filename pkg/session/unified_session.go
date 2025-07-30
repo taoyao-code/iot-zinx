@@ -1,6 +1,7 @@
 package session
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"sync"
@@ -462,17 +463,52 @@ func (s *UnifiedSession) GetStateManager() IStateManager {
 // notifyStateChange 通知状态变更
 func (s *UnifiedSession) notifyStateChange(oldState, newState constants.DeviceConnectionState) {
 	if s.stateManager != nil && s.deviceID != "" {
-		// 异步通知状态管理器
-		go func() {
+		// 🔧 修复：使用带重试的同步通知，确保状态一致性
+		// 使用context超时防止无限等待
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		
+		// 重试机制，最多重试3次
+		maxRetries := 3
+		var lastErr error
+		
+		for i := 0; i < maxRetries; i++ {
 			if err := s.stateManager.ForceTransitionTo(s.deviceID, newState); err != nil {
+				lastErr = err
 				logger.WithFields(logrus.Fields{
 					"deviceID": s.deviceID,
 					"oldState": oldState,
 					"newState": newState,
+					"attempt":  i + 1,
 					"error":    err.Error(),
-				}).Warn("通知状态管理器状态变更失败")
+				}).Warn("状态管理器通知失败，重试中...")
+				
+				// 指数退避
+				select {
+				case <-time.After(time.Duration(i+1) * 100 * time.Millisecond):
+				case <-ctx.Done():
+					logger.Warn("状态通知超时，放弃重试")
+					return
+				}
+				continue
 			}
-		}()
+			
+			// 通知成功
+			logger.WithFields(logrus.Fields{
+				"deviceID": s.deviceID,
+				"oldState": oldState,
+				"newState": newState,
+			}).Debug("状态变更已同步到状态管理器")
+			return
+		}
+		
+		// 所有重试都失败
+		logger.WithFields(logrus.Fields{
+			"deviceID": s.deviceID,
+			"oldState": oldState,
+			"newState": newState,
+			"error":    lastErr.Error(),
+		}).Error("状态管理器通知失败，已达到最大重试次数")
 	}
 }
 

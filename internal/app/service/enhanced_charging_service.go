@@ -141,6 +141,16 @@ func (s *EnhancedChargingService) processStopChargingRequest(req *ChargingReques
 	if session, exists := s.sessions[req.OrderNumber]; exists {
 		session.Status = "stopped"
 		session.LastUpdate = time.Now()
+		
+		// 🔧 修复：清理已完成的会话，防止内存泄漏
+		// 会话完成后，延迟清理（给用户时间查询最终状态）
+		go func(orderNum string) {
+			time.Sleep(5 * time.Minute) // 5分钟后清理
+			s.mutex.Lock()
+			delete(s.sessions, orderNum)
+			s.mutex.Unlock()
+			s.logger.WithField("orderNumber", orderNum).Debug("已清理完成的充电会话")
+		}(req.OrderNumber)
 	}
 	s.mutex.Unlock()
 
@@ -200,6 +210,10 @@ func (s *EnhancedChargingService) processQueryChargingRequest(req *ChargingReque
 func (s *EnhancedChargingService) Start(ctx context.Context) error {
 	s.ctx, s.cancel = context.WithCancel(ctx)
 	s.logger.Info("启动Enhanced充电服务")
+	
+	// 🔧 修复：启动会话清理goroutine，定期清理过期会话
+	go s.cleanupExpiredSessions()
+	
 	return nil
 }
 
@@ -210,4 +224,42 @@ func (s *EnhancedChargingService) Stop() error {
 	}
 	s.logger.Info("停止Enhanced充电服务")
 	return nil
+}
+
+// cleanupExpiredSessions 清理过期会话，防止内存泄漏
+func (s *EnhancedChargingService) cleanupExpiredSessions() {
+	ticker := time.NewTicker(10 * time.Minute) // 每10分钟检查一次
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-s.ctx.Done():
+			s.logger.Info("会话清理goroutine已停止")
+			return
+		case <-ticker.C:
+			s.mutex.Lock()
+			now := time.Now()
+			expiredCount := 0
+			
+			for orderNum, session := range s.sessions {
+				// 清理已停止超过2小时的会话
+				if session.Status == "stopped" && now.Sub(session.LastUpdate) > 2*time.Hour {
+					delete(s.sessions, orderNum)
+					expiredCount++
+				}
+				
+				// 清理异常长时间运行的会话（超过24小时）
+				if session.Status == "starting" && now.Sub(session.StartTime) > 24*time.Hour {
+					delete(s.sessions, orderNum)
+					expiredCount++
+				}
+			}
+			
+			if expiredCount > 0 {
+				s.logger.WithField("expired_sessions", expiredCount).Info("已清理过期充电会话")
+			}
+			
+			s.mutex.Unlock()
+		}
+	}
 }

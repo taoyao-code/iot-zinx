@@ -152,8 +152,10 @@ func (s *TCPServer) setupConnectionHooks() {
 	connectionHooks.SetOnConnectionEstablishedFunc(func(conn ziface.IConnection) {
 		// 🔧 使用DataBus：发布设备数据
 		if s.dataBus != nil {
+			// 使用临时连接ID作为设备标识，直到获得真实设备ID
+			tempDeviceID := fmt.Sprintf("temp_%d", conn.GetConnID())
 			deviceData := &databus.DeviceData{
-				DeviceID:    "", // 将在协议解析后设置
+				DeviceID:    tempDeviceID,
 				ConnID:      conn.GetConnID(),
 				RemoteAddr:  conn.GetConnection().RemoteAddr().String(),
 				ConnectedAt: time.Now(),
@@ -162,7 +164,10 @@ func (s *TCPServer) setupConnectionHooks() {
 			}
 
 			ctx := context.Background()
-			s.dataBus.PublishDeviceData(ctx, "", deviceData)
+			s.dataBus.PublishDeviceData(ctx, tempDeviceID, deviceData)
+			
+			// 设置临时设备ID到连接属性，避免空字符串问题
+			conn.SetProperty("temp_device_id", tempDeviceID)
 		}
 
 		logger.WithFields(logrus.Fields{

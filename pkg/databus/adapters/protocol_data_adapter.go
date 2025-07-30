@@ -12,13 +12,15 @@ import (
 	"github.com/bujia-iot/iot-zinx/internal/infrastructure/logger"
 	"github.com/bujia-iot/iot-zinx/pkg/constants"
 	"github.com/bujia-iot/iot-zinx/pkg/databus"
+	"github.com/bujia-iot/iot-zinx/pkg/network"
 )
 
 // ProtocolDataAdapter 协议数据适配器
 // 负责将协议解析结果转换为DataBus标准格式，实现协议层与数据层的解耦
 type ProtocolDataAdapter struct {
-	dataBus databus.DataBus
-	logger  *logrus.Entry
+	dataBus         databus.DataBus
+	logger          *logrus.Entry
+	responseHandler *network.ResponseHandler
 }
 
 // ProcessResult 协议处理结果
@@ -40,8 +42,9 @@ type ProcessResult struct {
 // NewProtocolDataAdapter 创建协议数据适配器
 func NewProtocolDataAdapter(dataBus databus.DataBus) *ProtocolDataAdapter {
 	adapter := &ProtocolDataAdapter{
-		dataBus: dataBus,
-		logger:  logger.WithField("component", "ProtocolDataAdapter"),
+		dataBus:         dataBus,
+		logger:          logger.WithField("component", "ProtocolDataAdapter"),
+		responseHandler: network.GetGlobalResponseHandler(),
 	}
 
 	return adapter
@@ -62,6 +65,12 @@ func (p *ProtocolDataAdapter) ProcessProtocolMessage(msg *dny_protocol.Message, 
 		"physicalId":  fmt.Sprintf("0x%08X", msg.PhysicalId),
 		"connId":      conn.GetConnID(),
 	}).Debug("开始处理协议消息")
+
+	// 获取设备ID
+	deviceID := fmt.Sprintf("%08X", msg.PhysicalId)
+
+	// 处理设备响应消息
+	p.responseHandler.HandleDeviceResponse(deviceID, msg)
 
 	// 根据消息类型路由到对应的处理器
 	switch msg.MessageType {

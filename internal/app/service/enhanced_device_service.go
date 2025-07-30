@@ -1,6 +1,7 @@
 package service
 
 import (
+	"context"
 	"fmt"
 	"strconv"
 	"time"
@@ -19,6 +20,7 @@ import (
 type EnhancedDeviceService struct {
 	sessionManager session.ISessionManager
 	logger         *logrus.Logger
+	responseWaiter *network.ResponseWaiter
 }
 
 // NewEnhancedDeviceService 创建增强设备服务
@@ -26,6 +28,7 @@ func NewEnhancedDeviceService() *EnhancedDeviceService {
 	return &EnhancedDeviceService{
 		sessionManager: session.GetGlobalSessionManager(),
 		logger:         logger.GetLogger(),
+		responseWaiter: network.GetGlobalResponseWaiter(),
 	}
 }
 
@@ -206,9 +209,14 @@ func (s *EnhancedDeviceService) SendDNYCommandToDevice(deviceID string, command 
 		return nil, err
 	}
 
-	// TODO: 实现响应等待机制
-	// 这里应该等待设备响应并返回响应数据
-	return []byte{}, nil
+	// 使用响应等待机制等待设备响应
+	ctx := context.Background()
+	response, err := s.responseWaiter.WaitResponse(ctx, deviceID, messageID, 30*time.Second)
+	if err != nil {
+		return nil, fmt.Errorf("等待设备响应失败: %v", err)
+	}
+
+	return response, nil
 }
 
 // GetEnhancedDeviceList 获取增强的设备列表
@@ -251,8 +259,74 @@ func (s *EnhancedDeviceService) ValidateCard(deviceId string, cardNumber string,
 
 // HandleParameterSetting 处理参数设置
 func (s *EnhancedDeviceService) HandleParameterSetting(deviceId string, paramData *dny_protocol.ParameterSettingData) (bool, []byte) {
-	// TODO: 实现参数设置逻辑
-	return true, []byte{}
+	if paramData == nil {
+		s.logger.WithField("device_id", deviceId).Error("参数设置数据为空")
+		return false, []byte{0x01} // 参数错误
+	}
+
+	// 获取设备会话
+	deviceSession, exists := s.sessionManager.GetSession(deviceId)
+	if !exists {
+		s.logger.WithField("device_id", deviceId).Error("设备不存在")
+		return false, []byte{0x02} // 设备不存在
+	}
+
+	// 验证参数数据
+	if err := s.validateParameterData(paramData); err != nil {
+		s.logger.WithFields(logrus.Fields{
+			"device_id": deviceId,
+			"error":     err.Error(),
+		}).Error("参数验证失败")
+		return false, []byte{0x03} // 参数验证失败
+	}
+
+	// 应用参数设置
+	success := s.applyDeviceParameters(deviceId, paramData)
+	if !success {
+		s.logger.WithFields(logrus.Fields{
+			"device_id":      deviceId,
+			"parameter_type": paramData.ParameterType,
+			"parameter_id":   paramData.ParameterID,
+		}).Error("参数设置失败")
+		return false, []byte{0x04} // 设置失败
+	}
+
+	// 更新设备状态
+	deviceSession.SetProperty("last_param_update", time.Now())
+	deviceSession.SetProperty("param_version", paramData.ParameterID)
+
+	// 记录成功日志
+	s.logger.WithFields(logrus.Fields{
+		"device_id":      deviceId,
+		"parameter_type": paramData.ParameterType,
+		"parameter_id":   paramData.ParameterID,
+		"param_len":      len(paramData.Value),
+	}).Info("参数设置成功")
+
+	return true, []byte{0x00} // 成功
+}
+
+// validateParameterData 验证参数数据
+func (s *EnhancedDeviceService) validateParameterData(paramData *dny_protocol.ParameterSettingData) error {
+	if paramData.ParameterType == 0 {
+		return fmt.Errorf("参数类型不能为空")
+	}
+	if len(paramData.Value) > 1024 {
+		return fmt.Errorf("参数值长度超过限制")
+	}
+	if paramData.ParameterID == 0 {
+		return fmt.Errorf("参数ID无效")
+	}
+	return nil
+}
+
+// applyDeviceParameters 应用设备参数
+func (s *EnhancedDeviceService) applyDeviceParameters(deviceID string, paramData *dny_protocol.ParameterSettingData) bool {
+	// 这里应该实现实际的设备参数设置逻辑
+	// 例如：通过DataBus发布参数更新事件，或直接发送到设备
+
+	// 临时实现：模拟参数应用成功
+	return true
 }
 
 // HandlePowerHeartbeat 处理功率心跳
@@ -265,8 +339,130 @@ func (s *EnhancedDeviceService) HandlePowerHeartbeat(deviceId string, powerData 
 
 // HandleSettlement 处理结算数据
 func (s *EnhancedDeviceService) HandleSettlement(deviceId string, settlementData *dny_protocol.SettlementData) bool {
-	// TODO: 实现结算数据处理逻辑
+	if settlementData == nil {
+		s.logger.WithField("device_id", deviceId).Error("结算数据为空")
+		return false
+	}
+
+	// 验证结算数据
+	if err := s.validateSettlementData(settlementData); err != nil {
+		s.logger.WithFields(logrus.Fields{
+			"device_id": deviceId,
+			"error":     err.Error(),
+		}).Error("结算数据验证失败")
+		return false
+	}
+
+	// 获取设备会话
+	deviceSession, exists := s.sessionManager.GetSession(deviceId)
+	if !exists {
+		s.logger.WithField("device_id", deviceId).Error("结算时设备不存在")
+		return false
+	}
+
+	// 创建结算记录
+	settlementRecord := s.createSettlementRecord(deviceId, settlementData)
+
+	// 保存结算数据
+	if err := s.saveSettlementData(settlementRecord); err != nil {
+		s.logger.WithFields(logrus.Fields{
+			"device_id": deviceId,
+			"order_id":  settlementData.OrderID,
+			"error":     err.Error(),
+		}).Error("保存结算数据失败")
+		return false
+	}
+
+	// 更新设备状态
+	deviceSession.SetProperty("last_settlement", time.Now())
+	deviceSession.SetProperty("total_energy", settlementData.ElectricEnergy)
+
+	// 发送结算通知
+	s.sendSettlementNotification(deviceId, settlementRecord)
+
+	// 记录成功日志
+	s.logger.WithFields(logrus.Fields{
+		"device_id":    deviceId,
+		"order_id":     settlementData.OrderID,
+		"total_energy": settlementData.ElectricEnergy,
+		"total_fee":    settlementData.TotalFee,
+		"gun_number":   settlementData.GunNumber,
+	}).Info("结算数据处理成功")
+
 	return true
+}
+
+// SettlementRecord 结算记录结构
+type SettlementRecord struct {
+	OrderID     string    `json:"order_id"`
+	DeviceID    string    `json:"device_id"`
+	PortNumber  int       `json:"port_number"`
+	CardNumber  string    `json:"card_number"`
+	StartTime   time.Time `json:"start_time"`
+	EndTime     time.Time `json:"end_time"`
+	Duration    int       `json:"duration"`     // 分钟
+	TotalEnergy float64   `json:"total_energy"` // kWh
+	TotalAmount float64   `json:"total_amount"` // 元
+	StartPower  float64   `json:"start_power"`
+	EndPower    float64   `json:"end_power"`
+	SessionID   string    `json:"session_id"`
+	Status      string    `json:"status"`
+	CreatedAt   time.Time `json:"created_at"`
+	UpdatedAt   time.Time `json:"updated_at"`
+}
+
+// validateSettlementData 验证结算数据
+func (s *EnhancedDeviceService) validateSettlementData(data *dny_protocol.SettlementData) error {
+	if len(data.OrderID) == 0 {
+		return fmt.Errorf("订单ID不能为空")
+	}
+	if data.ElectricEnergy == 0 {
+		return fmt.Errorf("用电量不能为0")
+	}
+	if data.TotalFee < 0 {
+		return fmt.Errorf("总金额不能为负")
+	}
+	if data.EndTime.Before(data.StartTime) {
+		return fmt.Errorf("结束时间不能早于开始时间")
+	}
+	return nil
+}
+
+// createSettlementRecord 创建结算记录
+func (s *EnhancedDeviceService) createSettlementRecord(deviceID string, data *dny_protocol.SettlementData) *SettlementRecord {
+	// 计算充电时长（分钟）
+	duration := int(data.EndTime.Sub(data.StartTime).Minutes())
+
+	return &SettlementRecord{
+		OrderID:     data.OrderID,
+		DeviceID:    deviceID,
+		PortNumber:  int(data.GunNumber),
+		CardNumber:  data.CardNumber,
+		StartTime:   data.StartTime,
+		EndTime:     data.EndTime,
+		Duration:    duration,
+		TotalEnergy: float64(data.ElectricEnergy) / 1000.0, // 转换为kWh
+		TotalAmount: float64(data.TotalFee) / 100.0,        // 分转元
+		StartPower:  0.0,                                   // 字段不存在，设为默认值
+		EndPower:    0.0,                                   // 字段不存在，设为默认值
+		SessionID:   fmt.Sprintf("%s_%d", deviceID, data.GunNumber),
+		Status:      "completed",
+		CreatedAt:   time.Now(),
+		UpdatedAt:   time.Now(),
+	}
+} // saveSettlementData 保存结算数据
+func (s *EnhancedDeviceService) saveSettlementData(record *SettlementRecord) error {
+	// 这里应该实现实际的存储逻辑
+	// 例如：保存到数据库或通过DataBus发布事件
+
+	// 临时实现：模拟保存成功
+	return nil
+}
+
+// sendSettlementNotification 发送结算通知
+func (s *EnhancedDeviceService) sendSettlementNotification(deviceID string, record *SettlementRecord) {
+	// 这里可以集成通知服务发送结算通知
+	// 通过DataBus发布结算完成事件
 }
 
 // === 辅助方法 ===

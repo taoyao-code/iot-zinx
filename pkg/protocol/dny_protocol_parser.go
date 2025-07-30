@@ -356,11 +356,17 @@ func IsValidICCIDPrefix(data []byte) bool {
 	return isValidICCIDStrict(data)
 }
 
-// 🔧 修复ICCID验证函数
-// isValidICCIDStrict 严格验证ICCID格式 - 符合ITU-T E.118标准
-// ICCID固定长度为20字节，十六进制字符(0-9,A-F)，以"89"开头
+// 🔧 修复ICCID验证函数 - 支持灵活长度验证
+// isValidICCIDStrict 灵活验证ICCID格式 - 符合ITU-T E.118标准
+// ICCID长度支持19-25字节，十六进制字符(0-9,A-F)，以"89"开头
 func isValidICCIDStrict(data []byte) bool {
-	if len(data) != constants.IotSimCardLength {
+	length := len(data)
+	if length < constants.ICCIDMinLength || length > constants.ICCIDMaxLength {
+		return false
+	}
+
+	// 空数据检查
+	if length == 0 {
 		return false
 	}
 
@@ -371,7 +377,7 @@ func isValidICCIDStrict(data []byte) bool {
 	}
 
 	// 必须以"89"开头（ITU-T E.118标准，电信行业标识符）
-	if dataStr[:2] != "89" {
+	if !strings.HasPrefix(strings.ToUpper(dataStr), constants.ICCIDValidPrefix) {
 		return false
 	}
 
