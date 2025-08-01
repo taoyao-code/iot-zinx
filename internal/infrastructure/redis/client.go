@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/bujia-iot/iot-zinx/internal/app"
 	"github.com/bujia-iot/iot-zinx/internal/infrastructure/config"
 	"github.com/bujia-iot/iot-zinx/internal/infrastructure/logger"
 	"github.com/redis/go-redis/v9"
@@ -50,9 +49,6 @@ func InitClient() error {
 		redisClient = nil
 		return fmt.Errorf("Redis连接测试失败: %v", err)
 	}
-
-	// 将Redis客户端存储在服务管理器中，以便全局访问
-	app.GetServiceManager().SetRedisClient(redisClient)
 
 	logger.Info("Redis连接初始化成功")
 	return nil

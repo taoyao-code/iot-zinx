@@ -2,6 +2,7 @@ package storage
 
 import (
 	"sync"
+	"time"
 )
 
 // DeviceStore 全局设备存储
@@ -77,4 +78,66 @@ func (s *DeviceStore) Count() int {
 		return true
 	})
 	return count
+}
+
+// Range 遍历所有设备
+func (s *DeviceStore) Range(fn func(deviceID string, device *DeviceInfo) bool) {
+	s.devices.Range(func(key, value interface{}) bool {
+		if deviceID, ok := key.(string); ok {
+			if device, ok := value.(*DeviceInfo); ok {
+				return fn(deviceID, device)
+			}
+		}
+		return true
+	})
+}
+
+// GetDevicesByStatus 按状态获取设备列表
+func (s *DeviceStore) GetDevicesByStatus(status string) []*DeviceInfo {
+	var devices []*DeviceInfo
+	s.devices.Range(func(key, value interface{}) bool {
+		if device, ok := value.(*DeviceInfo); ok && device.Status == status {
+			devices = append(devices, device.Clone())
+		}
+		return true
+	})
+	return devices
+}
+
+// CleanupOfflineDevices 清理超时的离线设备
+func (s *DeviceStore) CleanupOfflineDevices(timeout time.Duration) int {
+	count := 0
+	cutoff := time.Now().Add(-timeout)
+
+	var toDelete []string
+	s.devices.Range(func(key, value interface{}) bool {
+		if deviceID, ok := key.(string); ok {
+			if device, ok := value.(*DeviceInfo); ok {
+				if device.Status == StatusOffline && device.LastSeen.Before(cutoff) {
+					toDelete = append(toDelete, deviceID)
+					count++
+				}
+			}
+		}
+		return true
+	})
+
+	// 删除超时设备
+	for _, deviceID := range toDelete {
+		s.devices.Delete(deviceID)
+	}
+
+	return count
+}
+
+// StatsByStatus 获取按状态统计的设备数量
+func (s *DeviceStore) StatsByStatus() map[string]int {
+	stats := make(map[string]int)
+	s.devices.Range(func(key, value interface{}) bool {
+		if device, ok := value.(*DeviceInfo); ok {
+			stats[device.Status]++
+		}
+		return true
+	})
+	return stats
 }

@@ -2,13 +2,11 @@ package notification
 
 import (
 	"context"
-	"fmt"
 	"time"
 
 	"github.com/aceld/zinx/ziface"
 	"github.com/bujia-iot/iot-zinx/internal/infrastructure/config"
 	"github.com/bujia-iot/iot-zinx/internal/infrastructure/logger"
-	"github.com/bujia-iot/iot-zinx/pkg/protocol"
 )
 
 // NotificationIntegrator 通知集成器
@@ -124,12 +122,10 @@ func (n *NotificationIntegrator) NotifyDeviceOffline(conn ziface.IConnection, de
 }
 
 // NotifyChargingStart 通知充电开始
-func (n *NotificationIntegrator) NotifyChargingStart(decodedFrame *protocol.DecodedDNYFrame, conn ziface.IConnection, sessionData map[string]interface{}) {
+func (n *NotificationIntegrator) NotifyChargingStart(deviceID string, conn ziface.IConnection, sessionData map[string]interface{}) {
 	if !n.enabled {
 		return
 	}
-
-	deviceID := decodedFrame.DeviceID
 
 	// 从会话数据中提取端口号
 	portNumber := 0
@@ -142,8 +138,6 @@ func (n *NotificationIntegrator) NotifyChargingStart(decodedFrame *protocol.Deco
 	data := map[string]interface{}{
 		"conn_id":     conn.GetConnID(),
 		"remote_addr": conn.RemoteAddr().String(),
-		"message_id":  fmt.Sprintf("0x%04X", decodedFrame.MessageID),
-		"command":     fmt.Sprintf("0x%02X", decodedFrame.Command),
 		"timestamp":   time.Now().Unix(),
 	}
 
@@ -158,12 +152,10 @@ func (n *NotificationIntegrator) NotifyChargingStart(decodedFrame *protocol.Deco
 }
 
 // NotifyChargingEnd 通知充电结束
-func (n *NotificationIntegrator) NotifyChargingEnd(decodedFrame *protocol.DecodedDNYFrame, conn ziface.IConnection, endData map[string]interface{}) {
+func (n *NotificationIntegrator) NotifyChargingEnd(deviceID string, conn ziface.IConnection, endData map[string]interface{}) {
 	if !n.enabled {
 		return
 	}
-
-	deviceID := decodedFrame.DeviceID
 
 	// 从结束数据中提取端口号
 	portNumber := 0
@@ -176,8 +168,6 @@ func (n *NotificationIntegrator) NotifyChargingEnd(decodedFrame *protocol.Decode
 	data := map[string]interface{}{
 		"conn_id":     conn.GetConnID(),
 		"remote_addr": conn.RemoteAddr().String(),
-		"message_id":  fmt.Sprintf("0x%04X", decodedFrame.MessageID),
-		"command":     fmt.Sprintf("0x%02X", decodedFrame.Command),
 		"timestamp":   time.Now().Unix(),
 	}
 
@@ -192,12 +182,10 @@ func (n *NotificationIntegrator) NotifyChargingEnd(decodedFrame *protocol.Decode
 }
 
 // NotifySettlement 通知结算
-func (n *NotificationIntegrator) NotifySettlement(decodedFrame *protocol.DecodedDNYFrame, conn ziface.IConnection, settlementData map[string]interface{}) {
+func (n *NotificationIntegrator) NotifySettlement(deviceID string, conn ziface.IConnection, settlementData map[string]interface{}) {
 	if !n.enabled {
 		return
 	}
-
-	deviceID := decodedFrame.DeviceID
 
 	// 从结算数据中提取端口号
 	portNumber := 0
@@ -210,8 +198,6 @@ func (n *NotificationIntegrator) NotifySettlement(decodedFrame *protocol.Decoded
 	data := map[string]interface{}{
 		"conn_id":     conn.GetConnID(),
 		"remote_addr": conn.RemoteAddr().String(),
-		"message_id":  fmt.Sprintf("0x%04X", decodedFrame.MessageID),
-		"command":     fmt.Sprintf("0x%02X", decodedFrame.Command),
 		"timestamp":   time.Now().Unix(),
 	}
 
@@ -409,7 +395,7 @@ func (n *NotificationIntegrator) NotifyPortOffline(deviceID string, portNumber i
 }
 
 // NotifyDeviceHeartbeat 发送设备心跳通知
-func (n *NotificationIntegrator) NotifyDeviceHeartbeat(decodedFrame *protocol.DecodedDNYFrame, conn ziface.IConnection, heartbeatData map[string]interface{}) {
+func (n *NotificationIntegrator) NotifyDeviceHeartbeat(deviceID string, conn ziface.IConnection, heartbeatData map[string]interface{}) {
 	if !n.enabled {
 		return
 	}
@@ -417,7 +403,7 @@ func (n *NotificationIntegrator) NotifyDeviceHeartbeat(decodedFrame *protocol.De
 	// 创建设备心跳事件
 	event := &NotificationEvent{
 		EventType: EventTypeDeviceHeartbeat,
-		DeviceID:  decodedFrame.DeviceID,
+		DeviceID:  deviceID,
 		Data:      heartbeatData,
 		Timestamp: time.Now(),
 	}
@@ -491,12 +477,10 @@ func (n *NotificationIntegrator) NotifyDeviceRegister(deviceID string, registerD
 }
 
 // NotifyChargingFailed 发送充电失败通知
-func (n *NotificationIntegrator) NotifyChargingFailed(decodedFrame *protocol.DecodedDNYFrame, conn ziface.IConnection, chargingFailedData map[string]interface{}) {
+func (n *NotificationIntegrator) NotifyChargingFailed(deviceID string, conn ziface.IConnection, chargingFailedData map[string]interface{}) {
 	if !n.enabled {
 		return
 	}
-
-	deviceID := decodedFrame.DeviceID
 
 	// 从充电失败数据中提取端口号
 	portNumber := 0
@@ -509,8 +493,6 @@ func (n *NotificationIntegrator) NotifyChargingFailed(decodedFrame *protocol.Dec
 	data := map[string]interface{}{
 		"conn_id":     conn.GetConnID(),
 		"remote_addr": conn.RemoteAddr().String(),
-		"message_id":  fmt.Sprintf("0x%04X", decodedFrame.MessageID),
-		"command":     fmt.Sprintf("0x%02X", decodedFrame.Command),
 		"failed_time": time.Now().Unix(),
 	}
 
