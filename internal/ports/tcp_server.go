@@ -20,9 +20,7 @@ type TCPServer struct {
 // NewTCPServer 创建TCP服务器
 func NewTCPServer(port int) *TCPServer {
 	// 创建Zinx服务器
-	server := znet.NewServer()
-
-	// 设置连接监控器
+	server := znet.NewServer() // 设置连接监控器
 	connectionMonitor := handlers.NewConnectionMonitor()
 	server.SetOnConnStart(connectionMonitor.OnConnectionOpened)
 	server.SetOnConnStop(connectionMonitor.OnConnectionClosed)

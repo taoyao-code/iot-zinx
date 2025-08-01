@@ -29,35 +29,75 @@
 package main
 
 import (
+	"flag"
 	"log"
 	"os"
 	"os/signal"
 	"syscall"
 
 	"github.com/bujia-iot/iot-zinx/internal/apis"
+	"github.com/bujia-iot/iot-zinx/internal/infrastructure/config"
+	"github.com/bujia-iot/iot-zinx/internal/infrastructure/logger"
 	"github.com/bujia-iot/iot-zinx/internal/ports"
+	"github.com/bujia-iot/iot-zinx/pkg/utils"
+	"go.uber.org/zap"
 )
 
 func main() {
+	// 解析命令行参数
+	configPath := flag.String("config", "configs/gateway.yaml", "配置文件路径")
+	flag.Parse()
+
 	log.Println("🚀 启动IoT-Zinx简化架构...")
+	log.Printf("📄 加载配置文件: %s", *configPath)
+
+	// 加载配置文件
+	if err := config.Load(*configPath); err != nil {
+		log.Fatalf("❌ 配置文件加载失败: %v", err)
+	}
+
+	cfg := config.GetConfig()
+	log.Println("✅ 配置文件加载成功")
+
+	// 初始化zap日志系统
+	if err := logger.InitZapLogger(); err != nil {
+		log.Fatalf("❌ 日志系统初始化失败: %v", err)
+	}
+	defer logger.Sync()
+
+	// 设置Zinx框架日志
+	utils.SetupZinxLogger()
+
+	logger.Info("日志系统初始化完成")
+	logger.Infof("TCP服务器配置: %s:%d", cfg.TCPServer.Host, cfg.TCPServer.Port)
+	logger.Infof("HTTP服务器配置: %s:%d", cfg.HTTPAPIServer.Host, cfg.HTTPAPIServer.Port)
 
 	// 启动TCP服务器
 	go func() {
-		if err := ports.StartTCPServer(7054); err != nil {
-			log.Fatalf("TCP服务器启动失败: %v", err)
+		logger.Info("启动TCP服务器",
+			zap.Int("port", cfg.TCPServer.Port),
+			zap.String("host", cfg.TCPServer.Host),
+		)
+		if err := ports.StartTCPServer(cfg.TCPServer.Port); err != nil {
+			logger.Fatal("TCP服务器启动失败", zap.Error(err))
 		}
 	}()
 
 	// 启动HTTP服务器
 	go func() {
-		if err := apis.StartHTTPServer(7055); err != nil {
-			log.Fatalf("HTTP服务器启动失败: %v", err)
+		logger.Info("启动HTTP服务器",
+			zap.Int("port", cfg.HTTPAPIServer.Port),
+			zap.String("host", cfg.HTTPAPIServer.Host),
+		)
+		if err := apis.StartHTTPServer(cfg.HTTPAPIServer.Port); err != nil {
+			logger.Fatal("HTTP服务器启动失败", zap.Error(err))
 		}
 	}()
 
-	log.Println("✅ 所有服务已启动")
-	log.Println("📡 TCP服务器端口: 7054")
-	log.Println("🌐 HTTP服务器端口: 7055")
+	logger.Info("✅ 所有服务已启动")
+	logger.Infof("📡 TCP服务器端口: %d", cfg.TCPServer.Port)
+	logger.Infof("🌐 HTTP服务器端口: %d", cfg.HTTPAPIServer.Port)
+	log.Printf("🌐 HTTP服务器端口: %d", cfg.HTTPAPIServer.Port)
 	log.Println("📊 API端点:")
 	log.Println("  • GET  /api/devices       - 获取所有设备")
 	log.Println("  • GET  /api/devices/online - 获取在线设备")

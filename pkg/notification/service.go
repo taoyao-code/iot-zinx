@@ -11,9 +11,9 @@ import (
 	"time"
 
 	"github.com/bujia-iot/iot-zinx/internal/infrastructure/logger"
-	"github.com/redis/go-redis/v9"
 	"github.com/google/uuid"
-	"github.com/sirupsen/logrus"
+	"github.com/redis/go-redis/v9"
+	"go.uber.org/zap"
 )
 
 // NotificationService 通知服务
@@ -109,11 +109,11 @@ func (s *NotificationService) Start(ctx context.Context) error {
 
 	s.running = true
 
-	logger.WithFields(logrus.Fields{
-		"workers":    s.config.Workers,
-		"queue_size": s.config.QueueSize,
-		"endpoints":  len(s.config.Endpoints),
-	}).Info("通知服务已启动")
+	logger.Info("通知服务已启动",
+		zap.Int("workers", s.config.Workers),
+		zap.Int("queue_size", s.config.QueueSize),
+		zap.Int("endpoints", len(s.config.Endpoints)),
+	)
 
 	return nil
 }
@@ -236,7 +236,7 @@ func (s *NotificationService) SendSettlementNotification(deviceID string, portNu
 func (s *NotificationService) worker(workerID int) {
 	defer s.wg.Done()
 
-	logger.WithField("worker_id", workerID).Debug("通知工作协程已启动")
+	logger.Debug("通知工作协程已启动", zap.Int("worker_id", workerID))
 
 	for {
 		select {
@@ -279,7 +279,7 @@ func (s *NotificationService) processEvent(event *NotificationEvent) {
 	// 获取订阅该事件的端点
 	endpoints := s.config.GetEndpointsByEvent(event.EventType)
 	if len(endpoints) == 0 {
-		logger.WithField("event_type", event.EventType).Debug("没有端点订阅该事件类型")
+		logger.Debug("没有端点订阅该事件类型", zap.String("event_type", event.EventType))
 		return
 	}
 
@@ -305,29 +305,29 @@ func (s *NotificationService) sendToEndpoint(event *NotificationEvent, endpoint 
 
 	jsonData, err := json.Marshal(payload)
 	if err != nil {
-		logger.WithFields(logrus.Fields{
-			"component":  "notification",
-			"action":     "serialize_payload",
-			"event_id":   event.EventID,
-			"event_type": event.EventType,
-			"endpoint":   endpoint.Name,
-			"error":      err.Error(),
-		}).Error("📤 通知推送失败 - 序列化载荷失败")
+		logger.Error("📤 通知推送失败 - 序列化载荷失败",
+			zap.String("component", "notification"),
+			zap.String("action", "serialize_payload"),
+			zap.String("event_id", event.EventID),
+			zap.String("event_type", event.EventType),
+			zap.String("endpoint", endpoint.Name),
+			zap.Error(err),
+		)
 		return
 	}
 
 	// 创建HTTP请求
 	req, err := http.NewRequestWithContext(s.ctx, "POST", endpoint.URL, bytes.NewBuffer(jsonData))
 	if err != nil {
-		logger.WithFields(logrus.Fields{
-			"component":  "notification",
-			"action":     "create_request",
-			"event_id":   event.EventID,
-			"event_type": event.EventType,
-			"endpoint":   endpoint.Name,
-			"url":        endpoint.URL,
-			"error":      err.Error(),
-		}).Error("📤 通知推送失败 - 创建HTTP请求失败")
+		logger.Error("📤 通知推送失败 - 创建HTTP请求失败",
+			zap.String("component", "notification"),
+			zap.String("action", "create_request"),
+			zap.String("event_id", event.EventID),
+			zap.String("event_type", event.EventType),
+			zap.String("endpoint", endpoint.Name),
+			zap.String("url", endpoint.URL),
+			zap.Error(err),
+		)
 		return
 	}
 
@@ -338,18 +338,18 @@ func (s *NotificationService) sendToEndpoint(event *NotificationEvent, endpoint 
 	}
 
 	// 记录请求详情
-	logger.WithFields(logrus.Fields{
-		"component":     "notification",
-		"action":        "send_request",
-		"event_id":      event.EventID,
-		"event_type":    event.EventType,
-		"endpoint":      endpoint.Name,
-		"url":           endpoint.URL,
-		"method":        "POST",
-		"payload_size":  len(jsonData),
-		"timeout":       endpoint.Timeout.String(),
-		"attempt_count": event.AttemptCount + 1,
-	}).Info("📤 发送通知推送")
+	logger.Info("📤 发送通知推送",
+		zap.String("component", "notification"),
+		zap.String("action", "send_request"),
+		zap.String("event_id", event.EventID),
+		zap.String("event_type", event.EventType),
+		zap.String("endpoint", endpoint.Name),
+		zap.String("url", endpoint.URL),
+		zap.String("method", "POST"),
+		zap.Int("payload_size", len(jsonData)),
+		zap.String("timeout", endpoint.Timeout.String()),
+		zap.Int("attempt_count", event.AttemptCount+1),
+	)
 
 	// 设置超时
 	client := &http.Client{Timeout: endpoint.Timeout}
@@ -359,17 +359,17 @@ func (s *NotificationService) sendToEndpoint(event *NotificationEvent, endpoint 
 	responseTime := time.Since(startTime)
 
 	if err != nil {
-		logger.WithFields(logrus.Fields{
-			"component":     "notification",
-			"action":        "send_failed",
-			"event_id":      event.EventID,
-			"event_type":    event.EventType,
-			"endpoint":      endpoint.Name,
-			"url":           endpoint.URL,
-			"response_time": responseTime.String(),
-			"attempt_count": event.AttemptCount + 1,
-			"error":         err.Error(),
-		}).Error("📤 通知推送失败 - 网络错误")
+		logger.Error("📤 通知推送失败 - 网络错误",
+			zap.String("component", "notification"),
+			zap.String("action", "send_failed"),
+			zap.String("event_id", event.EventID),
+			zap.String("event_type", event.EventType),
+			zap.String("endpoint", endpoint.Name),
+			zap.String("url", endpoint.URL),
+			zap.String("response_time", responseTime.String()),
+			zap.Int("attempt_count", event.AttemptCount+1),
+			zap.Error(err),
+		)
 
 		// 增加重试计数
 		event.AttemptCount++
@@ -389,35 +389,35 @@ func (s *NotificationService) sendToEndpoint(event *NotificationEvent, endpoint 
 
 	// 检查响应状态
 	if resp.StatusCode >= 200 && resp.StatusCode < 300 {
-		logger.WithFields(logrus.Fields{
-			"component":     "notification",
-			"action":        "send_success",
-			"event_id":      event.EventID,
-			"event_type":    event.EventType,
-			"endpoint":      endpoint.Name,
-			"url":           endpoint.URL,
-			"status_code":   resp.StatusCode,
-			"response_time": responseTime.String(),
-			"response_size": len(respBody),
-			"attempt_count": event.AttemptCount + 1,
-			"final_attempt": true,
-		}).Info("📤 通知推送成功")
+		logger.Info("📤 通知推送成功",
+			zap.String("component", "notification"),
+			zap.String("action", "send_success"),
+			zap.String("event_id", event.EventID),
+			zap.String("event_type", event.EventType),
+			zap.String("endpoint", endpoint.Name),
+			zap.String("url", endpoint.URL),
+			zap.Int("status_code", resp.StatusCode),
+			zap.String("response_time", responseTime.String()),
+			zap.Int("response_size", len(respBody)),
+			zap.Int("attempt_count", event.AttemptCount+1),
+			zap.Bool("final_attempt", true),
+		)
 
 		// 更新成功统计
 		s.updateStats(endpoint.Name, true, responseTime)
 	} else {
-		logger.WithFields(logrus.Fields{
-			"component":     "notification",
-			"action":        "send_failed",
-			"event_id":      event.EventID,
-			"event_type":    event.EventType,
-			"endpoint":      endpoint.Name,
-			"url":           endpoint.URL,
-			"status_code":   resp.StatusCode,
-			"response_time": responseTime.String(),
-			"response_body": string(respBody),
-			"attempt_count": event.AttemptCount + 1,
-		}).Error("📤 通知推送失败 - HTTP错误状态")
+		logger.Error("📤 通知推送失败 - HTTP错误状态",
+			zap.String("component", "notification"),
+			zap.String("action", "send_failed"),
+			zap.String("event_id", event.EventID),
+			zap.String("event_type", event.EventType),
+			zap.String("endpoint", endpoint.Name),
+			zap.String("url", endpoint.URL),
+			zap.Int("status_code", resp.StatusCode),
+			zap.String("response_time", responseTime.String()),
+			zap.String("response_body", string(respBody)),
+			zap.Int("attempt_count", event.AttemptCount+1),
+		)
 
 		// 更新失败统计
 		s.updateStats(endpoint.Name, false, responseTime)
@@ -433,58 +433,58 @@ func (s *NotificationService) sendToEndpoint(event *NotificationEvent, endpoint 
 func (s *NotificationService) scheduleRetry(event *NotificationEvent, endpoint NotificationEndpoint) {
 	// 检查是否超过最大重试次数
 	if event.AttemptCount >= s.config.Retry.MaxAttempts {
-		logger.WithFields(logrus.Fields{
-			"component":     "notification",
-			"action":        "retry_exhausted",
-			"event_id":      event.EventID,
-			"event_type":    event.EventType,
-			"endpoint":      endpoint.Name,
-			"attempt_count": event.AttemptCount,
-			"max_attempts":  s.config.Retry.MaxAttempts,
-		}).Error("📤 通知推送失败 - 重试次数已用尽")
+		logger.Error("📤 通知推送失败 - 重试次数已用尽",
+			zap.String("component", "notification"),
+			zap.String("action", "retry_exhausted"),
+			zap.String("event_id", event.EventID),
+			zap.String("event_type", event.EventType),
+			zap.String("endpoint", endpoint.Name),
+			zap.Int("attempt_count", event.AttemptCount),
+			zap.Int("max_attempts", s.config.Retry.MaxAttempts),
+		)
 		return
 	}
 
 	// 计算重试延迟
 	delay := s.calculateRetryDelay(event.AttemptCount)
 
-	logger.WithFields(logrus.Fields{
-		"component":     "notification",
-		"action":        "schedule_retry",
-		"event_id":      event.EventID,
-		"event_type":    event.EventType,
-		"endpoint":      endpoint.Name,
-		"attempt_count": event.AttemptCount,
-		"next_attempt":  event.AttemptCount + 1,
-		"retry_delay":   delay.String(),
-	}).Warn("📤 通知推送安排重试")
+	logger.Warn("📤 通知推送安排重试",
+		zap.String("component", "notification"),
+		zap.String("action", "schedule_retry"),
+		zap.String("event_id", event.EventID),
+		zap.String("event_type", event.EventType),
+		zap.String("endpoint", endpoint.Name),
+		zap.Int("attempt_count", event.AttemptCount),
+		zap.Int("next_attempt", event.AttemptCount+1),
+		zap.String("retry_delay", delay.String()),
+	)
 
 	// 检查Redis客户端是否可用
 	if s.redisClient == nil {
-		logger.WithFields(logrus.Fields{
-			"component":  "notification",
-			"action":     "redis_unavailable",
-			"event_id":   event.EventID,
-			"event_type": event.EventType,
-			"endpoint":   endpoint.Name,
-		}).Warn("📤 Redis客户端不可用，跳过持久化")
+		logger.Warn("📤 Redis客户端不可用，跳过持久化",
+			zap.String("component", "notification"),
+			zap.String("action", "redis_unavailable"),
+			zap.String("event_id", event.EventID),
+			zap.String("event_type", event.EventType),
+			zap.String("endpoint", endpoint.Name),
+		)
 		return
 	}
 
 	// 实现Redis重试队列持久化
 	ctx := context.Background()
 	retryKey := "notification:retry:events"
-	
+
 	eventData, err := json.Marshal(event)
 	if err != nil {
-		logger.WithFields(logrus.Fields{
-			"component":  "notification",
-			"action":     "serialize_retry_event",
-			"event_id":   event.EventID,
-			"event_type": event.EventType,
-			"endpoint":   endpoint.Name,
-			"error":      err.Error(),
-		}).Error("📤 序列化重试事件失败")
+		logger.Error("📤 序列化重试事件失败",
+			zap.String("component", "notification"),
+			zap.String("action", "serialize_retry_event"),
+			zap.String("event_id", event.EventID),
+			zap.String("event_type", event.EventType),
+			zap.String("endpoint", endpoint.Name),
+			zap.Error(err),
+		)
 		return
 	}
 
@@ -493,30 +493,30 @@ func (s *NotificationService) scheduleRetry(event *NotificationEvent, endpoint N
 	case s.retryQueue <- event:
 		// 内存重试队列加入成功，同时持久化到Redis
 		if _, err := s.redisClient.LPush(ctx, retryKey, string(eventData)).Result(); err != nil {
-			logger.WithFields(logrus.Fields{
-				"component":  "notification",
-				"action":     "persist_retry_event",
-				"event_id":   event.EventID,
-				"error":      err.Error(),
-			}).Error("📤 持久化重试事件到Redis失败")
+			logger.Error("📤 持久化重试事件到Redis失败",
+				zap.String("component", "notification"),
+				zap.String("action", "persist_retry_event"),
+				zap.String("event_id", event.EventID),
+				zap.Error(err),
+			)
 		}
 	default:
 		// 内存队列已满，直接持久化到Redis
 		if _, err := s.redisClient.LPush(ctx, retryKey, string(eventData)).Result(); err != nil {
-			logger.WithFields(logrus.Fields{
-				"component":  "notification",
-				"action":     "retry_queue_full_persist",
-				"event_id":   event.EventID,
-				"error":      err.Error(),
-			}).Error("📤 通知推送失败 - 队列已满且Redis持久化失败")
+			logger.Error("📤 通知推送失败 - 队列已满且Redis持久化失败",
+				zap.String("component", "notification"),
+				zap.String("action", "retry_queue_full_persist"),
+				zap.String("event_id", event.EventID),
+				zap.Error(err),
+			)
 		} else {
-			logger.WithFields(logrus.Fields{
-				"component":  "notification",
-				"action":     "retry_queued_redis",
-				"event_id":   event.EventID,
-				"event_type": event.EventType,
-				"endpoint":   endpoint.Name,
-			}).Info("📤 重试事件已加入Redis队列")
+			logger.Info("📤 重试事件已加入Redis队列",
+				zap.String("component", "notification"),
+				zap.String("action", "retry_queued_redis"),
+				zap.String("event_id", event.EventID),
+				zap.String("event_type", event.EventType),
+				zap.String("endpoint", endpoint.Name),
+			)
 		}
 	}
 }
@@ -630,16 +630,16 @@ func (s *NotificationService) loadRetryEvents() {
 	}
 
 	retryKey := "notification:retry:events"
-	
+
 	// 从Redis获取所有待重试事件
 	ctx := context.Background()
 	result, err := s.redisClient.LRange(ctx, retryKey, 0, -1).Result()
 	if err != nil {
-		logger.WithFields(logrus.Fields{
-			"component": "notification",
-			"action":    "load_retry_events",
-			"error":     err.Error(),
-		}).Error("从Redis加载重试事件失败")
+		logger.Error("从Redis加载重试事件失败",
+			zap.String("component", "notification"),
+			zap.String("action", "load_retry_events"),
+			zap.Error(err),
+		)
 		return
 	}
 
@@ -647,34 +647,34 @@ func (s *NotificationService) loadRetryEvents() {
 		return
 	}
 
-	logger.WithFields(logrus.Fields{
-		"component":    "notification",
-		"action":       "load_retry_events",
-		"event_count":  len(result),
-	}).Info("从Redis加载重试事件")
+	logger.Info("从Redis加载重试事件",
+		zap.String("component", "notification"),
+		zap.String("action", "load_retry_events"),
+		zap.Int("event_count", len(result)),
+	)
 
 	// 解析并重入重试队列
 	loadedCount := 0
 	for _, item := range result {
 		var event NotificationEvent
 		if err := json.Unmarshal([]byte(item), &event); err != nil {
-			logger.WithFields(logrus.Fields{
-				"component": "notification",
-				"action":    "parse_retry_event",
-				"error":     err.Error(),
-				"data":      item,
-			}).Error("解析重试事件失败")
+			logger.Error("解析重试事件失败",
+				zap.String("component", "notification"),
+				zap.String("action", "parse_retry_event"),
+				zap.Error(err),
+				zap.String("data", item),
+			)
 			continue
 		}
 
 		// 检查是否已经过期
 		if time.Since(event.Timestamp) > 24*time.Hour {
-			logger.WithFields(logrus.Fields{
-				"component": "notification",
-				"action":    "skip_expired_event",
-				"event_id":  event.EventID,
-				"event_age": time.Since(event.Timestamp).String(),
-			}).Debug("跳过过期重试事件")
+			logger.Debug("跳过过期重试事件",
+				zap.String("component", "notification"),
+				zap.String("action", "skip_expired_event"),
+				zap.String("event_id", event.EventID),
+				zap.String("event_age", time.Since(event.Timestamp).String()),
+			)
 			continue
 		}
 
@@ -682,35 +682,35 @@ func (s *NotificationService) loadRetryEvents() {
 		select {
 		case s.retryQueue <- &event:
 			loadedCount++
-			logger.WithFields(logrus.Fields{
-				"component": "notification",
-				"action":    "enqueue_retry_event",
-				"event_id":  event.EventID,
-				"event_type": event.EventType,
-			}).Debug("重试事件已加入队列")
+			logger.Debug("重试事件已加入队列",
+				zap.String("component", "notification"),
+				zap.String("action", "enqueue_retry_event"),
+				zap.String("event_id", event.EventID),
+				zap.String("event_type", event.EventType),
+			)
 		default:
-			logger.WithFields(logrus.Fields{
-				"component": "notification",
-				"action":    "retry_queue_full",
-				"event_id":  event.EventID,
-			}).Warn("重试队列已满，丢弃事件")
+			logger.Warn("重试队列已满，丢弃事件",
+				zap.String("component", "notification"),
+				zap.String("action", "retry_queue_full"),
+				zap.String("event_id", event.EventID),
+			)
 		}
 	}
 
 	// 清空Redis中的重试事件
 	if loadedCount > 0 {
 		if _, err := s.redisClient.Del(ctx, retryKey).Result(); err != nil {
-			logger.WithFields(logrus.Fields{
-				"component": "notification",
-				"action":    "clear_retry_events",
-				"error":     err.Error(),
-			}).Error("清空Redis重试事件失败")
+			logger.Error("清空Redis重试事件失败",
+				zap.String("component", "notification"),
+				zap.String("action", "clear_retry_events"),
+				zap.Error(err),
+			)
 		} else {
-			logger.WithFields(logrus.Fields{
-				"component":     "notification",
-				"action":        "clear_retry_events",
-				"loaded_count":  loadedCount,
-			}).Info("已清空Redis重试事件")
+			logger.Info("已清空Redis重试事件",
+				zap.String("component", "notification"),
+				zap.String("action", "clear_retry_events"),
+				zap.Int("loaded_count", loadedCount),
+			)
 		}
 	}
 }
