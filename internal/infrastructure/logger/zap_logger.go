@@ -73,6 +73,14 @@ func InitZapLogger() error {
 	// 创建通信专用日志器
 	CommunicationLogger = createCommunicationLogger(cfg)
 
+	// 立即输出一条测试日志验证系统工作
+	GlobalLogger.Info("🎯 Zap日志系统初始化完成",
+		zap.String("level", cfg.Level),
+		zap.Bool("console", cfg.EnableConsole),
+		zap.Bool("file", cfg.EnableFile),
+		zap.String("format", cfg.Format),
+	)
+
 	return nil
 }
 

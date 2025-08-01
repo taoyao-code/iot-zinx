@@ -60,7 +60,7 @@ redis:
 # 统一日志配置
 logger:
   # 基础配置
-  level: "info" # 日志级别: trace, debug, info, warn, error, fatal, panic
+  level: "debug" # 日志级别: trace, debug, info, warn, error, fatal, panic
   format: "json" # 输出格式: json, text
   enableConsole: true # 是否输出到控制台
   enableStructured: true # 是否启用结构化日志
