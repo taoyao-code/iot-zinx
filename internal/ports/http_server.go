@@ -1,7 +1,6 @@
 package ports
 
 import (
-	_ "github.com/bujia-iot/iot-zinx/docs" // Swagger文档
 	"github.com/bujia-iot/iot-zinx/internal/adapter/http"
 	"github.com/bujia-iot/iot-zinx/internal/app"
 	"github.com/bujia-iot/iot-zinx/internal/infrastructure/config"
