@@ -4,13 +4,14 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log"
 	"net/http"
 	"strings"
 	"time"
 
 	"github.com/bujia-iot/iot-zinx/internal/handlers"
+	"github.com/bujia-iot/iot-zinx/internal/infrastructure/logger"
 	"github.com/bujia-iot/iot-zinx/pkg/storage"
+	"go.uber.org/zap"
 )
 
 // HTTPServer HTTP服务器 - 1.5 HTTP API接口完善
@@ -67,13 +68,18 @@ func NewHTTPServer(port int, connectionMonitor *handlers.ConnectionMonitor) *HTT
 
 // Start 启动HTTP服务器
 func (s *HTTPServer) Start() error {
-	log.Printf("启动HTTP服务器，端口: %s", s.server.Addr)
+	logger.Info("启动HTTP服务器",
+		zap.String("component", "http_server"),
+		zap.String("address", s.server.Addr),
+	)
 	return s.server.ListenAndServe()
 }
 
 // Stop 停止HTTP服务器
 func (s *HTTPServer) Stop(ctx context.Context) error {
-	log.Println("停止HTTP服务器...")
+	logger.Info("停止HTTP服务器",
+		zap.String("component", "http_server"),
+	)
 	return s.server.Shutdown(ctx)
 }
 

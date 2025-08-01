@@ -1,9 +1,11 @@
 package storage
 
 import (
-	"log"
 	"sync"
 	"time"
+
+	"github.com/bujia-iot/iot-zinx/internal/infrastructure/logger"
+	"go.uber.org/zap"
 )
 
 // DeviceStore 全局设备存储 - 1.3 设备状态统一管理增强
@@ -157,7 +159,10 @@ func (s *DeviceStore) RegisterStatusChangeCallback(callback StatusChangeCallback
 	defer s.callbackMutex.Unlock()
 	s.statusCallbacks = append(s.statusCallbacks, callback)
 
-	log.Printf("[DeviceStore] 注册状态变更回调，当前回调数量: %d", len(s.statusCallbacks))
+	logger.Info("注册状态变更回调",
+		zap.String("component", "device_store"),
+		zap.Int("callback_count", len(s.statusCallbacks)),
+	)
 }
 
 // TriggerStatusChangeEvent 触发全局状态变更事件
@@ -181,15 +186,23 @@ func (s *DeviceStore) TriggerStatusChangeEvent(deviceID, oldStatus, newStatus, e
 		go func(cb StatusChangeCallback) {
 			defer func() {
 				if r := recover(); r != nil {
-					log.Printf("[DeviceStore] 状态变更回调异常: %v", r)
+					logger.Error("状态变更回调异常",
+						zap.String("component", "device_store"),
+						zap.Any("error", r),
+					)
 				}
 			}()
 			cb(event)
 		}(callback)
 	}
 
-	log.Printf("[DeviceStore] 触发状态变更事件: 设备=%s, %s->%s, 类型=%s",
-		deviceID, oldStatus, newStatus, eventType)
+	logger.Info("触发状态变更事件",
+		zap.String("component", "device_store"),
+		zap.String("device_id", deviceID),
+		zap.String("old_status", oldStatus),
+		zap.String("new_status", newStatus),
+		zap.String("event_type", eventType),
+	)
 }
 
 // GetDeviceStatus 获取设备当前状态

@@ -4,12 +4,13 @@ import (
 	"encoding/binary"
 	"encoding/hex"
 	"fmt"
-	"log"
 	"strings"
 
 	"github.com/aceld/zinx/ziface"
 	"github.com/bujia-iot/iot-zinx/internal/domain/dny_protocol"
+	"github.com/bujia-iot/iot-zinx/internal/infrastructure/logger"
 	"github.com/bujia-iot/iot-zinx/pkg/storage"
+	"go.uber.org/zap"
 )
 
 // BaseHandler 基础处理器，提供公共方法
@@ -191,7 +192,10 @@ func (h *BaseHandler) SendSuccessResponse(request ziface.IRequest, response []by
 
 // Log 日志记录
 func (h *BaseHandler) Log(format string, args ...interface{}) {
-	log.Printf("[%s] %s", h.name, fmt.Sprintf(format, args...))
+	logger.Info("Handler",
+		zap.String("component", h.name),
+		zap.String("message", fmt.Sprintf(format, args...)),
+	)
 }
 
 // UpdateDeviceStatus 更新设备状态

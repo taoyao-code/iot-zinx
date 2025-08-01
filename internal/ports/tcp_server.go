@@ -1,7 +1,6 @@
 package ports
 
 import (
-	"log"
 	"os"
 	"os/signal"
 	"syscall"
@@ -9,7 +8,9 @@ import (
 	"github.com/aceld/zinx/ziface"
 	"github.com/aceld/zinx/znet"
 	"github.com/bujia-iot/iot-zinx/internal/handlers"
+	"github.com/bujia-iot/iot-zinx/internal/infrastructure/logger"
 	"github.com/bujia-iot/iot-zinx/pkg/constants"
+	"go.uber.org/zap"
 )
 
 // TCPServer TCP服务器
@@ -46,7 +47,10 @@ func NewTCPServer(port int) *TCPServer {
 
 // Start 启动服务器
 func (s *TCPServer) Start() error {
-	log.Printf("启动TCP服务器，端口: 7054")
+	logger.Info("启动TCP服务器",
+		zap.String("component", "tcp_server"),
+		zap.Int("port", 7054),
+	)
 
 	// 启动服务器
 	s.server.Start()
@@ -56,7 +60,9 @@ func (s *TCPServer) Start() error {
 	signal.Notify(c, syscall.SIGINT, syscall.SIGTERM)
 	<-c
 
-	log.Println("收到停止信号，关闭服务器...")
+	logger.Info("收到停止信号，关闭服务器",
+		zap.String("component", "tcp_server"),
+	)
 	s.server.Stop()
 
 	return nil

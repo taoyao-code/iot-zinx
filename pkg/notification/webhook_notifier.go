@@ -3,11 +3,12 @@ package notification
 import (
 	"bytes"
 	"encoding/json"
-	"log"
 	"net/http"
 	"time"
 
+	"github.com/bujia-iot/iot-zinx/internal/infrastructure/logger"
 	"github.com/bujia-iot/iot-zinx/pkg/storage"
+	"go.uber.org/zap"
 )
 
 // WebhookNotifier 第三方通知系统
@@ -87,7 +88,10 @@ func (n *WebhookNotifier) NotifyChargingStopped(deviceID string) {
 func (n *WebhookNotifier) sendEvent(event WebhookEvent) {
 	payload, err := json.Marshal(event)
 	if err != nil {
-		log.Printf("序列化webhook事件失败: %v", err)
+		logger.Error("序列化webhook事件失败",
+			zap.String("component", "webhook"),
+			zap.Error(err),
+		)
 		return
 	}
 
@@ -95,13 +99,21 @@ func (n *WebhookNotifier) sendEvent(event WebhookEvent) {
 		go func(url string) {
 			resp, err := n.client.Post(url, "application/json", bytes.NewBuffer(payload))
 			if err != nil {
-				log.Printf("发送webhook到 %s 失败: %v", url, err)
+				logger.Error("发送webhook失败",
+					zap.String("component", "webhook"),
+					zap.String("url", url),
+					zap.Error(err),
+				)
 				return
 			}
 			defer resp.Body.Close()
 
 			if resp.StatusCode >= 400 {
-				log.Printf("webhook %s 返回错误状态: %d", url, resp.StatusCode)
+				logger.Error("webhook返回错误状态",
+					zap.String("component", "webhook"),
+					zap.String("url", url),
+					zap.Int("status_code", resp.StatusCode),
+				)
 			}
 		}(endpoint)
 	}
@@ -113,7 +125,10 @@ var GlobalWebhookNotifier *WebhookNotifier
 // InitWebhookNotifier 初始化webhook通知器
 func InitWebhookNotifier(endpoints []string) {
 	GlobalWebhookNotifier = NewWebhookNotifier(endpoints)
-	log.Println("✅ Webhook通知器已初始化")
+	logger.Info("Webhook通知器已初始化",
+		zap.String("component", "webhook"),
+		zap.Int("endpoints_count", len(endpoints)),
+	)
 }
 
 // GetWebhookNotifier 获取全局通知器
