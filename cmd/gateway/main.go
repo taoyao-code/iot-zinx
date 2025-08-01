@@ -11,7 +11,7 @@
 // @license.name MIT
 // @license.url https://opensource.org/licenses/MIT
 
-// @host localhost:8080
+// @host localhost:7055
 // @BasePath /
 
 // @tag.name device "设备管理"
@@ -43,21 +43,21 @@ func main() {
 
 	// 启动TCP服务器
 	go func() {
-		if err := ports.StartTCPServer(8999); err != nil {
+		if err := ports.StartTCPServer(7054); err != nil {
 			log.Fatalf("TCP服务器启动失败: %v", err)
 		}
 	}()
 
 	// 启动HTTP服务器
 	go func() {
-		if err := apis.StartHTTPServer(8080); err != nil {
+		if err := apis.StartHTTPServer(7055); err != nil {
 			log.Fatalf("HTTP服务器启动失败: %v", err)
 		}
 	}()
 
 	log.Println("✅ 所有服务已启动")
-	log.Println("📡 TCP服务器端口: 8999")
-	log.Println("🌐 HTTP服务器端口: 8080")
+	log.Println("📡 TCP服务器端口: 7054")
+	log.Println("🌐 HTTP服务器端口: 7055")
 	log.Println("📊 API端点:")
 	log.Println("  • GET  /api/devices       - 获取所有设备")
 	log.Println("  • GET  /api/devices/online - 获取在线设备")

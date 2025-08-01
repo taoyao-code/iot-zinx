@@ -48,7 +48,7 @@ func NewTCPServer(port int) *TCPServer {
 
 // Start 启动服务器
 func (s *TCPServer) Start() error {
-	log.Printf("启动TCP服务器，端口: 8999")
+	log.Printf("启动TCP服务器，端口: 7054")
 
 	// 启动服务器
 	s.server.Start()
