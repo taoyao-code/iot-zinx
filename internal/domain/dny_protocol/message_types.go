@@ -713,3 +713,172 @@ func readTimeBytes(data []byte) time.Time {
 	return time.Date(int(year), time.Month(month), int(day),
 		int(hour), int(minute), int(second), 0, time.Local)
 }
+
+// ============================================================================
+// 1.1 协议解析标准化 - 统一解析入口
+// ============================================================================
+
+// MessageType 消息类型枚举
+type MessageType uint8
+
+const (
+	MsgTypeUnknown        MessageType = 0x00
+	MsgTypeLinkHeartbeat  MessageType = 0x01
+	MsgTypeSwipeCard      MessageType = 0x02
+	MsgTypeDeviceRegister MessageType = 0x20
+	MsgTypeHeartbeat      MessageType = 0x21
+	MsgTypeChargeControl  MessageType = 0x82
+	MsgTypePowerHeartbeat MessageType = 0x80
+)
+
+// ParsedMessage 统一的解析结果结构
+type ParsedMessage struct {
+	MessageType MessageType // 消息类型
+	PhysicalID  uint32      // 物理ID
+	MessageID   uint16      // 消息ID
+	Command     uint8       // 命令字节
+	Data        interface{} // 解析后的具体数据结构
+	RawData     []byte      // 原始数据
+	Error       error       // 解析错误
+}
+
+// ParseDNYMessage 统一的DNY协议消息解析入口
+// 这是1.1协议解析标准化的核心函数
+func ParseDNYMessage(rawData []byte) *ParsedMessage {
+	result := &ParsedMessage{
+		RawData: rawData,
+	}
+
+	// 基础验证
+	if len(rawData) < 12 {
+		result.Error = fmt.Errorf("insufficient data length: %d, expected at least 12", len(rawData))
+		return result
+	}
+
+	// 验证DNY协议头
+	if string(rawData[:3]) != "DNY" {
+		result.Error = fmt.Errorf("invalid protocol header: %s, expected DNY", string(rawData[:3]))
+		return result
+	}
+
+	// 解析基础字段
+	result.PhysicalID = binary.LittleEndian.Uint32(rawData[5:9])
+	result.MessageID = binary.LittleEndian.Uint16(rawData[9:11])
+	result.Command = rawData[11]
+	result.MessageType = MessageType(result.Command)
+
+	// 提取数据部分（跳过前12字节的头部）
+	dataPayload := rawData[12:]
+
+	// 根据消息类型解析具体数据
+	switch result.MessageType {
+	case MsgTypeDeviceRegister:
+		data := &DeviceRegisterData{}
+		if err := data.UnmarshalBinary(dataPayload); err != nil {
+			result.Error = fmt.Errorf("parse device register data: %w", err)
+			return result
+		}
+		result.Data = data
+
+	case MsgTypeLinkHeartbeat:
+		data := &LinkHeartbeatData{}
+		if err := data.UnmarshalBinary(dataPayload); err != nil {
+			result.Error = fmt.Errorf("parse link heartbeat data: %w", err)
+			return result
+		}
+		result.Data = data
+
+	case MsgTypeSwipeCard:
+		data := &SwipeCardRequestData{}
+		if err := data.UnmarshalBinary(dataPayload); err != nil {
+			result.Error = fmt.Errorf("parse swipe card data: %w", err)
+			return result
+		}
+		result.Data = data
+
+	case MsgTypeHeartbeat:
+		data := &DeviceHeartbeatData{}
+		if err := data.UnmarshalBinary(dataPayload); err != nil {
+			result.Error = fmt.Errorf("parse heartbeat data: %w", err)
+			return result
+		}
+		result.Data = data
+
+	case MsgTypeChargeControl:
+		data := &ChargeControlData{}
+		if err := data.UnmarshalBinary(dataPayload); err != nil {
+			result.Error = fmt.Errorf("parse charge control data: %w", err)
+			return result
+		}
+		result.Data = data
+
+	case MsgTypePowerHeartbeat:
+		data := &PowerHeartbeatData{}
+		if err := data.UnmarshalBinary(dataPayload); err != nil {
+			result.Error = fmt.Errorf("parse power heartbeat data: %w", err)
+			return result
+		}
+		result.Data = data
+
+	default:
+		// 对于未知类型，保存原始数据
+		result.Data = dataPayload
+		result.Error = fmt.Errorf("unknown message type: 0x%02X", result.Command)
+	}
+
+	return result
+}
+
+// ValidateMessage 验证消息的完整性和有效性
+func ValidateMessage(msg *ParsedMessage) error {
+	if msg == nil {
+		return fmt.Errorf("message is nil")
+	}
+
+	if msg.Error != nil {
+		return fmt.Errorf("message parsing error: %w", msg.Error)
+	}
+
+	// 验证物理ID不为0
+	if msg.PhysicalID == 0 {
+		return fmt.Errorf("invalid physical ID: cannot be zero")
+	}
+
+	// 根据消息类型进行特定验证
+	switch msg.MessageType {
+	case MsgTypeDeviceRegister:
+		if data, ok := msg.Data.(*DeviceRegisterData); ok {
+			if data.DeviceType == 0 {
+				return fmt.Errorf("invalid device type: cannot be zero")
+			}
+		}
+	case MsgTypeSwipeCard:
+		if data, ok := msg.Data.(*SwipeCardRequestData); ok {
+			if data.CardNumber == "" {
+				return fmt.Errorf("invalid card number: cannot be empty")
+			}
+		}
+	}
+
+	return nil
+}
+
+// GetMessageTypeName 获取消息类型的可读名称
+func GetMessageTypeName(msgType MessageType) string {
+	switch msgType {
+	case MsgTypeLinkHeartbeat:
+		return "Link心跳"
+	case MsgTypeSwipeCard:
+		return "刷卡请求"
+	case MsgTypeDeviceRegister:
+		return "设备注册"
+	case MsgTypeHeartbeat:
+		return "心跳"
+	case MsgTypeChargeControl:
+		return "充电控制"
+	case MsgTypePowerHeartbeat:
+		return "功率心跳"
+	default:
+		return fmt.Sprintf("未知类型(0x%02X)", uint8(msgType))
+	}
+}

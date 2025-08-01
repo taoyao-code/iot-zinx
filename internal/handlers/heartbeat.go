@@ -1,16 +1,17 @@
 package handlers
 
 import (
-	"encoding/binary"
 	"fmt"
 
 	"github.com/aceld/zinx/ziface"
+	"github.com/bujia-iot/iot-zinx/internal/domain/dny_protocol"
 	"github.com/bujia-iot/iot-zinx/pkg/storage"
 )
 
 // HeartbeatRouter 心跳路由器
 type HeartbeatRouter struct {
 	*BaseHandler
+	connectionMonitor *ConnectionMonitor
 }
 
 // NewHeartbeatRouter 创建心跳路由器
@@ -20,6 +21,11 @@ func NewHeartbeatRouter() *HeartbeatRouter {
 	}
 }
 
+// SetConnectionMonitor 设置连接监控器
+func (r *HeartbeatRouter) SetConnectionMonitor(monitor *ConnectionMonitor) {
+	r.connectionMonitor = monitor
+}
+
 // PreHandle 预处理
 func (r *HeartbeatRouter) PreHandle(request ziface.IRequest) {}
 
@@ -27,15 +33,21 @@ func (r *HeartbeatRouter) PreHandle(request ziface.IRequest) {}
 func (r *HeartbeatRouter) Handle(request ziface.IRequest) {
 	r.Log("收到心跳请求")
 
-	// 解析消息
-	msg, err := r.parseMessage(request.GetData())
-	if err != nil {
-		r.Log("解析消息失败: %v", err)
+	// 使用统一的协议解析
+	parsedMsg := dny_protocol.ParseDNYMessage(request.GetData())
+	if err := dny_protocol.ValidateMessage(parsedMsg); err != nil {
+		r.Log("消息解析或验证失败: %v", err)
+		return
+	}
+
+	// 确保是心跳消息
+	if parsedMsg.MessageType != dny_protocol.MsgTypeHeartbeat {
+		r.Log("错误的消息类型: %s, 期望心跳", dny_protocol.GetMessageTypeName(parsedMsg.MessageType))
 		return
 	}
 
 	// 提取设备信息
-	deviceID := fmt.Sprintf("%08X", msg.PhysicalId)
+	deviceID := fmt.Sprintf("%08X", parsedMsg.PhysicalID)
 
 	// 检查设备是否存在
 	device, exists := storage.GlobalDeviceStore.Get(deviceID)
@@ -44,15 +56,20 @@ func (r *HeartbeatRouter) Handle(request ziface.IRequest) {
 		return
 	}
 
-	// 更新设备状态
+	// 更新连接活动 - 集成连接生命周期管理
+	if r.connectionMonitor != nil {
+		r.connectionMonitor.UpdateConnectionActivity(uint32(request.GetConnection().GetConnID()))
+	}
+
+	// 更新设备状态 - 使用增强状态管理
 	oldStatus := device.Status
-	device.SetStatus(storage.StatusOnline)
+	device.SetStatusWithReason(storage.StatusOnline, "心跳更新")
 	device.SetConnectionID(uint32(request.GetConnection().GetConnID()))
 	device.SetLastHeartbeat()
 	storage.GlobalDeviceStore.Set(deviceID, device)
 
 	// 发送心跳响应
-	response := r.BuildHeartbeatResponse(fmt.Sprintf("%08X", msg.PhysicalId))
+	response := r.BuildHeartbeatResponse(fmt.Sprintf("%08X", parsedMsg.PhysicalID))
 	r.SendSuccessResponse(request, response)
 
 	// 如果状态发生变化，发送通知
@@ -65,32 +82,3 @@ func (r *HeartbeatRouter) Handle(request ziface.IRequest) {
 
 // PostHandle 后处理
 func (r *HeartbeatRouter) PostHandle(request ziface.IRequest) {}
-
-// parseMessage 解析DNY协议消息
-func (r *HeartbeatRouter) parseMessage(data []byte) (*heartbeatMessage, error) {
-	if len(data) < 12 {
-		return nil, fmt.Errorf("消息长度不足: %d < 12", len(data))
-	}
-
-	// 检查包头
-	if string(data[:3]) != "DNY" {
-		return nil, fmt.Errorf("无效的包头: %s", string(data[:3]))
-	}
-
-	msg := &heartbeatMessage{
-		PhysicalId: binary.LittleEndian.Uint32(data[3:7]),
-		Command:    data[7],
-		MessageId:  binary.LittleEndian.Uint16(data[8:10]),
-		Data:       data[12:], // 跳过数据长度字段
-	}
-
-	return msg, nil
-}
-
-// heartbeatMessage 简化的DNY协议消息结构
-type heartbeatMessage struct {
-	PhysicalId uint32
-	Command    byte
-	MessageId  uint16
-	Data       []byte
-}

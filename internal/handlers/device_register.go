@@ -1,17 +1,17 @@
 package handlers
 
 import (
-	"encoding/binary"
 	"fmt"
-	"strings"
 
 	"github.com/aceld/zinx/ziface"
+	"github.com/bujia-iot/iot-zinx/internal/domain/dny_protocol"
 	"github.com/bujia-iot/iot-zinx/pkg/storage"
 )
 
 // DeviceRegisterRouter 设备注册路由器
 type DeviceRegisterRouter struct {
 	*BaseHandler
+	connectionMonitor *ConnectionMonitor
 }
 
 // NewDeviceRegisterRouter 创建设备注册路由器
@@ -21,6 +21,11 @@ func NewDeviceRegisterRouter() *DeviceRegisterRouter {
 	}
 }
 
+// SetConnectionMonitor 设置连接监控器
+func (r *DeviceRegisterRouter) SetConnectionMonitor(monitor *ConnectionMonitor) {
+	r.connectionMonitor = monitor
+}
+
 // PreHandle 预处理
 func (r *DeviceRegisterRouter) PreHandle(request ziface.IRequest) {}
 
@@ -28,26 +33,48 @@ func (r *DeviceRegisterRouter) PreHandle(request ziface.IRequest) {}
 func (r *DeviceRegisterRouter) Handle(request ziface.IRequest) {
 	r.Log("收到设备注册请求")
 
-	// 解析消息
-	msg, err := r.parseMessage(request.GetData())
-	if err != nil {
-		r.Log("解析消息失败: %v", err)
+	// 使用统一的协议解析
+	parsedMsg := dny_protocol.ParseDNYMessage(request.GetData())
+	if err := dny_protocol.ValidateMessage(parsedMsg); err != nil {
+		r.Log("消息解析或验证失败: %v", err)
+		return
+	}
+
+	// 确保是设备注册消息
+	if parsedMsg.MessageType != dny_protocol.MsgTypeDeviceRegister {
+		r.Log("错误的消息类型: %s, 期望设备注册", dny_protocol.GetMessageTypeName(parsedMsg.MessageType))
+		return
+	}
+
+	// 获取设备注册数据
+	registerData, ok := parsedMsg.Data.(*dny_protocol.DeviceRegisterData)
+	if !ok {
+		r.Log("无法获取设备注册数据")
 		return
 	}
 
 	// 提取设备信息
-	deviceID, physicalID, iccid := r.extractDeviceInfo(msg, request.GetConnection())
+	deviceID := fmt.Sprintf("%08X", parsedMsg.PhysicalID)
+	physicalIDStr := deviceID
+	iccid := registerData.ICCID
 
 	// 检查设备是否已存在
 	device, exists := storage.GlobalDeviceStore.Get(deviceID)
 	if !exists {
 		// 创建新设备
-		device = r.CreateNewDevice(deviceID, physicalID, iccid, request.GetConnection())
+		device = r.CreateNewDevice(deviceID, physicalIDStr, iccid, request.GetConnection())
+
+		// 注册状态变化回调
+		device.RegisterStatusChangeCallback(func(event *storage.StatusChangeEvent) {
+			r.Log("设备 %s 状态变化: %s -> %s (原因: %s)", deviceID, event.OldStatus, event.NewStatus, event.Reason)
+			NotifyDeviceStatusChanged(deviceID, event.OldStatus, event.NewStatus)
+		})
+
 		NotifyDeviceRegistered(device)
 	} else {
-		// 更新现有设备
+		// 更新现有设备状态 - 使用增强状态管理
 		oldStatus := device.Status
-		device.SetStatus(storage.StatusOnline)
+		device.SetStatusWithReason(storage.StatusOnline, "设备重新注册连接")
 		device.SetConnectionID(uint32(request.GetConnection().GetConnID()))
 		storage.GlobalDeviceStore.Set(deviceID, device)
 		r.Log("设备 %s 重新上线", deviceID)
@@ -56,8 +83,14 @@ func (r *DeviceRegisterRouter) Handle(request ziface.IRequest) {
 		}
 	}
 
+	// 注册连接关联到连接监控器
+	if r.connectionMonitor != nil {
+		r.connectionMonitor.RegisterDeviceConnection(uint32(request.GetConnection().GetConnID()), deviceID)
+		r.Log("已注册设备连接关联: connID=%d, deviceID=%s", request.GetConnection().GetConnID(), deviceID)
+	}
+
 	// 发送注册响应
-	response := r.BuildDeviceRegisterResponse(physicalID)
+	response := r.BuildDeviceRegisterResponse(physicalIDStr)
 	r.SendSuccessResponse(request, response)
 
 	r.Log("设备注册完成: %s", deviceID)
@@ -66,57 +99,16 @@ func (r *DeviceRegisterRouter) Handle(request ziface.IRequest) {
 // PostHandle 后处理
 func (r *DeviceRegisterRouter) PostHandle(request ziface.IRequest) {}
 
-// parseMessage 解析DNY协议消息
-func (r *DeviceRegisterRouter) parseMessage(data []byte) (*registerMessage, error) {
-	if len(data) < 12 {
-		return nil, fmt.Errorf("消息长度不足: %d < 12", len(data))
-	}
-
-	// 检查包头
-	if string(data[:3]) != "DNY" {
-		return nil, fmt.Errorf("无效的包头: %s", string(data[:3]))
-	}
-
-	msg := &registerMessage{
-		PhysicalId: binary.LittleEndian.Uint32(data[3:7]),
-		Command:    data[7],
-		MessageId:  binary.LittleEndian.Uint16(data[8:10]),
-		Data:       data[12:], // 跳过数据长度字段
-	}
-
-	return msg, nil
-}
-
-// extractDeviceInfo 提取设备信息
-func (r *DeviceRegisterRouter) extractDeviceInfo(msg *registerMessage, conn ziface.IConnection) (deviceID, physicalID, iccid string) {
+// extractDeviceInfo 提取设备信息 - 从统一解析的消息中提取
+func (r *DeviceRegisterRouter) extractDeviceInfo(registerData *dny_protocol.DeviceRegisterData, physicalID uint32) (deviceID, physicalIDStr, iccid string) {
 	// 将物理ID转换为字符串
-	physicalID = fmt.Sprintf("%08X", msg.PhysicalId)
-
-	// 从数据中提取ICCID（如果存在）
-	if len(msg.Data) >= 20 {
-		// 前20字节通常是ICCID
-		iccid = string(msg.Data[:20])
-		// 清理非打印字符
-		iccid = strings.Map(func(r rune) rune {
-			if r >= 32 && r <= 126 {
-				return r
-			}
-			return -1
-		}, iccid)
-	} else {
-		iccid = ""
-	}
+	physicalIDStr = fmt.Sprintf("%08X", physicalID)
 
 	// 使用物理ID作为设备ID
-	deviceID = physicalID
+	deviceID = physicalIDStr
 
-	return deviceID, physicalID, iccid
-}
+	// 从协议数据中获取ICCID
+	iccid = registerData.ICCID
 
-// registerMessage 简化的DNY协议消息结构
-type registerMessage struct {
-	PhysicalId uint32
-	Command    byte
-	MessageId  uint16
-	Data       []byte
+	return deviceID, physicalIDStr, iccid
 }

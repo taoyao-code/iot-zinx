@@ -27,10 +27,19 @@ func NewTCPServer(port int) *TCPServer {
 	server.SetOnConnStart(connectionMonitor.OnConnectionOpened)
 	server.SetOnConnStop(connectionMonitor.OnConnectionClosed)
 
+	// 创建路由器并设置连接监控器
+	deviceRegisterRouter := handlers.NewDeviceRegisterRouter()
+	deviceRegisterRouter.SetConnectionMonitor(connectionMonitor)
+
+	heartbeatRouter := handlers.NewHeartbeatRouter()
+	heartbeatRouter.SetConnectionMonitor(connectionMonitor)
+
+	chargingRouter := handlers.NewChargingRouter()
+
 	// 添加路由
-	server.AddRouter(constants.CmdDeviceRegister, handlers.NewDeviceRegisterRouter())
-	server.AddRouter(constants.CmdHeartbeat, handlers.NewHeartbeatRouter())
-	server.AddRouter(constants.CmdChargeControl, handlers.NewChargingRouter())
+	server.AddRouter(constants.CmdDeviceRegister, deviceRegisterRouter)
+	server.AddRouter(constants.CmdHeartbeat, heartbeatRouter)
+	server.AddRouter(constants.CmdChargeControl, chargingRouter)
 
 	return &TCPServer{
 		server: server,
