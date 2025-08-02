@@ -1,11 +1,10 @@
 package handlers
 
 import (
-	"fmt"
-
 	"github.com/aceld/zinx/ziface"
 	"github.com/bujia-iot/iot-zinx/internal/domain/dny_protocol"
 	"github.com/bujia-iot/iot-zinx/pkg/storage"
+	"github.com/bujia-iot/iot-zinx/pkg/utils"
 )
 
 // DeviceRegisterRouter 设备注册路由器
@@ -33,16 +32,14 @@ func (r *DeviceRegisterRouter) PreHandle(request ziface.IRequest) {}
 func (r *DeviceRegisterRouter) Handle(request ziface.IRequest) {
 	r.Log("收到设备注册请求")
 
-	// 使用统一的协议解析
-	parsedMsg := dny_protocol.ParseDNYMessage(request.GetData())
-	if err := dny_protocol.ValidateMessage(parsedMsg); err != nil {
-		r.Log("消息解析或验证失败: %v", err)
+	// 使用统一的协议解析和验证
+	parsedMsg, err := r.ParseAndValidateMessage(request)
+	if err != nil {
 		return
 	}
 
 	// 确保是设备注册消息
-	if parsedMsg.MessageType != dny_protocol.MsgTypeDeviceRegister {
-		r.Log("错误的消息类型: %s, 期望设备注册", dny_protocol.GetMessageTypeName(parsedMsg.MessageType))
+	if err := r.ValidateMessageType(parsedMsg, dny_protocol.MsgTypeDeviceRegister); err != nil {
 		return
 	}
 
@@ -54,7 +51,7 @@ func (r *DeviceRegisterRouter) Handle(request ziface.IRequest) {
 	}
 
 	// 提取设备信息
-	deviceID := fmt.Sprintf("%08X", parsedMsg.PhysicalID)
+	deviceID := r.ExtractDeviceIDFromMessage(parsedMsg)
 	physicalIDStr := deviceID
 	// ICCID在设备注册协议中不存在，使用空字符串或从其他来源获取
 	iccid := ""
@@ -108,7 +105,7 @@ func (r *DeviceRegisterRouter) PostHandle(request ziface.IRequest) {}
 // extractDeviceInfo 提取设备信息 - 从统一解析的消息中提取
 func (r *DeviceRegisterRouter) extractDeviceInfo(registerData *dny_protocol.DeviceRegisterData, physicalID uint32) (deviceID, physicalIDStr, iccid string) {
 	// 将物理ID转换为字符串
-	physicalIDStr = fmt.Sprintf("%08X", physicalID)
+	physicalIDStr = utils.FormatPhysicalID(physicalID)
 
 	// 使用物理ID作为设备ID
 	deviceID = physicalIDStr

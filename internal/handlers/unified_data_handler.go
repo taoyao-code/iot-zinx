@@ -16,6 +16,7 @@ import (
 // 负责分发不同类型的数据包到对应的专门处理器
 type UnifiedDataHandler struct {
 	znet.BaseRouter
+	*BaseHandler
 	simCardHandler    *SimCardHandler
 	deviceRegister    *DeviceRegisterRouter
 	heartbeat         *HeartbeatRouter
@@ -26,6 +27,7 @@ type UnifiedDataHandler struct {
 // NewUnifiedDataHandler 创建统一数据处理器
 func NewUnifiedDataHandler() *UnifiedDataHandler {
 	return &UnifiedDataHandler{
+		BaseHandler:    NewBaseHandler("UnifiedDataHandler"),
 		simCardHandler: &SimCardHandler{},
 		deviceRegister: NewDeviceRegisterRouter(),
 		heartbeat:      NewHeartbeatRouter(),
@@ -67,9 +69,9 @@ func (h *UnifiedDataHandler) Handle(request ziface.IRequest) {
 		h.simCardHandler.Handle(request)
 
 	case "dny":
-		// 解析DNY协议包
-		parsedMsg := dny_protocol.ParseDNYMessage(data)
-		if err := dny_protocol.ValidateMessage(parsedMsg); err != nil {
+		// 使用统一的协议解析和验证
+		parsedMsg, err := h.ParseAndValidateMessage(request)
+		if err != nil {
 			logger.Error("UnifiedDataHandler: DNY协议解析失败",
 				zap.Uint64("connID", conn.GetConnID()),
 				zap.Error(err),

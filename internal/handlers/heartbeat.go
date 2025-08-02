@@ -1,11 +1,10 @@
 package handlers
 
 import (
-	"fmt"
-
 	"github.com/aceld/zinx/ziface"
 	"github.com/bujia-iot/iot-zinx/internal/domain/dny_protocol"
 	"github.com/bujia-iot/iot-zinx/pkg/storage"
+	"github.com/bujia-iot/iot-zinx/pkg/utils"
 )
 
 // HeartbeatRouter 心跳路由器
@@ -33,21 +32,19 @@ func (r *HeartbeatRouter) PreHandle(request ziface.IRequest) {}
 func (r *HeartbeatRouter) Handle(request ziface.IRequest) {
 	r.Log("收到心跳请求")
 
-	// 使用统一的协议解析
-	parsedMsg := dny_protocol.ParseDNYMessage(request.GetData())
-	if err := dny_protocol.ValidateMessage(parsedMsg); err != nil {
-		r.Log("消息解析或验证失败: %v", err)
+	// 使用统一的协议解析和验证
+	parsedMsg, err := r.ParseAndValidateMessage(request)
+	if err != nil {
 		return
 	}
 
 	// 确保是心跳消息
-	if parsedMsg.MessageType != dny_protocol.MsgTypeHeartbeat {
-		r.Log("错误的消息类型: %s, 期望心跳", dny_protocol.GetMessageTypeName(parsedMsg.MessageType))
+	if err := r.ValidateMessageType(parsedMsg, dny_protocol.MsgTypeHeartbeat); err != nil {
 		return
 	}
 
 	// 提取设备信息
-	deviceID := fmt.Sprintf("%08X", parsedMsg.PhysicalID)
+	deviceID := r.ExtractDeviceIDFromMessage(parsedMsg)
 
 	// 检查设备是否存在
 	device, exists := storage.GlobalDeviceStore.Get(deviceID)
@@ -69,7 +66,7 @@ func (r *HeartbeatRouter) Handle(request ziface.IRequest) {
 	storage.GlobalDeviceStore.Set(deviceID, device)
 
 	// 发送心跳响应
-	response := r.BuildHeartbeatResponse(fmt.Sprintf("%08X", parsedMsg.PhysicalID))
+	response := r.BuildHeartbeatResponse(utils.FormatPhysicalID(parsedMsg.PhysicalID))
 	r.SendSuccessResponse(request, response)
 
 	// 如果状态发生变化，发送通知

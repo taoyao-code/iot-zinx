@@ -10,6 +10,7 @@ import (
 	"github.com/bujia-iot/iot-zinx/internal/domain/dny_protocol"
 	"github.com/bujia-iot/iot-zinx/internal/infrastructure/logger"
 	"github.com/bujia-iot/iot-zinx/pkg/storage"
+	"github.com/bujia-iot/iot-zinx/pkg/utils"
 	"go.uber.org/zap"
 )
 
@@ -26,7 +27,7 @@ func NewBaseHandler(name string) *BaseHandler {
 // ExtractDeviceData 从消息中提取设备数据
 func (h *BaseHandler) ExtractDeviceData(msg *dny_protocol.Message, conn ziface.IConnection) (deviceID, physicalID, iccid string) {
 	// 将物理ID转换为字符串
-	physicalID = fmt.Sprintf("%08X", msg.PhysicalId)
+	physicalID = utils.FormatPhysicalID(msg.PhysicalId)
 
 	// 从数据中提取ICCID（如果存在）
 	if len(msg.Data) >= 20 {
@@ -210,6 +211,36 @@ func (h *BaseHandler) Log(format string, args ...interface{}) {
 		zap.String("component", h.name),
 		zap.String("message", fmt.Sprintf(format, args...)),
 	)
+}
+
+// ParseAndValidateMessage 统一的协议解析和验证方法
+// 消除各个handler中重复的ParseDNYMessage+ValidateMessage模式
+func (h *BaseHandler) ParseAndValidateMessage(request ziface.IRequest) (*dny_protocol.ParsedMessage, error) {
+	// 使用统一的协议解析
+	parsedMsg := dny_protocol.ParseDNYMessage(request.GetData())
+	if err := dny_protocol.ValidateMessage(parsedMsg); err != nil {
+		h.Log("消息解析或验证失败: %v", err)
+		return nil, fmt.Errorf("message parsing or validation failed: %w", err)
+	}
+
+	return parsedMsg, nil
+}
+
+// ValidateMessageType 验证消息类型是否符合预期
+func (h *BaseHandler) ValidateMessageType(parsedMsg *dny_protocol.ParsedMessage, expectedType dny_protocol.MessageType) error {
+	if parsedMsg.MessageType != expectedType {
+		err := fmt.Errorf("错误的消息类型: %s, 期望: %s",
+			dny_protocol.GetMessageTypeName(parsedMsg.MessageType),
+			dny_protocol.GetMessageTypeName(expectedType))
+		h.Log("%s", err.Error())
+		return err
+	}
+	return nil
+}
+
+// ExtractDeviceIDFromMessage 从解析的消息中提取设备ID
+func (h *BaseHandler) ExtractDeviceIDFromMessage(parsedMsg *dny_protocol.ParsedMessage) string {
+	return utils.FormatPhysicalID(parsedMsg.PhysicalID)
 }
 
 // UpdateDeviceStatus 更新设备状态

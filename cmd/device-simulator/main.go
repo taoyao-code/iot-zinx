@@ -1,11 +1,12 @@
 package main
 
 import (
-	"encoding/binary"
 	"fmt"
 	"log"
 	"net"
 	"time"
+
+	"github.com/bujia-iot/iot-zinx/internal/domain/dny_protocol"
 )
 
 func main() {
@@ -43,7 +44,7 @@ func main() {
 	// 其余字节保持为0
 
 	// 构建DNY协议包
-	packet := buildDNYPacket(deviceID, messageID, command, registerData)
+	packet := dny_protocol.BuildDNYPacket(deviceID, messageID, command, registerData)
 
 	fmt.Printf("发送设备注册包: %02X\n", packet)
 	_, err = conn.Write(packet)
@@ -71,7 +72,7 @@ func main() {
 		time.Sleep(2 * time.Second)
 
 		heartbeatData := []byte{0x01} // 简单的心跳数据
-		heartbeatPacket := buildDNYPacket(deviceID, uint16(i+2), 0x01, heartbeatData)
+		heartbeatPacket := dny_protocol.BuildDNYPacket(deviceID, uint16(i+2), 0x01, heartbeatData)
 
 		fmt.Printf("发送心跳包 #%d: %02X\n", i+1, heartbeatPacket)
 		_, err = conn.Write(heartbeatPacket)
@@ -82,51 +83,4 @@ func main() {
 	}
 
 	fmt.Println("模拟设备连接完成")
-}
-
-// buildDNYPacket 构建DNY协议数据包
-func buildDNYPacket(physicalID uint32, messageID uint16, command uint8, data []byte) []byte {
-	// DNY协议格式: "DNY" + 长度(2字节) + 物理ID(4字节) + 消息ID(2字节) + 命令(1字节) + 数据 + 校验和(2字节)
-
-	// 计算数据长度 (不包括协议头"DNY"和长度字段本身)
-	dataLen := 4 + 2 + 1 + len(data) + 2 // 物理ID + 消息ID + 命令 + 数据 + 校验和
-
-	packet := make([]byte, 0, 3+2+dataLen)
-
-	// 1. 协议头
-	packet = append(packet, []byte("DNY")...)
-
-	// 2. 长度字段 (小端序)
-	lenBytes := make([]byte, 2)
-	binary.LittleEndian.PutUint16(lenBytes, uint16(dataLen))
-	packet = append(packet, lenBytes...)
-
-	// 3. 物理ID (小端序)
-	physicalIDBytes := make([]byte, 4)
-	binary.LittleEndian.PutUint32(physicalIDBytes, physicalID)
-	packet = append(packet, physicalIDBytes...)
-
-	// 4. 消息ID (小端序)
-	messageIDBytes := make([]byte, 2)
-	binary.LittleEndian.PutUint16(messageIDBytes, messageID)
-	packet = append(packet, messageIDBytes...)
-
-	// 5. 命令
-	packet = append(packet, command)
-
-	// 6. 数据
-	packet = append(packet, data...)
-
-	// 7. 计算校验和 (简单的累加校验)
-	checksum := uint16(0)
-	for i := 3; i < len(packet); i++ { // 从长度字段开始计算
-		checksum += uint16(packet[i])
-	}
-
-	// 8. 添加校验和 (小端序)
-	checksumBytes := make([]byte, 2)
-	binary.LittleEndian.PutUint16(checksumBytes, checksum)
-	packet = append(packet, checksumBytes...)
-
-	return packet
 }

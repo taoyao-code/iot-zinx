@@ -14,28 +14,15 @@ import (
 	"time"
 )
 
-// 全局配置
-var (
-	verboseMode = false // 设置为false只显示错误日志，true显示所有日志
-)
-
 // 综合测试客户端 - 测试TCP协议、HTTP API、并发场景、错误处理等
 func main() {
 	fmt.Println("IoT-Zinx 综合测试客户端")
 	fmt.Println("= " + strings.Repeat("=", 60))
 
-	if !verboseMode {
-		fmt.Println("📝 简化模式：只显示错误和重要信息（设置 verboseMode=true 查看详细日志）")
-		fmt.Println()
-	}
-
 	// 创建测试套件
 	suite := NewTestSuite()
 
-	// 🔥 新增：使用真实协议数据进行本地测试
-	suite.runRealDataProtocolTest()
-
-	// 执行其他测试
+	// 执行所有测试
 	suite.RunAllTests()
 }
 
@@ -73,7 +60,7 @@ func NewTestSuite() *TestSuite {
 
 // RunAllTests 运行所有测试
 func (ts *TestSuite) RunAllTests() {
-	logImportant("开始综合测试...\n")
+	fmt.Println("🧪 开始综合测试...")
 
 	// 1. 基础连通性测试
 	ts.runConnectivityTests()
@@ -85,7 +72,7 @@ func (ts *TestSuite) RunAllTests() {
 	ts.runHTTPAPITests()
 
 	// 4. 并发场景测试
-	// ts.runConcurrencyTests()
+	ts.runConcurrencyTests()
 
 	// 5. 错误处理测试
 	ts.runErrorHandlingTests()
@@ -94,7 +81,7 @@ func (ts *TestSuite) RunAllTests() {
 	ts.runDataStateTests()
 
 	// 7. 压力测试
-	// ts.runStressTests()
+	ts.runStressTests()
 
 	// 8. 协议兼容性测试
 	ts.runProtocolCompatibilityTests()
@@ -103,173 +90,9 @@ func (ts *TestSuite) RunAllTests() {
 	ts.generateReport()
 }
 
-// 🔥 新增：使用真实协议数据的本地测试
-func (ts *TestSuite) runRealDataProtocolTest() {
-	logImportant("=== 真实协议数据测试 ===\n")
-	logImportant("使用生产环境的真实数据包进行本地测试验证\n")
-
-	start := time.Now()
-
-	// 连接到本地TCP服务器
-	conn, err := net.DialTimeout("tcp", ts.tcpAddress, 10*time.Second)
-	if err != nil {
-		ts.recordTestResult("真实数据测试-连接", "真实协议", false, time.Since(start), err, "无法连接到本地TCP服务器", nil)
-		return
-	}
-	defer conn.Close()
-
-	logSuccess("成功连接到本地TCP服务器: %s\n", ts.tcpAddress)
-
-	// === 步骤1：发送真实ICCID数据包 ===
-	logImportant("步骤1：发送真实ICCID数据包\n")
-	iccidStr := "898604D9162390488297" // 来自真实日志
-	iccidBytes := []byte(iccidStr)
-
-	logInfo("发送ICCID: %s (%d字节)\n", iccidStr, len(iccidBytes))
-	logInfo("十六进制: %x\n", iccidBytes)
-
-	err = ts.sendDataPacket(conn, iccidBytes, "ICCID数据包")
-	if err != nil {
-		ts.recordTestResult("真实数据测试-ICCID", "真实协议", false, time.Since(start), err, "ICCID发送失败", nil)
-		return
-	}
-
-	time.Sleep(1 * time.Second) // 等待服务器处理
-
-	// === 步骤2：发送真实Link心跳 ===
-	logImportant("步骤2：发送真实Link心跳\n")
-	linkBytes := []byte("link") // 来自真实日志: 6c696e6b
-
-	logInfo("发送Link心跳: %s (%d字节)\n", string(linkBytes), len(linkBytes))
-	logInfo("十六进制: %x\n", linkBytes)
-
-	err = ts.sendDataPacket(conn, linkBytes, "Link心跳")
-	if err != nil {
-		ts.recordTestResult("真实数据测试-Link心跳", "真实协议", false, time.Since(start), err, "Link心跳发送失败", nil)
-		return
-	}
-
-	time.Sleep(500 * time.Millisecond)
-
-	// === 步骤3：发送真实DNY协议包 ===
-	logImportant("步骤3：发送真实DNY协议包\n")
-
-	// 来自真实日志的DNY数据包
-	realDNYPackets := []struct {
-		name string
-		hex  string
-		desc string
-	}{
-		{
-			name: "刷卡操作包",
-			hex:  "444e590900f36ca2040200120d03",
-			desc: "物理ID: 04A26CF3, 命令: 0x02 (刷卡操作), 消息ID: 0x1200",
-		},
-		{
-			name: "结算消费信息上传包",
-			hex:  "444e595000f36ca2040300116b0202dd888d681c07383938363034443931363233393034383832393755000038363434353230363937363234373256312e302e30302e3030303030302e303631390000000000a711",
-			desc: "物理ID: 04A26CF3, 命令: 0x03 (结算消费信息上传), 包含消费详情",
-		},
-		{
-			name: "订单确认包",
-			hex:  "444e591200f36ca2040400350131008002f36ca204f405",
-			desc: "物理ID: 04A26CF3, 命令: 0x04 (充电端口订单确认，老版本指令)",
-		},
-		{
-			name: "端口功率心跳包",
-			hex:  "444e590f00f36ca2040600208002020a31065704",
-			desc: "物理ID: 04A26CF3, 命令: 0x06 (端口充电时功率心跳包), 修正为正确指令",
-		},
-		{
-			name: "设备注册包",
-			hex:  "444e590d00f36ca2042000013c0201063302",
-			desc: "物理ID: 04A26CF3, 命令: 0x20 (设备注册包), 正确的注册指令",
-		},
-	}
-
-	for _, packet := range realDNYPackets {
-		logInfo("发送 %s: %s\n", packet.name, packet.desc)
-		logInfo("十六进制: %s\n", packet.hex)
-
-		data := ts.hexStringToBytes(packet.hex)
-		if data == nil {
-			logError("十六进制解码失败: %s\n", packet.hex)
-			continue
-		}
-
-		logInfo("解码后: %d字节, %x\n", len(data), data)
-
-		err = ts.sendDataPacket(conn, data, packet.name)
-		if err != nil {
-			logError("%s 发送失败: %v\n", packet.name, err)
-		} else {
-			logInfo("✅ %s 发送成功\n", packet.name)
-		}
-
-		// 尝试读取响应
-		response := make([]byte, 1024)
-		conn.SetReadDeadline(time.Now().Add(2 * time.Second))
-		n, err := conn.Read(response)
-		if err == nil && n > 0 {
-			logInfo("📥 收到响应: %d字节, %x\n", n, response[:n])
-		} else {
-			logInfo("📭 无响应或超时\n")
-		}
-
-		time.Sleep(1 * time.Second) // 等待处理
-	}
-
-	// === 步骤4：验证API接口 ===
-	logImportant("步骤4：验证HTTP API接口\n")
-	time.Sleep(2 * time.Second) // 给服务器更多时间处理数据
-
-	// 查询设备列表
-	logInfo("查询设备列表API...\n")
-	resp, body, err := ts.makeHTTPRequest("GET", ts.httpBaseURL+"/api/v1/devices", nil)
-	if err != nil {
-		logError("API请求失败: %v\n", err)
-	} else {
-		logSuccess("API响应状态: %d\n", resp.StatusCode)
-		logInfo("📄 响应内容: %s\n", string(body))
-
-		// 解析JSON响应
-		var apiResp map[string]interface{}
-		if err := json.Unmarshal(body, &apiResp); err == nil {
-			if data, ok := apiResp["data"].([]interface{}); ok {
-				logImportant("📊 设备数量: %d\n", len(data))
-				if len(data) > 0 {
-					logSuccess("成功！发现设备数据\n")
-					for i, device := range data {
-						if deviceMap, ok := device.(map[string]interface{}); ok {
-							logImportant("  设备%d: %v\n", i+1, deviceMap)
-						}
-					}
-				} else {
-					logError("设备列表为空，数据可能未正确处理\n")
-				}
-			}
-		} else {
-			logError("JSON解析失败: %v\n", err)
-		}
-	}
-
-	duration := time.Since(start)
-	success := err == nil && resp != nil && resp.StatusCode == 200
-
-	ts.recordTestResult("真实协议数据完整测试", "真实协议", success, duration, err,
-		fmt.Sprintf("完成ICCID→Link心跳→DNY协议→API验证完整流程"),
-		map[string]interface{}{
-			"iccid":        iccidStr,
-			"packetsCount": len(realDNYPackets),
-			"apiStatus":    resp.StatusCode,
-		})
-
-	logImportant("真实协议数据测试完成，耗时: %.2f秒\n", duration.Seconds())
-}
-
 // 1. 基础连通性测试
 func (ts *TestSuite) runConnectivityTests() {
-	logImportant("=== 基础连通性测试 ===\n")
+	fmt.Println("\n🔌 === 基础连通性测试 ===")
 
 	// TCP连接测试
 	ts.testTCPConnection()
@@ -394,38 +217,16 @@ func (ts *TestSuite) runProtocolCompatibilityTests() {
 	ts.testProtocolParsingConsistency()
 }
 
-// logInfo 条件打印信息日志
-func logInfo(format string, args ...interface{}) {
-	if verboseMode {
-		fmt.Printf(format, args...)
-	}
-}
-
-// logError 总是打印错误日志
-func logError(format string, args ...interface{}) {
-	fmt.Printf("❌ "+format, args...)
-}
-
-// logSuccess 总是打印成功日志
-func logSuccess(format string, args ...interface{}) {
-	fmt.Printf("✅ "+format, args...)
-}
-
-// logImportant 总是打印重要信息
-func logImportant(format string, args ...interface{}) {
-	fmt.Printf("🔥 "+format, args...)
-}
-
 // sendData 发送数据到服务器
 func sendData(conn net.Conn, data []byte, description string) error {
-	logInfo("发送 %s (%d 字节): %x\n", description, len(data), data)
+	fmt.Printf("发送 %s (%d 字节): %x\n", description, len(data), data)
 
 	_, err := conn.Write(data)
 	if err != nil {
 		return fmt.Errorf("写入数据失败: %v", err)
 	}
 
-	logInfo("✅ %s 发送成功\n", description)
+	fmt.Printf("✅ %s 发送成功\n", description)
 	return nil
 }
 
@@ -437,16 +238,6 @@ func hexStringToBytes(hexStr string) []byte {
 		return nil
 	}
 	return data
-}
-
-// TestSuite的hexStringToBytes方法
-func (ts *TestSuite) hexStringToBytes(hexStr string) []byte {
-	return hexStringToBytes(hexStr)
-}
-
-// sendDataPacket 发送数据包的TestSuite方法
-func (ts *TestSuite) sendDataPacket(conn net.Conn, data []byte, description string) error {
-	return sendData(conn, data, description)
 }
 
 // readResponse 读取响应数据
@@ -477,27 +268,19 @@ func (ts *TestSuite) recordTestResult(testName, testType string, success bool, d
 
 	ts.testResults = append(ts.testResults, result)
 
-	// 只打印错误或始终显示重要结果
-	if !success || verboseMode {
-		status := "✅"
-		if !success {
-			status = "❌"
-		}
-
-		logLevel := logInfo
-		if !success {
-			logLevel = logError
-		}
-
-		logLevel("%s [%s] %s (%.2fms)", status, testType, testName, float64(duration.Nanoseconds())/1e6)
-		if description != "" {
-			logLevel(" - %s", description)
-		}
-		if err != nil {
-			logLevel(" | 错误: %v", err)
-		}
-		logLevel("\n")
+	status := "✅"
+	if !success {
+		status = "❌"
 	}
+
+	fmt.Printf("%s [%s] %s (%.2fms)", status, testType, testName, float64(duration.Nanoseconds())/1e6)
+	if description != "" {
+		fmt.Printf(" - %s", description)
+	}
+	if err != nil {
+		fmt.Printf(" | 错误: %v", err)
+	}
+	fmt.Println()
 }
 
 // =============================================================================
@@ -572,7 +355,7 @@ func (ts *TestSuite) testNormalDeviceRegistration() {
 	}
 	defer conn.Close()
 
-	// 1. 发送ICCID (使用真实数据)
+	// 1. 发送ICCID
 	iccidData := []byte("898604D9162390488297")
 	err = sendData(conn, iccidData, "ICCID")
 	if err != nil {
@@ -580,10 +363,10 @@ func (ts *TestSuite) testNormalDeviceRegistration() {
 		return
 	}
 
-	time.Sleep(2 * time.Second) // 增加等待时间
+	time.Sleep(1 * time.Second)
 
-	// 2. 发送设备注册 (使用真实的注册包格式)
-	registerData := hexStringToBytes("444e590d00f36ca2042000013c0201063302")
+	// 2. 发送设备注册 (修复CRC校验)
+	registerData := hexStringToBytes("444e590f00cd28a2040108208002021e31069703")
 	if registerData == nil {
 		ts.recordTestResult("设备注册流程", "TCP协议", false, time.Since(start),
 			fmt.Errorf("注册数据解码失败"), "数据格式错误", nil)
@@ -596,16 +379,11 @@ func (ts *TestSuite) testNormalDeviceRegistration() {
 		return
 	}
 
-	// 3. 读取响应 (增加超时时间)
-	response, err := readResponse(conn, 5*time.Second)
+	// 3. 读取响应
+	response, err := readResponse(conn, 2*time.Second)
 	if err != nil {
-		// 尝试再次读取，有时响应会延迟
-		time.Sleep(1 * time.Second)
-		response, err = readResponse(conn, 3*time.Second)
-		if err != nil {
-			ts.recordTestResult("设备注册流程", "TCP协议", false, time.Since(start), err, "响应读取失败", nil)
-			return
-		}
+		ts.recordTestResult("设备注册流程", "TCP协议", false, time.Since(start), err, "响应读取失败", nil)
+		return
 	}
 
 	success = len(response) > 0
@@ -614,9 +392,9 @@ func (ts *TestSuite) testNormalDeviceRegistration() {
 	ts.recordTestResult("设备注册流程", "TCP协议", success, time.Since(start), err,
 		fmt.Sprintf("响应: %s (%d字节)", responseHex, len(response)), responseHex)
 
-	// 记录设备状态 (使用正确的设备ID)
+	// 记录设备状态
 	ts.mutex.Lock()
-	ts.deviceStates["04A26CF3"] = "注册成功"
+	ts.deviceStates["04A228CD"] = "注册成功"
 	ts.mutex.Unlock()
 }
 
@@ -627,10 +405,10 @@ func (ts *TestSuite) testMalformedProtocolFrames() {
 		data string
 		desc string
 	}{
-		{"无效包头", "58585858f36ca2040108208002021e31069703", "非DNY包头"},
-		{"长度错误", "444e59ff00f36ca2040108208002021e31069703", "长度字段错误"},
-		{"校验和错误", "444e590f00f36ca2040108208002021e31069999", "校验和不匹配"},
-		{"数据截断", "444e590f00f36ca204", "数据包不完整"},
+		{"无效包头", "58585858cd28a2040108208002021e31069703", "非DNY包头"},
+		{"长度错误", "444e59ff00cd28a2040108208002021e31069703", "长度字段错误"},
+		{"校验和错误", "444e590f00cd28a2040108208002021e31069999", "校验和不匹配"},
+		{"数据截断", "444e590f00cd28a204", "数据包不完整"},
 		{"空数据包", "", "空数据"},
 	}
 
@@ -677,14 +455,14 @@ func (ts *TestSuite) testHeartbeatProtocol() {
 	}
 	defer conn.Close()
 
-	// 发送多种心跳 (使用真实数据)
+	// 发送多种心跳
 	heartbeats := []struct {
 		name string
 		data string
 	}{
-		{"标准心跳21", "444e591000f36ca204bc082171090202000064c704"},
+		{"标准心跳21", "444e591000cd28a204f107216b09020000006140ed"},
 		{"Link心跳", "6c696e6b"},
-		{"端口功率心跳", "444e591d00f36ca204bb08018002710902020000000000000000000a003164007005"},
+		{"端口功率心跳", "444e591d00cd28a204f1070180026b0902000000000000000000001e003161004405"},
 	}
 
 	allSuccess := true
@@ -728,14 +506,14 @@ func (ts *TestSuite) testChargingProtocol() {
 	}
 	defer conn.Close()
 
-	// 充电控制命令序列 (使用真实设备ID)
+	// 充电控制命令序列
 	commands := []struct {
 		name string
 		data string
 	}{
-		{"启动充电", "444e591000f36ca204f1078201010001003c00a204"},
-		{"停止充电", "444e591000f36ca204f207820001000100000098d5"},
-		{"查询充电状态", "444e590800f36ca204f30722dd03"},
+		{"启动充电", "444e591000cd28a204f1078201010001003c00691a"},
+		{"停止充电", "444e591000cd28a204f207820001000100000098d5"},
+		{"查询充电状态", "444e590800cd28a204f30722a103"},
 	}
 
 	allSuccess := true
@@ -778,9 +556,9 @@ func (ts *TestSuite) testPortPowerMonitoring() {
 
 	allSuccess := true
 	for _, power := range powerValues {
-		// 构造端口功率数据 (使用真实设备ID和格式)
+		// 构造端口功率数据 (简化版)
 		powerHex := fmt.Sprintf("%04x", power)
-		powerData := hexStringToBytes(fmt.Sprintf("444e591d00f36ca204f1070180026b090200000000000000000000%s003161004405", powerHex))
+		powerData := hexStringToBytes(fmt.Sprintf("444e591d00cd28a204f1070180026b090200000000000000000000%s003161004405", powerHex))
 
 		if powerData == nil {
 			allSuccess = false
@@ -861,10 +639,7 @@ func (ts *TestSuite) testDeviceListAPI() {
 
 // testDeviceStatusAPI 设备状态查询API测试
 func (ts *TestSuite) testDeviceStatusAPI() {
-	// 等待设备注册完成
-	time.Sleep(3 * time.Second)
-
-	deviceIDs := []string{"04A26CF3", "04A228CD", "nonexistent"}
+	deviceIDs := []string{"04A228CD", "04A26CF3", "nonexistent"}
 
 	for _, deviceID := range deviceIDs {
 		start := time.Now()
@@ -878,8 +653,7 @@ func (ts *TestSuite) testDeviceStatusAPI() {
 		if expectedNotFound {
 			success = success && resp.StatusCode == 404
 		} else {
-			// 对于真实设备，接受200或404状态码（设备可能未注册）
-			success = success && (resp.StatusCode == 200 || resp.StatusCode == 404)
+			success = success && resp.StatusCode == 200
 		}
 
 		var apiResp APIResponse
@@ -890,8 +664,6 @@ func (ts *TestSuite) testDeviceStatusAPI() {
 		desc := fmt.Sprintf("设备: %s, 状态码: %d", deviceID, resp.StatusCode)
 		if expectedNotFound {
 			desc += " (期望404)"
-		} else if resp.StatusCode == 404 {
-			desc += " (设备未注册)"
 		}
 
 		ts.recordTestResult("设备状态API", "HTTP API", success, time.Since(start), err, desc, apiResp)
@@ -904,7 +676,7 @@ func (ts *TestSuite) testChargingControlAPI() {
 	start := time.Now()
 
 	startRequest := map[string]interface{}{
-		"deviceId": "04A26CF3",
+		"deviceId": "04A228CD",
 		"port":     1,
 		"duration": 60,
 	}
@@ -924,7 +696,7 @@ func (ts *TestSuite) testChargingControlAPI() {
 	start = time.Now()
 
 	stopRequest := map[string]interface{}{
-		"deviceId": "04A26CF3",
+		"deviceId": "04A228CD",
 		"port":     1,
 	}
 
@@ -944,7 +716,7 @@ func (ts *TestSuite) testDeviceLocateAPI() {
 	start := time.Now()
 
 	locateRequest := map[string]interface{}{
-		"deviceId": "04A26CF3",
+		"deviceId": "04A228CD",
 	}
 
 	resp, body, err := ts.makeHTTPRequest("POST", ts.httpBaseURL+"/api/v1/device/locate", locateRequest)
@@ -975,7 +747,7 @@ func (ts *TestSuite) testDNYCommandAPI() {
 		start := time.Now()
 
 		dnyRequest := map[string]interface{}{
-			"deviceId":  "04A26CF3",
+			"deviceId":  "04A228CD",
 			"command":   cmd.command,
 			"data":      cmd.data,
 			"messageId": 0x1234,
@@ -1070,10 +842,10 @@ func (ts *TestSuite) testConcurrentAPIRequests() {
 		go func(id int) {
 			defer wg.Done()
 
-			// 随机选择API调用 (使用正确设备ID)
+			// 随机选择API调用
 			apis := []string{
 				"/api/v1/devices",
-				"/api/v1/device/04A26CF3/status",
+				"/api/v1/device/04A228CD/status",
 				"/health",
 			}
 
@@ -1110,7 +882,7 @@ func (ts *TestSuite) testConcurrentChargingControl() {
 			defer wg.Done()
 
 			startRequest := map[string]interface{}{
-				"deviceId": "04A26CF3",
+				"deviceId": "04A228CD",
 				"port":     port + 1,
 				"duration": 30,
 			}
@@ -1123,7 +895,7 @@ func (ts *TestSuite) testConcurrentChargingControl() {
 			time.Sleep(500 * time.Millisecond)
 
 			stopRequest := map[string]interface{}{
-				"deviceId": "04A26CF3",
+				"deviceId": "04A228CD",
 				"port":     port + 1,
 			}
 
@@ -1158,15 +930,15 @@ func (ts *TestSuite) testNilPointerScenarios() {
 	}
 	defer conn.Close()
 
-	// 发送可能导致空指针的数据序列 (使用真实设备ID格式)
+	// 发送可能导致空指针的数据序列
 	scenarios := []struct {
 		name string
 		data string
 		desc string
 	}{
 		{"空设备ID注册", "444e590f0000000000000108208002021e31069703", "设备ID为空"},
-		{"无效消息ID", "444e590f00f36ca2ffff08208002021e31069703", "消息ID异常"},
-		{"异常命令", "444e590f00f36ca20401ff208002021e31069703", "未知命令"},
+		{"无效消息ID", "444e590f00cd28a2ffff08208002021e31069703", "消息ID异常"},
+		{"异常命令", "444e590f00cd28a20401ff208002021e31069703", "未知命令"},
 	}
 
 	allSuccess := true
@@ -1222,23 +994,22 @@ func (ts *TestSuite) testInvalidDataHandling() {
 func (ts *TestSuite) testTimeoutScenarios() {
 	start := time.Now()
 
-	// 测试HTTP API超时 (使用更合理的超时时间)
-	client := &http.Client{Timeout: 10 * time.Millisecond} // 短超时但不会太极端
+	// 测试HTTP API超时
+	client := &http.Client{Timeout: 1 * time.Millisecond} // 非常短的超时
 	_, err := client.Get(ts.httpBaseURL + "/api/v1/devices")
 	expectTimeout := err != nil
 
-	// 测试TCP连接超时 (使用不可达地址)
-	conn, err := net.DialTimeout("tcp", "192.0.2.1:9999", 100*time.Millisecond) // 不可达地址
+	// 测试TCP连接超时
+	conn, err := net.DialTimeout("tcp", "192.0.2.1:9999", 1*time.Millisecond) // 不可达地址
 	expectTCPTimeout := err != nil
 	if conn != nil {
 		conn.Close()
 	}
 
-	// 对于超时测试，只要能正确处理超时就算成功
-	success := true // 系统能正确处理超时就是成功
+	success := expectTimeout && expectTCPTimeout
 
 	ts.recordTestResult("超时场景", "错误处理", success, time.Since(start), nil,
-		fmt.Sprintf("HTTP超时: %v, TCP超时: %v", expectTimeout, expectTCPTimeout), map[string]bool{
+		"HTTP和TCP超时测试", map[string]bool{
 			"httpTimeout": expectTimeout,
 			"tcpTimeout":  expectTCPTimeout,
 		})
@@ -1279,7 +1050,7 @@ func (ts *TestSuite) testResourceExhaustion() {
 func (ts *TestSuite) testDeviceStateTransitions() {
 	start := time.Now()
 
-	deviceID := "04A26CF3"
+	deviceID := "04A228CD"
 	states := []string{"离线", "连接中", "已注册", "充电中", "空闲"}
 
 	// 模拟状态变迁序列
@@ -1294,8 +1065,8 @@ func (ts *TestSuite) testDeviceStateTransitions() {
 	ts.deviceStates[deviceID] = states[1] // 连接中
 	ts.mutex.Unlock()
 
-	// 注册设备 (使用真实注册包)
-	registerData := hexStringToBytes("444e590d00f36ca2042000013c0201063302")
+	// 注册设备
+	registerData := hexStringToBytes("444e590f00cd28a2040108208002021e31069703")
 	if registerData != nil {
 		sendData(conn, registerData, "设备注册")
 		ts.mutex.Lock()
@@ -1305,8 +1076,8 @@ func (ts *TestSuite) testDeviceStateTransitions() {
 
 	time.Sleep(500 * time.Millisecond)
 
-	// 开始充电 (使用真实设备ID)
-	chargeData := hexStringToBytes("444e591000f36ca204f1078201010001003c00a204")
+	// 开始充电
+	chargeData := hexStringToBytes("444e591000cd28a204f1078201010001003c00a203")
 	if chargeData != nil {
 		sendData(conn, chargeData, "开始充电")
 		ts.mutex.Lock()
@@ -1316,8 +1087,8 @@ func (ts *TestSuite) testDeviceStateTransitions() {
 
 	time.Sleep(500 * time.Millisecond)
 
-	// 停止充电 (使用真实设备ID)
-	stopData := hexStringToBytes("444e591000f36ca204f207820001000100000098d5")
+	// 停止充电
+	stopData := hexStringToBytes("444e591000cd28a204f2078200010001000000a103")
 	if stopData != nil {
 		sendData(conn, stopData, "停止充电")
 		ts.mutex.Lock()
@@ -1362,16 +1133,16 @@ func (ts *TestSuite) testDataPersistence() {
 	}
 	defer conn.Close()
 
-	// 发送心跳数据 (使用真实设备ID)
-	heartbeatData := hexStringToBytes("444e591000f36ca204bc082171090202000064c704")
+	// 发送心跳数据
+	heartbeatData := hexStringToBytes("444e591000cd28a204f107216b0902000000618604")
 	if heartbeatData != nil {
 		sendData(conn, heartbeatData, "心跳数据")
 	}
 
 	time.Sleep(1 * time.Second)
 
-	// 查询设备状态确认数据被处理 (使用正确设备ID)
-	statusResp, _, err := ts.makeHTTPRequest("GET", ts.httpBaseURL+"/api/v1/device/04A26CF3/status", nil)
+	// 查询设备状态确认数据被处理
+	statusResp, _, err := ts.makeHTTPRequest("GET", ts.httpBaseURL+"/api/v1/device/04A228CD/status", nil)
 
 	success := err == nil && statusResp != nil && (statusResp.StatusCode == 200 || statusResp.StatusCode == 404)
 
@@ -1394,8 +1165,8 @@ func (ts *TestSuite) testHighFrequencyHeartbeat() {
 	}
 	defer conn.Close()
 
-	// 发送高频心跳（每100ms一次，持续5秒）(使用真实设备ID)
-	heartbeatData := hexStringToBytes("444e591000f36ca204bc082171090202000064c704")
+	// 发送高频心跳（每100ms一次，持续5秒）
+	heartbeatData := hexStringToBytes("444e591000cd28a204f107216b0902000000618604")
 	heartbeatCount := 0
 
 	ticker := time.NewTicker(100 * time.Millisecond)
@@ -1522,12 +1293,12 @@ func (ts *TestSuite) testProtocolVersions() {
 	}
 	defer conn.Close()
 
-	// 测试不同格式的协议帧 (使用真实数据)
+	// 测试不同格式的协议帧
 	protocols := []struct {
 		name string
 		data string
 	}{
-		{"标准DNY协议", "444e590d00f36ca2042000013c0201063302"},
+		{"标准DNY协议", "444e590f00cd28a2040108208002021e31069703"},
 		{"Link协议", "6c696e6b"},
 		{"ICCID协议", "898604D9162390488297"},
 	}
@@ -1565,14 +1336,14 @@ func (ts *TestSuite) testProtocolBoundaryConditions() {
 	}
 	defer conn.Close()
 
-	// 测试边界条件 (使用真实设备ID)
+	// 测试边界条件
 	boundaries := []struct {
 		name string
 		data []byte
 	}{
-		{"最小包", hexStringToBytes("444e590500f36ca203")},
+		{"最小包", hexStringToBytes("444e590500cd28a203")},
 		{"最大设备ID", hexStringToBytes("444e590f00ffffffff0108208002021e31069703")},
-		{"零长度数据", hexStringToBytes("444e590900f36ca20401dd03")},
+		{"零长度数据", hexStringToBytes("444e590900cd28a20401a103")},
 	}
 
 	allSuccess := true
@@ -1601,8 +1372,8 @@ func (ts *TestSuite) testProtocolParsingConsistency() {
 	}
 	defer conn.Close()
 
-	// 发送相同数据多次，检查解析一致性 (使用真实设备ID)
-	testData := hexStringToBytes("444e591000f36ca204bc082171090202000064c704")
+	// 发送相同数据多次，检查解析一致性
+	testData := hexStringToBytes("444e591000cd28a204f107216b0902000000618604")
 	repeats := 5
 	allSuccess := true
 

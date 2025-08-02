@@ -209,7 +209,12 @@ func BuildChargeControlPacket(
 	return buildDNYPacket(physicalID, messageID, 0x82, data)
 }
 
-// buildDNYPacket 构建DNY协议数据包
+// BuildDNYPacket 构建DNY协议数据包（导出版本，供外部使用）
+func BuildDNYPacket(physicalID uint32, messageID uint16, command uint8, data []byte) []byte {
+	return buildDNYPacket(physicalID, messageID, command, data)
+}
+
+// buildDNYPacket 构建DNY协议数据包（内部实现）
 func buildDNYPacket(physicalID uint32, messageID uint16, command uint8, data []byte) []byte {
 	// DNY协议格式: "DNY" + 长度(2字节) + 物理ID(4字节) + 消息ID(2字节) + 命令(1字节) + 数据 + 校验和(2字节)
 
