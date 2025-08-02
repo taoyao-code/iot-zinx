@@ -9,7 +9,6 @@ import (
 	"github.com/aceld/zinx/znet"
 	"github.com/bujia-iot/iot-zinx/internal/handlers"
 	"github.com/bujia-iot/iot-zinx/internal/infrastructure/logger"
-	"github.com/bujia-iot/iot-zinx/pkg/constants"
 	"go.uber.org/zap"
 )
 
@@ -21,24 +20,19 @@ type TCPServer struct {
 // NewTCPServer 创建TCP服务器
 func NewTCPServer(port int) *TCPServer {
 	// 创建Zinx服务器
-	server := znet.NewServer() // 设置连接监控器
+	server := znet.NewServer()
+
+	// 设置连接监控器
 	connectionMonitor := handlers.NewConnectionMonitor()
 	server.SetOnConnStart(connectionMonitor.OnConnectionOpened)
 	server.SetOnConnStop(connectionMonitor.OnConnectionClosed)
 
-	// 创建路由器并设置连接监控器
-	deviceRegisterRouter := handlers.NewDeviceRegisterRouter()
-	deviceRegisterRouter.SetConnectionMonitor(connectionMonitor)
+	// 创建统一数据处理器并设置连接监控器
+	unifiedHandler := handlers.NewUnifiedDataHandler()
+	unifiedHandler.SetConnectionMonitor(connectionMonitor)
 
-	heartbeatRouter := handlers.NewHeartbeatRouter()
-	heartbeatRouter.SetConnectionMonitor(connectionMonitor)
-
-	chargingRouter := handlers.NewChargingRouter()
-
-	// 添加路由
-	server.AddRouter(constants.CmdDeviceRegister, deviceRegisterRouter)
-	server.AddRouter(constants.CmdHeartbeat, heartbeatRouter)
-	server.AddRouter(constants.CmdChargeControl, chargingRouter)
+	// 注册统一数据处理器到路由ID 0 (默认路由)
+	server.AddRouter(0, unifiedHandler)
 
 	return &TCPServer{
 		server: server,
