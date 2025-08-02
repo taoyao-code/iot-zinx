@@ -1,6 +1,8 @@
 package dny_protocol
 
 import (
+	"encoding/binary"
+
 	"github.com/aceld/zinx/ziface"
 )
 
@@ -203,7 +205,59 @@ func BuildChargeControlPacket(
 	// 充满功率(1字节) - 0=关闭充满功率判断
 	data[36] = 0
 
-	// 🔧 注意：buildDNYPacket函数已废弃，此处需要使用 pkg/protocol/unified_dny_builder.go 中的统一构建器
-	// 临时返回空数据，实际应用中应使用新的构建器
-	return []byte{}
+	// 构建完整的DNY协议包
+	return buildDNYPacket(physicalID, messageID, 0x82, data)
+}
+
+// buildDNYPacket 构建DNY协议数据包
+func buildDNYPacket(physicalID uint32, messageID uint16, command uint8, data []byte) []byte {
+	// DNY协议格式: "DNY" + 长度(2字节) + 物理ID(4字节) + 消息ID(2字节) + 命令(1字节) + 数据 + 校验和(2字节)
+
+	// 计算数据长度 (不包括协议头"DNY"和长度字段本身)
+	dataLen := 4 + 2 + 1 + len(data) + 2 // 物理ID + 消息ID + 命令 + 数据 + 校验和
+
+	packet := make([]byte, 0, 3+2+dataLen)
+
+	// 1. 协议头
+	packet = append(packet, []byte("DNY")...)
+
+	// 2. 长度字段 (小端序)
+	lenBytes := make([]byte, 2)
+	binary.LittleEndian.PutUint16(lenBytes, uint16(dataLen))
+	packet = append(packet, lenBytes...)
+
+	// 3. 物理ID (小端序)
+	physicalIDBytes := make([]byte, 4)
+	binary.LittleEndian.PutUint32(physicalIDBytes, physicalID)
+	packet = append(packet, physicalIDBytes...)
+
+	// 4. 消息ID (小端序)
+	messageIDBytes := make([]byte, 2)
+	binary.LittleEndian.PutUint16(messageIDBytes, messageID)
+	packet = append(packet, messageIDBytes...)
+
+	// 5. 命令
+	packet = append(packet, command)
+
+	// 6. 数据
+	packet = append(packet, data...)
+
+	// 7. 计算校验和 (使用统一的校验函数)
+	checksum := CalculateDNYChecksum(packet[3:]) // 从长度字段开始计算
+
+	// 8. 添加校验和 (小端序)
+	checksumBytes := make([]byte, 2)
+	binary.LittleEndian.PutUint16(checksumBytes, checksum)
+	packet = append(packet, checksumBytes...)
+
+	return packet
+}
+
+// CalculateDNYChecksum 计算DNY协议校验和（统一实现）
+func CalculateDNYChecksum(data []byte) uint16 {
+	checksum := uint16(0)
+	for _, b := range data {
+		checksum += uint16(b)
+	}
+	return checksum
 }

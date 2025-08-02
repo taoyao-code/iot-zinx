@@ -14,9 +14,9 @@
 
 #### 🔧 架构优化
 
-- **高内聚设计**: 协议解析逻辑集中在 `pkg/protocol/dny_protocol_parser.go`
+- **高内聚设计**: 协议解析逻辑集中在 `internal/domain/dny_protocol/message_types.go`
 - **低耦合实现**: 清理重复函数定义，消除循环依赖
-- **常量统一**: 所有协议常量迁移到 `pkg/constants/dny_protocol.go`
+- **常量统一**: 所有协议常量迁移到 `pkg/constants/protocol_constants.go`
 - **接口标准化**: 提供清晰的 API 边界和兼容性接口
 
 #### 🛠️ 代码质量提升
@@ -28,21 +28,14 @@
 
 #### 📁 文件变更
 
-**新增文件**:
+**优化文件**:
 
-- `pkg/protocol/dny_protocol_parser.go` - 统一解析器核心
-- `pkg/protocol/utils.go` - 基础工具函数
-- `pkg/constants/dny_protocol.go` - 统一常量定义
-- `docs/DNY协议解析器统一架构设计.md` - 架构设计文档
-- `docs/DNY协议解析器_开发者指南.md` - 开发者指南
-- `issues/协议解析器统一重构_完成报告.md` - 重构完成报告
-
-**修改文件**:
-
-- `pkg/protocol/dny_decoder.go` - 使用统一解析器
-- `pkg/protocol/dny_frame_handler_base.go` - 增强兼容性方法
-- `internal/domain/dny_protocol/frame.go` - 添加 BuildChargeControlPacket
-- `internal/infrastructure/zinx_server/handlers/*.go` - 更新常量引用
+- `internal/domain/dny_protocol/constants.go` - 清理重复常量定义
+- `internal/domain/dny_protocol/frame.go` - 修复 BuildChargeControlPacket 函数
+- `internal/domain/dny_protocol/message_types.go` - 统一协议解析逻辑
+- `pkg/constants/protocol_constants.go` - 协议常量定义
+- `README.md` - 更新代码示例
+- `CHANGELOG.md` - 修正文件路径引用
 
 #### 🎯 性能指标
 

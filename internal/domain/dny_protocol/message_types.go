@@ -165,16 +165,12 @@ func (s *SwipeCardRequestData) UnmarshalBinary(data []byte) error {
 		expectedLength := 13 + int(cardNumber2Length)
 		if len(data) >= expectedLength && cardNumber2Length > 0 {
 			// 卡号2 (N字节) - 如果需要可以扩展处理
-			cardNumber2 := data[13 : 13+cardNumber2Length]
-			fmt.Printf("🔧 刷卡数据包含卡号2: 长度=%d, 内容=%s\n", cardNumber2Length, string(cardNumber2))
+			_ = data[13 : 13+cardNumber2Length] // 预留扩展处理
 		}
 	}
 
 	// 设置默认设备状态
 	s.DeviceStatus = 0 // 正常状态
-
-	fmt.Printf("🔧 刷卡请求解析成功: 卡号=%s, 卡类型=%d, 端口号=%d, 数据长度=%d\n",
-		s.CardNumber, s.CardType, s.GunNumber, len(data))
 
 	return nil
 }
@@ -308,9 +304,6 @@ func (s *SettlementData) UnmarshalBinary(data []byte) error {
 	s.ChargeFee = 0
 	s.ServiceFee = 0
 	s.TotalFee = 0
-
-	fmt.Printf("🔧 结算数据解析成功: 订单号=%s, 卡号=%s, 充电时长=%d秒, 耗电量=%d, 端口号=%d, 停止原因=%d, 数据长度=%d\n",
-		s.OrderID, s.CardNumber, chargeDuration, s.ElectricEnergy, s.GunNumber, s.StopReason, len(data))
 
 	return nil
 }
@@ -685,9 +678,6 @@ func (d *DeviceHeartbeatData) UnmarshalBinary(data []byte) error {
 		d.Temperature = data[4+d.PortCount]
 	} else {
 		// 简化的心跳数据包 - 只有基础信息
-		fmt.Printf("🔧 收到简化心跳包: 电压=%d, 端口数=%d, 数据长度=%d (期望至少%d)\n",
-			d.Voltage, d.PortCount, len(data), minLength)
-
 		// 设置默认值
 		d.PortStatuses = make([]uint8, d.PortCount)
 		for i := range d.PortStatuses {
@@ -704,9 +694,6 @@ func (d *DeviceHeartbeatData) UnmarshalBinary(data []byte) error {
 	}
 
 	d.Timestamp = time.Now()
-
-	fmt.Printf("🔧 设备心跳解析成功: 电压=%d, 端口数=%d, 信号强度=%d, 温度=%d, 数据长度=%d\n",
-		d.Voltage, d.PortCount, d.SignalStrength, d.Temperature, len(data))
 
 	return nil
 }
@@ -816,8 +803,6 @@ func ParseDNYMessage(rawData []byte) *ParsedMessage {
 	var dataLength int
 	if expectedTotalLength > len(rawData) || int(length) > len(rawData) {
 		// Length字段异常，使用实际长度
-		fmt.Printf("⚠️ Length字段异常: Length=%d, 期望总长=%d, 实际长度=%d, 使用实际长度计算\n",
-			length, expectedTotalLength, len(rawData))
 		dataLength = actualDataLength
 		if dataLength < 0 {
 			dataLength = 0
@@ -841,10 +826,6 @@ func ParseDNYMessage(rawData []byte) *ParsedMessage {
 	} else {
 		dataPayload = []byte{}
 	}
-
-	// 🔧 调试信息：记录解析过程的关键信息
-	fmt.Printf("🔧 DNY解析: Length=%d, 数据长度=%d, 实际长度=%d, 命令=0x%02X\n",
-		length, dataLength, len(rawData), result.Command)
 
 	// 根据消息类型解析具体数据
 	switch result.MessageType {

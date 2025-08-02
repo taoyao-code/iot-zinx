@@ -90,27 +90,29 @@ case "error":       // 解析错误
 ### 快速开始
 
 ```go
-import "github.com/bujia-iot/iot-zinx/pkg"
+import (
+    "github.com/bujia-iot/iot-zinx/pkg/constants"
+    "github.com/bujia-iot/iot-zinx/internal/domain/dny_protocol"
+)
 
-// 初始化统一架构（v2.0.0+）
-pkg.InitUnifiedArchitecture()
+// 使用协议常量
+command := constants.CmdDeviceRegister // 设备注册命令
 
-// 使用协议相关功能
-packet := pkg.Protocol.NewDNYDataPackFactory().NewDataPack(true)
-result := pkg.Protocol.ParseDNYProtocol(data)
-pkg.Protocol.SendDNYResponse(conn, physicalId, messageId, command, data)
+// 构建充电控制包
+packet := dny_protocol.BuildChargeControlPacket(
+    physicalID, messageID, rateMode, balance,
+    portNumber, chargeCommand, chargeDuration,
+    orderNumber, maxChargeDuration, maxPower, qrCodeLight,
+)
 
-// 使用网络相关功能
-hooks := pkg.Network.NewConnectionHooks(60*time.Second, 60*time.Second, 120*time.Second)
-cmdMgr := pkg.Network.GetCommandManager()
-
-// 使用监控相关功能
-monitor := pkg.Monitor.GetGlobalMonitor()
-monitor.BindDeviceIdToConnection(deviceId, conn)
-monitor.UpdateLastHeartbeatTime(conn)
+// 解析DNY协议消息
+result := dny_protocol.ParseDNYMessage(rawData)
+if result.Error == nil {
+    // 处理解析结果
+    deviceID := result.PhysicalID
+    command := result.Command
+}
 ```
-
-详细说明请参考 [pkg/README.md](pkg/README.md)。
 
 ## 开发指南
 
