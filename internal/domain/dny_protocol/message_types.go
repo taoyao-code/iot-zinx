@@ -761,10 +761,11 @@ func ParseDNYMessage(rawData []byte) *ParsedMessage {
 		return result
 	}
 
-	// 解析基础字段
-	result.PhysicalID = binary.LittleEndian.Uint32(rawData[5:9])
-	result.MessageID = binary.LittleEndian.Uint16(rawData[9:11])
-	result.Command = rawData[11]
+	// 解析基础字段 - 修复协议解析顺序
+	// 根据DNY协议文档: DNY(3) + Length(2) + 物理ID(4) + 命令(1) + 消息ID(2) + 数据 + 校验和(2)
+	result.PhysicalID = binary.LittleEndian.Uint32(rawData[5:9])  // 物理ID (4字节)
+	result.Command = rawData[9]                                   // 命令 (1字节)
+	result.MessageID = binary.LittleEndian.Uint16(rawData[10:12]) // 消息ID (2字节)
 	result.MessageType = MessageType(result.Command)
 
 	// 提取数据部分（跳过前12字节的头部）

@@ -51,17 +51,27 @@ func (h *BaseHandler) ExtractDeviceData(msg *dny_protocol.Message, conn ziface.I
 
 // BuildDeviceRegisterResponse 构建设备注册响应
 func (h *BaseHandler) BuildDeviceRegisterResponse(physicalID string) []byte {
-	// 简单的DNY协议响应
-	// 格式: 包头(3字节) + 物理ID(4字节) + 命令(1字节) + 消息ID(2字节) + 数据长度(2字节) + 数据(N字节) + 校验和(2字节)
+	// 根据DNY协议文档格式: DNY(3字节) + Length(2字节) + 物理ID(4字节) + 命令(1字节) + 消息ID(2字节) + 数据(N字节) + 校验和(2字节)
 
 	physicalIDUint := uint32(0)
 	fmt.Sscanf(physicalID, "%08X", &physicalIDUint)
 
+	// 准备数据内容
+	dataContent := []byte{0x00} // 成功状态
+
+	// 计算长度: 物理ID(4) + 命令(1) + 消息ID(2) + 数据(1) + 校验和(2) = 10字节
+	contentLength := uint16(4 + 1 + 2 + len(dataContent) + 2)
+
 	// 构建响应数据
-	response := make([]byte, 0, 12)
+	response := make([]byte, 0, 3+2+int(contentLength))
 
 	// 包头 "DNY"
 	response = append(response, []byte("DNY")...)
+
+	// 长度字段 (2字节，小端序)
+	lengthBytes := make([]byte, 2)
+	binary.LittleEndian.PutUint16(lengthBytes, contentLength)
+	response = append(response, lengthBytes...)
 
 	// 物理ID (4字节，小端序)
 	idBytes := make([]byte, 4)
@@ -74,15 +84,12 @@ func (h *BaseHandler) BuildDeviceRegisterResponse(physicalID string) []byte {
 	// 消息ID (2字节，小端序)
 	response = append(response, []byte{0x00, 0x00}...)
 
-	// 数据长度 (2字节，小端序) - 1字节数据
-	response = append(response, []byte{0x01, 0x00}...)
+	// 数据
+	response = append(response, dataContent...)
 
-	// 数据 (1字节) - 成功状态
-	response = append(response, 0x00)
-
-	// 校验和 (2字节，小端序) - 简单计算
+	// 校验和 (2字节，小端序) - 从DNY开始到数据结束的累加
 	checksum := uint16(0)
-	for _, b := range response[3:] { // 从物理ID开始计算
+	for _, b := range response { // 计算已有内容的校验和
 		checksum += uint16(b)
 	}
 	checksumBytes := make([]byte, 2)
@@ -97,11 +104,22 @@ func (h *BaseHandler) BuildHeartbeatResponse(physicalID string) []byte {
 	physicalIDUint := uint32(0)
 	fmt.Sscanf(physicalID, "%08X", &physicalIDUint)
 
+	// 准备数据内容
+	dataContent := []byte{0x00} // 成功状态
+
+	// 计算长度: 物理ID(4) + 命令(1) + 消息ID(2) + 数据(1) + 校验和(2) = 10字节
+	contentLength := uint16(4 + 1 + 2 + len(dataContent) + 2)
+
 	// 构建响应数据
-	response := make([]byte, 0, 12)
+	response := make([]byte, 0, 3+2+int(contentLength))
 
 	// 包头 "DNY"
 	response = append(response, []byte("DNY")...)
+
+	// 长度字段 (2字节，小端序)
+	lengthBytes := make([]byte, 2)
+	binary.LittleEndian.PutUint16(lengthBytes, contentLength)
+	response = append(response, lengthBytes...)
 
 	// 物理ID (4字节，小端序)
 	idBytes := make([]byte, 4)
@@ -114,15 +132,12 @@ func (h *BaseHandler) BuildHeartbeatResponse(physicalID string) []byte {
 	// 消息ID (2字节，小端序)
 	response = append(response, []byte{0x00, 0x00}...)
 
-	// 数据长度 (2字节，小端序) - 1字节数据
-	response = append(response, []byte{0x01, 0x00}...)
+	// 数据
+	response = append(response, dataContent...)
 
-	// 数据 (1字节) - 成功状态
-	response = append(response, 0x00)
-
-	// 校验和 (2字节，小端序)
+	// 校验和 (2字节，小端序) - 从DNY开始到数据结束的累加
 	checksum := uint16(0)
-	for _, b := range response[3:] {
+	for _, b := range response { // 计算已有内容的校验和
 		checksum += uint16(b)
 	}
 	checksumBytes := make([]byte, 2)
@@ -137,11 +152,26 @@ func (h *BaseHandler) BuildChargeControlResponse(physicalID string, success bool
 	physicalIDUint := uint32(0)
 	fmt.Sscanf(physicalID, "%08X", &physicalIDUint)
 
+	// 准备数据内容
+	status := byte(0x00)
+	if !success {
+		status = 0x01
+	}
+	dataContent := []byte{status}
+
+	// 计算长度: 物理ID(4) + 命令(1) + 消息ID(2) + 数据(1) + 校验和(2) = 10字节
+	contentLength := uint16(4 + 1 + 2 + len(dataContent) + 2)
+
 	// 构建响应数据
-	response := make([]byte, 0, 12)
+	response := make([]byte, 0, 3+2+int(contentLength))
 
 	// 包头 "DNY"
 	response = append(response, []byte("DNY")...)
+
+	// 长度字段 (2字节，小端序)
+	lengthBytes := make([]byte, 2)
+	binary.LittleEndian.PutUint16(lengthBytes, contentLength)
+	response = append(response, lengthBytes...)
 
 	// 物理ID (4字节，小端序)
 	idBytes := make([]byte, 4)
@@ -154,19 +184,12 @@ func (h *BaseHandler) BuildChargeControlResponse(physicalID string, success bool
 	// 消息ID (2字节，小端序)
 	response = append(response, []byte{0x00, 0x00}...)
 
-	// 数据长度 (2字节，小端序) - 1字节数据
-	response = append(response, []byte{0x01, 0x00}...)
+	// 数据
+	response = append(response, dataContent...)
 
-	// 数据 (1字节) - 成功状态
-	status := byte(0x00)
-	if !success {
-		status = 0x01
-	}
-	response = append(response, status)
-
-	// 校验和 (2字节，小端序)
+	// 校验和 (2字节，小端序) - 从DNY开始到数据结束的累加
 	checksum := uint16(0)
-	for _, b := range response[3:] {
+	for _, b := range response { // 计算已有内容的校验和
 		checksum += uint16(b)
 	}
 	checksumBytes := make([]byte, 2)
