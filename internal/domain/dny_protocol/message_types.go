@@ -127,11 +127,10 @@ func (s *SwipeCardRequestData) MarshalBinary() ([]byte, error) {
 }
 
 func (s *SwipeCardRequestData) UnmarshalBinary(data []byte) error {
-	// 🔧 关键修复：根据AP3000协议文档，刷卡操作(0x02)数据格式
-	// 协议格式：卡片ID(4字节) + 卡片类型(1字节) + 端口号(1字节) + 余额卡内金额(2字节) + 时间戳(4字节) + 卡号2字节数(1字节) + 卡号2(N字节)
-	// 基础长度：4+1+1+2+4+1 = 13字节，再加上可变长度的卡号2
-	if len(data) < 13 {
-		return fmt.Errorf("insufficient data length: %d, expected at least 13 for swipe card", len(data))
+	// 🔧 修复：支持更短的刷卡数据包 - 根据v1.0.0逻辑优化
+	// 基础刷卡数据最少需要：卡片ID(4) + 卡片类型(1) + 端口号(1) = 6字节
+	if len(data) < 6 {
+		return fmt.Errorf("insufficient data length: %d, expected at least 6 for swipe card", len(data))
 	}
 
 	// 卡片ID (4字节) - 需要转换为字符串
@@ -144,32 +143,38 @@ func (s *SwipeCardRequestData) UnmarshalBinary(data []byte) error {
 	// 端口号 (1字节) - 存储到GunNumber
 	s.GunNumber = data[5]
 
-	// 余额卡内金额 (2字节, 小端序) - 暂时忽略，根据业务需要可以扩展结构体
-
-	// 时间戳 (4字节, 小端序)
-	timestamp := binary.LittleEndian.Uint32(data[8:12])
-	s.SwipeTime = time.Unix(int64(timestamp), 0)
-
-	// 卡号2字节数 (1字节)
-	cardNumber2Length := data[12]
-
-	// 验证数据长度是否包含完整的卡号2
-	expectedLength := 13 + int(cardNumber2Length)
-	if len(data) < expectedLength {
-		return fmt.Errorf("insufficient data length: %d, expected %d with card number 2", len(data), expectedLength)
+	// 可选字段：如果数据足够长，继续解析
+	if len(data) >= 8 {
+		// 余额卡内金额 (2字节, 小端序) - 暂时忽略，根据业务需要可以扩展结构体
+		// amount := binary.LittleEndian.Uint16(data[6:8])
 	}
 
-	// 卡号2 (N字节) - 如果需要可以扩展处理
-	if cardNumber2Length > 0 {
-		cardNumber2 := data[13 : 13+cardNumber2Length]
-		fmt.Printf("🔧 刷卡数据包含卡号2: 长度=%d, 内容=%s\n", cardNumber2Length, string(cardNumber2))
+	if len(data) >= 12 {
+		// 时间戳 (4字节, 小端序)
+		timestamp := binary.LittleEndian.Uint32(data[8:12])
+		s.SwipeTime = time.Unix(int64(timestamp), 0)
+	} else {
+		s.SwipeTime = time.Now() // 默认当前时间
+	}
+
+	if len(data) >= 13 {
+		// 卡号2字节数 (1字节)
+		cardNumber2Length := data[12]
+
+		// 验证数据长度是否包含完整的卡号2
+		expectedLength := 13 + int(cardNumber2Length)
+		if len(data) >= expectedLength && cardNumber2Length > 0 {
+			// 卡号2 (N字节) - 如果需要可以扩展处理
+			cardNumber2 := data[13 : 13+cardNumber2Length]
+			fmt.Printf("🔧 刷卡数据包含卡号2: 长度=%d, 内容=%s\n", cardNumber2Length, string(cardNumber2))
+		}
 	}
 
 	// 设置默认设备状态
 	s.DeviceStatus = 0 // 正常状态
 
-	fmt.Printf("🔧 刷卡请求解析成功: 卡号=%s, 卡类型=%d, 端口号=%d, 时间戳=%d\n",
-		s.CardNumber, s.CardType, s.GunNumber, timestamp)
+	fmt.Printf("🔧 刷卡请求解析成功: 卡号=%s, 卡类型=%d, 端口号=%d, 数据长度=%d\n",
+		s.CardNumber, s.CardType, s.GunNumber, len(data))
 
 	return nil
 }
@@ -237,11 +242,10 @@ func (s *SettlementData) MarshalBinary() ([]byte, error) {
 }
 
 func (s *SettlementData) UnmarshalBinary(data []byte) error {
-	// 🔧 关键修复：根据AP3000协议文档，结算数据(0x03)数据格式
-	// 协议格式：充电时长(2字节) + 最大功率(2字节) + 耗电量(2字节) + 端口号(1字节) + 在线/离线启动(1字节) + 卡号(4字节) + 停止原因(1字节) + 订单编号(16字节) + 第二最大功率(2字节) + 时间戳(4字节) + 占位时长(2字节)
-	// 总共：2+2+2+1+1+4+1+16+2+4+2 = 37字节，但基础功能35字节即可
-	if len(data) < 35 {
-		return fmt.Errorf("insufficient data length: %d, expected at least 35 for settlement", len(data))
+	// 🔧 修复：支持更短的结算数据包 - 根据v1.0.0逻辑优化
+	// 最小数据长度：充电时长(2) + 最大功率(2) + 耗电量(2) + 端口号(1) = 7字节
+	if len(data) < 7 {
+		return fmt.Errorf("insufficient data length: %d, expected at least 7 for settlement", len(data))
 	}
 
 	// 充电时长 (2字节, 小端序) - 转换为开始时间和结束时间
@@ -258,31 +262,45 @@ func (s *SettlementData) UnmarshalBinary(data []byte) error {
 	// 端口号 (1字节)
 	s.GunNumber = data[6]
 
-	// 在线/离线启动 (1字节) - 暂时忽略
-
-	// 卡号/验证码 (4字节)
-	cardID := binary.LittleEndian.Uint32(data[8:12])
-	s.CardNumber = fmt.Sprintf("%08X", cardID) // 转换为8位十六进制字符串
-
-	// 停止原因 (1字节)
-	s.StopReason = data[12]
-
-	// 订单编号 (16字节)
-	s.OrderID = string(bytes.TrimRight(data[13:29], "\x00"))
-
-	// 第二最大功率 (2字节, 小端序) - 如果数据足够长
-	if len(data) >= 31 {
-		// secondMaxPower := binary.LittleEndian.Uint16(data[29:31])
+	// 可选字段：如果数据足够长，继续解析
+	if len(data) >= 8 {
+		// 在线/离线启动 (1字节) - 暂时忽略
+		// onlineOfflineFlag := data[7]
 	}
 
-	// 时间戳 (4字节, 小端序) - 如果数据足够长
+	if len(data) >= 12 {
+		// 卡号/验证码 (4字节)
+		cardID := binary.LittleEndian.Uint32(data[8:12])
+		s.CardNumber = fmt.Sprintf("%08X", cardID) // 转换为8位十六进制字符串
+	} else {
+		s.CardNumber = "00000000" // 默认值
+	}
+
+	if len(data) >= 13 {
+		// 停止原因 (1字节)
+		s.StopReason = data[12]
+	}
+
+	if len(data) >= 29 {
+		// 订单编号 (16字节)
+		s.OrderID = string(bytes.TrimRight(data[13:29], "\x00"))
+	} else {
+		s.OrderID = "UNKNOWN" // 默认值
+	}
+
+	// 可选的时间戳字段
 	if len(data) >= 35 {
+		// 第二最大功率 (2字节, 小端序) - 如果数据足够长
+		// secondMaxPower := binary.LittleEndian.Uint16(data[29:31])
+
+		// 时间戳 (4字节, 小端序)
 		timestamp := binary.LittleEndian.Uint32(data[31:35])
 		s.EndTime = time.Unix(int64(timestamp), 0)
 	}
 
-	// 占位时长 (2字节, 小端序) - 如果数据足够长，充电柜专用
+	// 充电柜专用字段
 	if len(data) >= 37 {
+		// 占位时长 (2字节, 小端序) - 充电柜专用
 		// occupyDuration := binary.LittleEndian.Uint16(data[35:37])
 	}
 
@@ -291,8 +309,8 @@ func (s *SettlementData) UnmarshalBinary(data []byte) error {
 	s.ServiceFee = 0
 	s.TotalFee = 0
 
-	fmt.Printf("🔧 结算数据解析成功: 订单号=%s, 卡号=%s, 充电时长=%d秒, 耗电量=%d, 端口号=%d, 停止原因=%d\n",
-		s.OrderID, s.CardNumber, chargeDuration, s.ElectricEnergy, s.GunNumber, s.StopReason)
+	fmt.Printf("🔧 结算数据解析成功: 订单号=%s, 卡号=%s, 充电时长=%d秒, 耗电量=%d, 端口号=%d, 停止原因=%d, 数据长度=%d\n",
+		s.OrderID, s.CardNumber, chargeDuration, s.ElectricEnergy, s.GunNumber, s.StopReason, len(data))
 
 	return nil
 }
@@ -638,8 +656,10 @@ func (d *DeviceHeartbeatData) MarshalBinary() ([]byte, error) {
 }
 
 func (d *DeviceHeartbeatData) UnmarshalBinary(data []byte) error {
-	if len(data) < 5 {
-		return fmt.Errorf("insufficient data length: %d, minimum required: 5", len(data))
+	// 🔧 修复：支持更短的心跳数据包 - 根据v1.0.0逻辑优化
+	// 最小数据长度：电压(2) + 端口数量(1) = 3字节
+	if len(data) < 3 {
+		return fmt.Errorf("insufficient data length: %d, minimum required: 3", len(data))
 	}
 
 	// 电压 (2字节，小端序)
@@ -648,26 +668,46 @@ func (d *DeviceHeartbeatData) UnmarshalBinary(data []byte) error {
 	// 端口数量 (1字节)
 	d.PortCount = data[2]
 
-	// 验证数据长度是否满足端口数量要求
-	minLength := 5 + int(d.PortCount) // 2(电压) + 1(端口数) + n(端口状态) + 1(信号) + 1(温度)
-	if len(data) < minLength {
-		return fmt.Errorf("insufficient data length: %d, required for %d ports: %d",
-			len(data), d.PortCount, minLength)
+	// 验证数据长度是否满足端口数量要求 - 更宽松的验证
+	minLength := 3 + int(d.PortCount) + 2 // 2(电压) + 1(端口数) + n(端口状态) + 1(信号) + 1(温度)
+	if len(data) >= minLength {
+		// 完整的心跳数据包
+		// 各端口状态 (n字节)
+		d.PortStatuses = make([]uint8, d.PortCount)
+		for i := 0; i < int(d.PortCount); i++ {
+			d.PortStatuses[i] = data[3+i]
+		}
+
+		// 信号强度 (1字节)
+		d.SignalStrength = data[3+d.PortCount]
+
+		// 当前环境温度 (1字节)
+		d.Temperature = data[4+d.PortCount]
+	} else {
+		// 简化的心跳数据包 - 只有基础信息
+		fmt.Printf("🔧 收到简化心跳包: 电压=%d, 端口数=%d, 数据长度=%d (期望至少%d)\n",
+			d.Voltage, d.PortCount, len(data), minLength)
+
+		// 设置默认值
+		d.PortStatuses = make([]uint8, d.PortCount)
+		for i := range d.PortStatuses {
+			d.PortStatuses[i] = 0 // 默认状态：空闲
+		}
+		d.SignalStrength = 0
+		d.Temperature = 0
+
+		// 如果有剩余数据，尽可能解析
+		remainingData := len(data) - 3
+		for i := 0; i < int(d.PortCount) && i < remainingData; i++ {
+			d.PortStatuses[i] = data[3+i]
+		}
 	}
-
-	// 各端口状态 (n字节)
-	d.PortStatuses = make([]uint8, d.PortCount)
-	for i := 0; i < int(d.PortCount); i++ {
-		d.PortStatuses[i] = data[3+i]
-	}
-
-	// 信号强度 (1字节)
-	d.SignalStrength = data[3+d.PortCount]
-
-	// 当前环境温度 (1字节)
-	d.Temperature = data[4+d.PortCount]
 
 	d.Timestamp = time.Now()
+
+	fmt.Printf("🔧 设备心跳解析成功: 电压=%d, 端口数=%d, 信号强度=%d, 温度=%d, 数据长度=%d\n",
+		d.Voltage, d.PortCount, d.SignalStrength, d.Temperature, len(data))
+
 	return nil
 }
 
@@ -727,6 +767,7 @@ const (
 	MsgTypeServerTimeRequest MessageType = 0x22 // 设备获取服务器时间
 	MsgTypeServerQuery       MessageType = 0x81 // 服务器查询设备联网状态
 	MsgTypeChargeControl     MessageType = 0x82 // 服务器开始、停止充电操作
+	MsgTypeNewType           MessageType = 0xF1 // 新发现的消息类型
 )
 
 // ParsedMessage 统一的解析结果结构
@@ -767,33 +808,43 @@ func ParseDNYMessage(rawData []byte) *ParsedMessage {
 	result.MessageID = binary.LittleEndian.Uint16(rawData[10:12]) // 消息ID (2字节)
 	result.MessageType = MessageType(result.Command)
 
-	// 🔧 修复：正确计算数据部分长度
-	// Length字段包含：物理ID(4) + 命令(1) + 消息ID(2) + 数据部分 + 校验和(2)
-	// 所以数据部分长度 = Length - 4 - 1 - 2 - 2 = Length - 9
-	if int(length) < 9 {
-		result.Error = fmt.Errorf("invalid length field: %d, expected at least 9", length)
-		return result
-	}
-
-	dataLength := int(length) - 9 // 减去固定字段和校验和
-	if dataLength < 0 {
-		dataLength = 0
-	}
-
-	// 验证总包长度
+	// 🔧 修复：智能计算数据部分长度 - 适配不同协议版本
+	// 检查Length字段是否合理，如果不合理则使用实际包长度计算
 	expectedTotalLength := 3 + 2 + int(length) // DNY(3) + Length(2) + Length字段内容
-	if len(rawData) < expectedTotalLength {
-		result.Error = fmt.Errorf("insufficient total data length: %d, expected %d", len(rawData), expectedTotalLength)
-		return result
+	actualDataLength := len(rawData) - 12      // 实际可用的数据部分长度
+
+	var dataLength int
+	if expectedTotalLength > len(rawData) || int(length) > len(rawData) {
+		// Length字段异常，使用实际长度
+		fmt.Printf("⚠️ Length字段异常: Length=%d, 期望总长=%d, 实际长度=%d, 使用实际长度计算\n",
+			length, expectedTotalLength, len(rawData))
+		dataLength = actualDataLength
+		if dataLength < 0 {
+			dataLength = 0
+		}
+	} else {
+		// Length字段正常，使用标准计算方式
+		if int(length) < 7 {
+			result.Error = fmt.Errorf("invalid length field: %d, expected at least 7", length)
+			return result
+		}
+		dataLength = int(length) - 7 // 减去固定字段：物理ID(4) + 命令(1) + 消息ID(2)
+		if dataLength < 0 {
+			dataLength = 0
+		}
 	}
 
 	// 提取正确长度的数据部分
 	var dataPayload []byte
-	if dataLength > 0 {
+	if dataLength > 0 && len(rawData) >= 12+dataLength {
 		dataPayload = rawData[12 : 12+dataLength]
 	} else {
 		dataPayload = []byte{}
 	}
+
+	// 🔧 调试信息：记录解析过程的关键信息
+	fmt.Printf("🔧 DNY解析: Length=%d, 数据长度=%d, 实际长度=%d, 命令=0x%02X\n",
+		length, dataLength, len(rawData), result.Command)
 
 	// 根据消息类型解析具体数据
 	switch result.MessageType {
@@ -867,6 +918,10 @@ func ParseDNYMessage(rawData []byte) *ParsedMessage {
 			return result
 		}
 		result.Data = data
+
+	case MsgTypeNewType:
+		// 新发现的消息类型（0xF1）
+		result.Data = dataPayload
 
 	default:
 		// 对于未知类型，保存原始数据

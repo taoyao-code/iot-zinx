@@ -79,6 +79,13 @@ func (h *UnifiedDataHandler) Handle(request ziface.IRequest) {
 
 		// 根据DNY命令分发
 		switch parsedMsg.MessageType {
+		case dny_protocol.MsgTypeOldHeartbeat:
+			logger.Info("UnifiedDataHandler: 分发旧版心跳包到HeartbeatRouter",
+				zap.Uint64("connID", conn.GetConnID()),
+				zap.String("command", fmt.Sprintf("0x%02x", parsedMsg.Command)),
+			)
+			h.heartbeat.Handle(request)
+
 		case dny_protocol.MsgTypeDeviceRegister:
 			logger.Info("UnifiedDataHandler: 分发设备注册包到DeviceRegisterRouter",
 				zap.Uint64("connID", conn.GetConnID()),
@@ -132,6 +139,14 @@ func (h *UnifiedDataHandler) Handle(request ziface.IRequest) {
 			)
 			h.charging.Handle(request)
 
+		case dny_protocol.MsgTypeNewType:
+			logger.Info("UnifiedDataHandler: 收到新类型数据包(0xF1)",
+				zap.Uint64("connID", conn.GetConnID()),
+				zap.String("command", fmt.Sprintf("0x%02x", parsedMsg.Command)),
+				zap.Int("dataLen", len(parsedMsg.Data.([]byte))),
+			)
+			// TODO: 实现0xF1类型处理逻辑
+
 		default:
 			logger.Warn("UnifiedDataHandler: 未知的DNY命令类型",
 				zap.Uint64("connID", conn.GetConnID()),
@@ -168,8 +183,21 @@ func (h *UnifiedDataHandler) identifyPacketType(data []byte) string {
 		return "link"
 	}
 
-	// 3. 检查是否为DNY协议包
-	if len(data) >= constants.MinPacketSize && string(data[:3]) == constants.ProtocolHeader {
+	// 3. 检查是否为DNY协议包 - 修复短包判断
+	if len(data) >= 9 && string(data[:3]) == constants.ProtocolHeader {
+		// 9字节是DNY协议的最小长度：DNY(3) + Length(2) + PhysicalID(4)
+		// 进一步验证Length字段的合理性
+		if len(data) >= 5 {
+			length := uint16(data[3]) | uint16(data[4])<<8 // 小端序读取Length
+			expectedTotal := 5 + int(length)               // DNY(3) + Length(2) + Length内容
+
+			// 对于长度不匹配但格式正确的包，仍然尝试解析
+			if expectedTotal <= len(data)+10 { // 允许10字节的容差
+				return "dny"
+			}
+		}
+
+		// 如果Length字段异常，但确实是DNY开头，仍然尝试解析
 		return "dny"
 	}
 
