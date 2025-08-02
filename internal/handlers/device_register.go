@@ -56,7 +56,13 @@ func (r *DeviceRegisterRouter) Handle(request ziface.IRequest) {
 	// 提取设备信息
 	deviceID := fmt.Sprintf("%08X", parsedMsg.PhysicalID)
 	physicalIDStr := deviceID
-	iccid := registerData.ICCID
+	// ICCID在设备注册协议中不存在，使用空字符串或从其他来源获取
+	iccid := ""
+
+	// 记录设备注册包的详细信息
+	r.Log("设备注册包详情 - 固件版本: %d.%d, 端口数量: %d, 虚拟ID: %d, 设备类型: %d, 工作模式: %d",
+		registerData.FirmwareVersion[1], registerData.FirmwareVersion[0],
+		registerData.PortCount, registerData.VirtualID, registerData.DeviceType, registerData.WorkMode)
 
 	// 检查设备是否已存在
 	device, exists := storage.GlobalDeviceStore.Get(deviceID)
@@ -107,8 +113,9 @@ func (r *DeviceRegisterRouter) extractDeviceInfo(registerData *dny_protocol.Devi
 	// 使用物理ID作为设备ID
 	deviceID = physicalIDStr
 
-	// 从协议数据中获取ICCID
-	iccid = registerData.ICCID
+	// 根据AP3000协议文档，设备注册包(0x20)中不包含ICCID字段
+	// ICCID是通信模块连接时单独发送的数据，这里使用空字符串
+	iccid = ""
 
 	return deviceID, physicalIDStr, iccid
 }

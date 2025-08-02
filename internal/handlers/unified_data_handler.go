@@ -93,6 +93,38 @@ func (h *UnifiedDataHandler) Handle(request ziface.IRequest) {
 			)
 			h.heartbeat.Handle(request)
 
+		case dny_protocol.MsgTypeSwipeCard:
+			logger.Info("UnifiedDataHandler: 分发刷卡请求到对应处理器",
+				zap.Uint64("connID", conn.GetConnID()),
+				zap.String("command", fmt.Sprintf("0x%02x", parsedMsg.Command)),
+			)
+			// TODO: 实现刷卡处理逻辑
+			logger.Info("刷卡请求处理", zap.Any("data", parsedMsg.Data))
+
+		case dny_protocol.MsgTypeSettlement:
+			logger.Info("UnifiedDataHandler: 分发结算数据到对应处理器",
+				zap.Uint64("connID", conn.GetConnID()),
+				zap.String("command", fmt.Sprintf("0x%02x", parsedMsg.Command)),
+			)
+			// TODO: 实现结算数据处理逻辑
+			logger.Info("结算数据处理", zap.Any("data", parsedMsg.Data))
+
+		case dny_protocol.MsgTypeOrderConfirm:
+			logger.Info("UnifiedDataHandler: 分发订单确认到对应处理器",
+				zap.Uint64("connID", conn.GetConnID()),
+				zap.String("command", fmt.Sprintf("0x%02x", parsedMsg.Command)),
+			)
+			// TODO: 实现订单确认处理逻辑
+			logger.Info("订单确认处理", zap.Any("data", parsedMsg.Data))
+
+		case dny_protocol.MsgTypePowerHeartbeat:
+			logger.Info("UnifiedDataHandler: 分发功率心跳包到对应处理器",
+				zap.Uint64("connID", conn.GetConnID()),
+				zap.String("command", fmt.Sprintf("0x%02x", parsedMsg.Command)),
+			)
+			// TODO: 实现功率心跳处理逻辑
+			logger.Info("功率心跳处理", zap.Any("data", parsedMsg.Data))
+
 		case dny_protocol.MsgTypeChargeControl:
 			logger.Info("UnifiedDataHandler: 分发充电控制包到ChargingRouter",
 				zap.Uint64("connID", conn.GetConnID()),

@@ -9,6 +9,7 @@ import (
 	"github.com/aceld/zinx/znet"
 	"github.com/bujia-iot/iot-zinx/internal/handlers"
 	"github.com/bujia-iot/iot-zinx/internal/infrastructure/logger"
+	"github.com/bujia-iot/iot-zinx/internal/infrastructure/zinx_server"
 	"go.uber.org/zap"
 )
 
@@ -22,6 +23,11 @@ func NewTCPServer(port int) *TCPServer {
 	// 创建Zinx服务器
 	server := znet.NewServer()
 
+	// 🔥 关键修复：使用自定义FrameDecoder处理原始TCP数据
+	// 替换默认的Zinx协议解析器，用于处理充电设备的原始TCP数据流
+	rawDataDecoder := zinx_server.NewRawDataFrameDecoder()
+	server.SetDecoder(rawDataDecoder)
+
 	// 设置连接监控器
 	connectionMonitor := handlers.NewConnectionMonitor()
 	server.SetOnConnStart(connectionMonitor.OnConnectionOpened)
@@ -31,8 +37,14 @@ func NewTCPServer(port int) *TCPServer {
 	unifiedHandler := handlers.NewUnifiedDataHandler()
 	unifiedHandler.SetConnectionMonitor(connectionMonitor)
 
-	// 注册统一数据处理器到路由ID 0 (默认路由)
-	server.AddRouter(0, unifiedHandler)
+	// 🔥 现在只需要一个路由：所有原始数据都会被FrameDecoder处理并包装成msgID=1的消息
+	server.AddRouter(1, unifiedHandler)
+
+	logger.Info("TCP服务器已配置自定义FrameDecoder",
+		zap.String("component", "tcp_server"),
+		zap.String("decoder", "RawDataFrameDecoder"),
+		zap.String("router", "msgID=1 -> UnifiedDataHandler"),
+	)
 
 	return &TCPServer{
 		server: server,

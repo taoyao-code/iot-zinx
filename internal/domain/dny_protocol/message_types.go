@@ -7,41 +7,44 @@ import (
 	"time"
 )
 
-// DeviceRegisterData 设备注册数据 (0x20)
+// DeviceRegisterData 设备注册数据 (0x20 - 正确的设备注册指令)
 type DeviceRegisterData struct {
-	ICCID           string    // 20字节 ICCID卡号 - 修复：恢复为20字节，严格按照AP3000协议文档
-	DeviceVersion   [16]byte  // 16字节 设备版本
-	DeviceType      uint16    // 2字节 设备类型
-	HeartbeatPeriod uint16    // 2字节 心跳周期(秒)
+	FirmwareVersion [2]byte   // 2字节 固件版本
+	PortCount       uint8     // 1字节 端口数量
+	VirtualID       uint8     // 1字节 虚拟ID
+	DeviceType      uint8     // 1字节 设备类型
+	WorkMode        uint8     // 1字节 工作模式
+	PowerVersion    [2]byte   // 2字节 电源板版本号（可选）
 	Timestamp       time.Time // 注册时间
 }
 
 func (d *DeviceRegisterData) MarshalBinary() ([]byte, error) {
-	buf := bytes.NewBuffer(make([]byte, 0, 40)) // 修复：恢复为40字节
+	buf := bytes.NewBuffer(make([]byte, 0, 8)) // 根据AP3000协议: 6-8字节
 
-	// ICCID (20字节) - 修复：恢复为20字节
-	iccidBytes := make([]byte, 20)
-	copy(iccidBytes, []byte(d.ICCID))
-	buf.Write(iccidBytes)
+	// 固件版本 (2字节)
+	buf.Write(d.FirmwareVersion[:])
 
-	// 设备版本 (16字节)
-	buf.Write(d.DeviceVersion[:])
+	// 端口数量 (1字节)
+	buf.WriteByte(d.PortCount)
 
-	// 设备类型 (2字节, 小端序)
-	if err := binary.Write(buf, binary.LittleEndian, d.DeviceType); err != nil {
-		return nil, fmt.Errorf("write device type: %w", err)
-	}
+	// 虚拟ID (1字节)
+	buf.WriteByte(d.VirtualID)
 
-	// 心跳周期 (2字节, 小端序)
-	if err := binary.Write(buf, binary.LittleEndian, d.HeartbeatPeriod); err != nil {
-		return nil, fmt.Errorf("write heartbeat period: %w", err)
+	// 设备类型 (1字节)
+	buf.WriteByte(d.DeviceType)
+
+	// 工作模式 (1字节)
+	buf.WriteByte(d.WorkMode)
+
+	// 电源板版本号 (2字节, 可选)
+	if d.PowerVersion[0] != 0 || d.PowerVersion[1] != 0 {
+		buf.Write(d.PowerVersion[:])
 	}
 
 	return buf.Bytes(), nil
 }
 
 func (d *DeviceRegisterData) UnmarshalBinary(data []byte) error {
-	// 🔧 关键修复：支持不同长度的设备注册数据
 	// 根据AP3000协议，最小6字节，完整8字节
 	// 协议格式：固件版本(2字节) + 端口数量(1字节) + 虚拟ID(1字节) + 设备类型(1字节) + 工作模式(1字节) + [电源板版本号(2字节)]
 	if len(data) < 6 {
@@ -49,65 +52,30 @@ func (d *DeviceRegisterData) UnmarshalBinary(data []byte) error {
 	}
 
 	// 固件版本 (2字节, 小端序)
-	firmwareVersion := binary.LittleEndian.Uint16(data[0:2])
+	d.FirmwareVersion[0] = data[0]
+	d.FirmwareVersion[1] = data[1]
 
 	// 端口数量 (1字节)
-	portCount := data[2]
+	d.PortCount = data[2]
 
 	// 虚拟ID (1字节)
-	virtualID := data[3]
+	d.VirtualID = data[3]
 
 	// 设备类型 (1字节)
-	d.DeviceType = uint16(data[4])
+	d.DeviceType = data[4]
 
 	// 工作模式 (1字节)
-	workMode := data[5]
+	d.WorkMode = data[5]
 
 	// 电源板版本号 (2字节, 小端序) - 可选字段
-	var powerBoardVersion uint16
 	if len(data) >= 8 {
-		powerBoardVersion = binary.LittleEndian.Uint16(data[6:8])
+		d.PowerVersion[0] = data[6]
+		d.PowerVersion[1] = data[7]
 	}
 
-	// 设备分时计费功能 (1字节) - 可选字段
-	// TODO： 根据实际业务需求处理此字段
-
-	// 🔧 重要：ICCID从连接属性获取，而不是从DNY数据包中解析
-	// 因为ICCID是通过单独的特殊消息(0xFF01)发送的
-	d.ICCID = "" // 将在处理器中从连接属性获取
-
-	// 🔧 版本字符串优化：将固件版本转换为版本字符串格式并正确处理空字符
-	versionStr := fmt.Sprintf("V%d.%02d", firmwareVersion/100, firmwareVersion%100)
-	// 清零整个数组，避免遗留的垃圾数据
-	for i := range d.DeviceVersion {
-		d.DeviceVersion[i] = 0
-	}
-	// 复制版本字符串，确保不会有冗余的空字符
-	copy(d.DeviceVersion[:], []byte(versionStr))
-
-	// 设置默认心跳周期（从工作模式或其他配置推导）
-	d.HeartbeatPeriod = 180 // 默认3分钟
-
+	// 设置注册时间
 	d.Timestamp = time.Now()
 
-	fmt.Printf("🔧 设备注册解析成功: 固件版本=%d, 端口数=%d, 虚拟ID=%d, 设备类型=%d, 工作模式=%d, 电源板版本=%d, 数据长度=%d\n",
-		firmwareVersion, portCount, virtualID, d.DeviceType, workMode, powerBoardVersion, len(data))
-
-	return nil
-}
-
-// LinkHeartbeatData Link心跳数据 (0x01)
-type LinkHeartbeatData struct {
-	Timestamp time.Time // 心跳时间
-}
-
-func (h *LinkHeartbeatData) MarshalBinary() ([]byte, error) {
-	// Link心跳通常没有数据部分
-	return []byte{}, nil
-}
-
-func (h *LinkHeartbeatData) UnmarshalBinary(_ []byte) error {
-	h.Timestamp = time.Now()
 	return nil
 }
 
@@ -384,30 +352,56 @@ func (p *PowerHeartbeatData) MarshalBinary() ([]byte, error) {
 }
 
 func (p *PowerHeartbeatData) UnmarshalBinary(data []byte) error {
-	if len(data) < 16 {
-		return fmt.Errorf("insufficient data length: %d", len(data))
+	// 🔧 修复：支持不同长度的功率心跳数据
+	// 根据AP3000协议，完整版本需要约40字节，但有简化版本
+	if len(data) < 3 {
+		return fmt.Errorf("insufficient data length: %d, expected at least 3 for power heartbeat", len(data))
 	}
 
-	// 枪号 (1字节)
-	p.GunNumber = data[0]
+	// 基础字段 (最少3字节)
+	if len(data) >= 1 {
+		// 端口号 (1字节)
+		p.GunNumber = data[0]
+	}
 
-	// 电压 (2字节, 小端序)
-	p.Voltage = binary.LittleEndian.Uint16(data[1:3])
+	if len(data) >= 2 {
+		// 端口状态 (1字节)
+		p.Status = data[1]
+	}
 
-	// 电流 (2字节, 小端序)
-	p.Current = binary.LittleEndian.Uint16(data[3:5])
+	if len(data) >= 4 {
+		// 充电时长 (2字节, 小端序)
+		chargeDuration := binary.LittleEndian.Uint16(data[2:4])
+		_ = chargeDuration // 暂时不使用
+	}
 
-	// 功率 (4字节, 小端序)
-	p.Power = binary.LittleEndian.Uint32(data[5:9])
+	if len(data) >= 6 {
+		// 当前订单累计电量 (2字节, 小端序)
+		p.ElectricEnergy = uint32(binary.LittleEndian.Uint16(data[4:6]))
+	}
 
-	// 累计电量 (4字节, 小端序)
-	p.ElectricEnergy = binary.LittleEndian.Uint32(data[9:13])
+	if len(data) >= 7 {
+		// 在线/离线启动标志 (1字节)
+		startMode := data[6]
+		_ = startMode // 暂时不使用
+	}
 
-	// 温度 (2字节, 小端序)
-	p.Temperature = int16(binary.LittleEndian.Uint16(data[13:15]))
+	if len(data) >= 9 {
+		// 实时功率 (2字节, 小端序)
+		p.Power = uint32(binary.LittleEndian.Uint16(data[7:9]))
+	}
 
-	// 充电状态 (1字节)
-	p.Status = data[15]
+	// 如果是完整版本的功率心跳数据
+	if len(data) >= 16 {
+		// 完整解析逻辑 (保持向后兼容)
+		p.GunNumber = data[0]
+		p.Voltage = binary.LittleEndian.Uint16(data[1:3])
+		p.Current = binary.LittleEndian.Uint16(data[3:5])
+		p.Power = binary.LittleEndian.Uint32(data[5:9])
+		p.ElectricEnergy = binary.LittleEndian.Uint32(data[9:13])
+		p.Temperature = int16(binary.LittleEndian.Uint16(data[13:15]))
+		p.Status = data[15]
+	}
 
 	p.Timestamp = time.Now()
 	return nil
@@ -722,13 +716,17 @@ func readTimeBytes(data []byte) time.Time {
 type MessageType uint8
 
 const (
-	MsgTypeUnknown        MessageType = 0x00
-	MsgTypeLinkHeartbeat  MessageType = 0x01
-	MsgTypeSwipeCard      MessageType = 0x02
-	MsgTypeDeviceRegister MessageType = 0x20
-	MsgTypeHeartbeat      MessageType = 0x21
-	MsgTypeChargeControl  MessageType = 0x82
-	MsgTypePowerHeartbeat MessageType = 0x80
+	MsgTypeUnknown           MessageType = 0x00
+	MsgTypeOldHeartbeat      MessageType = 0x01 // 旧版设备心跳包（建议使用21指令）
+	MsgTypeSwipeCard         MessageType = 0x02 // 刷卡操作
+	MsgTypeSettlement        MessageType = 0x03 // 结算消费信息上传
+	MsgTypeOrderConfirm      MessageType = 0x04 // 充电端口订单确认（老版本指令）
+	MsgTypePowerHeartbeat    MessageType = 0x06 // 端口充电时功率心跳包（新版本指令）
+	MsgTypeDeviceRegister    MessageType = 0x20 // 设备注册包（正确的注册指令）
+	MsgTypeHeartbeat         MessageType = 0x21 // 设备心跳包（新版）
+	MsgTypeServerTimeRequest MessageType = 0x22 // 设备获取服务器时间
+	MsgTypeServerQuery       MessageType = 0x81 // 服务器查询设备联网状态
+	MsgTypeChargeControl     MessageType = 0x82 // 服务器开始、停止充电操作
 )
 
 // ParsedMessage 统一的解析结果结构
@@ -763,17 +761,44 @@ func ParseDNYMessage(rawData []byte) *ParsedMessage {
 
 	// 解析基础字段 - 修复协议解析顺序
 	// 根据DNY协议文档: DNY(3) + Length(2) + 物理ID(4) + 命令(1) + 消息ID(2) + 数据 + 校验和(2)
+	length := binary.LittleEndian.Uint16(rawData[3:5])            // Length字段 (2字节)
 	result.PhysicalID = binary.LittleEndian.Uint32(rawData[5:9])  // 物理ID (4字节)
 	result.Command = rawData[9]                                   // 命令 (1字节)
 	result.MessageID = binary.LittleEndian.Uint16(rawData[10:12]) // 消息ID (2字节)
 	result.MessageType = MessageType(result.Command)
 
-	// 提取数据部分（跳过前12字节的头部）
-	dataPayload := rawData[12:]
+	// 🔧 修复：正确计算数据部分长度
+	// Length字段包含：物理ID(4) + 命令(1) + 消息ID(2) + 数据部分 + 校验和(2)
+	// 所以数据部分长度 = Length - 4 - 1 - 2 - 2 = Length - 9
+	if int(length) < 9 {
+		result.Error = fmt.Errorf("invalid length field: %d, expected at least 9", length)
+		return result
+	}
+
+	dataLength := int(length) - 9 // 减去固定字段和校验和
+	if dataLength < 0 {
+		dataLength = 0
+	}
+
+	// 验证总包长度
+	expectedTotalLength := 3 + 2 + int(length) // DNY(3) + Length(2) + Length字段内容
+	if len(rawData) < expectedTotalLength {
+		result.Error = fmt.Errorf("insufficient total data length: %d, expected %d", len(rawData), expectedTotalLength)
+		return result
+	}
+
+	// 提取正确长度的数据部分
+	var dataPayload []byte
+	if dataLength > 0 {
+		dataPayload = rawData[12 : 12+dataLength]
+	} else {
+		dataPayload = []byte{}
+	}
 
 	// 根据消息类型解析具体数据
 	switch result.MessageType {
 	case MsgTypeDeviceRegister:
+		// 设备注册包（0x20）
 		data := &DeviceRegisterData{}
 		if err := data.UnmarshalBinary(dataPayload); err != nil {
 			result.Error = fmt.Errorf("parse device register data: %w", err)
@@ -781,23 +806,17 @@ func ParseDNYMessage(rawData []byte) *ParsedMessage {
 		}
 		result.Data = data
 
-	case MsgTypeLinkHeartbeat:
-		data := &LinkHeartbeatData{}
+	case MsgTypeOldHeartbeat:
+		// 旧版设备心跳包（0x01）
+		data := &DeviceHeartbeatData{}
 		if err := data.UnmarshalBinary(dataPayload); err != nil {
-			result.Error = fmt.Errorf("parse link heartbeat data: %w", err)
-			return result
-		}
-		result.Data = data
-
-	case MsgTypeSwipeCard:
-		data := &SwipeCardRequestData{}
-		if err := data.UnmarshalBinary(dataPayload); err != nil {
-			result.Error = fmt.Errorf("parse swipe card data: %w", err)
+			result.Error = fmt.Errorf("parse old heartbeat data: %w", err)
 			return result
 		}
 		result.Data = data
 
 	case MsgTypeHeartbeat:
+		// 新版设备心跳包（0x21）
 		data := &DeviceHeartbeatData{}
 		if err := data.UnmarshalBinary(dataPayload); err != nil {
 			result.Error = fmt.Errorf("parse heartbeat data: %w", err)
@@ -805,18 +824,46 @@ func ParseDNYMessage(rawData []byte) *ParsedMessage {
 		}
 		result.Data = data
 
-	case MsgTypeChargeControl:
-		data := &ChargeControlData{}
+	case MsgTypeSwipeCard:
+		// 刷卡操作（0x02）
+		data := &SwipeCardRequestData{}
 		if err := data.UnmarshalBinary(dataPayload); err != nil {
-			result.Error = fmt.Errorf("parse charge control data: %w", err)
+			result.Error = fmt.Errorf("parse swipe card data: %w", err)
 			return result
 		}
 		result.Data = data
 
+	case MsgTypeSettlement:
+		// 结算消费信息上传（0x03）
+		data := &SettlementData{}
+		if err := data.UnmarshalBinary(dataPayload); err != nil {
+			result.Error = fmt.Errorf("parse settlement data: %w", err)
+			return result
+		}
+		result.Data = data
+
+	case MsgTypeOrderConfirm:
+		// 充电端口订单确认（0x04，老版本指令）
+		result.Data = dataPayload
+
 	case MsgTypePowerHeartbeat:
+		// 端口充电时功率心跳包（0x06）
 		data := &PowerHeartbeatData{}
 		if err := data.UnmarshalBinary(dataPayload); err != nil {
 			result.Error = fmt.Errorf("parse power heartbeat data: %w", err)
+			return result
+		}
+		result.Data = data
+
+	case MsgTypeServerTimeRequest:
+		// 设备获取服务器时间（0x22）
+		result.Data = dataPayload
+
+	case MsgTypeChargeControl:
+		// 服务器开始、停止充电操作（0x82）
+		data := &ChargeControlData{}
+		if err := data.UnmarshalBinary(dataPayload); err != nil {
+			result.Error = fmt.Errorf("parse charge control data: %w", err)
 			return result
 		}
 		result.Data = data
@@ -867,18 +914,26 @@ func ValidateMessage(msg *ParsedMessage) error {
 // GetMessageTypeName 获取消息类型的可读名称
 func GetMessageTypeName(msgType MessageType) string {
 	switch msgType {
-	case MsgTypeLinkHeartbeat:
-		return "Link心跳"
+	case MsgTypeOldHeartbeat:
+		return "旧版设备心跳包(01指令)"
 	case MsgTypeSwipeCard:
-		return "刷卡请求"
-	case MsgTypeDeviceRegister:
-		return "设备注册"
-	case MsgTypeHeartbeat:
-		return "心跳"
-	case MsgTypeChargeControl:
-		return "充电控制"
+		return "刷卡操作(02指令)"
+	case MsgTypeSettlement:
+		return "结算消费信息上传(03指令)"
+	case MsgTypeOrderConfirm:
+		return "充电端口订单确认(04指令)"
 	case MsgTypePowerHeartbeat:
-		return "功率心跳"
+		return "端口充电时功率心跳包(06指令)"
+	case MsgTypeDeviceRegister:
+		return "设备注册包(20指令)"
+	case MsgTypeHeartbeat:
+		return "设备心跳包(21指令)"
+	case MsgTypeServerTimeRequest:
+		return "设备获取服务器时间(22指令)"
+	case MsgTypeServerQuery:
+		return "服务器查询设备联网状态(81指令)"
+	case MsgTypeChargeControl:
+		return "服务器开始、停止充电操作(82指令)"
 	default:
 		return fmt.Sprintf("未知类型(0x%02X)", uint8(msgType))
 	}
