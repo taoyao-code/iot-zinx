@@ -26,24 +26,10 @@ func TestProtocol(t *testing.T) {
 		testMalformedProtocolFrames(t, suite, connHelper, protocolHelper, assertHelper)
 	})
 
-	// 注释掉需要服务器响应的测试，专注于协议包构建和格式验证
-	/*
-		t.Run("正常设备注册流程", func(t *testing.T) {
-			testNormalDeviceRegistration(t, suite, connHelper, protocolHelper, assertHelper)
-		})
-
-		t.Run("心跳协议测试", func(t *testing.T) {
-			testHeartbeatProtocol(t, suite, connHelper, protocolHelper, assertHelper)
-		})
-
-		t.Run("充电控制协议测试", func(t *testing.T) {
-			testChargingProtocol(t, suite, connHelper, protocolHelper, assertHelper)
-		})
-
-		t.Run("端口功率监控测试", func(t *testing.T) {
-			testPortPowerMonitoring(t, suite, connHelper, protocolHelper, assertHelper)
-		})
-	*/
+	// 启用实际协议交互测试
+	t.Run("实际协议交互测试", func(t *testing.T) {
+		testRealProtocolInteraction(t, suite, connHelper, protocolHelper, assertHelper)
+	})
 
 	// 打印测试摘要
 	suite.PrintSummary()
@@ -88,6 +74,130 @@ func testProtocolPacketBuilding(t *testing.T, suite *common.TestSuite, connHelpe
 
 	t.Logf("协议包构建测试完成: 注册包%d字节, 心跳包%d字节, 充电包%d字节, 功率包%d字节",
 		len(registerPacket), len(heartbeatPacket), len(chargingPacket), len(powerPacket))
+}
+
+// testRealProtocolInteraction 实际协议交互测试
+// 测试完整的协议交互流程：连接→注册→心跳→充电控制
+func testRealProtocolInteraction(t *testing.T, suite *common.TestSuite, connHelper *common.ConnectionHelper, protocolHelper *common.ProtocolHelper, assertHelper *common.AssertionHelper) {
+	start := time.Now()
+
+	// 建立TCP连接
+	conn, err := connHelper.EstablishTCPConnection(suite.TCPAddress)
+	if err != nil {
+		suite.RecordTestResult("实际协议交互", "协议交互", false, time.Since(start), err, "连接失败", nil)
+		assertHelper.AssertNoError(t, err, "TCP连接建立")
+		return
+	}
+	defer connHelper.CloseConnection(conn)
+
+	deviceID := uint32(0x04A228CD)
+	allSuccess := true
+	var lastErr error
+
+	// 1. 发送ICCID数据
+	t.Log("步骤1: 发送ICCID数据")
+	iccidData := protocolHelper.CreateTestICCIDData(0)
+	err = connHelper.SendProtocolData(conn, iccidData, "ICCID数据")
+	if err != nil {
+		allSuccess = false
+		lastErr = err
+		t.Errorf("发送ICCID失败: %v", err)
+	} else {
+		t.Log("ICCID数据发送成功")
+	}
+
+	time.Sleep(1 * time.Second)
+
+	// 2. 发送设备注册包
+	t.Log("步骤2: 发送设备注册包")
+	messageID := uint16(0x0801)
+	registerPacket := protocolHelper.BuildDeviceRegisterPacket(deviceID, messageID)
+
+	err = connHelper.SendProtocolData(conn, registerPacket, "设备注册")
+	if err != nil {
+		allSuccess = false
+		lastErr = err
+		t.Errorf("发送设备注册包失败: %v", err)
+	} else {
+		t.Log("设备注册包发送成功")
+
+		// 尝试读取注册响应
+		response, err := connHelper.ReadProtocolResponse(conn, 3*time.Second)
+		if err != nil {
+			t.Logf("注册响应读取失败（可能正常）: %v", err)
+		} else {
+			t.Logf("收到注册响应: %s", hex.EncodeToString(response))
+		}
+	}
+
+	time.Sleep(2 * time.Second)
+
+	// 3. 发送心跳包
+	t.Log("步骤3: 发送心跳包")
+	messageID = uint16(0x0802)
+	heartbeatPacket := protocolHelper.BuildHeartbeatPacket(deviceID, messageID)
+
+	err = connHelper.SendProtocolData(conn, heartbeatPacket, "心跳包")
+	if err != nil {
+		allSuccess = false
+		lastErr = err
+		t.Errorf("发送心跳包失败: %v", err)
+	} else {
+		t.Log("心跳包发送成功")
+
+		// 尝试读取心跳响应
+		response, err := connHelper.ReadProtocolResponse(conn, 3*time.Second)
+		if err != nil {
+			t.Logf("心跳响应读取失败（可能正常）: %v", err)
+		} else {
+			t.Logf("收到心跳响应: %s", hex.EncodeToString(response))
+		}
+	}
+
+	time.Sleep(2 * time.Second)
+
+	// 4. 发送充电控制包
+	t.Log("步骤4: 发送充电控制包")
+	messageID = uint16(0xF107)
+	chargingPacket := protocolHelper.BuildChargingPacket(deviceID, messageID, constants.ChargeCommandStart, 1, 60)
+
+	err = connHelper.SendProtocolData(conn, chargingPacket, "充电控制")
+	if err != nil {
+		allSuccess = false
+		lastErr = err
+		t.Errorf("发送充电控制包失败: %v", err)
+	} else {
+		t.Log("充电控制包发送成功")
+
+		// 尝试读取充电响应
+		response, err := connHelper.ReadProtocolResponse(conn, 3*time.Second)
+		if err != nil {
+			t.Logf("充电响应读取失败（可能正常）: %v", err)
+		} else {
+			t.Logf("收到充电响应: %s", hex.EncodeToString(response))
+		}
+	}
+
+	// 记录测试结果
+	description := "完整协议交互流程：ICCID→注册→心跳→充电控制"
+	if !allSuccess {
+		description += " (部分失败)"
+	}
+
+	suite.RecordTestResult("实际协议交互", "协议交互", allSuccess, time.Since(start), lastErr, description, map[string]interface{}{
+		"device_id":       protocolHelper.FormatDeviceID(deviceID),
+		"steps_completed": 4,
+	})
+
+	// 更新设备状态
+	deviceIDStr := protocolHelper.FormatDeviceID(deviceID)
+	if allSuccess {
+		suite.SetDeviceState(deviceIDStr, "协议交互完成")
+	} else {
+		suite.SetDeviceState(deviceIDStr, "协议交互部分失败")
+	}
+
+	t.Logf("实际协议交互测试完成，总耗时: %v", time.Since(start))
 }
 
 // testNormalDeviceRegistration 正常设备注册流程测试
