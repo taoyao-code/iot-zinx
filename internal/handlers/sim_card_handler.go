@@ -3,7 +3,6 @@ package handlers
 import (
 	"fmt"
 	"net"
-	"strings"
 	"time"
 
 	"github.com/aceld/zinx/ziface"
@@ -11,6 +10,7 @@ import (
 	"github.com/bujia-iot/iot-zinx/internal/infrastructure/config"
 	"github.com/bujia-iot/iot-zinx/internal/infrastructure/logger"
 	"github.com/bujia-iot/iot-zinx/pkg/constants"
+	"github.com/bujia-iot/iot-zinx/pkg/utils"
 	"go.uber.org/zap"
 )
 
@@ -38,7 +38,7 @@ func (h *SimCardHandler) Handle(request ziface.IRequest) {
 	)
 
 	// 验证ICCID格式 - 符合ITU-T E.118标准
-	if len(data) == constants.IotSimCardLength && h.isValidICCIDStrict(data) {
+	if len(data) == constants.IotSimCardLength && utils.IsValidICCID(data) {
 		iccidStr := string(data)
 		now := time.Now()
 
@@ -93,30 +93,8 @@ func (h *SimCardHandler) Handle(request ziface.IRequest) {
 	}
 }
 
-// isValidICCIDStrict 严格验证ICCID格式 - 符合ITU-T E.118标准
-// ICCID固定长度为20字节，十六进制字符(0-9,A-F)，以"89"开头
+// isValidICCIDStrict 已废弃：使用 utils.IsValidICCID 替代
+// 保留此函数以避免破坏现有代码，但建议使用统一的验证函数
 func (h *SimCardHandler) isValidICCIDStrict(data []byte) bool {
-	if len(data) != constants.IotSimCardLength {
-		return false
-	}
-
-	// 转换为字符串进行验证
-	dataStr := string(data)
-	if len(dataStr) < 2 {
-		return false
-	}
-
-	// 必须以"89"开头（ITU-T E.118标准，电信行业标识符）
-	if !strings.HasPrefix(dataStr, constants.ICCIDValidPrefix) {
-		return false
-	}
-
-	// 必须全部为十六进制字符（0-9, A-F, a-f）
-	for _, b := range data {
-		if !((b >= '0' && b <= '9') || (b >= 'A' && b <= 'F') || (b >= 'a' && b <= 'f')) {
-			return false
-		}
-	}
-
-	return true
+	return utils.IsValidICCID(data)
 }

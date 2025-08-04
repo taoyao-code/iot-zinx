@@ -9,6 +9,7 @@ import (
 	"github.com/bujia-iot/iot-zinx/internal/domain/dny_protocol"
 	"github.com/bujia-iot/iot-zinx/internal/infrastructure/logger"
 	"github.com/bujia-iot/iot-zinx/pkg/constants"
+	"github.com/bujia-iot/iot-zinx/pkg/utils"
 	"go.uber.org/zap"
 )
 
@@ -260,30 +261,10 @@ func (h *UnifiedDataHandler) identifyPacketType(data []byte) string {
 	return "unknown"
 }
 
-// isValidICCID 验证ICCID格式
+// isValidICCID 已废弃：使用 utils.IsValidICCID 替代
+// 保留此函数以避免破坏现有代码，但建议使用统一的验证函数
 func (h *UnifiedDataHandler) isValidICCID(data []byte) bool {
-	if len(data) != constants.IotSimCardLength {
-		return false
-	}
-
-	dataStr := string(data)
-	if len(dataStr) < 2 {
-		return false
-	}
-
-	// 必须以"89"开头
-	if !strings.HasPrefix(dataStr, constants.ICCIDValidPrefix) {
-		return false
-	}
-
-	// 必须全部为十六进制字符
-	for _, b := range data {
-		if !((b >= '0' && b <= '9') || (b >= 'A' && b <= 'F') || (b >= 'a' && b <= 'f')) {
-			return false
-		}
-	}
-
-	return true
+	return utils.IsValidICCID(data)
 }
 
 // handleUnknownMessage 处理未知消息类型
