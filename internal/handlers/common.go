@@ -218,12 +218,54 @@ func (h *BaseHandler) Log(format string, args ...interface{}) {
 func (h *BaseHandler) ParseAndValidateMessage(request ziface.IRequest) (*dny_protocol.ParsedMessage, error) {
 	// 使用统一的协议解析
 	parsedMsg := dny_protocol.ParseDNYMessage(request.GetData())
+
+	// 🔧 修复：优化错误处理 - 对于扩展消息类型，不进行严格验证
+	if parsedMsg.Error != nil {
+		// 检查是否是未知消息类型，如果是则允许通过
+		if strings.Contains(parsedMsg.Error.Error(), "unknown message type") {
+			// 对于未知消息类型，清除错误，允许继续处理
+			parsedMsg.Error = nil
+			h.Log("收到未知消息类型，使用扩展处理: 0x%02X", parsedMsg.Command)
+		} else {
+			h.Log("消息解析失败: %v", parsedMsg.Error)
+			return nil, fmt.Errorf("message parsing failed: %w", parsedMsg.Error)
+		}
+	}
+
+	// 对于扩展消息类型，跳过严格验证
+	if h.isExtendedMessageType(parsedMsg.MessageType) {
+		h.Log("跳过扩展消息类型的严格验证: %s", dny_protocol.GetMessageTypeName(parsedMsg.MessageType))
+		return parsedMsg, nil
+	}
+
+	// 对于标准消息类型，进行正常验证
 	if err := dny_protocol.ValidateMessage(parsedMsg); err != nil {
-		h.Log("消息解析或验证失败: %v", err)
-		return nil, fmt.Errorf("message parsing or validation failed: %w", err)
+		h.Log("消息验证失败: %v", err)
+		return nil, fmt.Errorf("message validation failed: %w", err)
 	}
 
 	return parsedMsg, nil
+}
+
+// isExtendedMessageType 检查是否为扩展消息类型
+func (h *BaseHandler) isExtendedMessageType(msgType dny_protocol.MessageType) bool {
+	switch msgType {
+	case dny_protocol.MsgTypeExtendedCommand,
+		dny_protocol.MsgTypeExtHeartbeat1, dny_protocol.MsgTypeExtHeartbeat2, dny_protocol.MsgTypeExtHeartbeat3,
+		dny_protocol.MsgTypeExtHeartbeat4, dny_protocol.MsgTypeExtHeartbeat5, dny_protocol.MsgTypeExtHeartbeat6,
+		dny_protocol.MsgTypeExtHeartbeat7, dny_protocol.MsgTypeExtHeartbeat8,
+		dny_protocol.MsgTypeExtCommand1, dny_protocol.MsgTypeExtCommand2, dny_protocol.MsgTypeExtCommand3, dny_protocol.MsgTypeExtCommand4,
+		dny_protocol.MsgTypeExtStatus1, dny_protocol.MsgTypeExtStatus2, dny_protocol.MsgTypeExtStatus3,
+		dny_protocol.MsgTypeExtStatus4, dny_protocol.MsgTypeExtStatus5, dny_protocol.MsgTypeExtStatus6,
+		dny_protocol.MsgTypeExtStatus7, dny_protocol.MsgTypeExtStatus8, dny_protocol.MsgTypeExtStatus9,
+		dny_protocol.MsgTypeExtStatus10, dny_protocol.MsgTypeExtStatus11, dny_protocol.MsgTypeExtStatus12,
+		dny_protocol.MsgTypeExtStatus13, dny_protocol.MsgTypeExtStatus14, dny_protocol.MsgTypeExtStatus15,
+		dny_protocol.MsgTypeExtStatus16, dny_protocol.MsgTypeExtStatus17, dny_protocol.MsgTypeExtStatus18,
+		dny_protocol.MsgTypeExtStatus19, dny_protocol.MsgTypeExtStatus20:
+		return true
+	default:
+		return false
+	}
 }
 
 // ValidateMessageType 验证消息类型是否符合预期

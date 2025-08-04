@@ -72,6 +72,18 @@ func (h *UnifiedDataHandler) Handle(request ziface.IRequest) {
 		// 使用统一的协议解析和验证
 		parsedMsg, err := h.ParseAndValidateMessage(request)
 		if err != nil {
+			// 检查是否是未知消息类型错误，如果是则降级为WARN
+			if strings.Contains(err.Error(), "unknown message type") {
+				logger.Warn("UnifiedDataHandler: 收到未知消息类型",
+					zap.Uint64("connID", conn.GetConnID()),
+					zap.String("error", err.Error()),
+					zap.String("dataHex", fmt.Sprintf("%x", data)),
+				)
+				// 对于未知消息类型，尝试使用通用处理
+				h.handleUnknownMessage(request, data)
+				return
+			}
+
 			logger.Error("UnifiedDataHandler: DNY协议解析失败",
 				zap.Uint64("connID", conn.GetConnID()),
 				zap.Error(err),
@@ -141,6 +153,45 @@ func (h *UnifiedDataHandler) Handle(request ziface.IRequest) {
 			)
 			h.charging.Handle(request)
 
+		case dny_protocol.MsgTypeExtendedCommand:
+			logger.Info("UnifiedDataHandler: 收到扩展命令数据包(0x05)",
+				zap.Uint64("connID", conn.GetConnID()),
+				zap.String("command", fmt.Sprintf("0x%02x", parsedMsg.Command)),
+			)
+			h.handleExtendedMessage(request, parsedMsg)
+
+		case dny_protocol.MsgTypeExtHeartbeat1, dny_protocol.MsgTypeExtHeartbeat2, dny_protocol.MsgTypeExtHeartbeat3,
+			dny_protocol.MsgTypeExtHeartbeat4, dny_protocol.MsgTypeExtHeartbeat5, dny_protocol.MsgTypeExtHeartbeat6,
+			dny_protocol.MsgTypeExtHeartbeat7, dny_protocol.MsgTypeExtHeartbeat8:
+			logger.Debug("UnifiedDataHandler: 收到扩展心跳数据包",
+				zap.Uint64("connID", conn.GetConnID()),
+				zap.String("command", fmt.Sprintf("0x%02x", parsedMsg.Command)),
+				zap.String("messageType", dny_protocol.GetMessageTypeName(parsedMsg.MessageType)),
+			)
+			h.handleExtendedMessage(request, parsedMsg)
+
+		case dny_protocol.MsgTypeExtCommand1, dny_protocol.MsgTypeExtCommand2, dny_protocol.MsgTypeExtCommand3, dny_protocol.MsgTypeExtCommand4:
+			logger.Info("UnifiedDataHandler: 收到扩展命令数据包",
+				zap.Uint64("connID", conn.GetConnID()),
+				zap.String("command", fmt.Sprintf("0x%02x", parsedMsg.Command)),
+				zap.String("messageType", dny_protocol.GetMessageTypeName(parsedMsg.MessageType)),
+			)
+			h.handleExtendedMessage(request, parsedMsg)
+
+		case dny_protocol.MsgTypeExtStatus1, dny_protocol.MsgTypeExtStatus2, dny_protocol.MsgTypeExtStatus3,
+			dny_protocol.MsgTypeExtStatus4, dny_protocol.MsgTypeExtStatus5, dny_protocol.MsgTypeExtStatus6,
+			dny_protocol.MsgTypeExtStatus7, dny_protocol.MsgTypeExtStatus8, dny_protocol.MsgTypeExtStatus9,
+			dny_protocol.MsgTypeExtStatus10, dny_protocol.MsgTypeExtStatus11, dny_protocol.MsgTypeExtStatus12,
+			dny_protocol.MsgTypeExtStatus13, dny_protocol.MsgTypeExtStatus14, dny_protocol.MsgTypeExtStatus15,
+			dny_protocol.MsgTypeExtStatus16, dny_protocol.MsgTypeExtStatus17, dny_protocol.MsgTypeExtStatus18,
+			dny_protocol.MsgTypeExtStatus19, dny_protocol.MsgTypeExtStatus20:
+			logger.Debug("UnifiedDataHandler: 收到扩展状态数据包",
+				zap.Uint64("connID", conn.GetConnID()),
+				zap.String("command", fmt.Sprintf("0x%02x", parsedMsg.Command)),
+				zap.String("messageType", dny_protocol.GetMessageTypeName(parsedMsg.MessageType)),
+			)
+			h.handleExtendedMessage(request, parsedMsg)
+
 		case dny_protocol.MsgTypeNewType:
 			logger.Info("UnifiedDataHandler: 收到新类型数据包(0xF1)",
 				zap.Uint64("connID", conn.GetConnID()),
@@ -150,11 +201,12 @@ func (h *UnifiedDataHandler) Handle(request ziface.IRequest) {
 			// TODO: 实现0xF1类型处理逻辑
 
 		default:
-			logger.Warn("UnifiedDataHandler: 未知的DNY命令类型",
+			logger.Debug("UnifiedDataHandler: 收到其他类型数据包",
 				zap.Uint64("connID", conn.GetConnID()),
 				zap.String("command", fmt.Sprintf("0x%02x", parsedMsg.Command)),
-				zap.String("messageType", string(parsedMsg.MessageType)),
+				zap.String("messageType", dny_protocol.GetMessageTypeName(parsedMsg.MessageType)),
 			)
+			h.handleExtendedMessage(request, parsedMsg)
 		}
 
 	case "link":
@@ -230,4 +282,76 @@ func (h *UnifiedDataHandler) isValidICCID(data []byte) bool {
 	}
 
 	return true
+}
+
+// handleUnknownMessage 处理未知消息类型
+func (h *UnifiedDataHandler) handleUnknownMessage(request ziface.IRequest, data []byte) {
+	conn := request.GetConnection()
+
+	logger.Debug("UnifiedDataHandler: 处理未知消息类型",
+		zap.Uint64("connID", conn.GetConnID()),
+		zap.String("dataHex", fmt.Sprintf("%x", data)),
+		zap.Int("dataLen", len(data)),
+	)
+
+	// 对于未知消息，暂时不做特殊处理，只记录日志
+	// 未来可以在这里添加通用的响应逻辑
+}
+
+// handleExtendedMessage 处理扩展消息类型
+func (h *UnifiedDataHandler) handleExtendedMessage(request ziface.IRequest, parsedMsg *dny_protocol.ParsedMessage) {
+	conn := request.GetConnection()
+
+	// 获取扩展消息数据
+	extData, ok := parsedMsg.Data.(*dny_protocol.ExtendedMessageData)
+	if !ok {
+		logger.Warn("UnifiedDataHandler: 扩展消息数据类型转换失败",
+			zap.Uint64("connID", conn.GetConnID()),
+			zap.String("command", fmt.Sprintf("0x%02x", parsedMsg.Command)),
+		)
+		return
+	}
+
+	// 根据消息类别进行处理
+	category := extData.GetMessageCategory()
+
+	logger.Debug("UnifiedDataHandler: 处理扩展消息",
+		zap.Uint64("connID", conn.GetConnID()),
+		zap.String("command", fmt.Sprintf("0x%02x", parsedMsg.Command)),
+		zap.String("category", category),
+		zap.Int("dataLen", extData.DataLength),
+		zap.String("messageType", dny_protocol.GetMessageTypeName(parsedMsg.MessageType)),
+	)
+
+	switch category {
+	case "extended_heartbeat":
+		// 扩展心跳包处理 - 可以考虑转发给心跳处理器
+		logger.Debug("处理扩展心跳包",
+			zap.Uint64("connID", conn.GetConnID()),
+			zap.String("messageType", dny_protocol.GetMessageTypeName(parsedMsg.MessageType)),
+		)
+		// TODO: 可以在这里添加心跳包的统计和监控逻辑
+
+	case "extended_status":
+		// 扩展状态包处理
+		logger.Debug("处理扩展状态包",
+			zap.Uint64("connID", conn.GetConnID()),
+			zap.String("messageType", dny_protocol.GetMessageTypeName(parsedMsg.MessageType)),
+		)
+		// TODO: 可以在这里添加状态监控和第三方平台通知逻辑
+
+	case "extended_command":
+		// 扩展命令包处理
+		logger.Debug("处理扩展命令包",
+			zap.Uint64("connID", conn.GetConnID()),
+			zap.String("messageType", dny_protocol.GetMessageTypeName(parsedMsg.MessageType)),
+		)
+		// TODO: 可以在这里添加命令响应逻辑
+
+	default:
+		logger.Debug("处理未分类扩展消息",
+			zap.Uint64("connID", conn.GetConnID()),
+			zap.String("messageType", dny_protocol.GetMessageTypeName(parsedMsg.MessageType)),
+		)
+	}
 }
