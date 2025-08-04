@@ -82,6 +82,14 @@ func registerRoutes(router *gin.Engine, deviceAPI *DeviceAPI) {
 			device.GET("", deviceAPI.GetDeviceGin)                  // GET /api/v1/device?device_id=xxx - 获取单个设备
 			device.PUT("/status", deviceAPI.UpdateDeviceStatusGin)  // PUT /api/v1/device/status?device_id=xxx&status=xxx - 更新设备状态
 			device.POST("/command", deviceAPI.SendDeviceCommandGin) // POST /api/v1/device/command - 发送设备命令
+			device.POST("/locate", deviceAPI.LocateDeviceGin)       // POST /api/v1/device/locate - 设备定位
+		}
+
+		// 充电控制路由
+		charging := v1.Group("/charging")
+		{
+			charging.POST("/start", deviceAPI.StartChargingGin) // POST /api/v1/charging/start - 开始充电
+			charging.POST("/stop", deviceAPI.StopChargingGin)   // POST /api/v1/charging/stop - 停止充电
 		}
 
 		// 设备状态查询

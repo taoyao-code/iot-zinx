@@ -5,6 +5,8 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/bujia-iot/iot-zinx/internal/domain/dny_protocol"
+	"github.com/bujia-iot/iot-zinx/pkg/constants"
 	"github.com/bujia-iot/iot-zinx/pkg/storage"
 	"github.com/gin-gonic/gin"
 )
@@ -371,6 +373,242 @@ func convertToIntMap(m map[string]interface{}) map[string]int {
 // ============================================================================
 // 注意：已移除兼容旧版API的处理器，统一使用现代化的RESTful API设计
 // ============================================================================
+
+// StartChargingGin 开始充电 (Gin版本)
+// @Summary 开始充电
+// @Description 向指定设备发送开始充电命令
+// @Tags charging
+// @Accept json
+// @Produce json
+// @Param request body ChargingStartRequest true "开始充电请求"
+// @Success 200 {object} StandardResponse{data=ChargingResponse} "成功"
+// @Failure 400 {object} ErrorResponse "请求参数错误"
+// @Failure 404 {object} ErrorResponse "设备不存在"
+// @Failure 500 {object} ErrorResponse "服务器内部错误"
+// @Router /api/v1/charging/start [post]
+func (api *DeviceAPI) StartChargingGin(c *gin.Context) {
+	var request ChargingStartRequest
+	if err := c.ShouldBindJSON(&request); err != nil {
+		c.JSON(http.StatusBadRequest, NewErrorResponse("请求参数错误: "+err.Error(), 400))
+		return
+	}
+
+	// 验证设备存在
+	device, exists, err := api.getDeviceByID(request.DeviceID)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, NewErrorResponse("设备ID格式错误: "+err.Error(), 400))
+		return
+	}
+	if !exists {
+		c.JSON(http.StatusNotFound, NewErrorResponse("设备不存在", 404))
+		return
+	}
+
+	// 验证设备在线
+	if !device.IsOnline() {
+		c.JSON(http.StatusBadRequest, NewErrorResponse("设备不在线", 400))
+		return
+	}
+
+	// 解析设备ID
+	physicalID, err := api.parseDeviceID(request.DeviceID)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, NewErrorResponse("设备ID格式错误: "+err.Error(), 400))
+		return
+	}
+
+	// 生成消息ID
+	messageID := api.generateMessageID()
+
+	// 构建充电控制协议包
+	packet := dny_protocol.BuildChargeControlPacket(
+		physicalID,
+		messageID,
+		byte(request.Mode),           // 费率模式
+		uint32(request.Balance),      // 余额
+		byte(request.Port),           // 端口号
+		constants.ChargeCommandStart, // 开始充电命令
+		uint16(request.Value),        // 充电时长/电量
+		request.OrderNo,              // 订单号
+		uint16(request.Value),        // 最大充电时长
+		1000,                         // 最大功率(W)
+		1,                            // 二维码灯开启
+	)
+
+	// 发送协议包到设备
+	err = api.sendProtocolPacket(request.DeviceID, packet)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, NewErrorResponse("发送充电命令失败: "+err.Error(), 500))
+		return
+	}
+
+	// 返回成功响应
+	result := ChargingResponse{
+		DeviceID:  request.DeviceID,
+		Port:      request.Port,
+		OrderNo:   request.OrderNo,
+		Status:    "success",
+		Message:   "充电命令已发送",
+		Timestamp: time.Now().Unix(),
+	}
+
+	c.JSON(http.StatusOK, NewStandardResponse(result, "开始充电命令已发送", 0))
+}
+
+// StopChargingGin 停止充电 (Gin版本)
+// @Summary 停止充电
+// @Description 向指定设备发送停止充电命令
+// @Tags charging
+// @Accept json
+// @Produce json
+// @Param request body ChargingStopRequest true "停止充电请求"
+// @Success 200 {object} StandardResponse{data=ChargingResponse} "成功"
+// @Failure 400 {object} ErrorResponse "请求参数错误"
+// @Failure 404 {object} ErrorResponse "设备不存在"
+// @Failure 500 {object} ErrorResponse "服务器内部错误"
+// @Router /api/v1/charging/stop [post]
+func (api *DeviceAPI) StopChargingGin(c *gin.Context) {
+	var request ChargingStopRequest
+	if err := c.ShouldBindJSON(&request); err != nil {
+		c.JSON(http.StatusBadRequest, NewErrorResponse("请求参数错误: "+err.Error(), 400))
+		return
+	}
+
+	// 验证设备存在
+	device, exists, err := api.getDeviceByID(request.DeviceID)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, NewErrorResponse("设备ID格式错误: "+err.Error(), 400))
+		return
+	}
+	if !exists {
+		c.JSON(http.StatusNotFound, NewErrorResponse("设备不存在", 404))
+		return
+	}
+
+	// 验证设备在线
+	if !device.IsOnline() {
+		c.JSON(http.StatusBadRequest, NewErrorResponse("设备不在线", 400))
+		return
+	}
+
+	// 解析设备ID
+	physicalID, err := api.parseDeviceID(request.DeviceID)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, NewErrorResponse("设备ID格式错误: "+err.Error(), 400))
+		return
+	}
+
+	// 生成消息ID
+	messageID := api.generateMessageID()
+
+	// 构建停止充电协议包
+	packet := dny_protocol.BuildChargeControlPacket(
+		physicalID,
+		messageID,
+		0,                           // 费率模式（停止时不重要）
+		0,                           // 余额（停止时不重要）
+		byte(request.Port),          // 端口号
+		constants.ChargeCommandStop, // 停止充电命令
+		0,                           // 充电时长为0
+		request.OrderNo,             // 订单号
+		0,                           // 最大充电时长为0
+		0,                           // 最大功率为0
+		0,                           // 二维码灯关闭
+	)
+
+	// 发送协议包到设备
+	err = api.sendProtocolPacket(request.DeviceID, packet)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, NewErrorResponse("发送停止充电命令失败: "+err.Error(), 500))
+		return
+	}
+
+	// 返回成功响应
+	result := ChargingResponse{
+		DeviceID:  request.DeviceID,
+		Port:      request.Port,
+		OrderNo:   request.OrderNo,
+		Status:    "success",
+		Message:   "停止充电命令已发送",
+		Timestamp: time.Now().Unix(),
+	}
+
+	c.JSON(http.StatusOK, NewStandardResponse(result, "停止充电命令已发送", 0))
+}
+
+// LocateDeviceGin 设备定位 (Gin版本)
+// @Summary 设备定位
+// @Description 向指定设备发送定位命令，设备会播放声音并闪灯
+// @Tags device
+// @Accept json
+// @Produce json
+// @Param request body DeviceLocateRequest true "设备定位请求"
+// @Success 200 {object} StandardResponse{data=DeviceLocateResponse} "成功"
+// @Failure 400 {object} ErrorResponse "请求参数错误"
+// @Failure 404 {object} ErrorResponse "设备不存在"
+// @Failure 500 {object} ErrorResponse "服务器内部错误"
+// @Router /api/v1/device/locate [post]
+func (api *DeviceAPI) LocateDeviceGin(c *gin.Context) {
+	var request DeviceLocateRequest
+	if err := c.ShouldBindJSON(&request); err != nil {
+		c.JSON(http.StatusBadRequest, NewErrorResponse("请求参数错误: "+err.Error(), 400))
+		return
+	}
+
+	// 设置默认定位时间
+	if request.LocateTime <= 0 {
+		request.LocateTime = 5 // 默认5秒
+	}
+
+	// 验证设备存在
+	device, exists, err := api.getDeviceByID(request.DeviceID)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, NewErrorResponse("设备ID格式错误: "+err.Error(), 400))
+		return
+	}
+	if !exists {
+		c.JSON(http.StatusNotFound, NewErrorResponse("设备不存在", 404))
+		return
+	}
+
+	// 验证设备在线
+	if !device.IsOnline() {
+		c.JSON(http.StatusBadRequest, NewErrorResponse("设备不在线", 400))
+		return
+	}
+
+	// 解析设备ID
+	physicalID, err := api.parseDeviceID(request.DeviceID)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, NewErrorResponse("设备ID格式错误: "+err.Error(), 400))
+		return
+	}
+
+	// 生成消息ID
+	messageID := api.generateMessageID()
+
+	// 构建设备定位协议包（0x96命令）
+	locateData := []byte{byte(request.LocateTime)} // 定位时间（秒）
+	packet := dny_protocol.BuildDNYPacket(physicalID, messageID, constants.CmdDeviceLocate, locateData)
+
+	// 发送协议包到设备
+	err = api.sendProtocolPacket(request.DeviceID, packet)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, NewErrorResponse("发送定位命令失败: "+err.Error(), 500))
+		return
+	}
+
+	// 返回成功响应
+	result := DeviceLocateResponse{
+		DeviceID:   request.DeviceID,
+		LocateTime: request.LocateTime,
+		Status:     "success",
+		Message:    "设备定位命令已发送",
+		Timestamp:  time.Now().Unix(),
+	}
+
+	c.JSON(http.StatusOK, NewStandardResponse(result, "设备定位命令已发送", 0))
+}
 
 // GetHealthGin 健康检查 (Gin版本)
 // @Summary 健康检查

@@ -29,6 +29,7 @@ type ConnectionInfo struct {
 	ConnectTime  time.Time              `json:"connect_time"`
 	LastActivity time.Time              `json:"last_activity"`
 	Properties   map[string]interface{} `json:"properties"`
+	Connection   ziface.IConnection     `json:"-"` // 实际的连接对象，不序列化
 }
 
 // ConnectionMonitor 连接监控器 - 1.2 连接生命周期管理增强
@@ -95,6 +96,7 @@ func (m *ConnectionMonitor) OnConnectionOpened(conn ziface.IConnection) {
 		ConnectTime:  time.Now(),
 		LastActivity: time.Now(),
 		Properties:   make(map[string]interface{}),
+		Connection:   conn, // 存储连接对象
 	}
 
 	// 存储连接信息
@@ -241,7 +243,7 @@ func (m *ConnectionMonitor) UpdateConnectionActivity(connID uint32) {
 func (m *ConnectionMonitor) GetConnectionInfo(connID uint32) (*ConnectionInfo, bool) {
 	if connInfoValue, exists := m.connections.Load(connID); exists {
 		connInfo := connInfoValue.(*ConnectionInfo)
-		// 返回副本，避免外部修改
+		// 返回副本，避免外部修改，但保留连接对象引用
 		info := *connInfo
 		return &info, true
 	}
@@ -255,6 +257,24 @@ func (m *ConnectionMonitor) GetDeviceConnection(deviceID string) (uint32, bool) 
 		return connID, true
 	}
 	return 0, false
+}
+
+// GetConnectionByDeviceId 根据设备ID获取连接对象
+func (m *ConnectionMonitor) GetConnectionByDeviceId(deviceID string) (ziface.IConnection, bool) {
+	// 首先获取连接ID
+	connID, exists := m.GetDeviceConnection(deviceID)
+	if !exists {
+		return nil, false
+	}
+
+	// 然后获取连接信息
+	connInfo, exists := m.GetConnectionInfo(connID)
+	if !exists {
+		return nil, false
+	}
+
+	// 返回存储的连接对象
+	return connInfo.Connection, connInfo.Connection != nil
 }
 
 // GetAllConnections 获取所有连接信息
