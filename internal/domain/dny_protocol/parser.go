@@ -1,0 +1,163 @@
+package dny_protocol
+
+import (
+	"encoding/binary"
+	"fmt"
+)
+
+// ParseDNYMessage 统一的DNY协议消息解析入口
+// 这是1.1协议解析标准化的核心函数
+func ParseDNYMessage(rawData []byte) *ParsedMessage {
+	result := &ParsedMessage{
+		RawData: rawData,
+	}
+
+	// 基础验证
+	if len(rawData) < 12 {
+		result.Error = fmt.Errorf("insufficient data length: %d, expected at least 12", len(rawData))
+		return result
+	}
+
+	// 验证DNY协议头
+	if string(rawData[:3]) != "DNY" {
+		result.Error = fmt.Errorf("invalid protocol header: %s, expected DNY", string(rawData[:3]))
+		return result
+	}
+
+	// 解析基础字段 - 修复协议解析顺序
+	// 根据DNY协议文档: DNY(3) + Length(2) + 物理ID(4) + 命令(1) + 消息ID(2) + 数据 + 校验和(2)
+	length := binary.LittleEndian.Uint16(rawData[3:5])            // Length字段 (2字节)
+	result.PhysicalID = binary.LittleEndian.Uint32(rawData[5:9])  // 物理ID (4字节)
+	result.Command = rawData[9]                                   // 命令 (1字节)
+	result.MessageID = binary.LittleEndian.Uint16(rawData[10:12]) // 消息ID (2字节)
+	result.MessageType = MessageType(result.Command)
+
+	// 🔧 修复：智能计算数据部分长度 - 适配不同协议版本
+	// 检查Length字段是否合理，如果不合理则使用实际包长度计算
+	expectedTotalLength := 3 + 2 + int(length) // DNY(3) + Length(2) + Length字段内容
+	actualDataLength := len(rawData) - 12      // 实际可用的数据部分长度
+
+	var dataLength int
+	if expectedTotalLength > len(rawData) || int(length) > len(rawData) {
+		// Length字段异常，使用实际长度
+		dataLength = actualDataLength
+		if dataLength < 0 {
+			dataLength = 0
+		}
+	} else {
+		// Length字段正常，使用标准计算方式
+		if int(length) < 7 {
+			result.Error = fmt.Errorf("invalid length field: %d, expected at least 7", length)
+			return result
+		}
+		dataLength = int(length) - 7 // 减去固定字段：物理ID(4) + 命令(1) + 消息ID(2)
+		if dataLength < 0 {
+			dataLength = 0
+		}
+	}
+
+	// 提取正确长度的数据部分
+	var dataPayload []byte
+	if dataLength > 0 && len(rawData) >= 12+dataLength {
+		dataPayload = rawData[12 : 12+dataLength]
+	} else {
+		dataPayload = []byte{}
+	}
+
+	// 根据消息类型解析具体数据
+	switch result.MessageType {
+	case MsgTypeDeviceRegister:
+		// 设备注册包（0x20）
+		data := &DeviceRegisterData{}
+		if err := data.UnmarshalBinary(dataPayload); err != nil {
+			result.Error = fmt.Errorf("parse device register data: %w", err)
+			return result
+		}
+		result.Data = data
+
+	case MsgTypeOldHeartbeat:
+		// 旧版设备心跳包（0x01）
+		data := &DeviceHeartbeatData{}
+		if err := data.UnmarshalBinary(dataPayload); err != nil {
+			result.Error = fmt.Errorf("parse old heartbeat data: %w", err)
+			return result
+		}
+		result.Data = data
+
+	case MsgTypeHeartbeat:
+		// 新版设备心跳包（0x21）
+		data := &DeviceHeartbeatData{}
+		if err := data.UnmarshalBinary(dataPayload); err != nil {
+			result.Error = fmt.Errorf("parse heartbeat data: %w", err)
+			return result
+		}
+		result.Data = data
+
+	case MsgTypeSwipeCard:
+		// 刷卡操作（0x02）
+		data := &SwipeCardRequestData{}
+		if err := data.UnmarshalBinary(dataPayload); err != nil {
+			result.Error = fmt.Errorf("parse swipe card data: %w", err)
+			return result
+		}
+		result.Data = data
+
+	case MsgTypeSettlement:
+		// 结算消费信息上传（0x03）
+		data := &SettlementData{}
+		if err := data.UnmarshalBinary(dataPayload); err != nil {
+			result.Error = fmt.Errorf("parse settlement data: %w", err)
+			return result
+		}
+		result.Data = data
+
+	case MsgTypeOrderConfirm:
+		// 充电端口订单确认（0x04，老版本指令）
+		result.Data = dataPayload
+
+	case MsgTypePowerHeartbeat:
+		// 端口充电时功率心跳包（0x06）
+		data := &PowerHeartbeatData{}
+		if err := data.UnmarshalBinary(dataPayload); err != nil {
+			result.Error = fmt.Errorf("parse power heartbeat data: %w", err)
+			return result
+		}
+		result.Data = data
+
+	case MsgTypeServerTimeRequest:
+		// 设备获取服务器时间（0x22）
+		result.Data = dataPayload
+
+	case MsgTypeChargeControl:
+		// 服务器开始、停止充电操作（0x82）
+		data := &ChargeControlData{}
+		if err := data.UnmarshalBinary(dataPayload); err != nil {
+			result.Error = fmt.Errorf("parse charge control data: %w", err)
+			return result
+		}
+		result.Data = data
+
+	default:
+		// 处理扩展消息类型和未知消息类型
+		if IsExtendedMessageType(result.MessageType) {
+			// 扩展消息类型
+			data := &ExtendedMessageData{MessageType: result.MessageType}
+			if err := data.UnmarshalBinary(dataPayload); err != nil {
+				result.Error = fmt.Errorf("parse extended message data: %w", err)
+				return result
+			}
+			result.Data = data
+		} else {
+			// 完全未知的消息类型，使用通用扩展数据结构
+			data := &ExtendedMessageData{MessageType: result.MessageType}
+			if err := data.UnmarshalBinary(dataPayload); err != nil {
+				result.Error = fmt.Errorf("parse unknown message data: %w", err)
+				return result
+			}
+			result.Data = data
+			// 注意：不再设置Error，改为在日志中以WARN级别记录
+		}
+	}
+
+	return result
+}
