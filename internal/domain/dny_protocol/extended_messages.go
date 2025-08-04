@@ -36,10 +36,12 @@ func (e *ExtendedMessageData) GetMessageCategory() string {
 		MsgTypeExtHeartbeat5, MsgTypeExtHeartbeat6, MsgTypeExtHeartbeat7, MsgTypeExtHeartbeat8:
 		return "extended_heartbeat"
 	case MsgTypeExtStatus1, MsgTypeExtStatus2, MsgTypeExtStatus3, MsgTypeExtStatus4, MsgTypeExtStatus5,
-		MsgTypeExtStatus6, MsgTypeExtStatus7, MsgTypeExtStatus8, MsgTypeExtStatus9, MsgTypeExtStatus10,
+		MsgTypeExtStatus6, MsgTypeExtStatus8, MsgTypeExtStatus9, MsgTypeExtStatus10,
 		MsgTypeExtStatus11, MsgTypeExtStatus12, MsgTypeExtStatus13, MsgTypeExtStatus14, MsgTypeExtStatus15,
 		MsgTypeExtStatus16, MsgTypeExtStatus17, MsgTypeExtStatus18, MsgTypeExtStatus19, MsgTypeExtStatus20:
 		return "extended_status"
+	case MsgTypeDeviceLocate:
+		return "device_locate"
 	default:
 		return "unknown"
 	}
@@ -86,8 +88,10 @@ func GetExpectedDataLength(msgType MessageType) int {
 		MsgTypeExtStatus13, MsgTypeExtStatus16, MsgTypeExtStatus18:
 		return 21 // 中等长度心跳包和状态包
 	case MsgTypeExtHeartbeat3, MsgTypeExtHeartbeat5, MsgTypeExtHeartbeat8, MsgTypeExtStatus3, MsgTypeExtStatus4,
-		MsgTypeExtStatus7, MsgTypeExtStatus10, MsgTypeExtStatus14, MsgTypeExtStatus19, MsgTypeExtStatus20:
+		MsgTypeExtStatus10, MsgTypeExtStatus14, MsgTypeExtStatus19, MsgTypeExtStatus20:
 		return 20 // 20字节心跳包和状态包
+	case MsgTypeDeviceLocate:
+		return 4 // 设备定位指令数据长度
 	case MsgTypeExtHeartbeat4, MsgTypeExtStatus11:
 		return 14 // 短心跳包和状态包
 	default:

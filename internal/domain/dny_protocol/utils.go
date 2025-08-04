@@ -69,6 +69,8 @@ func GetMessageTypeName(msgType MessageType) string {
 		return "服务器查询设备联网状态(81指令)"
 	case MsgTypeChargeControl:
 		return "服务器开始、停止充电操作(82指令)"
+	case MsgTypeModifyCharge:
+		return "服务器修改充电时长/电量(8A指令)"
 
 	// 扩展消息类型
 	case MsgTypeExtHeartbeat1:
@@ -78,7 +80,7 @@ func GetMessageTypeName(msgType MessageType) string {
 	case MsgTypeExtHeartbeat3:
 		return "扩展心跳包类型3(89指令)"
 	case MsgTypeExtHeartbeat4:
-		return "扩展心跳包类型4(8A指令)"
+		return "扩展心跳包类型4(A0指令)"
 	case MsgTypeExtHeartbeat5:
 		return "扩展心跳包类型5(8B指令)"
 	case MsgTypeExtHeartbeat6:
@@ -101,8 +103,8 @@ func GetMessageTypeName(msgType MessageType) string {
 		return "扩展状态类型5(94指令)"
 	case MsgTypeExtStatus6:
 		return "扩展状态类型6(95指令)"
-	case MsgTypeExtStatus7:
-		return "扩展状态类型7(96指令)"
+	case MsgTypeDeviceLocate:
+		return "声光寻找设备功能(96指令)"
 	case MsgTypeExtCommand2:
 		return "扩展命令类型2(97指令)"
 	case MsgTypeExtStatus8:

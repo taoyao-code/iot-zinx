@@ -85,6 +85,7 @@ const (
 	EventTypeSettlement     = "settlement"      // 结算
 	EventTypePowerHeartbeat = "power_heartbeat" // 功率心跳
 	EventTypeChargingPower  = "charging_power"  // 充电功率实时数据
+	EventTypeChargeModified = "charge_modified" // 充电参数修改
 
 	// 端口状态事件
 	EventTypePortStatusChange = "port_status_change" // 端口状态变化

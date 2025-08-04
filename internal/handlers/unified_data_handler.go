@@ -22,6 +22,9 @@ type UnifiedDataHandler struct {
 	deviceRegister    *DeviceRegisterRouter
 	heartbeat         *HeartbeatRouter
 	charging          *ChargingRouter
+	settlement        *SettlementRouter
+	serverTime        *ServerTimeRouter
+	modifyCharge      *ModifyChargeRouter
 	connectionMonitor *ConnectionMonitor
 }
 
@@ -33,6 +36,9 @@ func NewUnifiedDataHandler() *UnifiedDataHandler {
 		deviceRegister: NewDeviceRegisterRouter(),
 		heartbeat:      NewHeartbeatRouter(),
 		charging:       NewChargingRouter(),
+		settlement:     NewSettlementRouter(),
+		serverTime:     NewServerTimeRouter(),
+		modifyCharge:   NewModifyChargeRouter(),
 	}
 }
 
@@ -130,12 +136,19 @@ func (h *UnifiedDataHandler) Handle(request ziface.IRequest) {
 			logger.Info("刷卡请求处理", zap.Any("data", parsedMsg.Data))
 
 		case dny_protocol.MsgTypeSettlement:
-			logger.Info("UnifiedDataHandler: 分发结算数据到对应处理器",
+			logger.Info("UnifiedDataHandler: 分发结算数据到SettlementRouter",
 				zap.Uint64("connID", conn.GetConnID()),
 				zap.String("command", fmt.Sprintf("0x%02x", parsedMsg.Command)),
 			)
-			// TODO: 实现结算数据处理逻辑
-			logger.Info("结算数据处理", zap.Any("data", parsedMsg.Data))
+			h.settlement.Handle(request)
+
+		case dny_protocol.MsgTypeDeviceLocate:
+			logger.Info("UnifiedDataHandler: 分发设备定位指令到对应处理器",
+				zap.Uint64("connID", conn.GetConnID()),
+				zap.String("command", fmt.Sprintf("0x%02x", parsedMsg.Command)),
+			)
+			// TODO: 实现设备定位处理逻辑
+			logger.Info("设备定位指令处理", zap.Any("data", parsedMsg.Data))
 
 		case dny_protocol.MsgTypeOrderConfirm:
 			logger.Info("UnifiedDataHandler: 分发订单确认到对应处理器",
@@ -153,12 +166,26 @@ func (h *UnifiedDataHandler) Handle(request ziface.IRequest) {
 			// TODO: 实现功率心跳处理逻辑
 			logger.Info("功率心跳处理", zap.Any("data", parsedMsg.Data))
 
+		case dny_protocol.MsgTypeServerTimeRequest:
+			logger.Info("UnifiedDataHandler: 分发服务器时间请求到ServerTimeRouter",
+				zap.Uint64("connID", conn.GetConnID()),
+				zap.String("command", fmt.Sprintf("0x%02x", parsedMsg.Command)),
+			)
+			h.serverTime.Handle(request)
+
 		case dny_protocol.MsgTypeChargeControl:
 			logger.Info("UnifiedDataHandler: 分发充电控制包到ChargingRouter",
 				zap.Uint64("connID", conn.GetConnID()),
 				zap.String("command", fmt.Sprintf("0x%02x", parsedMsg.Command)),
 			)
 			h.charging.Handle(request)
+
+		case dny_protocol.MsgTypeModifyCharge:
+			logger.Info("UnifiedDataHandler: 分发修改充电参数请求到ModifyChargeRouter",
+				zap.Uint64("connID", conn.GetConnID()),
+				zap.String("command", fmt.Sprintf("0x%02x", parsedMsg.Command)),
+			)
+			h.modifyCharge.Handle(request)
 
 		case dny_protocol.MsgTypeExtendedCommand:
 			logger.Info("UnifiedDataHandler: 收到扩展命令数据包(0x05)",
@@ -187,7 +214,7 @@ func (h *UnifiedDataHandler) Handle(request ziface.IRequest) {
 
 		case dny_protocol.MsgTypeExtStatus1, dny_protocol.MsgTypeExtStatus2, dny_protocol.MsgTypeExtStatus3,
 			dny_protocol.MsgTypeExtStatus4, dny_protocol.MsgTypeExtStatus5, dny_protocol.MsgTypeExtStatus6,
-			dny_protocol.MsgTypeExtStatus7, dny_protocol.MsgTypeExtStatus8, dny_protocol.MsgTypeExtStatus9,
+			dny_protocol.MsgTypeExtStatus8, dny_protocol.MsgTypeExtStatus9,
 			dny_protocol.MsgTypeExtStatus10, dny_protocol.MsgTypeExtStatus11, dny_protocol.MsgTypeExtStatus12,
 			dny_protocol.MsgTypeExtStatus13, dny_protocol.MsgTypeExtStatus14, dny_protocol.MsgTypeExtStatus15,
 			dny_protocol.MsgTypeExtStatus16, dny_protocol.MsgTypeExtStatus17, dny_protocol.MsgTypeExtStatus18,

@@ -329,3 +329,49 @@ func (c *ChargeControlData) UnmarshalBinary(data []byte) error {
 
 	return nil
 }
+
+// ModifyChargeData 修改充电参数数据结构 (0x8A指令)
+type ModifyChargeData struct {
+	PortNumber uint8  // 端口号 (1字节)
+	ModifyType uint8  // 修改类型：1=修改时长，2=修改电量 (1字节)
+	NewValue   uint32 // 新值：时长(秒)或电量(Wh) (4字节)
+	OrderID    string // 订单编号 (16字节)
+}
+
+// UnmarshalBinary 解析修改充电参数数据
+func (m *ModifyChargeData) UnmarshalBinary(data []byte) error {
+	if len(data) < 22 {
+		return fmt.Errorf("insufficient data for ModifyChargeData: %d bytes, expected 22", len(data))
+	}
+
+	m.PortNumber = data[0]
+	m.ModifyType = data[1]
+	m.NewValue = binary.LittleEndian.Uint32(data[2:6])
+
+	// 订单编号 (16字节，去除尾部的0)
+	orderBytes := data[6:22]
+	m.OrderID = string(bytes.TrimRight(orderBytes, "\x00"))
+	if m.OrderID == "" {
+		m.OrderID = "UNKNOWN"
+	}
+
+	return nil
+}
+
+// MarshalBinary 序列化修改充电参数数据
+func (m *ModifyChargeData) MarshalBinary() ([]byte, error) {
+	data := make([]byte, 22)
+
+	data[0] = m.PortNumber
+	data[1] = m.ModifyType
+	binary.LittleEndian.PutUint32(data[2:6], m.NewValue)
+
+	// 订单编号 (16字节)
+	orderBytes := []byte(m.OrderID)
+	if len(orderBytes) > 16 {
+		orderBytes = orderBytes[:16]
+	}
+	copy(data[6:22], orderBytes)
+
+	return data, nil
+}

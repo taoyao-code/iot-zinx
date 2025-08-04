@@ -197,6 +197,7 @@ notification:
         - "port_offline" # 端口离线
         - "device_heartbeat" # 设备心跳
         - "port_heartbeat" # 端口心跳
+        - "charge_modified" # 充电参数修改
       enabled: true
 
     # # 运营平台端点

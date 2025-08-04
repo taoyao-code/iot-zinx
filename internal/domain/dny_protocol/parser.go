@@ -137,6 +137,15 @@ func ParseDNYMessage(rawData []byte) *ParsedMessage {
 		}
 		result.Data = data
 
+	case MsgTypeModifyCharge:
+		// 服务器修改充电时长/电量（0x8A）
+		data := &ModifyChargeData{}
+		if err := data.UnmarshalBinary(dataPayload); err != nil {
+			result.Error = fmt.Errorf("parse modify charge data: %w", err)
+			return result
+		}
+		result.Data = data
+
 	default:
 		// 处理扩展消息类型和未知消息类型
 		if IsExtendedMessageType(result.MessageType) {

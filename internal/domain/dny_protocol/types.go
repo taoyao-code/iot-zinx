@@ -16,12 +16,13 @@ const (
 	MsgTypeServerTimeRequest MessageType = 0x22 // 设备获取服务器时间
 	MsgTypeServerQuery       MessageType = 0x81 // 服务器查询设备联网状态
 	MsgTypeChargeControl     MessageType = 0x82 // 服务器开始、停止充电操作
+	MsgTypeModifyCharge      MessageType = 0x8A // 服务器修改充电时长/电量
 
 	// 扩展消息类型 - 基于日志分析添加的新类型
 	MsgTypeExtHeartbeat1 MessageType = 0x87 // 扩展心跳包类型1 (34字节)
 	MsgTypeExtHeartbeat2 MessageType = 0x88 // 扩展心跳包类型2 (21字节)
 	MsgTypeExtHeartbeat3 MessageType = 0x89 // 扩展心跳包类型3 (20字节)
-	MsgTypeExtHeartbeat4 MessageType = 0x8A // 扩展心跳包类型4 (14字节)
+	MsgTypeExtHeartbeat4 MessageType = 0xA0 // 扩展心跳包类型4 (14字节)
 	MsgTypeExtHeartbeat5 MessageType = 0x8B // 扩展心跳包类型5 (20字节)
 	MsgTypeExtHeartbeat6 MessageType = 0x8C // 扩展心跳包类型6 (34字节)
 	MsgTypeExtHeartbeat7 MessageType = 0x8D // 扩展心跳包类型7 (21字节)
@@ -33,7 +34,7 @@ const (
 	MsgTypeExtStatus4    MessageType = 0x93 // 扩展状态类型4 (20字节)
 	MsgTypeExtStatus5    MessageType = 0x94 // 扩展状态类型5 (34字节)
 	MsgTypeExtStatus6    MessageType = 0x95 // 扩展状态类型6 (21字节)
-	MsgTypeExtStatus7    MessageType = 0x96 // 扩展状态类型7 (20字节)
+	MsgTypeDeviceLocate  MessageType = 0x96 // 声光寻找设备功能
 	MsgTypeExtCommand2   MessageType = 0x97 // 扩展命令类型2 (14字节)
 	MsgTypeExtStatus8    MessageType = 0x98 // 扩展状态类型8 (34字节)
 	MsgTypeExtStatus9    MessageType = 0x99 // 扩展状态类型9 (21字节)
@@ -75,11 +76,11 @@ func IsExtendedMessageType(msgType MessageType) bool {
 		MsgTypeExtCommand1, MsgTypeExtCommand2, MsgTypeExtCommand3, MsgTypeExtCommand4,
 		MsgTypeExtStatus1, MsgTypeExtStatus2, MsgTypeExtStatus3,
 		MsgTypeExtStatus4, MsgTypeExtStatus5, MsgTypeExtStatus6,
-		MsgTypeExtStatus7, MsgTypeExtStatus8, MsgTypeExtStatus9,
+		MsgTypeExtStatus8, MsgTypeExtStatus9,
 		MsgTypeExtStatus10, MsgTypeExtStatus11, MsgTypeExtStatus12,
 		MsgTypeExtStatus13, MsgTypeExtStatus14, MsgTypeExtStatus15,
 		MsgTypeExtStatus16, MsgTypeExtStatus17, MsgTypeExtStatus18,
-		MsgTypeExtStatus19, MsgTypeExtStatus20:
+		MsgTypeExtStatus19, MsgTypeExtStatus20, MsgTypeDeviceLocate:
 		return true
 	default:
 		return false

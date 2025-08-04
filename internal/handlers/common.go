@@ -257,7 +257,7 @@ func (h *BaseHandler) isExtendedMessageType(msgType dny_protocol.MessageType) bo
 		dny_protocol.MsgTypeExtCommand1, dny_protocol.MsgTypeExtCommand2, dny_protocol.MsgTypeExtCommand3, dny_protocol.MsgTypeExtCommand4,
 		dny_protocol.MsgTypeExtStatus1, dny_protocol.MsgTypeExtStatus2, dny_protocol.MsgTypeExtStatus3,
 		dny_protocol.MsgTypeExtStatus4, dny_protocol.MsgTypeExtStatus5, dny_protocol.MsgTypeExtStatus6,
-		dny_protocol.MsgTypeExtStatus7, dny_protocol.MsgTypeExtStatus8, dny_protocol.MsgTypeExtStatus9,
+		dny_protocol.MsgTypeExtStatus8, dny_protocol.MsgTypeExtStatus9,
 		dny_protocol.MsgTypeExtStatus10, dny_protocol.MsgTypeExtStatus11, dny_protocol.MsgTypeExtStatus12,
 		dny_protocol.MsgTypeExtStatus13, dny_protocol.MsgTypeExtStatus14, dny_protocol.MsgTypeExtStatus15,
 		dny_protocol.MsgTypeExtStatus16, dny_protocol.MsgTypeExtStatus17, dny_protocol.MsgTypeExtStatus18,

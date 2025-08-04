@@ -506,6 +506,20 @@ func (n *NotificationIntegrator) NotifyChargingFailed(deviceID string, conn zifa
 	}
 }
 
+// SendNotification 发送通用通知事件
+func (n *NotificationIntegrator) SendNotification(event *NotificationEvent) error {
+	if !n.enabled {
+		return nil
+	}
+
+	return n.service.SendNotification(event)
+}
+
+// GetGlobalIntegrator 获取全局通知集成器（别名）
+func GetGlobalIntegrator() *NotificationIntegrator {
+	return GetGlobalNotificationIntegrator()
+}
+
 // 辅助函数
 func parseDuration(s string, defaultValue time.Duration) time.Duration {
 	if d, err := time.ParseDuration(s); err == nil {
