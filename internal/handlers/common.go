@@ -280,6 +280,27 @@ func (h *BaseHandler) ValidateMessageType(parsedMsg *dny_protocol.ParsedMessage,
 	return nil
 }
 
+// ValidateMessageTypes 验证消息类型是否符合预期的多个类型之一
+func (h *BaseHandler) ValidateMessageTypes(parsedMsg *dny_protocol.ParsedMessage, expectedTypes ...dny_protocol.MessageType) error {
+	for _, expectedType := range expectedTypes {
+		if parsedMsg.MessageType == expectedType {
+			return nil
+		}
+	}
+
+	// 构建期望类型的字符串
+	var expectedNames []string
+	for _, expectedType := range expectedTypes {
+		expectedNames = append(expectedNames, dny_protocol.GetMessageTypeName(expectedType))
+	}
+
+	err := fmt.Errorf("错误的消息类型: %s, 期望: %s",
+		dny_protocol.GetMessageTypeName(parsedMsg.MessageType),
+		strings.Join(expectedNames, " 或 "))
+	h.Log("%s", err.Error())
+	return err
+}
+
 // ExtractDeviceIDFromMessage 从解析的消息中提取设备ID
 func (h *BaseHandler) ExtractDeviceIDFromMessage(parsedMsg *dny_protocol.ParsedMessage) string {
 	return utils.FormatPhysicalID(parsedMsg.PhysicalID)

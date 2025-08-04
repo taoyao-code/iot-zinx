@@ -38,6 +38,7 @@ case "error":       // 解析错误
 
 #### 📖 相关文档
 
+- **简化架构**: [docs/简化架构说明.md](docs/简化架构说明.md)
 - **架构设计**: [docs/DNY 协议解析器统一架构设计.md](docs/DNY协议解析器统一架构设计.md)
 - **开发指南**: [docs/DNY 协议解析器\_开发者指南.md](docs/DNY协议解析器_开发者指南.md)
 - **完成报告**: [issues/协议解析器统一重构\_完成报告.md](issues/协议解析器统一重构_完成报告.md)
@@ -92,11 +93,16 @@ case "error":       // 解析错误
 ```go
 import (
     "github.com/bujia-iot/iot-zinx/pkg/constants"
+    "github.com/bujia-iot/iot-zinx/pkg/storage"
     "github.com/bujia-iot/iot-zinx/internal/domain/dny_protocol"
 )
 
 // 使用协议常量
 command := constants.CmdDeviceRegister // 设备注册命令
+
+// 访问全局设备存储
+deviceStore := storage.GlobalDeviceStore
+devices := deviceStore.GetAll()
 
 // 构建充电控制包
 packet := dny_protocol.BuildChargeControlPacket(

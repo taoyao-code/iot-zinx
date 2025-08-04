@@ -28,7 +28,7 @@ func NewDeviceInfo(deviceID, physicalID, iccid string) *DeviceInfo {
 		ICCID:           iccid,
 		Status:          StatusOffline,
 		LastSeen:        time.Now(),
-		LastHeartbeat:   time.Now(),
+		LastHeartbeat:   time.Time{},                       // 🔧 修复：初始心跳时间为零值，等待真正的心跳包更新
 		StatusHistory:   make([]*StatusChangeEvent, 0, 10), // 保留最近10条状态变更
 		Properties:      make(map[string]interface{}),
 		statusCallbacks: make([]StatusChangeCallback, 0),
@@ -148,11 +148,12 @@ func (d *DeviceInfo) GetStatusHistory() []*StatusChangeEvent {
 // Clone 创建设备信息的副本
 func (d *DeviceInfo) Clone() *DeviceInfo {
 	return &DeviceInfo{
-		DeviceID:   d.DeviceID,
-		PhysicalID: d.PhysicalID,
-		ICCID:      d.ICCID,
-		Status:     d.Status,
-		LastSeen:   d.LastSeen,
-		ConnID:     d.ConnID,
+		DeviceID:      d.DeviceID,
+		PhysicalID:    d.PhysicalID,
+		ICCID:         d.ICCID,
+		Status:        d.Status,
+		LastSeen:      d.LastSeen,
+		LastHeartbeat: d.LastHeartbeat, // 🔧 修复：复制心跳时间字段
+		ConnID:        d.ConnID,
 	}
 }

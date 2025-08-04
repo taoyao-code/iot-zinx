@@ -24,18 +24,18 @@ func ParseDNYMessage(rawData []byte) *ParsedMessage {
 		return result
 	}
 
-	// 解析基础字段 - 修复协议解析顺序
-	// 根据DNY协议文档: DNY(3) + Length(2) + 物理ID(4) + 命令(1) + 消息ID(2) + 数据 + 校验和(2)
-	length := binary.LittleEndian.Uint16(rawData[3:5])            // Length字段 (2字节)
-	result.PhysicalID = binary.LittleEndian.Uint32(rawData[5:9])  // 物理ID (4字节)
-	result.Command = rawData[9]                                   // 命令 (1字节)
-	result.MessageID = binary.LittleEndian.Uint16(rawData[10:12]) // 消息ID (2字节)
+	// 🔧 修复：协议解析顺序错误
+	// 根据DNY协议文档: DNY(3) + Length(2) + 物理ID(4) + 消息ID(2) + 命令(1) + 数据 + 校验和(2)
+	length := binary.LittleEndian.Uint16(rawData[3:5])           // Length字段 (2字节)
+	result.PhysicalID = binary.LittleEndian.Uint32(rawData[5:9]) // 物理ID (4字节)
+	result.MessageID = binary.LittleEndian.Uint16(rawData[9:11]) // 消息ID (2字节)
+	result.Command = rawData[11]                                 // 命令 (1字节)
 	result.MessageType = MessageType(result.Command)
 
 	// 🔧 修复：智能计算数据部分长度 - 适配不同协议版本
 	// 检查Length字段是否合理，如果不合理则使用实际包长度计算
 	expectedTotalLength := 3 + 2 + int(length) // DNY(3) + Length(2) + Length字段内容
-	actualDataLength := len(rawData) - 12      // 实际可用的数据部分长度
+	actualDataLength := len(rawData) - 12      // 实际可用的数据部分长度 (DNY+Length+PhysicalID+MessageID+Command = 12字节)
 
 	var dataLength int
 	if expectedTotalLength > len(rawData) || int(length) > len(rawData) {
@@ -50,7 +50,7 @@ func ParseDNYMessage(rawData []byte) *ParsedMessage {
 			result.Error = fmt.Errorf("invalid length field: %d, expected at least 7", length)
 			return result
 		}
-		dataLength = int(length) - 7 // 减去固定字段：物理ID(4) + 命令(1) + 消息ID(2)
+		dataLength = int(length) - 7 // 减去固定字段：物理ID(4) + 消息ID(2) + 命令(1)
 		if dataLength < 0 {
 			dataLength = 0
 		}

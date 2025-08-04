@@ -38,8 +38,8 @@ func (r *HeartbeatRouter) Handle(request ziface.IRequest) {
 		return
 	}
 
-	// 确保是心跳消息
-	if err := r.ValidateMessageType(parsedMsg, dny_protocol.MsgTypeHeartbeat); err != nil {
+	// 🔧 修复：确保是心跳消息（支持新版0x21和旧版0x01）
+	if err := r.ValidateMessageTypes(parsedMsg, dny_protocol.MsgTypeHeartbeat, dny_protocol.MsgTypeOldHeartbeat); err != nil {
 		return
 	}
 
@@ -60,6 +60,7 @@ func (r *HeartbeatRouter) Handle(request ziface.IRequest) {
 
 	// 更新设备状态 - 使用增强状态管理
 	oldStatus := device.Status
+	// 更新设备状态和心跳时间
 	device.SetStatusWithReason(storage.StatusOnline, "心跳更新")
 	device.SetConnectionID(uint32(request.GetConnection().GetConnID()))
 	device.SetLastHeartbeat()

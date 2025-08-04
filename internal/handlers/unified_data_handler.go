@@ -91,6 +91,8 @@ func (h *UnifiedDataHandler) Handle(request ziface.IRequest) {
 			return
 		}
 
+		// 设备必须先通过0x20注册包正式注册，不允许自动注册
+
 		// 根据DNY命令分发
 		switch parsedMsg.MessageType {
 		case dny_protocol.MsgTypeOldHeartbeat:

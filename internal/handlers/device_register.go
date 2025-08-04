@@ -3,6 +3,7 @@ package handlers
 import (
 	"github.com/aceld/zinx/ziface"
 	"github.com/bujia-iot/iot-zinx/internal/domain/dny_protocol"
+	"github.com/bujia-iot/iot-zinx/pkg/constants"
 	"github.com/bujia-iot/iot-zinx/pkg/storage"
 	"github.com/bujia-iot/iot-zinx/pkg/utils"
 )
@@ -53,8 +54,13 @@ func (r *DeviceRegisterRouter) Handle(request ziface.IRequest) {
 	// 提取设备信息
 	deviceID := r.ExtractDeviceIDFromMessage(parsedMsg)
 	physicalIDStr := deviceID
-	// ICCID在设备注册协议中不存在，使用空字符串或从其他来源获取
+	// 🔧 修复：从连接属性获取ICCID
 	iccid := ""
+	if prop, err := request.GetConnection().GetProperty(constants.PropKeyICCID); err == nil && prop != nil {
+		if val, ok := prop.(string); ok {
+			iccid = val
+		}
+	}
 
 	// 记录设备注册包的详细信息
 	r.Log("设备注册包详情 - 固件版本: %d.%d, 端口数量: %d, 虚拟ID: %d, 设备类型: %d, 工作模式: %d",
