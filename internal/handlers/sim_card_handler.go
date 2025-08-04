@@ -92,9 +92,3 @@ func (h *SimCardHandler) Handle(request ziface.IRequest) {
 		)
 	}
 }
-
-// isValidICCIDStrict 已废弃：使用 utils.IsValidICCID 替代
-// 保留此函数以避免破坏现有代码，但建议使用统一的验证函数
-func (h *SimCardHandler) isValidICCIDStrict(data []byte) bool {
-	return utils.IsValidICCID(data)
-}

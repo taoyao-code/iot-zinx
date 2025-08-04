@@ -34,6 +34,11 @@ const (
 	PropKeySessionID           = "sessionID"        // 会话ID
 	PropKeyDeviceSession       = "deviceSession"    // 设备会话对象
 	PropKeyDeviceSessionPrefix = "session:"         // 设备会话在Redis中的存储前缀
+	PropKeyICCIDTime           = "iccidTime"        // ICCID接收时间
+	PropKeyConnState           = "connState"        // 连接状态（别名）
+	PropKeyStateTime           = "stateTime"        // 状态变更时间
+	PropKeyDeviceID            = "deviceId"         // 设备ID（别名）
+	PropKeyLastActivity        = "lastActivity"     // 最后活动时间
 )
 
 // 🔧 新增：函数类型定义，用于回调和依赖注入

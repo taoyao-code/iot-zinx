@@ -48,9 +48,13 @@ func (h *UnifiedDataHandler) Handle(request ziface.IRequest) {
 	conn := request.GetConnection()
 	data := request.GetData()
 
-	// 强制调试输出
-	fmt.Printf("🔥 UnifiedDataHandler: connID=%d, dataLen=%d, dataHex=%x, dataStr=%s\n",
-		conn.GetConnID(), len(data), data, string(data))
+	// 调试输出 - 使用统一日志系统
+	logger.Debug("UnifiedDataHandler: 收到原始数据包",
+		zap.Uint64("connID", conn.GetConnID()),
+		zap.Int("dataLen", len(data)),
+		zap.String("dataHex", fmt.Sprintf("%x", data)),
+		zap.String("dataStr", string(data)),
+	)
 
 	logger.Info("UnifiedDataHandler: 收到数据包",
 		zap.Uint64("connID", conn.GetConnID()),
@@ -231,7 +235,7 @@ func (h *UnifiedDataHandler) Handle(request ziface.IRequest) {
 // identifyPacketType 识别数据包类型
 func (h *UnifiedDataHandler) identifyPacketType(data []byte) string {
 	// 1. 检查是否为ICCID包
-	if len(data) == constants.IotSimCardLength && h.isValidICCID(data) {
+	if len(data) == constants.IotSimCardLength && utils.IsValidICCID(data) {
 		return "iccid"
 	}
 
@@ -259,12 +263,6 @@ func (h *UnifiedDataHandler) identifyPacketType(data []byte) string {
 	}
 
 	return "unknown"
-}
-
-// isValidICCID 已废弃：使用 utils.IsValidICCID 替代
-// 保留此函数以避免破坏现有代码，但建议使用统一的验证函数
-func (h *UnifiedDataHandler) isValidICCID(data []byte) bool {
-	return utils.IsValidICCID(data)
 }
 
 // handleUnknownMessage 处理未知消息类型
