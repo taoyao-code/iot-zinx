@@ -83,28 +83,24 @@ func main() {
 		}
 	}()
 
-	// 启动HTTP服务器
+	// 启动Gin HTTP服务器 (新实现)
 	go func() {
-		logger.Info("启动HTTP服务器",
+		logger.Info("启动Gin HTTP服务器",
 			zap.Int("port", cfg.HTTPAPIServer.Port),
 			zap.String("host", cfg.HTTPAPIServer.Host),
 		)
-		if err := apis.StartHTTPServer(cfg.HTTPAPIServer.Port); err != nil {
-			logger.Fatal("HTTP服务器启动失败", zap.Error(err))
+		// 获取连接监控器
+		connectionMonitor := ports.GetConnectionMonitor()
+		if err := apis.StartGinHTTPServer(cfg.HTTPAPIServer.Port, connectionMonitor); err != nil {
+			logger.Fatal("Gin HTTP服务器启动失败", zap.Error(err))
 		}
 	}()
 
 	logger.Info("✅ 所有服务已启动")
 	logger.Infof("📡 TCP服务器端口: %d", cfg.TCPServer.Port)
-	logger.Infof("🌐 HTTP服务器端口: %d", cfg.HTTPAPIServer.Port)
-	log.Printf("🌐 HTTP服务器端口: %d", cfg.HTTPAPIServer.Port)
-	log.Println("📊 API端点:")
-	log.Println("  • GET  /api/devices       - 获取所有设备")
-	log.Println("  • GET  /api/devices/online - 获取在线设备")
-	log.Println("  • GET  /api/devices/count  - 获取设备统计")
-	log.Println("  • GET  /api/device?device_id={id} - 获取单个设备")
-	log.Println("  • POST /api/device/control?device_id={id}&action={start|stop} - 控制设备")
-	log.Println("  • GET  /health - 健康检查")
+	logger.Infof("🌐 Gin HTTP服务器端口: %d", cfg.HTTPAPIServer.Port)
+	log.Printf("🌐 Gin HTTP服务器端口: %d", cfg.HTTPAPIServer.Port)
+	log.Printf("📖 Swagger文档地址: http://localhost:%d/swagger/index.html", cfg.HTTPAPIServer.Port)
 
 	// 等待中断信号
 	c := make(chan os.Signal, 1)

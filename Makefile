@@ -137,8 +137,9 @@ tidy:
 # 生成 Swagger 文档
 swagger:
 	@echo "==> Generating Swagger documentation..."
-	@$(SWAG) init -g cmd/gateway/main.go
+	@$(SWAG) init -g cmd/gateway/main.go -o docs --parseDependency --parseInternal
 	@echo "==> Swagger documentation generated in docs/ directory"
+	@echo "==> Access documentation at: http://localhost:7055/swagger/index.html"
 
 # 显示帮助信息
 help:

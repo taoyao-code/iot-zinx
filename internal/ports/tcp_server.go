@@ -13,6 +13,9 @@ import (
 	"go.uber.org/zap"
 )
 
+// 全局连接监控器
+var globalConnectionMonitor *handlers.ConnectionMonitor
+
 // TCPServer TCP服务器
 type TCPServer struct {
 	server ziface.IServer
@@ -29,13 +32,13 @@ func NewTCPServer(port int) *TCPServer {
 	server.SetDecoder(rawDataDecoder)
 
 	// 设置连接监控器
-	connectionMonitor := handlers.NewConnectionMonitor()
-	server.SetOnConnStart(connectionMonitor.OnConnectionOpened)
-	server.SetOnConnStop(connectionMonitor.OnConnectionClosed)
+	globalConnectionMonitor = handlers.NewConnectionMonitor()
+	server.SetOnConnStart(globalConnectionMonitor.OnConnectionOpened)
+	server.SetOnConnStop(globalConnectionMonitor.OnConnectionClosed)
 
 	// 创建统一数据处理器并设置连接监控器
 	unifiedHandler := handlers.NewUnifiedDataHandler()
-	unifiedHandler.SetConnectionMonitor(connectionMonitor)
+	unifiedHandler.SetConnectionMonitor(globalConnectionMonitor)
 
 	// 🔥 现在只需要一个路由：所有原始数据都会被FrameDecoder处理并包装成msgID=1的消息
 	server.AddRouter(1, unifiedHandler)
@@ -88,4 +91,9 @@ func (s *TCPServer) GetServer() ziface.IServer {
 func StartTCPServer(port int) error {
 	server := NewTCPServer(port)
 	return server.Start()
+}
+
+// GetConnectionMonitor 获取全局连接监控器
+func GetConnectionMonitor() *handlers.ConnectionMonitor {
+	return globalConnectionMonitor
 }
