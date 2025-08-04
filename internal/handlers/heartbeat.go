@@ -3,32 +3,34 @@ package handlers
 import (
 	"github.com/aceld/zinx/ziface"
 	"github.com/bujia-iot/iot-zinx/internal/domain/dny_protocol"
-	"github.com/bujia-iot/iot-zinx/pkg/storage"
 	"github.com/bujia-iot/iot-zinx/pkg/utils"
 )
 
-// HeartbeatRouter 心跳路由器
+// HeartbeatRouter 心跳路由器 - 优化版
 type HeartbeatRouter struct {
 	*BaseHandler
 	connectionMonitor *ConnectionMonitor
+	heartbeatManager  *HeartbeatManager
 }
 
 // NewHeartbeatRouter 创建心跳路由器
 func NewHeartbeatRouter() *HeartbeatRouter {
 	return &HeartbeatRouter{
-		BaseHandler: NewBaseHandler("Heartbeat"),
+		BaseHandler:      NewBaseHandler("Heartbeat"),
+		heartbeatManager: NewHeartbeatManager(),
 	}
 }
 
 // SetConnectionMonitor 设置连接监控器
 func (r *HeartbeatRouter) SetConnectionMonitor(monitor *ConnectionMonitor) {
 	r.connectionMonitor = monitor
+	r.heartbeatManager.SetConnectionMonitor(monitor)
 }
 
 // PreHandle 预处理
 func (r *HeartbeatRouter) PreHandle(request ziface.IRequest) {}
 
-// Handle 处理心跳请求
+// Handle 处理心跳请求 - 优化版，使用HeartbeatManager
 func (r *HeartbeatRouter) Handle(request ziface.IRequest) {
 	r.Log("收到心跳请求")
 
@@ -43,39 +45,21 @@ func (r *HeartbeatRouter) Handle(request ziface.IRequest) {
 		return
 	}
 
-	// 提取设备信息
-	deviceID := r.ExtractDeviceIDFromMessage(parsedMsg)
+	// 确定心跳类型
+	heartbeatType := "standard"
+	if parsedMsg.MessageType == dny_protocol.MsgTypeOldHeartbeat {
+		heartbeatType = "legacy"
+	}
 
-	// 检查设备是否存在
-	device, exists := storage.GlobalDeviceStore.Get(deviceID)
-	if !exists {
-		r.Log("设备 %s 不存在，忽略心跳", deviceID)
+	// 使用HeartbeatManager处理心跳
+	if err := r.heartbeatManager.ProcessHeartbeat(request, heartbeatType); err != nil {
+		r.Log("心跳处理失败: %v", err)
 		return
 	}
-
-	// 更新连接活动 - 集成连接生命周期管理
-	if r.connectionMonitor != nil {
-		r.connectionMonitor.UpdateConnectionActivity(uint32(request.GetConnection().GetConnID()))
-	}
-
-	// 更新设备状态 - 使用增强状态管理
-	oldStatus := device.Status
-	// 更新设备状态和心跳时间
-	device.SetStatusWithReason(storage.StatusOnline, "心跳更新")
-	device.SetConnectionID(uint32(request.GetConnection().GetConnID()))
-	device.SetLastHeartbeat()
-	storage.GlobalDeviceStore.Set(deviceID, device)
 
 	// 发送心跳响应
 	response := r.BuildHeartbeatResponse(utils.FormatPhysicalID(parsedMsg.PhysicalID))
 	r.SendSuccessResponse(request, response)
-
-	// 如果状态发生变化，发送通知
-	if oldStatus != storage.StatusOnline {
-		NotifyDeviceStatusChanged(deviceID, oldStatus, storage.StatusOnline)
-	}
-
-	r.Log("心跳处理完成: %s", deviceID)
 }
 
 // PostHandle 后处理

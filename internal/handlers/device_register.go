@@ -8,16 +8,18 @@ import (
 	"github.com/bujia-iot/iot-zinx/pkg/utils"
 )
 
-// DeviceRegisterRouter 设备注册路由器
+// DeviceRegisterRouter 设备注册路由器 - 优化版
 type DeviceRegisterRouter struct {
 	*BaseHandler
 	connectionMonitor *ConnectionMonitor
+	reconnectManager  *ReconnectManager
 }
 
 // NewDeviceRegisterRouter 创建设备注册路由器
 func NewDeviceRegisterRouter() *DeviceRegisterRouter {
 	return &DeviceRegisterRouter{
-		BaseHandler: NewBaseHandler("DeviceRegister"),
+		BaseHandler:      NewBaseHandler("DeviceRegister"),
+		reconnectManager: NewReconnectManager(),
 	}
 }
 
@@ -29,7 +31,7 @@ func (r *DeviceRegisterRouter) SetConnectionMonitor(monitor *ConnectionMonitor) 
 // PreHandle 预处理
 func (r *DeviceRegisterRouter) PreHandle(request ziface.IRequest) {}
 
-// Handle 处理设备注册请求
+// Handle 处理设备注册请求 - 优化版，增加重连管理
 func (r *DeviceRegisterRouter) Handle(request ziface.IRequest) {
 	r.Log("收到设备注册请求")
 
@@ -44,15 +46,24 @@ func (r *DeviceRegisterRouter) Handle(request ziface.IRequest) {
 		return
 	}
 
+	// 提取设备信息
+	deviceID := r.ExtractDeviceIDFromMessage(parsedMsg)
+
+	// 检查设备是否可以重连
+	if canReconnect, reason := r.reconnectManager.CanDeviceReconnect(deviceID); !canReconnect {
+		r.Log("设备 %s 重连被拒绝: %s", deviceID, reason)
+		// 发送拒绝响应或直接忽略
+		return
+	}
+
 	// 获取设备注册数据
 	registerData, ok := parsedMsg.Data.(*dny_protocol.DeviceRegisterData)
 	if !ok {
 		r.Log("无法获取设备注册数据")
+		r.reconnectManager.RecordReconnectAttempt(deviceID, false)
 		return
 	}
 
-	// 提取设备信息
-	deviceID := r.ExtractDeviceIDFromMessage(parsedMsg)
 	physicalIDStr := deviceID
 	// 🔧 修复：从连接属性获取ICCID
 	iccid := ""
@@ -69,6 +80,8 @@ func (r *DeviceRegisterRouter) Handle(request ziface.IRequest) {
 
 	// 检查设备是否已存在
 	device, exists := storage.GlobalDeviceStore.Get(deviceID)
+	registrationSuccess := false
+
 	if !exists {
 		// 创建新设备
 		device = r.CreateNewDevice(deviceID, physicalIDStr, iccid, request.GetConnection())
@@ -80,17 +93,23 @@ func (r *DeviceRegisterRouter) Handle(request ziface.IRequest) {
 		})
 
 		NotifyDeviceRegistered(device)
+		registrationSuccess = true
+		r.Log("新设备注册: %s", deviceID)
 	} else {
 		// 更新现有设备状态 - 使用增强状态管理
 		oldStatus := device.Status
 		device.SetStatusWithReason(storage.StatusOnline, "设备重新注册连接")
 		device.SetConnectionID(uint32(request.GetConnection().GetConnID()))
 		storage.GlobalDeviceStore.Set(deviceID, device)
+		registrationSuccess = true
 		r.Log("设备 %s 重新上线", deviceID)
 		if oldStatus != storage.StatusOnline {
 			NotifyDeviceStatusChanged(deviceID, oldStatus, storage.StatusOnline)
 		}
 	}
+
+	// 记录重连尝试结果
+	r.reconnectManager.RecordReconnectAttempt(deviceID, registrationSuccess)
 
 	// 注册连接关联到连接监控器
 	if r.connectionMonitor != nil {
