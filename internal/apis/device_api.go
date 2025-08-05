@@ -6,7 +6,9 @@ import (
 	"time"
 
 	"github.com/bujia-iot/iot-zinx/internal/handlers"
+	"github.com/bujia-iot/iot-zinx/internal/infrastructure/logger"
 	"github.com/bujia-iot/iot-zinx/pkg/storage"
+	"go.uber.org/zap"
 )
 
 // DeviceAPI 设备API
@@ -39,17 +41,75 @@ func (api *DeviceAPI) sendProtocolPacket(deviceID string, packet []byte) error {
 	// 将物理ID转换为系统内部使用的十六进制格式
 	hexDeviceID := fmt.Sprintf("%08X", physicalID)
 
+	// 详细日志：记录发送前的状态
+	logger.Info("准备发送协议包",
+		zap.String("component", "device_api"),
+		zap.String("device_id", deviceID),
+		zap.String("hex_device_id", hexDeviceID),
+		zap.Uint32("physical_id", physicalID),
+		zap.Int("packet_length", len(packet)),
+	)
+
 	// 获取设备连接对象
 	conn, exists := api.connectionMonitor.GetConnectionByDeviceId(hexDeviceID)
 	if !exists {
+		logger.Error("设备连接不存在",
+			zap.String("component", "device_api"),
+			zap.String("device_id", deviceID),
+			zap.String("hex_device_id", hexDeviceID),
+		)
 		return fmt.Errorf("设备 %s 未连接", deviceID)
 	}
+
+	// 验证连接状态
+	if conn == nil {
+		logger.Error("连接对象为空",
+			zap.String("component", "device_api"),
+			zap.String("device_id", deviceID),
+		)
+		return fmt.Errorf("设备 %s 连接对象无效", deviceID)
+	}
+
+	// 获取连接详细信息进行验证
+	connID := uint32(conn.GetConnID())
+	remoteAddr := conn.RemoteAddr().String()
+
+	logger.Info("找到设备连接",
+		zap.String("component", "device_api"),
+		zap.String("device_id", deviceID),
+		zap.Uint32("conn_id", connID),
+		zap.String("remote_addr", remoteAddr),
+	)
+
+	// 记录发送的协议包内容
+	logger.HexDump("发送协议包内容", packet,
+		zap.String("component", "device_api"),
+		zap.String("device_id", deviceID),
+		zap.Uint32("conn_id", connID),
+	)
 
 	// 通过Zinx连接发送协议包
 	err = conn.SendMsg(1, packet)
 	if err != nil {
+		logger.Error("发送协议包失败",
+			zap.String("component", "device_api"),
+			zap.String("device_id", deviceID),
+			zap.Uint32("conn_id", connID),
+			zap.Error(err),
+		)
 		return fmt.Errorf("发送协议包失败: %v", err)
 	}
+
+	// 记录发送成功
+	logger.Info("协议包发送成功",
+		zap.String("component", "device_api"),
+		zap.String("device_id", deviceID),
+		zap.Uint32("conn_id", connID),
+		zap.Int("packet_length", len(packet)),
+	)
+
+	// 使用通信日志记录发送数据
+	logger.LogSendData(hexDeviceID, packet, "charging_control")
 
 	return nil
 }
