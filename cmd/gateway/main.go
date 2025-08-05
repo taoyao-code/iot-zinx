@@ -84,16 +84,27 @@ func main() {
 	logger.Infof("TCP服务器配置: %s:%d", cfg.TCPServer.Host, cfg.TCPServer.Port)
 	logger.Infof("HTTP服务器配置: %s:%d", cfg.HTTPAPIServer.Host, cfg.HTTPAPIServer.Port)
 
-	// 启动TCP服务器
+	// 启动TCP服务器并等待连接监控器初始化完成
+	logger.Info("启动TCP服务器",
+		zap.Int("port", cfg.TCPServer.Port),
+		zap.String("host", cfg.TCPServer.Host),
+	)
+
+	// 创建TCP服务器（这会初始化globalConnectionMonitor）
+	tcpServer := ports.NewTCPServer(cfg.TCPServer.Port)
+
+	// 在goroutine中启动TCP服务器
 	go func() {
-		logger.Info("启动TCP服务器",
-			zap.Int("port", cfg.TCPServer.Port),
-			zap.String("host", cfg.TCPServer.Host),
-		)
-		if err := ports.StartTCPServer(cfg.TCPServer.Port); err != nil {
+		if err := tcpServer.Start(); err != nil {
 			logger.Fatal("TCP服务器启动失败", zap.Error(err))
 		}
 	}()
+
+	// 确保连接监控器已初始化后再启动HTTP服务器
+	connectionMonitor := ports.GetConnectionMonitor()
+	if connectionMonitor == nil {
+		logger.Fatal("连接监控器初始化失败")
+	}
 
 	// 启动Gin HTTP服务器 (新实现)
 	go func() {
@@ -101,8 +112,6 @@ func main() {
 			zap.Int("port", cfg.HTTPAPIServer.Port),
 			zap.String("host", cfg.HTTPAPIServer.Host),
 		)
-		// 获取连接监控器
-		connectionMonitor := ports.GetConnectionMonitor()
 		if err := apis.StartGinHTTPServer(cfg.HTTPAPIServer.Port, connectionMonitor); err != nil {
 			logger.Fatal("Gin HTTP服务器启动失败", zap.Error(err))
 		}

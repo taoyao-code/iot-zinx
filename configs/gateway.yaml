@@ -7,11 +7,11 @@ tcpServer:
   host: "0.0.0.0" # 监听地址
   port: 7054 # TCP端口
 
-  # 超时配置 - 优化版
+  # 超时配置 - 修复频繁断开问题
   initialReadDeadlineSeconds: 180 # 修复：增加到3分钟，用于等待ICCID
-  defaultReadDeadlineSeconds: 120 # 优化：从5分钟调整为2分钟，配合新的心跳机制
+  defaultReadDeadlineSeconds: 300 # 修复：增加到5分钟，避免网络波动导致的频繁断开
   tcpWriteTimeoutSeconds: 90 # TCP写超时90秒 - 优化：增加写超时减少连接失败
-  tcpReadTimeoutSeconds: 120 # TCP读超时120秒 - 优化：与ReadDeadline保持一致
+  tcpReadTimeoutSeconds: 300 # TCP读超时300秒 - 修复：与ReadDeadline保持一致，避免i/o timeout
 
   # 缓冲区配置
   sendBufferSize: 262144 # 发送缓冲区256KB - 🔧 优化：增加缓冲区减少积压
