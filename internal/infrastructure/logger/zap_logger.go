@@ -1,6 +1,7 @@
 package logger
 
 import (
+	"encoding/hex"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -272,6 +273,8 @@ func HexDump(msg string, data []byte, fields ...zap.Field) {
 		zap.ByteString("hex_data", data),
 		zap.Int("data_length", len(data)),
 		zap.String("ascii_data", safeASCII(data)),
+		// 原始十六进制数据
+		zap.String("raw_hex", hex.EncodeToString(data)),
 	)
 
 	GlobalLogger.Debug(msg, allFields...)
