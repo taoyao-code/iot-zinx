@@ -59,6 +59,8 @@ func GetMessageTypeName(msgType MessageType) string {
 		return "扩展命令类型(05指令)"
 	case MsgTypePowerHeartbeat:
 		return "端口充电时功率心跳包(06指令)"
+	case MsgTypeMainGetServerTime:
+		return "主机获取服务器时间(12指令)"
 	case MsgTypeDeviceRegister:
 		return "设备注册包(20指令)"
 	case MsgTypeHeartbeat:

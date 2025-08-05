@@ -24,6 +24,7 @@ type UnifiedDataHandler struct {
 	charging          *ChargingRouter
 	settlement        *SettlementRouter
 	serverTime        *ServerTimeRouter
+	mainServerTime    *MainServerTimeRouter
 	modifyCharge      *ModifyChargeRouter
 	deviceResponse    *DeviceResponseRouter
 	responseDetector  *ResponseDetector
@@ -40,6 +41,7 @@ func NewUnifiedDataHandler() *UnifiedDataHandler {
 		charging:         NewChargingRouter(),
 		settlement:       NewSettlementRouter(),
 		serverTime:       NewServerTimeRouter(),
+		mainServerTime:   NewMainServerTimeRouter(),
 		modifyCharge:     NewModifyChargeRouter(),
 		deviceResponse:   NewDeviceResponseRouter(),
 		responseDetector: NewResponseDetector(),
@@ -181,6 +183,13 @@ func (h *UnifiedDataHandler) Handle(request ziface.IRequest) {
 			)
 			// TODO: 实现功率心跳处理逻辑
 			logger.Info("功率心跳处理", zap.Any("data", parsedMsg.Data))
+
+		case dny_protocol.MsgTypeMainGetServerTime:
+			logger.Info("UnifiedDataHandler: 分发主机服务器时间请求到MainServerTimeRouter",
+				zap.Uint64("connID", conn.GetConnID()),
+				zap.String("command", fmt.Sprintf("0x%02x", parsedMsg.Command)),
+			)
+			h.mainServerTime.Handle(request)
 
 		case dny_protocol.MsgTypeServerTimeRequest:
 			logger.Info("UnifiedDataHandler: 分发服务器时间请求到ServerTimeRouter",

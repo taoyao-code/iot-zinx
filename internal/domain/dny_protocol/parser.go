@@ -130,6 +130,15 @@ func ParseDNYMessage(rawData []byte) *ParsedMessage {
 		}
 		result.Data = data
 
+	case MsgTypeMainGetServerTime:
+		// 主机获取服务器时间（0x12）
+		data := &MainServerTimeRequestData{}
+		if err := data.UnmarshalBinary(dataPayload); err != nil {
+			result.Error = fmt.Errorf("parse main server time request data: %w", err)
+			return result
+		}
+		result.Data = data
+
 	case MsgTypeServerTimeRequest:
 		// 设备获取服务器时间（0x22）
 		result.Data = dataPayload

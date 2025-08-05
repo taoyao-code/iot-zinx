@@ -11,6 +11,7 @@ const (
 	MsgTypeOrderConfirm      MessageType = 0x04 // 充电端口订单确认（老版本指令）
 	MsgTypeExtendedCommand   MessageType = 0x05 // 扩展命令类型
 	MsgTypePowerHeartbeat    MessageType = 0x06 // 端口充电时功率心跳包（新版本指令）
+	MsgTypeMainGetServerTime MessageType = 0x12 // 主机获取服务器时间
 	MsgTypeDeviceRegister    MessageType = 0x20 // 设备注册包（正确的注册指令）
 	MsgTypeHeartbeat         MessageType = 0x21 // 设备心跳包（新版）
 	MsgTypeServerTimeRequest MessageType = 0x22 // 设备获取服务器时间
@@ -108,6 +109,16 @@ func IsHeartbeatType(msgType MessageType) bool {
 func IsBusinessType(msgType MessageType) bool {
 	switch msgType {
 	case MsgTypeSwipeCard, MsgTypeSettlement, MsgTypeChargeControl:
+		return true
+	default:
+		return false
+	}
+}
+
+// IsTimeRequestType 检查是否为时间请求类型消息
+func IsTimeRequestType(msgType MessageType) bool {
+	switch msgType {
+	case MsgTypeMainGetServerTime, MsgTypeServerTimeRequest:
 		return true
 	default:
 		return false

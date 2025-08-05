@@ -343,3 +343,19 @@ func (m *MainHeartbeatData) UnmarshalBinary(data []byte) error {
 	m.Timestamp = time.Now()
 	return nil
 }
+
+// MainServerTimeRequestData 主机获取服务器时间请求数据 (0x12)
+type MainServerTimeRequestData struct {
+	Timestamp time.Time // 请求时间
+}
+
+func (m *MainServerTimeRequestData) MarshalBinary() ([]byte, error) {
+	// 0x12命令的请求数据为空，只有命令字节
+	return []byte{}, nil
+}
+
+func (m *MainServerTimeRequestData) UnmarshalBinary(data []byte) error {
+	// 0x12命令的请求数据为空，只需要记录时间戳
+	m.Timestamp = time.Now()
+	return nil
+}
