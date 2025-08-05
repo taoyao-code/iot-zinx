@@ -1,6 +1,7 @@
 package apis
 
 import (
+	"encoding/hex"
 	"fmt"
 	"strconv"
 	"time"
@@ -106,6 +107,8 @@ func (api *DeviceAPI) sendProtocolPacket(deviceID string, packet []byte) error {
 		zap.String("device_id", deviceID),
 		zap.Uint32("conn_id", connID),
 		zap.Int("packet_length", len(packet)),
+		// 十六进制数据
+		zap.String("raw_hex", hex.EncodeToString(packet)),
 	)
 
 	// 使用通信日志记录发送数据
