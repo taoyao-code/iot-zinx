@@ -57,7 +57,9 @@ func (r *HeartbeatRouter) Handle(request ziface.IRequest) {
 		return
 	}
 
-	// 发送心跳响应
+	// 根据官方协议文档，心跳包需要服务器响应
+	// 01指令：如服务器不应答，则3次后不再发送
+	// 21指令：设备如2次收不到服务器应答，则进入离线状态
 	response := r.BuildHeartbeatResponse(utils.FormatPhysicalID(parsedMsg.PhysicalID))
 	r.SendSuccessResponse(request, response)
 }

@@ -134,7 +134,8 @@ func (h *BaseHandler) BuildHeartbeatResponse(physicalID string) []byte {
 	response = append(response, dataContent...)
 
 	// 校验和 (2字节，小端序) - 使用统一的校验函数
-	checksum := dny_protocol.CalculateDNYChecksum(response)
+	// 注意：校验和计算从长度字段开始，不包括"DNY"头
+	checksum := dny_protocol.CalculateDNYChecksum(response[3:]) // 跳过"DNY"头
 	checksumBytes := make([]byte, 2)
 	binary.LittleEndian.PutUint16(checksumBytes, checksum)
 	response = append(response, checksumBytes...)
