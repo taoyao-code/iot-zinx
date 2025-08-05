@@ -11,7 +11,7 @@ DEVICE_B="04A228CD"    # 设备B (显示: 10627277)
 
 # 默认测试参数配置
 DEFAULT_DEVICE="$DEVICE_A"
-DEFAULT_PORT=1          # 🔧 统一端口管理：用户界面显示的端口号(1-based)，API会自动转换为协议端口号(0-based)
+DEFAULT_PORT=1          # 统一端口管理：用户界面显示的端口号(1-based)，API会自动转换为协议端口号(0-based)
 DEFAULT_DURATION=5      # 默认充电时长(分钟)
 DEFAULT_BALANCE=10000   # 默认余额(分)
 DEFAULT_MAX_POWER=3000  # 默认最大功率(0.1W单位，即300W)
@@ -559,7 +559,7 @@ emergency_stop_device() {
 
     log_info "🚨 紧急停止设备: ${display_id} (所有端口)"
 
-    # 🔧 修复：使用端口0xFF(255)停止所有端口（协议中0xFF表示设备智能选择端口）
+    # 修复：使用端口0xFF(255)停止所有端口（协议中0xFF表示设备智能选择端口）
     local response=$(curl -s -X POST "${SERVER_URL}/api/v1/charging/stop" \
         -H "Content-Type: application/json" \
         -d "{

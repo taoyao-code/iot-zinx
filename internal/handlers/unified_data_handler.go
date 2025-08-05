@@ -307,13 +307,16 @@ func (h *UnifiedDataHandler) identifyPacketType(data []byte) string {
 		return "link"
 	}
 
-	// 3. 检查是否为DNY协议包 - 修复短包判断
-	if len(data) >= 9 && string(data[:3]) == constants.ProtocolHeader {
+	// 3. 检查是否为DNY协议包 - 修复短包判断，使用统一函数
+	if len(data) >= 9 && constants.IsDNYProtocolHeader(data) {
 		// 9字节是DNY协议的最小长度：DNY(3) + Length(2) + PhysicalID(4)
-		// 进一步验证Length字段的合理性
+		// 进一步验证Length字段的合理性 - 使用统一函数
 		if len(data) >= 5 {
-			length := uint16(data[3]) | uint16(data[4])<<8 // 小端序读取Length
-			expectedTotal := 5 + int(length)               // DNY(3) + Length(2) + Length内容
+			length, err := constants.ReadDNYLengthField(data)
+			if err != nil {
+				return "unknown" // 长度字段读取失败，认为是未知数据
+			}
+			expectedTotal := constants.HeaderLength + constants.LengthFieldSize + int(length)
 
 			// 对于长度不匹配但格式正确的包，仍然尝试解析
 			if expectedTotal <= len(data)+10 { // 允许10字节的容差

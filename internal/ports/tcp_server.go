@@ -26,7 +26,7 @@ func NewTCPServer(port int) *TCPServer {
 	// 创建Zinx服务器
 	server := znet.NewServer()
 
-	// 🔥 关键修复：使用自定义FrameDecoder处理原始TCP数据
+	// 关键修复：使用自定义FrameDecoder处理原始TCP数据
 	// 替换默认的Zinx协议解析器，用于处理充电设备的原始TCP数据流
 	rawDataDecoder := zinx_server.NewRawDataFrameDecoder()
 	server.SetDecoder(rawDataDecoder)
@@ -40,7 +40,7 @@ func NewTCPServer(port int) *TCPServer {
 	unifiedHandler := handlers.NewUnifiedDataHandler()
 	unifiedHandler.SetConnectionMonitor(globalConnectionMonitor)
 
-	// 🔥 现在只需要一个路由：所有原始数据都会被FrameDecoder处理并包装成msgID=1的消息
+	// 现在只需要一个路由：所有原始数据都会被FrameDecoder处理并包装成msgID=1的消息
 	server.AddRouter(1, unifiedHandler)
 
 	logger.Info("TCP服务器已配置自定义FrameDecoder",

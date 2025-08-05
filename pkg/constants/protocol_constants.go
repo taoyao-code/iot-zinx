@@ -1,6 +1,10 @@
 package constants
 
-import "fmt"
+import (
+	"bytes"
+	"encoding/binary"
+	"fmt"
+)
 
 // AP3000协议常量定义
 // 严格按照AP3000设备与服务器通信协议规范定义
@@ -57,7 +61,7 @@ const (
 	LinkHeartbeatContent = "link" // Link心跳消息内容
 	LinkHeartbeatLength  = 4      // Link心跳消息长度
 
-	// 🔧 修复：ICCID相关常量已在 dny_protocol.go 中定义，删除重复定义
+	// 修复：ICCID相关常量已在 dny_protocol.go 中定义，删除重复定义
 )
 
 // ============================================================================
@@ -266,4 +270,23 @@ func ValidateProtocolConstants() error {
 	}
 
 	return nil
+}
+
+// ============================================================================
+// 统一协议处理函数 - 消除重复代码
+// ============================================================================
+
+// IsDNYProtocolHeader 统一的DNY协议头检查函数
+// 替换所有重复的协议头检查逻辑，使用高效的bytes.Equal方法
+func IsDNYProtocolHeader(data []byte) bool {
+	return len(data) >= HeaderLength && bytes.Equal(data[:HeaderLength], []byte(ProtocolHeader))
+}
+
+// ReadDNYLengthField 统一的DNY协议长度字段读取函数
+// 替换所有重复的长度字段读取逻辑，消除手动位操作的错误风险
+func ReadDNYLengthField(data []byte) (uint16, error) {
+	if len(data) < MinHeaderSize {
+		return 0, fmt.Errorf("insufficient data for length field: got %d bytes, need at least %d", len(data), MinHeaderSize)
+	}
+	return binary.LittleEndian.Uint16(data[LengthFieldPos : LengthFieldPos+LengthFieldSize]), nil
 }

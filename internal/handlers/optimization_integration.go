@@ -9,11 +9,11 @@ import (
 // OptimizationIntegrator 优化集成器 - 统一管理所有优化组件
 type OptimizationIntegrator struct {
 	*BaseHandler
-	heartbeatManager    *HeartbeatManager
-	reconnectManager    *ReconnectManager
-	performanceMonitor  *PerformanceMonitor
-	connectionMonitor   *ConnectionMonitor
-	enabled             bool
+	heartbeatManager   *HeartbeatManager
+	reconnectManager   *ReconnectManager
+	performanceMonitor *PerformanceMonitor
+	connectionMonitor  *ConnectionMonitor
+	enabled            bool
 }
 
 // NewOptimizationIntegrator 创建优化集成器
@@ -23,7 +23,7 @@ func NewOptimizationIntegrator() *OptimizationIntegrator {
 		heartbeatManager:   NewHeartbeatManager(),
 		reconnectManager:   NewReconnectManager(),
 		performanceMonitor: NewPerformanceMonitor(),
-		enabled:           true,
+		enabled:            true,
 	}
 }
 
@@ -55,19 +55,19 @@ func (oi *OptimizationIntegrator) ProcessHeartbeat(request ziface.IRequest, hear
 	if !oi.enabled {
 		return nil // 优化功能禁用时，使用原始逻辑
 	}
-	
+
 	startTime := time.Now()
-	
+
 	// 使用优化的心跳管理器处理
 	err := oi.heartbeatManager.ProcessHeartbeat(request, heartbeatType)
-	
+
 	// 记录性能指标
 	dataSize := len(request.GetData())
 	oi.performanceMonitor.RecordHeartbeat(heartbeatType, dataSize)
-	
+
 	processingTime := time.Since(startTime)
 	oi.Log("优化心跳处理完成: 类型=%s, 耗时=%v", heartbeatType, processingTime)
-	
+
 	return err
 }
 
@@ -76,17 +76,17 @@ func (oi *OptimizationIntegrator) ProcessDeviceRegister(deviceID string) (bool, 
 	if !oi.enabled {
 		return true, "" // 优化功能禁用时，允许所有注册
 	}
-	
+
 	// 检查是否可以重连
 	canReconnect, reason := oi.reconnectManager.CanDeviceReconnect(deviceID)
-	
+
 	// 记录性能指标
 	oi.performanceMonitor.RecordReconnect(canReconnect, !canReconnect, 0)
-	
+
 	if !canReconnect {
 		oi.Log("设备注册被优化器拒绝: %s, 原因: %s", deviceID, reason)
 	}
-	
+
 	return canReconnect, reason
 }
 
@@ -95,10 +95,10 @@ func (oi *OptimizationIntegrator) RecordReconnectResult(deviceID string, success
 	if !oi.enabled {
 		return
 	}
-	
+
 	oi.reconnectManager.RecordReconnectAttempt(deviceID, success)
 	oi.performanceMonitor.RecordReconnect(success, false, backoffTime)
-	
+
 	oi.Log("记录重连结果: 设备=%s, 成功=%v, 退避时间=%v", deviceID, success, backoffTime)
 }
 
@@ -107,7 +107,7 @@ func (oi *OptimizationIntegrator) RecordConnection(connected bool, connectionTim
 	if !oi.enabled {
 		return
 	}
-	
+
 	oi.performanceMonitor.RecordConnection(connected, connectionTime)
 }
 
@@ -130,11 +130,11 @@ func (oi *OptimizationIntegrator) GetPerformanceMonitor() *PerformanceMonitor {
 func (oi *OptimizationIntegrator) GetOptimizationReport() map[string]interface{} {
 	if !oi.enabled {
 		return map[string]interface{}{
-			"status": "disabled",
+			"status":  "disabled",
 			"message": "优化功能已禁用",
 		}
 	}
-	
+
 	return oi.performanceMonitor.GetOptimizationReport()
 }
 
@@ -144,7 +144,7 @@ func (oi *OptimizationIntegrator) StartPeriodicReporting(interval time.Duration)
 		oi.Log("优化功能已禁用，跳过定期报告")
 		return
 	}
-	
+
 	oi.performanceMonitor.StartPeriodicReporting(interval)
 	oi.Log("已启动优化效果定期报告，间隔: %v", interval)
 }
@@ -153,13 +153,13 @@ func (oi *OptimizationIntegrator) StartPeriodicReporting(interval time.Duration)
 func (oi *OptimizationIntegrator) GetDeviceOptimizationStatus(deviceID string) map[string]interface{} {
 	status := map[string]interface{}{
 		"device_id": deviceID,
-		"enabled": oi.enabled,
+		"enabled":   oi.enabled,
 	}
-	
+
 	if !oi.enabled {
 		return status
 	}
-	
+
 	// 获取心跳信息
 	if heartbeatInfo, exists := oi.heartbeatManager.GetHeartbeatInfo(deviceID); exists {
 		status["heartbeat"] = map[string]interface{}{
@@ -171,21 +171,17 @@ func (oi *OptimizationIntegrator) GetDeviceOptimizationStatus(deviceID string) m
 			"consecutive_misses": heartbeatInfo.ConsecutiveMisses,
 		}
 	}
-	
+
 	// 获取重连信息
 	if reconnectInfo, exists := oi.reconnectManager.GetReconnectInfo(deviceID); exists {
 		status["reconnect"] = map[string]interface{}{
-			"last_reconnect":      reconnectInfo.LastReconnect,
-			"reconnect_count":     reconnectInfo.ReconnectCount,
-			"consecutive_fails":   reconnectInfo.ConsecutiveFails,
-			"current_backoff":     reconnectInfo.CurrentBackoff,
-			"next_allowed_time":   reconnectInfo.NextAllowedTime,
-			"connection_quality":  reconnectInfo.ConnectionQuality,
-			"is_blacklisted":      reconnectInfo.IsBlacklisted,
-			"blacklist_until":     reconnectInfo.BlacklistUntil,
+			"last_reconnect":     reconnectInfo.LastReconnect,
+			"reconnect_count":    reconnectInfo.ReconnectCount,
+			"consecutive_fails":  reconnectInfo.ConsecutiveFails,
+			"connection_quality": reconnectInfo.ConnectionQuality,
 		}
 	}
-	
+
 	return status
 }
 
@@ -194,7 +190,7 @@ func (oi *OptimizationIntegrator) CleanupExpiredData() {
 	if !oi.enabled {
 		return
 	}
-	
+
 	oi.reconnectManager.CleanupExpiredData()
 	oi.Log("已清理过期的优化数据")
 }
@@ -204,12 +200,12 @@ func (oi *OptimizationIntegrator) StartPeriodicCleanup(interval time.Duration) {
 	go func() {
 		ticker := time.NewTicker(interval)
 		defer ticker.Stop()
-		
+
 		for range ticker.C {
 			oi.CleanupExpiredData()
 		}
 	}()
-	
+
 	oi.Log("已启动定期数据清理，间隔: %v", interval)
 }
 
@@ -219,7 +215,7 @@ func (oi *OptimizationIntegrator) UpdateHeartbeatConfig(config *HeartbeatConfig)
 		oi.Log("优化功能已禁用，无法更新心跳配置")
 		return
 	}
-	
+
 	oi.heartbeatManager.UpdateConfig(config)
 	oi.Log("心跳配置已更新")
 }
@@ -229,11 +225,11 @@ func (oi *OptimizationIntegrator) GetCurrentConfig() map[string]interface{} {
 	config := map[string]interface{}{
 		"enabled": oi.enabled,
 	}
-	
+
 	if oi.enabled {
 		config["heartbeat"] = oi.heartbeatManager.GetConfig()
 	}
-	
+
 	return config
 }
 
@@ -243,10 +239,10 @@ func (oi *OptimizationIntegrator) LogOptimizationSummary() {
 		oi.Log("优化功能状态: 已禁用")
 		return
 	}
-	
+
 	report := oi.GetOptimizationReport()
 	summary := report["optimization_summary"].(map[string]interface{})
-	
+
 	oi.Log("优化效果摘要:")
 	oi.Log("  心跳流量减少: %s", summary["heartbeat_traffic_reduction"])
 	oi.Log("  重连频率减少: %s", summary["reconnect_frequency_reduction"])

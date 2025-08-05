@@ -8,10 +8,10 @@ tcpServer:
   port: 7054 # TCP端口
 
   # 超时配置 - 优化版
-  initialReadDeadlineSeconds: 180 # 🔧 修复：增加到3分钟，用于等待ICCID
-  defaultReadDeadlineSeconds: 120 # 🔧 优化：从5分钟调整为2分钟，配合新的心跳机制
-  tcpWriteTimeoutSeconds: 90 # TCP写超时90秒 - 🔧 优化：增加写超时减少连接失败
-  tcpReadTimeoutSeconds: 120 # TCP读超时120秒 - 🔧 优化：与ReadDeadline保持一致
+  initialReadDeadlineSeconds: 180 # 修复：增加到3分钟，用于等待ICCID
+  defaultReadDeadlineSeconds: 120 # 优化：从5分钟调整为2分钟，配合新的心跳机制
+  tcpWriteTimeoutSeconds: 90 # TCP写超时90秒 - 优化：增加写超时减少连接失败
+  tcpReadTimeoutSeconds: 120 # TCP读超时120秒 - 优化：与ReadDeadline保持一致
 
   # 缓冲区配置
   sendBufferSize: 262144 # 发送缓冲区256KB - 🔧 优化：增加缓冲区减少积压
@@ -19,7 +19,7 @@ tcpServer:
 
   # TCP选项
   keepAlive: true # 启用TCP Keep-Alive
-  keepAlivePeriodSeconds: 15 # Keep-Alive探测间隔15秒 - 🔧 优化：更频繁检测连接状态
+  keepAlivePeriodSeconds: 15 # Keep-Alive探测间隔15秒 - 优化：更频繁检测连接状态
   tcpNoDelay: true # 禁用Nagle算法，提高实时性
 
   # 队列配置
@@ -78,9 +78,6 @@ logger:
   maxAgeDays: 30 # 保留天数
   compress: true # 是否压缩旧文件
 
-  # 兼容性字段 (废弃，但保留以避免配置错误)
-  filePath: "" # 废弃: 使用 fileDir + filePrefix
-
 # 超时配置
 timeouts:
   deviceInitSeconds: 30 # 设备初始化超时时间，在此时间内必须完成ICCID上报和注册
@@ -91,28 +88,28 @@ timeouts:
 # 设备连接配置 - 优化版
 deviceConnection:
   # 心跳超时时间（秒）- 这是 HeartbeatManager 使用的，应大于 ReadDeadline
-  heartbeatTimeoutSeconds: 150 # 🔧 优化：调整为2.5分钟，配合新的ReadDeadline
+  heartbeatTimeoutSeconds: 150 # 优化：调整为2.5分钟，配合新的ReadDeadline
   # 心跳检查间隔（秒）- 优化后的心跳频率
-  heartbeatIntervalSeconds: 20 # 🔧 优化：从30秒调整为20秒，减少网络负载
+  heartbeatIntervalSeconds: 20 # 优化：从30秒调整为20秒，减少网络负载
   # 心跳警告阈值（秒）
-  heartbeatWarningThreshold: 180 # 🔧 优化：调整为3分钟警告
+  heartbeatWarningThreshold: 180 # 优化：调整为3分钟警告
   # 会话超时时间（分钟）
   sessionTimeoutMinutes: 60 # 会话超时60分钟
 
-  # 🔧 新增：差异化超时策略
+  # 新增：差异化超时策略
   timeouts:
     # 注册响应超时（秒）- 设备注册必须快速响应
     registerTimeoutSeconds: 30
     # 心跳响应超时（秒）- 心跳包应该快速处理
     heartbeatResponseTimeoutSeconds: 10
     # 数据传输超时（秒）- 业务数据传输可以相对宽松
-    # 🔧 优化：充电控制命令需要更长超时，应对网络波动
+    # 优化：充电控制命令需要更长超时，应对网络波动
     dataTransferTimeoutSeconds: 90
     # 默认写操作超时（秒）- 用于未明确分类的操作
-    # 🔧 优化：增加默认写超时，减少TCP写超时频率
+    # 优化：增加默认写超时，减少TCP写超时频率
     defaultWriteTimeoutSeconds: 60
 
-# 🔧 新增：心跳优化配置
+# 新增：心跳优化配置
 heartbeat:
   # 标准心跳间隔（秒）- 从5秒优化到20秒
   standardInterval: 20
@@ -132,10 +129,10 @@ heartbeat:
     backwardCompatible: true
     legacyHeartbeatEnabled: true
 
-# 🔧 重连管理配置 - 已移除所有限制，仅保留监控功能
+# 重连管理配置 - 已移除所有限制，仅保留监控功能
 reconnect:
-  # 🔥 已移除所有限制配置（指数退避、频率限制、黑名单机制）
-  # 🔥 紧急修复：完全移除重连限制，保障充电业务连续性
+  # 已移除所有限制配置（指数退避、频率限制、黑名单机制）
+  # 紧急修复：完全移除重连限制，保障充电业务连续性
 
   # 保留连接质量评估配置用于监控
   qualityWindow: 10m

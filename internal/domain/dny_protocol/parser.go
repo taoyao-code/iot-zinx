@@ -3,10 +3,12 @@ package dny_protocol
 import (
 	"encoding/binary"
 	"fmt"
+
+	"github.com/bujia-iot/iot-zinx/pkg/constants"
 )
 
 // ParseDNYMessage 统一的DNY协议消息解析入口
-// 这是1.1协议解析标准化的核心函数
+// 这是协议解析标准化的核心函数，支持所有DNY协议变体
 func ParseDNYMessage(rawData []byte) *ParsedMessage {
 	result := &ParsedMessage{
 		RawData: rawData,
@@ -18,21 +20,25 @@ func ParseDNYMessage(rawData []byte) *ParsedMessage {
 		return result
 	}
 
-	// 验证DNY协议头
-	if string(rawData[:3]) != "DNY" {
-		result.Error = fmt.Errorf("invalid protocol header: %s, expected DNY", string(rawData[:3]))
+	// 验证DNY协议头 - 使用统一函数
+	if !constants.IsDNYProtocolHeader(rawData) {
+		result.Error = fmt.Errorf("invalid protocol header, expected DNY")
 		return result
 	}
 
-	// 🔧 修复：协议解析顺序错误
-	// 根据DNY协议文档: DNY(3) + Length(2) + 物理ID(4) + 消息ID(2) + 命令(1) + 数据 + 校验和(2)
-	length := binary.LittleEndian.Uint16(rawData[3:5])           // Length字段 (2字节)
+	// 协议解析：按照DNY协议文档标准顺序解析
+	// 协议格式: DNY(3) + Length(2) + 物理ID(4) + 消息ID(2) + 命令(1) + 数据 + 校验和(2)
+	length, err := constants.ReadDNYLengthField(rawData) // Length字段 (2字节) - 使用统一函数
+	if err != nil {
+		result.Error = fmt.Errorf("failed to read length field: %v", err)
+		return result
+	}
 	result.PhysicalID = binary.LittleEndian.Uint32(rawData[5:9]) // 物理ID (4字节)
 	result.MessageID = binary.LittleEndian.Uint16(rawData[9:11]) // 消息ID (2字节)
 	result.Command = rawData[11]                                 // 命令 (1字节)
 	result.MessageType = MessageType(result.Command)
 
-	// 🔧 修复：智能计算数据部分长度 - 适配不同协议版本
+	// 智能计算数据部分长度 - 适配不同协议版本
 	// 检查Length字段是否合理，如果不合理则使用实际包长度计算
 	expectedTotalLength := 3 + 2 + int(length) // DNY(3) + Length(2) + Length字段内容
 	actualDataLength := len(rawData) - 12      // 实际可用的数据部分长度 (DNY+Length+PhysicalID+MessageID+Command = 12字节)
