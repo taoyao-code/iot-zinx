@@ -1,11 +1,11 @@
 package apis
 
 import (
-	"encoding/hex"
 	"fmt"
 	"strconv"
 	"time"
 
+	"github.com/bujia-iot/iot-zinx/internal/domain/dny_protocol"
 	"github.com/bujia-iot/iot-zinx/internal/handlers"
 	"github.com/bujia-iot/iot-zinx/internal/infrastructure/logger"
 	"github.com/bujia-iot/iot-zinx/pkg/storage"
@@ -28,15 +28,9 @@ func (api *DeviceAPI) SetConnectionMonitor(monitor *handlers.ConnectionMonitor) 
 }
 
 // sendProtocolPacket 发送协议包到设备
-func (api *DeviceAPI) sendProtocolPacket(deviceID string, packet []byte) error {
+func (api *DeviceAPI) sendProtocolPacket(deviceID string, physicalID uint32, messageID uint16, command uint8, data []byte) error {
 	if api.connectionMonitor == nil {
 		return fmt.Errorf("连接监控器未初始化")
-	}
-
-	// 解析设备ID为物理ID
-	physicalID, err := api.parseDeviceID(deviceID)
-	if err != nil {
-		return fmt.Errorf("解析设备ID失败: %v", err)
 	}
 
 	// 将物理ID转换为系统内部使用的十六进制格式
@@ -48,7 +42,8 @@ func (api *DeviceAPI) sendProtocolPacket(deviceID string, packet []byte) error {
 		zap.String("device_id", deviceID),
 		zap.String("hex_device_id", hexDeviceID),
 		zap.Uint32("physical_id", physicalID),
-		zap.Int("packet_length", len(packet)),
+		zap.Uint8("command", command),
+		zap.Int("data_length", len(data)),
 	)
 
 	// 获取设备连接对象
@@ -82,15 +77,21 @@ func (api *DeviceAPI) sendProtocolPacket(deviceID string, packet []byte) error {
 		zap.String("remote_addr", remoteAddr),
 	)
 
-	// 记录发送的协议包内容
-	logger.HexDump("发送协议包内容", packet,
-		zap.String("component", "device_api"),
-		zap.String("device_id", deviceID),
-		zap.Uint32("conn_id", connID),
-	)
+	// 构建DNY协议包
+	packet := dny_protocol.BuildDNYPacket(physicalID, messageID, command, data)
 
-	// 通过Zinx连接发送协议包（使用SendBuffMsg避免双重封装）
-	err = conn.SendBuffMsg(0, packet)
+	// 通过TCP连接直接发送（绕过Zinx封装）
+	tcpConn := conn.GetTCPConnection()
+	if tcpConn == nil {
+		logger.Error("无法获取TCP连接",
+			zap.String("component", "device_api"),
+			zap.String("device_id", deviceID),
+			zap.Uint32("conn_id", connID),
+		)
+		return fmt.Errorf("无法获取TCP连接")
+	}
+
+	_, err := tcpConn.Write(packet)
 	if err != nil {
 		logger.Error("发送协议包失败",
 			zap.String("component", "device_api"),
@@ -106,13 +107,9 @@ func (api *DeviceAPI) sendProtocolPacket(deviceID string, packet []byte) error {
 		zap.String("component", "device_api"),
 		zap.String("device_id", deviceID),
 		zap.Uint32("conn_id", connID),
-		zap.Int("packet_length", len(packet)),
-		// 十六进制数据
-		zap.String("raw_hex", hex.EncodeToString(packet)),
+		zap.Uint8("command", command),
+		zap.Int("data_length", len(data)),
 	)
-
-	// 使用通信日志记录发送数据
-	logger.LogSendData(hexDeviceID, packet, "charging_control")
 
 	return nil
 }

@@ -5,7 +5,6 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/bujia-iot/iot-zinx/internal/domain/dny_protocol"
 	"github.com/bujia-iot/iot-zinx/pkg/constants"
 	"github.com/bujia-iot/iot-zinx/pkg/storage"
 	"github.com/gin-gonic/gin"
@@ -445,23 +444,27 @@ func (api *DeviceAPI) StartChargingGin(c *gin.Context) {
 	// 生成消息ID
 	messageID := api.generateMessageID()
 
-	// 构建充电控制协议包
-	packet := dny_protocol.BuildChargeControlPacket(
-		physicalID,
-		messageID,
-		byte(request.Mode),           // 费率模式
-		uint32(request.Balance),      // 余额
-		byte(request.Port),           // 端口号
-		constants.ChargeCommandStart, // 开始充电命令
-		uint16(request.Value),        // 充电时长/电量
-		request.OrderNo,              // 订单号
-		uint16(request.Value),        // 最大充电时长
-		1000,                         // 最大功率(W)
-		1,                            // 二维码灯开启
-	)
+	// 构建充电控制数据（37字节）
+	chargeData := make([]byte, 37)
+	chargeData[0] = byte(request.Mode)    // 费率模式
+	chargeData[1] = byte(request.Balance) // 余额（小端序）
+	chargeData[2] = byte(request.Balance >> 8)
+	chargeData[3] = byte(request.Balance >> 16)
+	chargeData[4] = byte(request.Balance >> 24)
+	chargeData[5] = byte(request.Port)           // 端口号
+	chargeData[6] = constants.ChargeCommandStart // 开始充电命令
+	chargeData[7] = byte(request.Value)          // 充电时长（小端序）
+	chargeData[8] = byte(request.Value >> 8)
+	copy(chargeData[9:25], []byte(request.OrderNo)) // 订单号（16字节）
+	chargeData[25] = byte(request.Value)            // 最大充电时长（小端序）
+	chargeData[26] = byte(request.Value >> 8)
+	chargeData[27] = byte(1000 & 0xFF) // 最大功率（小端序）
+	chargeData[28] = byte((1000 >> 8) & 0xFF)
+	chargeData[29] = 1 // 二维码灯开启
+	// 其余字段保持默认值0
 
 	// 发送协议包到设备
-	err = api.sendProtocolPacket(request.DeviceID, packet)
+	err = api.sendProtocolPacket(request.DeviceID, physicalID, messageID, constants.CmdChargeControl, chargeData)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, NewErrorResponse("发送充电命令失败: "+err.Error(), 500))
 		return
@@ -526,23 +529,16 @@ func (api *DeviceAPI) StopChargingGin(c *gin.Context) {
 	// 生成消息ID
 	messageID := api.generateMessageID()
 
-	// 构建停止充电协议包
-	packet := dny_protocol.BuildChargeControlPacket(
-		physicalID,
-		messageID,
-		0,                           // 费率模式（停止时不重要）
-		0,                           // 余额（停止时不重要）
-		byte(request.Port),          // 端口号
-		constants.ChargeCommandStop, // 停止充电命令
-		0,                           // 充电时长为0
-		request.OrderNo,             // 订单号
-		0,                           // 最大充电时长为0
-		0,                           // 最大功率为0
-		0,                           // 二维码灯关闭
-	)
+	// 构建停止充电数据（37字节）
+	stopChargeData := make([]byte, 37)
+	stopChargeData[0] = 0                               // 费率模式（停止时不重要）
+	stopChargeData[5] = byte(request.Port)              // 端口号
+	stopChargeData[6] = constants.ChargeCommandStop     // 停止充电命令
+	copy(stopChargeData[9:25], []byte(request.OrderNo)) // 订单号（16字节）
+	// 其余字段保持默认值0
 
 	// 发送协议包到设备
-	err = api.sendProtocolPacket(request.DeviceID, packet)
+	err = api.sendProtocolPacket(request.DeviceID, physicalID, messageID, constants.CmdChargeControl, stopChargeData)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, NewErrorResponse("发送停止充电命令失败: "+err.Error(), 500))
 		return
@@ -614,10 +610,9 @@ func (api *DeviceAPI) LocateDeviceGin(c *gin.Context) {
 
 	// 构建设备定位协议包（0x96命令）
 	locateData := []byte{byte(request.LocateTime)} // 定位时间（秒）
-	packet := dny_protocol.BuildDNYPacket(physicalID, messageID, constants.CmdDeviceLocate, locateData)
 
 	// 发送协议包到设备
-	err = api.sendProtocolPacket(request.DeviceID, packet)
+	err = api.sendProtocolPacket(request.DeviceID, physicalID, messageID, constants.CmdDeviceLocate, locateData)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, NewErrorResponse("发送定位命令失败: "+err.Error(), 500))
 		return
