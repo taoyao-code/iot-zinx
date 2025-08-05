@@ -89,6 +89,7 @@ func (h *BaseHandler) BuildDeviceRegisterResponse(physicalID string) []byte {
 	response = append(response, dataContent...)
 
 	// 校验和 (2字节，小端序) - 使用统一的校验函数
+	// 校验范围：从"DNY"头开始到校验码前的所有字节
 	checksum := dny_protocol.CalculateDNYChecksum(response)
 	checksumBytes := make([]byte, 2)
 	binary.LittleEndian.PutUint16(checksumBytes, checksum)
@@ -134,8 +135,8 @@ func (h *BaseHandler) BuildHeartbeatResponse(physicalID string) []byte {
 	response = append(response, dataContent...)
 
 	// 校验和 (2字节，小端序) - 使用统一的校验函数
-	// 注意：校验和计算从长度字段开始，不包括"DNY"头
-	checksum := dny_protocol.CalculateDNYChecksum(response[3:]) // 跳过"DNY"头
+	// 校验范围：从"DNY"头开始到校验码前的所有字节
+	checksum := dny_protocol.CalculateDNYChecksum(response)
 	checksumBytes := make([]byte, 2)
 	binary.LittleEndian.PutUint16(checksumBytes, checksum)
 	response = append(response, checksumBytes...)
@@ -184,6 +185,7 @@ func (h *BaseHandler) BuildChargeControlResponse(physicalID string, success bool
 	response = append(response, dataContent...)
 
 	// 校验和 (2字节，小端序) - 使用统一的校验函数
+	// 校验范围：从"DNY"头开始到校验码前的所有字节
 	checksum := dny_protocol.CalculateDNYChecksum(response)
 	checksumBytes := make([]byte, 2)
 	binary.LittleEndian.PutUint16(checksumBytes, checksum)

@@ -248,7 +248,8 @@ func buildDNYPacket(physicalID uint32, messageID uint16, command uint8, data []b
 	packet = append(packet, data...)
 
 	// 7. 计算校验和 (使用统一的校验函数)
-	checksum := CalculateDNYChecksum(packet[3:]) // 从长度字段开始计算
+	// 校验范围：从"DNY"头开始到校验码前的所有字节
+	checksum := CalculateDNYChecksum(packet) // 包含"DNY"头的完整数据
 
 	// 8. 添加校验和 (小端序)
 	checksumBytes := make([]byte, 2)

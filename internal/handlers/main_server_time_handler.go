@@ -47,7 +47,7 @@ func (r *MainServerTimeRouter) Handle(request ziface.IRequest) {
 
 	// 构建时间响应
 	response := r.BuildMainServerTimeResponse(utils.FormatPhysicalID(parsedMsg.PhysicalID), parsedMsg.MessageID)
-	
+
 	// 发送响应
 	r.SendSuccessResponse(request, response)
 
@@ -82,18 +82,16 @@ func (r *MainServerTimeRouter) BuildMainServerTimeResponse(physicalID string, me
 	currentTime := uint32(time.Now().Unix())
 	binary.LittleEndian.PutUint32(response[12:16], currentTime)
 
-	// 计算校验和
-	checksum := r.CalculateChecksum(response[5:16])
+	// 计算校验和 - 使用统一的校验函数
+	// 校验范围：从"DNY"头开始到校验码前的所有字节
+	checksum := dny_protocol.CalculateDNYChecksum(response[0:16])
 	binary.LittleEndian.PutUint16(response[16:18], checksum)
 
 	return response
 }
 
-// CalculateChecksum 计算校验和
+// CalculateChecksum 计算校验和 (已弃用，使用 dny_protocol.CalculateDNYChecksum)
+// 保留此函数以维持向后兼容性
 func (r *MainServerTimeRouter) CalculateChecksum(data []byte) uint16 {
-	var sum uint16
-	for _, b := range data {
-		sum += uint16(b)
-	}
-	return sum
+	return dny_protocol.CalculateDNYChecksum(data)
 }

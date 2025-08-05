@@ -198,8 +198,9 @@ func (r *SettlementRouter) BuildSettlementResponse(physicalID string, messageID 
 	// 应答状态 (1字节) - 0表示成功
 	response[12] = 0x00
 
-	// 计算校验和
-	checksum := r.CalculateChecksum(response[5:13])
+	// 计算校验和 - 使用统一的校验函数
+	// 校验范围：从"DNY"头开始到校验码前的所有字节
+	checksum := dny_protocol.CalculateDNYChecksum(response[0:13])
 	binary.LittleEndian.PutUint16(response[13:15], checksum)
 
 	return response
@@ -229,8 +230,9 @@ func (r *SettlementRouter) sendErrorResponse(request ziface.IRequest, errorCode 
 	// 错误状态
 	response[12] = errorCode
 
-	// 计算校验和
-	checksum := r.CalculateChecksum(response[5:13])
+	// 计算校验和 - 使用统一的校验函数
+	// 校验范围：从"DNY"头开始到校验码前的所有字节
+	checksum := dny_protocol.CalculateDNYChecksum(response[0:13])
 	binary.LittleEndian.PutUint16(response[13:15], checksum)
 
 	// 发送响应
@@ -239,13 +241,10 @@ func (r *SettlementRouter) sendErrorResponse(request ziface.IRequest, errorCode 
 	}
 }
 
-// CalculateChecksum 计算校验和
+// CalculateChecksum 计算校验和 (已弃用，使用 dny_protocol.CalculateDNYChecksum)
+// 保留此函数以维持向后兼容性
 func (r *SettlementRouter) CalculateChecksum(data []byte) uint16 {
-	var sum uint16
-	for _, b := range data {
-		sum += uint16(b)
-	}
-	return sum
+	return dny_protocol.CalculateDNYChecksum(data)
 }
 
 // getStopReasonDescription 获取停止原因描述
