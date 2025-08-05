@@ -637,3 +637,21 @@ func (api *DeviceAPI) GetHealthGin(c *gin.Context) {
 
 	c.JSON(http.StatusOK, NewStandardResponse(result, "系统健康", 0))
 }
+
+// PingGin 简单连通性测试 (Gin版本)
+// @Summary 连通性测试
+// @Description 简单的连通性测试接口，用于检查服务是否正常运行
+// @Tags system
+// @Accept json
+// @Produce json
+// @Success 200 {object} StandardResponse{data=map[string]interface{}} "成功"
+// @Router /ping [get]
+func (api *DeviceAPI) PingGin(c *gin.Context) {
+	result := map[string]interface{}{
+		"message": "pong",
+		"time":    time.Now().Unix(),
+		"status":  "ok",
+	}
+
+	c.JSON(http.StatusOK, NewStandardResponse(result, "pong", 0))
+}

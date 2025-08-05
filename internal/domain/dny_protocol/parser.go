@@ -146,6 +146,9 @@ func ParseDNYMessage(rawData []byte) *ParsedMessage {
 		}
 		result.Data = data
 
+	// 注意：设备响应使用相同的命令字节，需要通过数据长度和内容来区分
+	// 响应通常只包含1字节的状态码，而命令包含更多数据
+
 	default:
 		// 处理扩展消息类型和未知消息类型
 		if IsExtendedMessageType(result.MessageType) {

@@ -25,20 +25,24 @@ type UnifiedDataHandler struct {
 	settlement        *SettlementRouter
 	serverTime        *ServerTimeRouter
 	modifyCharge      *ModifyChargeRouter
+	deviceResponse    *DeviceResponseRouter
+	responseDetector  *ResponseDetector
 	connectionMonitor *ConnectionMonitor
 }
 
 // NewUnifiedDataHandler 创建统一数据处理器
 func NewUnifiedDataHandler() *UnifiedDataHandler {
 	return &UnifiedDataHandler{
-		BaseHandler:    NewBaseHandler("UnifiedDataHandler"),
-		simCardHandler: &SimCardHandler{},
-		deviceRegister: NewDeviceRegisterRouter(),
-		heartbeat:      NewHeartbeatRouter(),
-		charging:       NewChargingRouter(),
-		settlement:     NewSettlementRouter(),
-		serverTime:     NewServerTimeRouter(),
-		modifyCharge:   NewModifyChargeRouter(),
+		BaseHandler:      NewBaseHandler("UnifiedDataHandler"),
+		simCardHandler:   &SimCardHandler{},
+		deviceRegister:   NewDeviceRegisterRouter(),
+		heartbeat:        NewHeartbeatRouter(),
+		charging:         NewChargingRouter(),
+		settlement:       NewSettlementRouter(),
+		serverTime:       NewServerTimeRouter(),
+		modifyCharge:     NewModifyChargeRouter(),
+		deviceResponse:   NewDeviceResponseRouter(),
+		responseDetector: NewResponseDetector(),
 	}
 }
 
@@ -47,6 +51,7 @@ func (h *UnifiedDataHandler) SetConnectionMonitor(monitor *ConnectionMonitor) {
 	h.connectionMonitor = monitor
 	h.deviceRegister.SetConnectionMonitor(monitor)
 	h.heartbeat.SetConnectionMonitor(monitor)
+	h.deviceResponse.SetConnectionMonitor(monitor)
 }
 
 // Handle 统一处理所有传入的数据包
@@ -143,11 +148,22 @@ func (h *UnifiedDataHandler) Handle(request ziface.IRequest) {
 			h.settlement.Handle(request)
 
 		case dny_protocol.MsgTypeDeviceLocate:
-			logger.Info("UnifiedDataHandler: 分发设备定位指令到对应处理器",
-				zap.Uint64("connID", conn.GetConnID()),
-				zap.String("command", fmt.Sprintf("0x%02x", parsedMsg.Command)),
-			)
-			// TODO: 实现设备定位处理逻辑
+			// 检测是否为设备响应
+			if h.responseDetector.IsDeviceResponse(parsedMsg) {
+				logger.Info("UnifiedDataHandler: 分发设备定位响应到DeviceResponseRouter",
+					zap.Uint64("connID", conn.GetConnID()),
+					zap.String("command", fmt.Sprintf("0x%02x", parsedMsg.Command)),
+					zap.String("response_type", "device_locate_response"),
+				)
+				h.deviceResponse.Handle(request)
+			} else {
+				logger.Info("UnifiedDataHandler: 收到设备定位命令（通常由API发送）",
+					zap.Uint64("connID", conn.GetConnID()),
+					zap.String("command", fmt.Sprintf("0x%02x", parsedMsg.Command)),
+				)
+				// 设备定位命令通常由API发送，这里收到可能是异常情况
+				logger.Warn("设备主动发送定位命令，可能是异常情况")
+			}
 			logger.Info("设备定位指令处理", zap.Any("data", parsedMsg.Data))
 
 		case dny_protocol.MsgTypeOrderConfirm:
@@ -174,18 +190,38 @@ func (h *UnifiedDataHandler) Handle(request ziface.IRequest) {
 			h.serverTime.Handle(request)
 
 		case dny_protocol.MsgTypeChargeControl:
-			logger.Info("UnifiedDataHandler: 分发充电控制包到ChargingRouter",
-				zap.Uint64("connID", conn.GetConnID()),
-				zap.String("command", fmt.Sprintf("0x%02x", parsedMsg.Command)),
-			)
-			h.charging.Handle(request)
+			// 检测是否为设备响应
+			if h.responseDetector.IsDeviceResponse(parsedMsg) {
+				logger.Info("UnifiedDataHandler: 分发充电控制响应到DeviceResponseRouter",
+					zap.Uint64("connID", conn.GetConnID()),
+					zap.String("command", fmt.Sprintf("0x%02x", parsedMsg.Command)),
+					zap.String("response_type", "charge_control_response"),
+				)
+				h.deviceResponse.Handle(request)
+			} else {
+				logger.Info("UnifiedDataHandler: 分发充电控制包到ChargingRouter",
+					zap.Uint64("connID", conn.GetConnID()),
+					zap.String("command", fmt.Sprintf("0x%02x", parsedMsg.Command)),
+				)
+				h.charging.Handle(request)
+			}
 
 		case dny_protocol.MsgTypeModifyCharge:
-			logger.Info("UnifiedDataHandler: 分发修改充电参数请求到ModifyChargeRouter",
-				zap.Uint64("connID", conn.GetConnID()),
-				zap.String("command", fmt.Sprintf("0x%02x", parsedMsg.Command)),
-			)
-			h.modifyCharge.Handle(request)
+			// 检测是否为设备响应
+			if h.responseDetector.IsDeviceResponse(parsedMsg) {
+				logger.Info("UnifiedDataHandler: 分发修改充电参数响应到DeviceResponseRouter",
+					zap.Uint64("connID", conn.GetConnID()),
+					zap.String("command", fmt.Sprintf("0x%02x", parsedMsg.Command)),
+					zap.String("response_type", "modify_charge_response"),
+				)
+				h.deviceResponse.Handle(request)
+			} else {
+				logger.Info("UnifiedDataHandler: 分发修改充电参数请求到ModifyChargeRouter",
+					zap.Uint64("connID", conn.GetConnID()),
+					zap.String("command", fmt.Sprintf("0x%02x", parsedMsg.Command)),
+				)
+				h.modifyCharge.Handle(request)
+			}
 
 		case dny_protocol.MsgTypeExtendedCommand:
 			logger.Info("UnifiedDataHandler: 收到扩展命令数据包(0x05)",

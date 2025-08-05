@@ -52,6 +52,10 @@ const (
 	MsgTypeExtStatus19   MessageType = 0xAB // 扩展状态类型19 (20字节)
 	MsgTypeExtStatus20   MessageType = 0xAC // 扩展状态类型20 (20字节)
 
+	// 设备响应消息类型（设备对服务器命令的应答）
+	// 注意：响应消息的识别需要通过上下文判断，而不是命令字节
+	// 这些类型用于内部处理逻辑，实际协议中响应使用相同的命令字节
+
 	MsgTypeNewType MessageType = 0xF1 // 新发现的消息类型
 )
 

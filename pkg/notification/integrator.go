@@ -7,6 +7,8 @@ import (
 	"github.com/aceld/zinx/ziface"
 	"github.com/bujia-iot/iot-zinx/internal/infrastructure/config"
 	"github.com/bujia-iot/iot-zinx/internal/infrastructure/logger"
+	"github.com/bujia-iot/iot-zinx/internal/infrastructure/redis"
+	redisClient "github.com/redis/go-redis/v9"
 )
 
 // NotificationIntegrator 通知集成器
@@ -52,6 +54,11 @@ func NewNotificationIntegrator() *NotificationIntegrator {
 	if err != nil {
 		logger.Error("创建通知服务失败: " + err.Error())
 		return &NotificationIntegrator{enabled: false}
+	}
+
+	// 设置Redis客户端（如果可用）
+	if redisClient := getRedisClient(); redisClient != nil {
+		service.SetRedisClient(redisClient)
 	}
 
 	return &NotificationIntegrator{
@@ -526,4 +533,13 @@ func parseDuration(s string, defaultValue time.Duration) time.Duration {
 		return d
 	}
 	return defaultValue
+}
+
+// getRedisClient 获取Redis客户端
+func getRedisClient() *redisClient.Client {
+	// 尝试获取全局Redis客户端
+	if client := redis.GetClient(); client != nil {
+		return client
+	}
+	return nil
 }

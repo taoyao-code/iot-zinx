@@ -29,6 +29,7 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"log"
 	"os"
@@ -39,6 +40,7 @@ import (
 	"github.com/bujia-iot/iot-zinx/internal/infrastructure/config"
 	"github.com/bujia-iot/iot-zinx/internal/infrastructure/logger"
 	"github.com/bujia-iot/iot-zinx/internal/ports"
+	"github.com/bujia-iot/iot-zinx/pkg/notification"
 	"github.com/bujia-iot/iot-zinx/pkg/utils"
 	"go.uber.org/zap"
 )
@@ -69,6 +71,16 @@ func main() {
 	utils.SetupZinxLogger()
 
 	logger.Info("日志系统初始化完成")
+
+	// 初始化通知系统
+	ctx := context.Background()
+	if err := notification.InitGlobalNotificationIntegrator(ctx); err != nil {
+		logger.Error("通知系统初始化失败", zap.Error(err))
+		// 通知系统失败不应该阻止服务启动，只记录错误
+	} else {
+		logger.Info("通知系统初始化完成")
+	}
+
 	logger.Infof("TCP服务器配置: %s:%d", cfg.TCPServer.Host, cfg.TCPServer.Port)
 	logger.Infof("HTTP服务器配置: %s:%d", cfg.HTTPAPIServer.Host, cfg.HTTPAPIServer.Port)
 
@@ -108,4 +120,11 @@ func main() {
 	<-c
 
 	log.Println("🛑 收到停止信号，关闭服务...")
+
+	// 优雅关闭通知系统
+	if err := notification.StopGlobalNotificationIntegrator(ctx); err != nil {
+		logger.Error("停止通知系统失败", zap.Error(err))
+	} else {
+		logger.Info("通知系统已停止")
+	}
 }

@@ -108,12 +108,7 @@ func registerRoutes(router *gin.Engine, deviceAPI *DeviceAPI) {
 
 	// 健康检查路由
 	router.GET("/health", deviceAPI.GetHealthGin)
-	router.GET("/ping", func(c *gin.Context) {
-		c.JSON(http.StatusOK, gin.H{
-			"message": "pong",
-			"time":    time.Now().Unix(),
-		})
-	})
+	router.GET("/ping", deviceAPI.PingGin)
 }
 
 // corsMiddleware CORS中间件
