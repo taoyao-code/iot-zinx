@@ -130,6 +130,15 @@ func ParseDNYMessage(rawData []byte) *ParsedMessage {
 		}
 		result.Data = data
 
+	case MsgTypeMainHeartbeat:
+		// 主机状态心跳包（0x11）
+		data := &MainStatusHeartbeatData{}
+		if err := data.UnmarshalBinary(dataPayload); err != nil {
+			result.Error = fmt.Errorf("parse main status heartbeat data: %w", err)
+			return result
+		}
+		result.Data = data
+
 	case MsgTypeMainGetServerTime:
 		// 主机获取服务器时间（0x12）
 		data := &MainServerTimeRequestData{}

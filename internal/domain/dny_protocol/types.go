@@ -11,6 +11,7 @@ const (
 	MsgTypeOrderConfirm      MessageType = 0x04 // 充电端口订单确认（老版本指令）
 	MsgTypeExtendedCommand   MessageType = 0x05 // 扩展命令类型
 	MsgTypePowerHeartbeat    MessageType = 0x06 // 端口充电时功率心跳包（新版本指令）
+	MsgTypeMainHeartbeat     MessageType = 0x11 // 主机状态心跳包
 	MsgTypeMainGetServerTime MessageType = 0x12 // 主机获取服务器时间
 	MsgTypeDeviceRegister    MessageType = 0x20 // 设备注册包（正确的注册指令）
 	MsgTypeHeartbeat         MessageType = 0x21 // 设备心跳包（新版）
@@ -95,7 +96,7 @@ func IsExtendedMessageType(msgType MessageType) bool {
 // IsHeartbeatType 检查是否为心跳类型消息
 func IsHeartbeatType(msgType MessageType) bool {
 	switch msgType {
-	case MsgTypeOldHeartbeat, MsgTypeHeartbeat, MsgTypePowerHeartbeat,
+	case MsgTypeOldHeartbeat, MsgTypeHeartbeat, MsgTypePowerHeartbeat, MsgTypeMainHeartbeat,
 		MsgTypeExtHeartbeat1, MsgTypeExtHeartbeat2, MsgTypeExtHeartbeat3,
 		MsgTypeExtHeartbeat4, MsgTypeExtHeartbeat5, MsgTypeExtHeartbeat6,
 		MsgTypeExtHeartbeat7, MsgTypeExtHeartbeat8:

@@ -21,6 +21,7 @@ type UnifiedDataHandler struct {
 	simCardHandler    *SimCardHandler
 	deviceRegister    *DeviceRegisterRouter
 	heartbeat         *HeartbeatRouter
+	mainHeartbeat     *MainHeartbeatRouter
 	charging          *ChargingRouter
 	settlement        *SettlementRouter
 	serverTime        *ServerTimeRouter
@@ -38,6 +39,7 @@ func NewUnifiedDataHandler() *UnifiedDataHandler {
 		simCardHandler:   &SimCardHandler{},
 		deviceRegister:   NewDeviceRegisterRouter(),
 		heartbeat:        NewHeartbeatRouter(),
+		mainHeartbeat:    NewMainHeartbeatRouter(),
 		charging:         NewChargingRouter(),
 		settlement:       NewSettlementRouter(),
 		serverTime:       NewServerTimeRouter(),
@@ -53,6 +55,7 @@ func (h *UnifiedDataHandler) SetConnectionMonitor(monitor *ConnectionMonitor) {
 	h.connectionMonitor = monitor
 	h.deviceRegister.SetConnectionMonitor(monitor)
 	h.heartbeat.SetConnectionMonitor(monitor)
+	h.mainHeartbeat.SetConnectionMonitor(monitor)
 	h.deviceResponse.SetConnectionMonitor(monitor)
 }
 
@@ -133,6 +136,13 @@ func (h *UnifiedDataHandler) Handle(request ziface.IRequest) {
 				zap.String("command", fmt.Sprintf("0x%02x", parsedMsg.Command)),
 			)
 			h.heartbeat.Handle(request)
+
+		case dny_protocol.MsgTypeMainHeartbeat:
+			logger.Info("UnifiedDataHandler: 分发主机状态心跳包到MainHeartbeatRouter",
+				zap.Uint64("connID", conn.GetConnID()),
+				zap.String("command", fmt.Sprintf("0x%02x", parsedMsg.Command)),
+			)
+			h.mainHeartbeat.Handle(request)
 
 		case dny_protocol.MsgTypeSwipeCard:
 			logger.Info("UnifiedDataHandler: 分发刷卡请求到对应处理器",

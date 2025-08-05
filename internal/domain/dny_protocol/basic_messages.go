@@ -359,3 +359,200 @@ func (m *MainServerTimeRequestData) UnmarshalBinary(data []byte) error {
 	m.Timestamp = time.Now()
 	return nil
 }
+
+// MainStatusHeartbeatData 主机状态心跳数据 (0x11)
+// 严格按照协议文档定义：71字节的完整状态数据
+type MainStatusHeartbeatData struct {
+	FirmwareVersion  [2]byte   // 固件版本 (2字节)
+	HasRTCModule     uint8     // 是否有RTC模块 (1字节): 00=无RTC模块，01=SD2068，02=BM8563
+	CurrentTimestamp uint32    // 主机当前时间戳 (4字节): 如无RTC模块，则为全0
+	SignalStrength   uint8     // 信号强度 (1字节): 0-31（31信号最好），99表示异常
+	CommModuleType   uint8     // 通讯模块类型 (1字节): 01=WIFI(B2)，02=2G（GM3），03=4G等
+	SIMCardNumber    [20]byte  // SIM卡号 (20字节): ASCII字符串格式
+	HostType         uint8     // 主机类型 (1字节): 参考协议文档中的主机类型表
+	Frequency        uint16    // 频率 (2字节): LORA使用的中心频率，如无此数据则为0
+	IMEI             [15]byte  // IMEI号 (15字节): 模块的IMEI号
+	ModuleVersion    [24]byte  // 模块版本号 (24字节): 通讯模块的固件版本号
+	Timestamp        time.Time // 解析时间戳
+}
+
+func (m *MainStatusHeartbeatData) MarshalBinary() ([]byte, error) {
+	buf := bytes.NewBuffer(make([]byte, 0, 71))
+
+	// 固件版本 (2字节)
+	buf.Write(m.FirmwareVersion[:])
+
+	// 是否有RTC模块 (1字节)
+	buf.WriteByte(m.HasRTCModule)
+
+	// 主机当前时间戳 (4字节, 小端序)
+	if err := binary.Write(buf, binary.LittleEndian, m.CurrentTimestamp); err != nil {
+		return nil, fmt.Errorf("write current timestamp: %w", err)
+	}
+
+	// 信号强度 (1字节)
+	buf.WriteByte(m.SignalStrength)
+
+	// 通讯模块类型 (1字节)
+	buf.WriteByte(m.CommModuleType)
+
+	// SIM卡号 (20字节)
+	buf.Write(m.SIMCardNumber[:])
+
+	// 主机类型 (1字节)
+	buf.WriteByte(m.HostType)
+
+	// 频率 (2字节, 小端序)
+	if err := binary.Write(buf, binary.LittleEndian, m.Frequency); err != nil {
+		return nil, fmt.Errorf("write frequency: %w", err)
+	}
+
+	// IMEI号 (15字节)
+	buf.Write(m.IMEI[:])
+
+	// 模块版本号 (24字节)
+	buf.Write(m.ModuleVersion[:])
+
+	return buf.Bytes(), nil
+}
+
+func (m *MainStatusHeartbeatData) UnmarshalBinary(data []byte) error {
+	// 验证数据长度：至少需要71字节
+	if len(data) < 71 {
+		return fmt.Errorf("insufficient data length: %d, expected 71 bytes", len(data))
+	}
+
+	offset := 0
+
+	// 固件版本 (2字节)
+	copy(m.FirmwareVersion[:], data[offset:offset+2])
+	offset += 2
+
+	// 是否有RTC模块 (1字节)
+	m.HasRTCModule = data[offset]
+	offset++
+
+	// 主机当前时间戳 (4字节, 小端序)
+	m.CurrentTimestamp = binary.LittleEndian.Uint32(data[offset : offset+4])
+	offset += 4
+
+	// 信号强度 (1字节)
+	m.SignalStrength = data[offset]
+	offset++
+
+	// 通讯模块类型 (1字节)
+	m.CommModuleType = data[offset]
+	offset++
+
+	// SIM卡号 (20字节)
+	copy(m.SIMCardNumber[:], data[offset:offset+20])
+	offset += 20
+
+	// 主机类型 (1字节)
+	m.HostType = data[offset]
+	offset++
+
+	// 频率 (2字节, 小端序)
+	m.Frequency = binary.LittleEndian.Uint16(data[offset : offset+2])
+	offset += 2
+
+	// IMEI号 (15字节)
+	copy(m.IMEI[:], data[offset:offset+15])
+	offset += 15
+
+	// 模块版本号 (24字节)
+	copy(m.ModuleVersion[:], data[offset:offset+24])
+
+	m.Timestamp = time.Now()
+	return nil
+}
+
+// GetSIMCardNumber 获取SIM卡号字符串（去除空字符填充）
+func (m *MainStatusHeartbeatData) GetSIMCardNumber() string {
+	// 找到第一个空字符的位置
+	end := len(m.SIMCardNumber)
+	for i, b := range m.SIMCardNumber {
+		if b == 0 {
+			end = i
+			break
+		}
+	}
+	return string(m.SIMCardNumber[:end])
+}
+
+// GetIMEI 获取IMEI字符串（去除空字符填充）
+func (m *MainStatusHeartbeatData) GetIMEI() string {
+	// 找到第一个空字符的位置
+	end := len(m.IMEI)
+	for i, b := range m.IMEI {
+		if b == 0 {
+			end = i
+			break
+		}
+	}
+	return string(m.IMEI[:end])
+}
+
+// GetModuleVersion 获取模块版本号字符串（去除空字符填充）
+func (m *MainStatusHeartbeatData) GetModuleVersion() string {
+	// 找到第一个空字符的位置
+	end := len(m.ModuleVersion)
+	for i, b := range m.ModuleVersion {
+		if b == 0 {
+			end = i
+			break
+		}
+	}
+	return string(m.ModuleVersion[:end])
+}
+
+// GetFirmwareVersionString 获取固件版本字符串
+func (m *MainStatusHeartbeatData) GetFirmwareVersionString() string {
+	return fmt.Sprintf("%d.%d", m.FirmwareVersion[1], m.FirmwareVersion[0])
+}
+
+// GetCommModuleTypeName 获取通讯模块类型名称
+func (m *MainStatusHeartbeatData) GetCommModuleTypeName() string {
+	switch m.CommModuleType {
+	case 0x01:
+		return "WIFI(B2)"
+	case 0x02:
+		return "2G(GM3)"
+	case 0x03:
+		return "4G(7S4/G405)"
+	case 0x04:
+		return "2G(GM35)"
+	case 0x05:
+		return "NB(M5311)"
+	case 0x06:
+		return "4G-CAT1(GM5)"
+	case 0x07:
+		return "OpenCpu 4G-CAT1(GM5)"
+	case 0x08:
+		return "4G-CAT1(GM6)"
+	default:
+		return fmt.Sprintf("未知类型(0x%02x)", m.CommModuleType)
+	}
+}
+
+// GetHostTypeName 获取主机类型名称
+func (m *MainStatusHeartbeatData) GetHostTypeName() string {
+	switch m.HostType {
+	case 0x01:
+		return "旧款485"
+	case 0x02:
+		return "旧款lora"
+	case 0x03:
+		return "新款lora"
+	case 0x04:
+		return "433无线"
+	case 0x05:
+		return "AP262 LORA"
+	case 0x50:
+		return "AP262合装主机"
+	case 0x51:
+		return "漏保主机"
+	default:
+		return fmt.Sprintf("未知类型(0x%02x)", m.HostType)
+	}
+}
