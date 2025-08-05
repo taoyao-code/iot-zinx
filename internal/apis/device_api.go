@@ -89,8 +89,8 @@ func (api *DeviceAPI) sendProtocolPacket(deviceID string, packet []byte) error {
 		zap.Uint32("conn_id", connID),
 	)
 
-	// 通过Zinx连接发送协议包
-	err = conn.SendMsg(1, packet)
+	// 通过Zinx连接发送协议包（使用SendBuffMsg避免双重封装）
+	err = conn.SendBuffMsg(0, packet)
 	if err != nil {
 		logger.Error("发送协议包失败",
 			zap.String("component", "device_api"),
