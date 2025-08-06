@@ -9,9 +9,7 @@ import (
 	"github.com/bujia-iot/iot-zinx/internal/infrastructure/logger"
 	"github.com/bujia-iot/iot-zinx/pkg"
 	"github.com/bujia-iot/iot-zinx/pkg/constants"
-	"github.com/bujia-iot/iot-zinx/pkg/core"
 	"github.com/bujia-iot/iot-zinx/pkg/errors"
-	"github.com/bujia-iot/iot-zinx/pkg/monitor"
 	"github.com/bujia-iot/iot-zinx/pkg/network"
 	"github.com/bujia-iot/iot-zinx/pkg/utils"
 	"github.com/sirupsen/logrus"
@@ -19,10 +17,8 @@ import (
 
 // DeviceService 设备服务，处理设备业务逻辑
 type DeviceService struct {
-	// TCP监控器引用 - 用于底层连接操作
-	tcpMonitor monitor.IConnectionMonitor
-	// 🔧 统一设备状态管理器
-	statusManager *core.DeviceStatusManager
+	// 🚀 重构：使用统一TCP管理器适配器
+	tcpAdapter IAPITCPAdapter
 }
 
 // DeviceInfo 设备信息结构体
@@ -36,46 +32,41 @@ type DeviceInfo struct {
 // NewDeviceService 创建设备服务实例
 func NewDeviceService() *DeviceService {
 	service := &DeviceService{
-		// 🔧 使用统一架构：直接使用统一监控器
-		tcpMonitor: nil, // 将在getTCPMonitor()方法中动态获取
-		// 🔧 使用统一设备状态管理器
-		statusManager: core.GetDeviceStatusManager(),
+		// 🚀 重构：使用统一TCP管理器适配器
+		tcpAdapter: GetGlobalAPITCPAdapter(),
 	}
 
-	// 🔧 使用统一架构：不再初始化旧的设备监控器
-	// 统一架构会自动处理设备超时和状态管理
-	logger.Info("设备服务已初始化，使用统一架构和统一状态管理器")
+	logger.Info("设备服务已初始化，使用统一TCP管理器适配器")
 
 	return service
 }
 
-// getTCPMonitor 动态获取TCP监控器实例
-// 🔧 使用统一架构：直接获取统一监控器
-func (s *DeviceService) getTCPMonitor() monitor.IConnectionMonitor {
-	if s.tcpMonitor == nil {
-		// 🔧 使用统一架构：直接获取统一监控器
-		s.tcpMonitor = monitor.GetGlobalConnectionMonitor()
-		if s.tcpMonitor != nil {
-			logger.Info("设备服务：成功获取统一监控器")
-		} else {
-			logger.Warn("设备服务：统一监控器未初始化")
-		}
-	}
-	return s.tcpMonitor
-}
+// 🚀 重构：移除getTCPMonitor方法，直接使用TCP适配器
 
 // HandleDeviceOnline 处理设备上线
 func (s *DeviceService) HandleDeviceOnline(deviceId string, iccid string) {
-	// 🔧 使用统一状态管理器处理设备上线
-	s.statusManager.HandleDeviceOnline(deviceId)
+	// 🚀 重构：使用TCP适配器处理设备上线
+	if err := s.tcpAdapter.HandleDeviceOnline(deviceId); err != nil {
+		logger.WithFields(logrus.Fields{
+			"deviceId": deviceId,
+			"iccid":    iccid,
+			"error":    err.Error(),
+		}).Error("处理设备上线失败")
+	}
 
 	// 🔧 通知已迁移到新的第三方平台通知系统，在协议处理器层面直接集成
 }
 
 // HandleDeviceOffline 处理设备离线
 func (s *DeviceService) HandleDeviceOffline(deviceId string, iccid string) {
-	// 🔧 使用统一状态管理器处理设备离线
-	s.statusManager.HandleDeviceOffline(deviceId)
+	// 🚀 重构：使用TCP适配器处理设备离线
+	if err := s.tcpAdapter.HandleDeviceOffline(deviceId); err != nil {
+		logger.WithFields(logrus.Fields{
+			"deviceId": deviceId,
+			"iccid":    iccid,
+			"error":    err.Error(),
+		}).Error("处理设备离线失败")
+	}
 
 	// 🔧 通知已迁移到新的第三方平台通知系统，在协议处理器层面直接集成
 }
@@ -85,40 +76,28 @@ func (s *DeviceService) HandleDeviceStatusUpdate(deviceId string, status constan
 	// 记录设备状态更新
 	logger.Info("设备状态更新")
 
-	// 🔧 使用统一状态管理器更新设备状态
-	s.statusManager.UpdateDeviceStatus(deviceId, string(status))
+	// 🚀 重构：使用TCP适配器更新设备状态
+	if err := s.tcpAdapter.UpdateDeviceStatus(deviceId, status); err != nil {
+		logger.WithFields(logrus.Fields{
+			"deviceId": deviceId,
+			"status":   status,
+			"error":    err.Error(),
+		}).Error("更新设备状态失败")
+	}
 
 	// 🔧 通知已迁移到新的第三方平台通知系统，在协议处理器层面直接集成
 }
 
 // GetDeviceStatus 获取设备状态
 func (s *DeviceService) GetDeviceStatus(deviceId string) (string, bool) {
-	// 🔧 使用统一状态管理器获取设备状态
-	status := s.statusManager.GetDeviceStatus(deviceId)
-	return status, status != ""
+	// 🚀 重构：使用TCP适配器获取设备状态
+	return s.tcpAdapter.GetDeviceStatus(deviceId)
 }
 
 // GetAllDevices 获取所有设备状态
 func (s *DeviceService) GetAllDevices() []DeviceInfo {
-	var devices []DeviceInfo
-
-	// 🔧 使用统一状态管理器获取所有设备状态
-	allStatuses := s.statusManager.GetAllDeviceStatuses()
-
-	for deviceId, status := range allStatuses {
-		device := DeviceInfo{
-			DeviceID: deviceId,
-			Status:   status,
-		}
-
-		// 获取最后更新时间
-		_, timestamp := s.statusManager.GetDeviceStatusWithTimestamp(deviceId)
-		device.LastSeen = timestamp
-
-		devices = append(devices, device)
-	}
-
-	return devices
+	// 🚀 重构：使用TCP适配器获取所有设备
+	return s.tcpAdapter.GetAllDevices()
 }
 
 // =================================================================================
@@ -139,74 +118,20 @@ type DeviceConnectionInfo struct {
 
 // GetDeviceConnectionInfo 获取设备连接详细信息 - 🔧 修复：使用精细化错误处理
 func (s *DeviceService) GetDeviceConnectionInfo(deviceID string) (*DeviceConnectionInfo, error) {
-	tcpMonitor := s.getTCPMonitor()
-	if tcpMonitor == nil {
-		return nil, constants.NewDeviceError(errors.ErrConnectionLost, deviceID, "TCP监控器未初始化")
-	}
-
-	// 🔧 使用统一架构：直接检查设备连接状态
-	// 统一架构中，连接存在即表示设备存在
-
-	// 查询设备连接状态
-	conn, connExists := tcpMonitor.GetConnectionByDeviceId(deviceID)
-	if !connExists {
-		return nil, constants.NewDeviceError(errors.ErrDeviceNotFound, deviceID, "设备未连接")
-	}
-
-	// 构建设备连接信息
-	info := &DeviceConnectionInfo{
-		DeviceID: deviceID,
-	}
-
-	// 获取ICCID
-	if iccidVal, err := conn.GetProperty(pkg.PropKeyICCID); err == nil && iccidVal != nil {
-		info.ICCID = iccidVal.(string)
-	}
-
-	// 获取最后心跳时间（优先使用格式化的字符串）
-	info.HeartbeatTime = "never"
-	if val, err := conn.GetProperty(pkg.PropKeyLastHeartbeatStr); err == nil && val != nil {
-		info.HeartbeatTime = val.(string)
-	} else if val, err := conn.GetProperty(pkg.PropKeyLastHeartbeat); err == nil && val != nil {
-		info.LastHeartbeat = val.(int64)
-		info.HeartbeatTime = time.Unix(info.LastHeartbeat, 0).Format(constants.TimeFormatDefault)
-		info.TimeSinceHeart = time.Since(time.Unix(info.LastHeartbeat, 0)).Seconds()
-	}
-
-	// 获取连接状态
-	info.Status = string(constants.ConnStatusInactive)
-	if statusVal, err := conn.GetProperty(pkg.PropKeyConnStatus); err == nil && statusVal != nil {
-		if connStatus, ok := statusVal.(constants.ConnStatus); ok {
-			info.Status = string(connStatus)
-			// 使用 IsConsideredActive 方法判断设备是否在线
-			info.IsOnline = connStatus.IsConsideredActive()
-		} else if statusStr, ok := statusVal.(string); ok {
-			info.Status = statusStr // 兼容旧的字符串类型
-			// 对于字符串类型，检查是否为活跃状态
-			connStatus := constants.ConnStatus(statusStr)
-			info.IsOnline = connStatus.IsConsideredActive()
-		}
-	}
-
-	// 获取远程地址
-	info.RemoteAddr = conn.RemoteAddr().String()
-
-	return info, nil
+	// 🚀 重构：使用TCP适配器获取设备连接信息
+	return s.tcpAdapter.GetDeviceConnectionInfo(deviceID)
 }
 
 // GetDeviceConnection 获取设备连接对象（内部使用）
 func (s *DeviceService) GetDeviceConnection(deviceID string) (ziface.IConnection, bool) {
-	tcpMonitor := s.getTCPMonitor()
-	if tcpMonitor == nil {
-		return nil, false
-	}
-	return tcpMonitor.GetConnectionByDeviceId(deviceID)
+	// 🚀 重构：使用TCP适配器获取设备连接
+	return s.tcpAdapter.GetDeviceConnection(deviceID)
 }
 
 // IsDeviceOnline 检查设备是否在线
 func (s *DeviceService) IsDeviceOnline(deviceID string) bool {
-	// 🔧 使用统一状态管理器检查设备是否在线
-	return s.statusManager.IsDeviceOnline(deviceID)
+	// 🚀 重构：使用TCP适配器检查设备是否在线
+	return s.tcpAdapter.IsDeviceOnline(deviceID)
 }
 
 // SendCommandToDevice 发送命令到设备

@@ -13,16 +13,16 @@ func TestChargeControlProtocolCompliance(t *testing.T) {
 	// 测试用户报告的2字节简化应答
 	testSimplifiedResponse()
 
-	fmt.Println("\n")
+	fmt.Println()
 	// 测试标准20字节应答
 	testStandardResponse()
 
-	fmt.Println("\n")
+	fmt.Println()
 
 	// 测试服务器下发指令格式（用于对比）
 	testServerCommand()
 
-	fmt.Println("\n")
+	fmt.Println()
 
 	fmt.Printf("=== 测试完成 ===\n")
 }

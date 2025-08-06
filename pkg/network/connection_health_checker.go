@@ -12,7 +12,7 @@ import (
 )
 
 // ConnectionHealthChecker 连接健康检查器
-// 🔧 修复：实现连接健康检查，提前发现问题连接
+// 🚀 重构：直接使用统一TCP管理器，移除回调函数机制
 type ConnectionHealthChecker struct {
 	mutex              sync.RWMutex
 	enabled            bool
@@ -22,8 +22,8 @@ type ConnectionHealthChecker struct {
 	running            bool
 	writeBufferMonitor *WriteBufferMonitor
 
-	// 连接提供者回调函数，用于获取当前所有连接
-	connectionProvider func() map[string]ziface.IConnection
+	// 🚀 重构：使用TCP管理器获取函数，避免循环导入
+	tcpManagerGetter func() interface{}
 
 	// 健康检查统计
 	totalChecks          int64
@@ -53,6 +53,13 @@ func NewConnectionHealthChecker(checkInterval, unhealthyThreshold time.Duration)
 		running:            false,
 		writeBufferMonitor: NewWriteBufferMonitor(30*time.Second, 5*time.Minute),
 	}
+}
+
+// SetTCPManagerGetter 设置TCP管理器获取函数
+func (chc *ConnectionHealthChecker) SetTCPManagerGetter(getter func() interface{}) {
+	chc.mutex.Lock()
+	defer chc.mutex.Unlock()
+	chc.tcpManagerGetter = getter
 }
 
 // Start 启动连接健康检查
@@ -140,39 +147,49 @@ func (chc *ConnectionHealthChecker) performHealthCheck() {
 	totalChecks := chc.totalChecks
 	chc.mutex.Unlock()
 
-	// 由于循环导入问题，这里通过回调函数获取连接列表
-	// 在实际使用时，需要设置连接提供者回调
-	if chc.connectionProvider != nil {
-		connections := chc.connectionProvider()
-		if len(connections) > 0 {
-			results := chc.CheckConnections(connections)
+	// 🚀 重构：通过统一TCP管理器获取连接列表
+	if chc.tcpManagerGetter != nil {
+		if tcpManager := chc.tcpManagerGetter(); tcpManager != nil {
+			if manager, ok := tcpManager.(interface {
+				ForEachConnection(callback func(deviceID string, conn ziface.IConnection) bool)
+			}); ok {
+				connections := make(map[string]ziface.IConnection)
+				manager.ForEachConnection(func(deviceID string, conn ziface.IConnection) bool {
+					connections[deviceID] = conn
+					return true
+				})
 
-			healthyCount := 0
-			unhealthyCount := 0
-			for _, result := range results {
-				if result.IsHealthy {
-					healthyCount++
+				if len(connections) > 0 {
+					results := chc.CheckConnections(connections)
+
+					healthyCount := 0
+					unhealthyCount := 0
+					for _, result := range results {
+						if result.IsHealthy {
+							healthyCount++
+						} else {
+							unhealthyCount++
+						}
+					}
+
+					logger.WithFields(logrus.Fields{
+						"totalChecks":    totalChecks,
+						"checkedCount":   len(connections),
+						"healthyCount":   healthyCount,
+						"unhealthyCount": unhealthyCount,
+						"checkInterval":  chc.checkInterval.String(),
+					}).Info("连接健康检查完成")
 				} else {
-					unhealthyCount++
+					logger.WithFields(logrus.Fields{
+						"totalChecks": totalChecks,
+					}).Debug("无连接需要检查")
 				}
 			}
-
-			logger.WithFields(logrus.Fields{
-				"totalChecks":    totalChecks,
-				"checkedCount":   len(connections),
-				"healthyCount":   healthyCount,
-				"unhealthyCount": unhealthyCount,
-				"checkInterval":  chc.checkInterval.String(),
-			}).Info("连接健康检查完成")
-		} else {
-			logger.WithFields(logrus.Fields{
-				"totalChecks": totalChecks,
-			}).Debug("无连接需要检查")
 		}
 	} else {
 		logger.WithFields(logrus.Fields{
 			"totalChecks": totalChecks,
-		}).Debug("连接提供者未设置，跳过健康检查")
+		}).Debug("TCP管理器未设置，跳过健康检查")
 	}
 }
 
@@ -337,14 +354,8 @@ func (chc *ConnectionHealthChecker) IsEnabled() bool {
 	return chc.enabled
 }
 
-// SetConnectionProvider 设置连接提供者回调函数
-// 🔧 修复：通过回调函数解决循环导入问题
+// SetConnectionProvider 设置连接提供者回调函数（已废弃）
+// � 重构：此方法已废弃，使用SetTCPManagerGetter代替
 func (chc *ConnectionHealthChecker) SetConnectionProvider(provider func() map[string]ziface.IConnection) {
-	chc.mutex.Lock()
-	defer chc.mutex.Unlock()
-	chc.connectionProvider = provider
-
-	logger.WithFields(logrus.Fields{
-		"hasProvider": provider != nil,
-	}).Info("连接提供者已设置")
+	logger.Debug("SetConnectionProvider已废弃，请使用SetTCPManagerGetter")
 }

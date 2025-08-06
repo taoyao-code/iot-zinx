@@ -4,6 +4,8 @@ import (
 	"sync"
 
 	"github.com/bujia-iot/iot-zinx/internal/app/service"
+	"github.com/bujia-iot/iot-zinx/internal/infrastructure/logger"
+	"github.com/bujia-iot/iot-zinx/pkg/core"
 	"github.com/redis/go-redis/v9"
 )
 
@@ -40,7 +42,13 @@ func GetServiceManager() *ServiceManager {
 
 // Init 初始化所有服务
 func (m *ServiceManager) Init() error {
-	// 可以在这里执行一些初始化操作
+	// 🚀 重构：设置API服务的TCP适配器
+	service.SetGlobalAPITCPManagerGetter(func() interface{} {
+		return core.GetGlobalUnifiedTCPManager()
+	})
+	logger.Info("API服务TCP适配器已设置")
+
+	// 可以在这里执行其他初始化操作
 	return nil
 }
 

@@ -493,48 +493,56 @@ func (h *DeviceControlHandlers) validateMaxTimeAndPowerRequest(req *MaxTimeAndPo
 
 // getDeviceConnection 获取设备连接
 func (h *DeviceControlHandlers) getDeviceConnection(deviceID string) (interface{}, error) {
-	// 这里应该从连接管理器获取设备连接
-	// 暂时简化实现，直接返回成功
-	// 在实际实现中，应该检查设备是否在线
+	// 🚀 重构：通过全局处理器上下文获取设备服务
+	ctx := GetGlobalHandlerContext()
+	if ctx == nil || ctx.DeviceService == nil {
+		return nil, fmt.Errorf("设备服务未初始化")
+	}
 
-	// TODO: 实现真正的设备连接检查
-	// monitor := network.GetConnectionMonitor()
-	// if monitor == nil {
-	//     return nil, fmt.Errorf("连接监控器不可用")
-	// }
-	// if !monitor.IsDeviceOnline(deviceID) {
-	//     return nil, fmt.Errorf("设备 %s 未连接", deviceID)
-	// }
+	// 检查设备是否在线
+	if !ctx.DeviceService.IsDeviceOnline(deviceID) {
+		return nil, fmt.Errorf("设备 %s 未连接", deviceID)
+	}
 
-	return "mock_connection", nil
+	// 获取设备连接
+	conn, exists := ctx.DeviceService.GetDeviceConnection(deviceID)
+	if !exists {
+		return nil, fmt.Errorf("设备 %s 连接不存在", deviceID)
+	}
+
+	return conn, nil
 }
 
 // sendCommand 发送命令到设备
 func (h *DeviceControlHandlers) sendCommand(deviceID string, commandCode uint8, data []byte) (string, error) {
-	// 转换设备ID为物理ID
-	physicalID, err := h.parseDeviceID(deviceID)
-	if err != nil {
-		return "", fmt.Errorf("设备ID格式错误: %v", err)
+	// 🚀 重构：通过设备服务发送命令
+	ctx := GetGlobalHandlerContext()
+	if ctx == nil || ctx.DeviceService == nil {
+		return "", fmt.Errorf("设备服务未初始化")
 	}
 
 	// 生成命令ID用于跟踪
 	commandID := fmt.Sprintf("CMD_%s_%02X_%d", deviceID, commandCode, time.Now().Unix())
 
-	// TODO: 实现真正的命令发送逻辑
-	// 这里需要：
-	// 1. 获取设备连接
-	// 2. 生成消息ID
-	// 3. 构建协议帧
-	// 4. 发送到设备
-	// 5. 注册到命令管理器等待响应
+	// 使用设备服务发送命令
+	err := ctx.DeviceService.SendCommandToDevice(deviceID, commandCode, data)
+	if err != nil {
+		logger.WithFields(logrus.Fields{
+			"deviceID":  deviceID,
+			"command":   fmt.Sprintf("0x%02X", commandCode),
+			"commandID": commandID,
+			"dataLen":   len(data),
+			"error":     err.Error(),
+		}).Error("发送命令到设备失败")
+		return "", fmt.Errorf("发送命令失败: %v", err)
+	}
 
 	logger.WithFields(logrus.Fields{
-		"deviceID":   deviceID,
-		"physicalID": fmt.Sprintf("0x%08X", physicalID),
-		"command":    fmt.Sprintf("0x%02X", commandCode),
-		"commandID":  commandID,
-		"dataLen":    len(data),
-	}).Info("模拟发送命令到设备")
+		"deviceID":  deviceID,
+		"command":   fmt.Sprintf("0x%02X", commandCode),
+		"commandID": commandID,
+		"dataLen":   len(data),
+	}).Info("发送命令到设备成功")
 
 	return commandID, nil
 }

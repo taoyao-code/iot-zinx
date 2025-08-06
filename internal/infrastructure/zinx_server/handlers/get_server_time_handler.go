@@ -9,7 +9,7 @@ import (
 	"github.com/aceld/zinx/ziface"
 	"github.com/bujia-iot/iot-zinx/internal/infrastructure/logger"
 	"github.com/bujia-iot/iot-zinx/pkg/constants"
-	"github.com/bujia-iot/iot-zinx/pkg/monitor"
+	"github.com/bujia-iot/iot-zinx/pkg/core"
 	"github.com/bujia-iot/iot-zinx/pkg/protocol"
 	"github.com/bujia-iot/iot-zinx/pkg/session"
 	"github.com/sirupsen/logrus"
@@ -158,8 +158,14 @@ func (h *GetServerTimeHandler) processGetServerTime(decodedFrame *protocol.Decod
 		"timeStr":     time.Unix(currentTime, 0).Format(constants.TimeFormatDefault),
 	}).Info("✅ 获取服务器时间响应发送成功")
 
-	// 更新心跳时间
-	monitor.GetGlobalConnectionMonitor().UpdateLastHeartbeatTime(conn)
+	// 🚀 重构：通过统一TCP管理器更新心跳时间，不再直接调用监控器
+	tcpManager := core.GetGlobalUnifiedTCPManager()
+	if tcpManager != nil {
+		// 获取设备ID并更新心跳
+		if session, exists := tcpManager.GetSessionByConnID(conn.GetConnID()); exists {
+			tcpManager.UpdateHeartbeat(session.DeviceID)
+		}
+	}
 }
 
 // sendRegistrationRequiredResponse 发送需要注册的响应

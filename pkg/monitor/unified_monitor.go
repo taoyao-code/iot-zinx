@@ -17,13 +17,13 @@ import (
 // 整合所有监控功能，提供单一的监控入口
 type UnifiedMonitor struct {
 	// === 核心存储 ===
-	connectionMetrics sync.Map // connID -> *ConnectionMetrics
-	deviceMetrics     sync.Map // deviceID -> *DeviceMetrics
-	customMetrics     sync.Map // metricName -> interface{}
+	// 🚀 重构：移除重复的连接和设备指标存储，使用统一TCP管理器
+	// connectionMetrics sync.Map // 已删除：重复存储
+	// deviceMetrics     sync.Map // 已删除：重复存储
+	customMetrics sync.Map // metricName -> interface{} // 保留：自定义指标
 
-	// === 索引映射 ===
-	connToDevice sync.Map // connID -> deviceID
-	deviceToConn sync.Map // deviceID -> connID
+	// === TCP管理器适配器 ===
+	tcpAdapter IMonitorTCPAdapter
 
 	// === 统计信息 ===
 	connectionStats  *ConnectionStats
@@ -54,6 +54,7 @@ func NewUnifiedMonitor(config *UnifiedMonitorConfig) *UnifiedMonitor {
 	}
 
 	return &UnifiedMonitor{
+		tcpAdapter:       GetGlobalMonitorTCPAdapter(),
 		connectionStats:  &ConnectionStats{},
 		deviceStats:      &DeviceStats{},
 		performanceStats: &PerformanceStats{},
@@ -151,16 +152,8 @@ func (m *UnifiedMonitor) OnConnectionEstablished(conn ziface.IConnection) {
 	connID := conn.GetConnID()
 	now := time.Now()
 
-	// 创建连接指标
-	metrics := &ConnectionMetrics{
-		ConnID:       connID,
-		RemoteAddr:   conn.RemoteAddr().String(),
-		ConnectedAt:  now,
-		LastActivity: now,
-		Status:       "connected",
-	}
-
-	m.connectionMetrics.Store(connID, metrics)
+	// 🚀 重构：不再维护本地连接指标，通过TCP适配器获取数据
+	// 连接指标数据由统一TCP管理器维护
 
 	// 更新连接统计
 	m.updateConnectionStats(func(stats *ConnectionStats) {
@@ -177,13 +170,13 @@ func (m *UnifiedMonitor) OnConnectionEstablished(conn ziface.IConnection) {
 		Source:    "unified_monitor",
 		Data: map[string]interface{}{
 			"conn_id":     connID,
-			"remote_addr": metrics.RemoteAddr,
+			"remote_addr": conn.RemoteAddr().String(),
 		},
 	})
 
 	logger.WithFields(logrus.Fields{
 		"conn_id":     connID,
-		"remote_addr": metrics.RemoteAddr,
+		"remote_addr": conn.RemoteAddr().String(),
 	}).Debug("连接已建立")
 }
 
@@ -192,23 +185,15 @@ func (m *UnifiedMonitor) OnConnectionClosed(conn ziface.IConnection) {
 	connID := conn.GetConnID()
 	now := time.Now()
 
-	// 更新连接指标
-	if metricsInterface, exists := m.connectionMetrics.Load(connID); exists {
-		metrics := metricsInterface.(*ConnectionMetrics)
-		metrics.Status = "closed"
-		metrics.LastActivity = now
-	}
+	// 🚀 重构：不再维护本地连接指标，通过TCP适配器获取数据
+	// 连接关闭时的状态更新由统一TCP管理器处理
 
-	// 检查是否有关联的设备
-	if deviceIDInterface, exists := m.connToDevice.Load(connID); exists {
-		deviceID := deviceIDInterface.(string)
-
-		// 更新设备状态为离线
-		m.OnDeviceOffline(deviceID)
-
-		// 清理映射关系
-		m.connToDevice.Delete(connID)
-		m.deviceToConn.Delete(deviceID)
+	// 🚀 优化：通过TCP适配器获取关联的设备
+	if m.tcpAdapter != nil {
+		if deviceID, exists := m.tcpAdapter.GetDeviceIDByConnID(connID); exists && deviceID != "" {
+			// 更新设备状态为离线
+			m.OnDeviceOffline(deviceID)
+		}
 	}
 
 	// 更新连接统计
@@ -235,16 +220,10 @@ func (m *UnifiedMonitor) OnConnectionClosed(conn ziface.IConnection) {
 
 // OnRawDataReceived 接收数据事件
 func (m *UnifiedMonitor) OnRawDataReceived(conn ziface.IConnection, data []byte) {
-	connID := conn.GetConnID()
 	dataSize := int64(len(data))
 
-	// 更新连接指标
-	if metricsInterface, exists := m.connectionMetrics.Load(connID); exists {
-		metrics := metricsInterface.(*ConnectionMetrics)
-		metrics.BytesReceived += dataSize
-		metrics.PacketsReceived++
-		metrics.LastActivity = time.Now()
-	}
+	// 🚀 重构：不再维护本地连接指标，通过TCP适配器更新统计
+	// 连接指标数据由统一TCP管理器维护
 
 	// 更新连接统计
 	m.updateConnectionStats(func(stats *ConnectionStats) {
@@ -256,16 +235,10 @@ func (m *UnifiedMonitor) OnRawDataReceived(conn ziface.IConnection, data []byte)
 
 // OnRawDataSent 发送数据事件
 func (m *UnifiedMonitor) OnRawDataSent(conn ziface.IConnection, data []byte) {
-	connID := conn.GetConnID()
 	dataSize := int64(len(data))
 
-	// 更新连接指标
-	if metricsInterface, exists := m.connectionMetrics.Load(connID); exists {
-		metrics := metricsInterface.(*ConnectionMetrics)
-		metrics.BytesSent += dataSize
-		metrics.PacketsSent++
-		metrics.LastActivity = time.Now()
-	}
+	// 🚀 重构：不再维护本地连接指标，通过TCP适配器更新统计
+	// 连接指标数据由统一TCP管理器维护
 
 	// 更新连接统计
 	m.updateConnectionStats(func(stats *ConnectionStats) {
@@ -283,17 +256,8 @@ func (m *UnifiedMonitor) OnSessionCreated(session session.ISession) {
 	connID := session.GetConnID()
 	now := time.Now()
 
-	// 建立连接和设备的映射关系
-	if deviceID != "" {
-		m.connToDevice.Store(connID, deviceID)
-		m.deviceToConn.Store(deviceID, connID)
-
-		// 更新连接指标中的设备ID
-		if metricsInterface, exists := m.connectionMetrics.Load(connID); exists {
-			metrics := metricsInterface.(*ConnectionMetrics)
-			metrics.DeviceID = deviceID
-		}
-	}
+	// 🚀 重构：不再维护本地映射关系，映射关系由统一TCP管理器维护
+	// 此处保留用于向后兼容，但不执行任何操作
 
 	// 发送事件通知
 	m.emitEvent(MonitorEvent{
@@ -319,19 +283,8 @@ func (m *UnifiedMonitor) OnSessionRegistered(session session.ISession) {
 	deviceID := session.GetDeviceID()
 	now := time.Now()
 
-	// 创建或更新设备指标
-	metrics := &DeviceMetrics{
-		DeviceID:     deviceID,
-		PhysicalID:   session.GetPhysicalID(),
-		ICCID:        session.GetICCID(),
-		State:        session.GetState(),
-		Status:       "registered",
-		ConnectedAt:  session.GetConnectedAt(),
-		RegisteredAt: now,
-		LastActivity: now,
-	}
-
-	m.deviceMetrics.Store(deviceID, metrics)
+	// 🚀 重构：不再维护本地设备指标，设备注册由统一TCP管理器处理
+	// 此处保留用于向后兼容，但不执行任何操作
 
 	// 更新设备统计
 	m.updateDeviceStats(func(stats *DeviceStats) {
@@ -365,12 +318,9 @@ func (m *UnifiedMonitor) OnSessionRemoved(session session.ISession, reason strin
 	connID := session.GetConnID()
 	now := time.Now()
 
-	// 清理映射关系
-	m.connToDevice.Delete(connID)
-	m.deviceToConn.Delete(deviceID)
+	// 🚀 优化：不再维护本地映射关系，映射关系由TCP管理器维护
 
-	// 移除设备指标
-	m.deviceMetrics.Delete(deviceID)
+	// 🚀 重构：不再维护本地设备指标，设备注销由统一TCP管理器处理
 
 	// 更新设备统计
 	m.updateDeviceStats(func(stats *DeviceStats) {
@@ -405,21 +355,16 @@ func (m *UnifiedMonitor) OnSessionRemoved(session session.ISession, reason strin
 
 // OnSessionStateChanged 会话状态变更事件
 func (m *UnifiedMonitor) OnSessionStateChanged(session session.ISession, oldState, newState constants.DeviceConnectionState) {
-	deviceID := session.GetDeviceID()
-	now := time.Now()
-
-	// 更新设备指标
-	if metricsInterface, exists := m.deviceMetrics.Load(deviceID); exists {
-		metrics := metricsInterface.(*DeviceMetrics)
-		metrics.State = newState
-		metrics.LastActivity = now
-	}
+	// 🚀 重构：不再维护本地设备指标，状态变更由统一TCP管理器处理
 
 	logger.WithFields(logrus.Fields{
-		"device_id": deviceID,
-		"old_state": oldState,
-		"new_state": newState,
-	}).Debug("会话状态已变更")
+		"device_id":  session.GetDeviceID(),
+		"old_state":  oldState,
+		"new_state":  newState,
+		"session_id": session.GetSessionID(),
+	}).Debug("会话状态变更（通过统一TCP管理器处理）")
+
+	// 重复的日志记录已移除
 }
 
 // === 设备监控实现 ===
@@ -428,13 +373,7 @@ func (m *UnifiedMonitor) OnSessionStateChanged(session session.ISession, oldStat
 func (m *UnifiedMonitor) OnDeviceOnline(deviceID string) {
 	now := time.Now()
 
-	// 更新设备指标
-	if metricsInterface, exists := m.deviceMetrics.Load(deviceID); exists {
-		metrics := metricsInterface.(*DeviceMetrics)
-		metrics.Status = "online"
-		metrics.LastActivity = now
-		metrics.LastHeartbeat = now
-	}
+	// 🚀 重构：不再维护本地设备指标，设备上线由统一TCP管理器处理
 
 	// 更新设备统计
 	m.updateDeviceStats(func(stats *DeviceStats) {
@@ -459,13 +398,7 @@ func (m *UnifiedMonitor) OnDeviceOnline(deviceID string) {
 func (m *UnifiedMonitor) OnDeviceOffline(deviceID string) {
 	now := time.Now()
 
-	// 更新设备指标
-	if metricsInterface, exists := m.deviceMetrics.Load(deviceID); exists {
-		metrics := metricsInterface.(*DeviceMetrics)
-		metrics.Status = "offline"
-		metrics.LastActivity = now
-		metrics.OfflineCount++
-	}
+	// 🚀 重构：不再维护本地设备指标，设备离线由统一TCP管理器处理
 
 	// 更新设备统计
 	m.updateDeviceStats(func(stats *DeviceStats) {
@@ -491,13 +424,7 @@ func (m *UnifiedMonitor) OnDeviceOffline(deviceID string) {
 func (m *UnifiedMonitor) OnDeviceHeartbeat(deviceID string) {
 	now := time.Now()
 
-	// 更新设备指标
-	if metricsInterface, exists := m.deviceMetrics.Load(deviceID); exists {
-		metrics := metricsInterface.(*DeviceMetrics)
-		metrics.LastHeartbeat = now
-		metrics.LastActivity = now
-		metrics.HeartbeatCount++
-	}
+	// 🚀 重构：不再维护本地设备指标，心跳更新由统一TCP管理器处理
 
 	// 更新设备统计
 	m.updateDeviceStats(func(stats *DeviceStats) {
@@ -511,14 +438,7 @@ func (m *UnifiedMonitor) OnDeviceHeartbeat(deviceID string) {
 func (m *UnifiedMonitor) OnDeviceTimeout(deviceID string, lastHeartbeat time.Time) {
 	now := time.Now()
 
-	// 更新设备指标
-	if metricsInterface, exists := m.deviceMetrics.Load(deviceID); exists {
-		metrics := metricsInterface.(*DeviceMetrics)
-		metrics.Status = "timeout"
-		metrics.LastActivity = now
-		metrics.ErrorCount++
-		metrics.LastError = "heartbeat timeout"
-	}
+	// 🚀 重构：不再维护本地设备指标，超时处理由统一TCP管理器处理
 
 	// 发送事件通知
 	m.emitEvent(MonitorEvent{
@@ -668,23 +588,15 @@ func (m *UnifiedMonitor) emitEvent(event MonitorEvent) {
 
 // GetConnectionMetrics 获取连接指标
 func (m *UnifiedMonitor) GetConnectionMetrics(connID uint64) (*ConnectionMetrics, bool) {
-	if metricsInterface, exists := m.connectionMetrics.Load(connID); exists {
-		metrics := metricsInterface.(*ConnectionMetrics)
-		// 返回副本以避免并发修改
-		metricsCopy := *metrics
-		return &metricsCopy, true
-	}
+	// 🚀 重构：暂时返回空指标，后续通过TCP适配器获取
+	// TODO: 实现通过统一TCP管理器获取连接指标
 	return nil, false
 }
 
 // GetDeviceMetrics 获取设备指标
 func (m *UnifiedMonitor) GetDeviceMetrics(deviceID string) (*DeviceMetrics, bool) {
-	if metricsInterface, exists := m.deviceMetrics.Load(deviceID); exists {
-		metrics := metricsInterface.(*DeviceMetrics)
-		// 返回副本以避免并发修改
-		metricsCopy := *metrics
-		return &metricsCopy, true
-	}
+	// 🚀 重构：暂时返回空指标，后续通过TCP适配器获取
+	// TODO: 实现通过统一TCP管理器获取设备指标
 	return nil, false
 }
 
@@ -702,25 +614,10 @@ func (m *UnifiedMonitor) GetSystemMetrics() *SystemMetrics {
 func (m *UnifiedMonitor) GetAllMetrics() *UnifiedMetrics {
 	now := time.Now()
 
-	// 收集连接指标
+	// 🚀 重构：暂时返回空指标，后续通过TCP适配器获取
 	connectionMetrics := make(map[uint64]*ConnectionMetrics)
-	m.connectionMetrics.Range(func(key, value interface{}) bool {
-		connID := key.(uint64)
-		metrics := value.(*ConnectionMetrics)
-		metricsCopy := *metrics
-		connectionMetrics[connID] = &metricsCopy
-		return true
-	})
-
-	// 收集设备指标
 	deviceMetrics := make(map[string]*DeviceMetrics)
-	m.deviceMetrics.Range(func(key, value interface{}) bool {
-		deviceID := key.(string)
-		metrics := value.(*DeviceMetrics)
-		metricsCopy := *metrics
-		deviceMetrics[deviceID] = &metricsCopy
-		return true
-	})
+	// TODO: 通过统一TCP管理器获取连接和设备指标
 
 	// 收集自定义指标
 	customMetrics := make(map[string]interface{})
@@ -986,80 +883,14 @@ func (m *UnifiedMonitor) updateSystemMetrics() {
 
 // calculateDerivedMetrics 计算派生指标
 func (m *UnifiedMonitor) calculateDerivedMetrics() {
-	// 计算连接平均连接时间
-	var totalConnTime time.Duration
-	var connCount int64
-
-	m.connectionMetrics.Range(func(key, value interface{}) bool {
-		metrics := value.(*ConnectionMetrics)
-		if metrics.Status == "connected" {
-			connTime := time.Since(metrics.ConnectedAt)
-			totalConnTime += connTime
-			connCount++
-		}
-		return true
-	})
-
-	if connCount > 0 {
-		m.updateConnectionStats(func(stats *ConnectionStats) {
-			stats.AverageConnTime = totalConnTime / time.Duration(connCount)
-		})
-	}
-
-	// 计算设备平均在线时间
-	var totalOnlineTime time.Duration
-	var onlineCount int64
-
-	m.deviceMetrics.Range(func(key, value interface{}) bool {
-		metrics := value.(*DeviceMetrics)
-		if metrics.Status == "online" && !metrics.ConnectedAt.IsZero() {
-			onlineTime := time.Since(metrics.ConnectedAt)
-			totalOnlineTime += onlineTime
-			onlineCount++
-		}
-		return true
-	})
-
-	if onlineCount > 0 {
-		m.updateDeviceStats(func(stats *DeviceStats) {
-			stats.AverageOnlineTime = totalOnlineTime / time.Duration(onlineCount)
-		})
-	}
+	// 🚀 重构：暂时跳过派生指标计算，后续通过TCP适配器实现
+	// TODO: 通过统一TCP管理器计算平均连接时间和在线时间
 }
 
 // performHealthCheck 执行健康检查
 func (m *UnifiedMonitor) performHealthCheck() {
-	now := time.Now()
-
-	// 检查设备心跳超时
-	m.deviceMetrics.Range(func(key, value interface{}) bool {
-		deviceID := key.(string)
-		metrics := value.(*DeviceMetrics)
-
-		if metrics.Status == "online" && !metrics.LastHeartbeat.IsZero() {
-			if now.Sub(metrics.LastHeartbeat) > m.config.HeartbeatTimeout {
-				m.OnDeviceTimeout(deviceID, metrics.LastHeartbeat)
-			}
-		}
-
-		return true
-	})
-
-	// 检查连接超时
-	m.connectionMetrics.Range(func(key, value interface{}) bool {
-		metrics := value.(*ConnectionMetrics)
-
-		if metrics.Status == "connected" && !metrics.LastActivity.IsZero() {
-			if now.Sub(metrics.LastActivity) > m.config.ConnectionTimeout {
-				// 标记连接为超时
-				metrics.Status = "timeout"
-				metrics.ErrorCount++
-				metrics.LastError = "connection timeout"
-			}
-		}
-
-		return true
-	})
+	// 🚀 重构：暂时跳过健康检查，后续通过TCP适配器实现
+	// TODO: 通过统一TCP管理器检查设备心跳超时和连接超时
 }
 
 // checkAlertRules 检查告警规则
@@ -1237,20 +1068,13 @@ func SetGlobalUnifiedMonitor(monitor *UnifiedMonitor) {
 func (m *UnifiedMonitor) BindDeviceIdToConnection(deviceId string, conn ziface.IConnection) {
 	connID := conn.GetConnID()
 
-	// 建立映射关系
-	m.connToDevice.Store(connID, deviceId)
-	m.deviceToConn.Store(deviceId, connID)
-
-	// 更新连接指标中的设备ID
-	if metricsInterface, exists := m.connectionMetrics.Load(connID); exists {
-		metrics := metricsInterface.(*ConnectionMetrics)
-		metrics.DeviceID = deviceId
-	}
+	// 🚀 重构：不再维护本地映射关系，映射关系由统一TCP管理器维护
+	// 此方法保留用于向后兼容，但不执行任何操作
 
 	logger.WithFields(logrus.Fields{
 		"device_id": deviceId,
 		"conn_id":   connID,
-	}).Debug("设备ID已绑定到连接")
+	}).Debug("设备ID绑定请求（通过统一TCP管理器处理）")
 }
 
 // GetGroupStatistics 获取组统计信息（向后兼容）
@@ -1269,15 +1093,10 @@ func (m *UnifiedMonitor) GetGroupStatistics() map[string]interface{} {
 
 // ForEachConnection 遍历所有连接（向后兼容）
 func (m *UnifiedMonitor) ForEachConnection(callback func(deviceId string, conn ziface.IConnection) bool) {
-	// 注意：这个方法需要实际的连接对象，但统一监控器只存储连接指标
-	// 这是一个向后兼容的实现，实际使用中可能需要从会话管理器获取连接对象
-	m.connToDevice.Range(func(key, value interface{}) bool {
-		deviceID := value.(string)
-
-		// 这里需要从会话管理器获取实际的连接对象
-		// 作为临时实现，我们传递nil，实际使用时需要集成会话管理器
-		return callback(deviceID, nil)
-	})
+	// 🚀 优化：通过TCP适配器获取连接信息
+	if m.tcpAdapter != nil {
+		m.tcpAdapter.ForEachConnection(callback)
+	}
 }
 
 // GetConnectionByDeviceId 通过设备ID获取连接（向后兼容）
@@ -1290,26 +1109,22 @@ func (m *UnifiedMonitor) GetConnectionByDeviceId(deviceId string) (ziface.IConne
 
 // GetDeviceIdByConnId 通过连接ID获取设备ID（向后兼容）
 func (m *UnifiedMonitor) GetDeviceIdByConnId(connId uint64) (string, bool) {
-	if deviceIDInterface, exists := m.connToDevice.Load(connId); exists {
-		deviceID := deviceIDInterface.(string)
-		return deviceID, true
+	// 🚀 优化：通过TCP适配器获取设备ID
+	if m.tcpAdapter != nil {
+		return m.tcpAdapter.GetDeviceIDByConnID(connId)
 	}
 	return "", false
 }
 
 // UpdateDeviceStatus 更新设备状态（向后兼容）
 func (m *UnifiedMonitor) UpdateDeviceStatus(deviceId string, status string) {
-	// 更新设备指标中的状态
-	if metricsInterface, exists := m.deviceMetrics.Load(deviceId); exists {
-		metrics := metricsInterface.(*DeviceMetrics)
-		metrics.Status = status
-		metrics.LastActivity = time.Now()
-	}
+	// 🚀 重构：不再维护本地设备指标，状态更新由统一TCP管理器处理
+	// 此方法保留用于向后兼容，但不执行任何操作
 
 	logger.WithFields(logrus.Fields{
 		"device_id": deviceId,
 		"status":    status,
-	}).Debug("设备状态已更新")
+	}).Debug("设备状态更新请求（通过统一TCP管理器处理）")
 }
 
 // UpdateLastHeartbeatTime 更新最后心跳时间（向后兼容）

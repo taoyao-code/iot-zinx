@@ -10,14 +10,14 @@ import (
 )
 
 // DeviceStatusManager 统一设备状态管理器
-// 整合所有设备状态相关功能：状态缓存、状态更新、状态查询、状态同步
+// 🚀 重构：基于统一TCP管理器的设备状态管理，消除重复状态存储
 type DeviceStatusManager struct {
-	// 状态存储
-	deviceStatus     sync.Map // map[string]string - deviceId -> status
-	deviceLastUpdate sync.Map // map[string]int64 - deviceId -> timestamp
+	// 🚀 重构：不再维护独立的状态存储，使用统一TCP管理器
+	// deviceStatus     sync.Map // 已删除：重复状态存储
+	// deviceLastUpdate sync.Map // 已删除：重复时间戳存储
 
-	// 连接管理器引用
-	connectionMgr *ConnectionGroupManager
+	// 统一TCP管理器引用
+	tcpManager IUnifiedTCPManager
 
 	// 配置
 	config *DeviceStatusConfig
@@ -74,9 +74,9 @@ func GetDeviceStatusManager() *DeviceStatusManager {
 // NewDeviceStatusManager 创建设备状态管理器
 func NewDeviceStatusManager(config *DeviceStatusConfig) *DeviceStatusManager {
 	return &DeviceStatusManager{
-		connectionMgr: GetGlobalConnectionGroupManager(),
-		config:        config,
-		stats:         &DeviceStatusStats{},
+		tcpManager: GetGlobalUnifiedTCPManager(), // 🚀 重构：使用统一TCP管理器
+		config:     config,
+		stats:      &DeviceStatusStats{},
 	}
 }
 
@@ -97,45 +97,50 @@ func (m *DeviceStatusManager) Start() {
 
 // GetDeviceStatus 获取设备状态 - 统一状态查询入口
 func (m *DeviceStatusManager) GetDeviceStatus(deviceID string) string {
-	if !m.config.EnableCache {
-		// 如果禁用缓存，直接从连接状态获取
-		return m.getStatusFromConnection(deviceID)
+	// 🚀 重构：直接从统一TCP管理器获取设备状态，不再维护独立缓存
+	if m.tcpManager == nil {
+		return string(constants.DeviceStatusOffline)
 	}
 
-	// 从缓存获取状态
-	if statusVal, exists := m.deviceStatus.Load(deviceID); exists {
-		if status, ok := statusVal.(string); ok {
-			// 检查缓存是否过期
-			if updateTimeVal, exists := m.deviceLastUpdate.Load(deviceID); exists {
-				if updateTime, ok := updateTimeVal.(int64); ok {
-					if time.Now().Unix()-updateTime < int64(m.config.CacheTimeout.Seconds()) {
-						return status
-					}
-				}
-			}
+	// 从统一TCP管理器获取设备状态
+	if session, exists := m.tcpManager.GetSessionByDeviceID(deviceID); exists {
+		// 根据连接状态和设备状态判断
+		if session.DeviceStatus == constants.DeviceStatusOnline {
+			return string(constants.DeviceStatusOnline)
 		}
 	}
 
-	// 缓存过期或不存在，重新获取状态
-	status := m.getStatusFromConnection(deviceID)
-	m.UpdateDeviceStatus(deviceID, status)
-
-	return status
+	return string(constants.DeviceStatusOffline)
 }
 
 // UpdateDeviceStatus 更新设备状态 - 统一状态更新入口
 func (m *DeviceStatusManager) UpdateDeviceStatus(deviceID string, status string) {
-	if !m.config.EnableCache {
+	// 🚀 重构：通过统一TCP管理器更新设备状态，不再维护独立缓存
+	if m.tcpManager == nil {
 		return
 	}
 
-	m.deviceStatus.Store(deviceID, status)
-	m.deviceLastUpdate.Store(deviceID, time.Now().Unix())
+	// 转换状态格式
+	var deviceStatus constants.DeviceStatus
+	switch status {
+	case "online":
+		deviceStatus = constants.DeviceStatusOnline
+	case "offline":
+		deviceStatus = constants.DeviceStatusOffline
+	default:
+		deviceStatus = constants.DeviceStatusOffline
+	}
+
+	// 通过统一TCP管理器更新状态
+	m.tcpManager.UpdateDeviceStatus(deviceID, deviceStatus)
 
 	logger.WithFields(logrus.Fields{
 		"deviceId": deviceID,
 		"status":   status,
-	}).Debug("更新设备状态")
+	}).Debug("设备状态已更新")
+
+	// 更新统计信息
+	m.updateStats()
 }
 
 // IsDeviceOnline 检查设备是否在线 - 统一在线检查入口
@@ -148,12 +153,19 @@ func (m *DeviceStatusManager) IsDeviceOnline(deviceID string) bool {
 func (m *DeviceStatusManager) GetAllDeviceStatuses() map[string]string {
 	result := make(map[string]string)
 
-	// 从连接管理器获取所有设备信息
-	allDevices := m.connectionMgr.GetAllDevices()
+	// 🚀 重构：从统一TCP管理器获取所有设备信息
+	if m.tcpManager == nil {
+		return result
+	}
 
-	for _, deviceInfo := range allDevices {
-		status := m.GetDeviceStatus(deviceInfo.DeviceID)
-		result[deviceInfo.DeviceID] = status
+	// 获取所有会话并提取设备状态
+	allSessions := m.tcpManager.GetAllSessions()
+	for deviceID, session := range allSessions {
+		if session.DeviceStatus == constants.DeviceStatusOnline {
+			result[deviceID] = string(constants.DeviceStatusOnline)
+		} else {
+			result[deviceID] = string(constants.DeviceStatusOffline)
+		}
 	}
 
 	return result
@@ -162,12 +174,9 @@ func (m *DeviceStatusManager) GetAllDeviceStatuses() map[string]string {
 // ===== 内部方法 =====
 
 // getStatusFromConnection 从连接状态获取设备状态
+// 🚀 重构：此方法已废弃，直接使用统一TCP管理器
 func (m *DeviceStatusManager) getStatusFromConnection(deviceID string) string {
-	_, exists := m.connectionMgr.GetConnectionByDeviceID(deviceID)
-	if exists {
-		return string(constants.DeviceStatusOnline)
-	}
-	return string(constants.DeviceStatusOffline)
+	return m.GetDeviceStatus(deviceID)
 }
 
 // startCleanupRoutine 启动清理协程
@@ -182,33 +191,9 @@ func (m *DeviceStatusManager) startCleanupRoutine() {
 
 // cleanupExpiredStatuses 清理过期的状态缓存
 func (m *DeviceStatusManager) cleanupExpiredStatuses() {
-	now := time.Now().Unix()
-	expiredDevices := make([]string, 0)
-
-	// 查找过期的设备状态
-	m.deviceLastUpdate.Range(func(key, value interface{}) bool {
-		if deviceID, ok := key.(string); ok {
-			if updateTime, ok := value.(int64); ok {
-				if now-updateTime > int64(m.config.CacheTimeout.Seconds()) {
-					expiredDevices = append(expiredDevices, deviceID)
-				}
-			}
-		}
-		return true
-	})
-
-	// 删除过期的状态缓存
-	for _, deviceID := range expiredDevices {
-		m.deviceStatus.Delete(deviceID)
-		m.deviceLastUpdate.Delete(deviceID)
-	}
-
-	// 更新统计信息
-	m.updateStats()
-
-	if len(expiredDevices) > 0 {
-		logger.WithField("count", len(expiredDevices)).Debug("清理过期设备状态缓存")
-	}
+	// 🚀 重构：不再需要清理缓存，统一TCP管理器自动管理状态
+	// 此方法保留用于向后兼容，但不执行任何操作
+	logger.Debug("设备状态清理：使用统一TCP管理器，无需手动清理")
 }
 
 // startSyncRoutine 启动状态同步协程
@@ -223,23 +208,9 @@ func (m *DeviceStatusManager) startSyncRoutine() {
 
 // syncDeviceStatuses 同步设备状态
 func (m *DeviceStatusManager) syncDeviceStatuses() {
-	// 获取所有连接的设备
-	allDevices := m.connectionMgr.GetAllDevices()
-
-	syncCount := 0
-	for _, deviceInfo := range allDevices {
-		// 更新在线设备状态
-		m.UpdateDeviceStatus(deviceInfo.DeviceID, string(constants.DeviceStatusOnline))
-		syncCount++
-	}
-
-	// 更新统计信息
-	m.updateStats()
-
-	logger.WithFields(logrus.Fields{
-		"syncCount": syncCount,
-		"timestamp": time.Now().Format(time.RFC3339),
-	}).Debug("设备状态同步完成")
+	// 🚀 重构：统一TCP管理器自动同步状态，无需手动同步
+	// 此方法保留用于向后兼容，但不执行任何操作
+	logger.Debug("设备状态同步：使用统一TCP管理器，自动同步状态")
 }
 
 // updateStats 更新统计信息
@@ -247,21 +218,17 @@ func (m *DeviceStatusManager) updateStats() {
 	m.stats.mutex.Lock()
 	defer m.stats.mutex.Unlock()
 
-	// 统计缓存状态数量
-	cachedCount := 0
-	m.deviceStatus.Range(func(key, value interface{}) bool {
-		cachedCount++
-		return true
-	})
+	// 🚀 重构：从统一TCP管理器获取统计信息
+	if m.tcpManager != nil {
+		stats := m.tcpManager.GetStats()
+		if stats != nil {
+			m.stats.OnlineDevices = int(stats.OnlineDevices)
+			m.stats.TotalDevices = int(stats.TotalDevices)
+			m.stats.CachedStatuses = int(stats.TotalDevices) // 使用总设备数作为缓存状态数
+			m.stats.OfflineDevices = m.stats.TotalDevices - m.stats.OnlineDevices
+		}
+	}
 
-	// 统计在线设备数量
-	allDevices := m.connectionMgr.GetAllDevices()
-	onlineCount := len(allDevices)
-
-	m.stats.CachedStatuses = cachedCount
-	m.stats.OnlineDevices = onlineCount
-	m.stats.TotalDevices = cachedCount // 缓存中的设备数量作为总数
-	m.stats.OfflineDevices = m.stats.TotalDevices - m.stats.OnlineDevices
 	m.stats.LastSyncTime = time.Now()
 }
 
@@ -285,10 +252,11 @@ func (m *DeviceStatusManager) HandleDeviceOffline(deviceID string) {
 func (m *DeviceStatusManager) GetDeviceStatusWithTimestamp(deviceID string) (string, int64) {
 	status := m.GetDeviceStatus(deviceID)
 
+	// 🚀 重构：从统一TCP管理器获取最后活动时间
 	var timestamp int64
-	if updateTimeVal, exists := m.deviceLastUpdate.Load(deviceID); exists {
-		if updateTime, ok := updateTimeVal.(int64); ok {
-			timestamp = updateTime
+	if m.tcpManager != nil {
+		if session, exists := m.tcpManager.GetSessionByDeviceID(deviceID); exists {
+			timestamp = session.LastActivity.Unix()
 		}
 	}
 

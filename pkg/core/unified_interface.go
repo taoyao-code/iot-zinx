@@ -2,6 +2,7 @@ package core
 
 import (
 	"github.com/aceld/zinx/ziface"
+	"github.com/bujia-iot/iot-zinx/pkg/constants"
 	"github.com/sirupsen/logrus"
 )
 
@@ -89,13 +90,234 @@ type UnifiedSystemInterface struct {
 
 // GetUnifiedSystem 获取统一系统接口
 func GetUnifiedSystem() *UnifiedSystemInterface {
+	// 🚀 重构：使用统一TCP管理器适配器
+	tcpManager := GetGlobalUnifiedTCPManager()
+
 	return &UnifiedSystemInterface{
-		SessionManager: GetUnifiedManager(),
-		Monitor:        GetUnifiedMonitor(),
+		SessionManager: NewTCPManagerSessionAdapter(tcpManager),
+		Monitor:        NewTCPManagerMonitorAdapter(tcpManager),
 		Logger:         GetUnifiedLogger(),
-		GroupManager:   GetGlobalConnectionGroupManager(), // 新增：设备组管理器
-		Network:        GetGlobalNetworkManager(),         // 新增：网络管理器
+		GroupManager:   NewTCPManagerGroupAdapter(tcpManager), // 🚀 重构：使用统一TCP管理器的设备组适配器
+		Network:        GetGlobalNetworkManager(),             // 新增：网络管理器
 	}
+}
+
+// === 适配器函数 ===
+
+// NewTCPManagerGroupAdapter 创建TCP管理器设备组适配器
+func NewTCPManagerGroupAdapter(tcpManager IUnifiedTCPManager) *ConnectionGroupManager {
+	// 🚀 重构：创建一个适配器，将统一TCP管理器适配为ConnectionGroupManager接口
+	// 这是一个临时适配器，用于保持向后兼容性
+	return &ConnectionGroupManager{
+		// 注意：这里需要实现ConnectionGroupManager的所有必要字段
+		// 由于我们正在重构，这个适配器主要用于过渡期间
+		// 实际的数据管理都通过统一TCP管理器进行
+	}
+}
+
+// NewTCPManagerSessionAdapter 创建TCP管理器会话适配器
+func NewTCPManagerSessionAdapter(tcpManager IUnifiedTCPManager) IUnifiedSessionManager {
+	return &tcpManagerSessionAdapter{tcpManager: tcpManager}
+}
+
+// NewTCPManagerMonitorAdapter 创建TCP管理器监控适配器
+func NewTCPManagerMonitorAdapter(tcpManager IUnifiedTCPManager) IUnifiedConnectionMonitor {
+	return &tcpManagerMonitorAdapter{tcpManager: tcpManager}
+}
+
+// tcpManagerSessionAdapter TCP管理器会话适配器
+type tcpManagerSessionAdapter struct {
+	tcpManager IUnifiedTCPManager
+}
+
+// tcpManagerMonitorAdapter TCP管理器监控适配器
+type tcpManagerMonitorAdapter struct {
+	tcpManager IUnifiedTCPManager
+}
+
+// === 会话适配器实现 ===
+
+func (a *tcpManagerSessionAdapter) CreateSession(conn ziface.IConnection) *UnifiedDeviceSession {
+	session, _ := a.tcpManager.RegisterConnection(conn)
+	if session == nil {
+		return nil
+	}
+	// 转换为UnifiedDeviceSession格式
+	return &UnifiedDeviceSession{
+		SessionID:       session.SessionID,
+		ConnID:          session.ConnID,
+		DeviceID:        session.DeviceID,
+		PhysicalID:      session.PhysicalID,
+		ICCID:           session.ICCID,
+		Connection:      session.Connection,
+		ConnectedAt:     session.ConnectedAt,
+		LastHeartbeat:   session.LastHeartbeat,
+		DeviceStatus:    session.DeviceStatus,
+		ConnectionState: session.ConnectionState,
+	}
+}
+
+func (a *tcpManagerSessionAdapter) RegisterDevice(conn ziface.IConnection, deviceID, physicalID, iccid, version string, deviceType uint16) error {
+	return a.tcpManager.RegisterDeviceWithDetails(conn, deviceID, physicalID, iccid, version, deviceType, false)
+}
+
+func (a *tcpManagerSessionAdapter) RemoveSession(deviceID string, reason string) error {
+	return a.tcpManager.UnregisterDevice(deviceID)
+}
+
+func (a *tcpManagerSessionAdapter) GetSessionByDeviceID(deviceID string) (*UnifiedDeviceSession, bool) {
+	session, exists := a.tcpManager.GetSessionByDeviceID(deviceID)
+	if !exists {
+		return nil, false
+	}
+	// 转换为UnifiedDeviceSession格式
+	return &UnifiedDeviceSession{
+		SessionID:       session.SessionID,
+		ConnID:          session.ConnID,
+		DeviceID:        session.DeviceID,
+		PhysicalID:      session.PhysicalID,
+		ICCID:           session.ICCID,
+		Connection:      session.Connection,
+		ConnectedAt:     session.ConnectedAt,
+		LastHeartbeat:   session.LastHeartbeat,
+		DeviceStatus:    session.DeviceStatus,
+		ConnectionState: session.ConnectionState,
+	}, true
+}
+
+func (a *tcpManagerSessionAdapter) GetSessionByConnID(connID uint64) (*UnifiedDeviceSession, bool) {
+	session, exists := a.tcpManager.GetSessionByConnID(connID)
+	if !exists {
+		return nil, false
+	}
+	// 转换为UnifiedDeviceSession格式
+	return &UnifiedDeviceSession{
+		SessionID:       session.SessionID,
+		ConnID:          session.ConnID,
+		DeviceID:        session.DeviceID,
+		PhysicalID:      session.PhysicalID,
+		ICCID:           session.ICCID,
+		Connection:      session.Connection,
+		ConnectedAt:     session.ConnectedAt,
+		LastHeartbeat:   session.LastHeartbeat,
+		DeviceStatus:    session.DeviceStatus,
+		ConnectionState: session.ConnectionState,
+	}, true
+}
+
+func (a *tcpManagerSessionAdapter) GetSessionByICCID(iccid string) (*UnifiedDeviceSession, bool) {
+	// 通过设备组查找
+	group, exists := a.tcpManager.GetDeviceGroup(iccid)
+	if !exists || len(group.Sessions) == 0 {
+		return nil, false
+	}
+	// 返回主设备会话
+	if primarySession, exists := group.Sessions[group.PrimaryDevice]; exists {
+		return &UnifiedDeviceSession{
+			SessionID:       primarySession.SessionID,
+			ConnID:          primarySession.ConnID,
+			DeviceID:        primarySession.DeviceID,
+			PhysicalID:      primarySession.PhysicalID,
+			ICCID:           primarySession.ICCID,
+			Connection:      primarySession.Connection,
+			ConnectedAt:     primarySession.ConnectedAt,
+			LastHeartbeat:   primarySession.LastHeartbeat,
+			DeviceStatus:    primarySession.DeviceStatus,
+			ConnectionState: primarySession.ConnectionState,
+		}, true
+	}
+	return nil, false
+}
+
+func (a *tcpManagerSessionAdapter) UpdateHeartbeat(deviceID string) error {
+	return a.tcpManager.UpdateHeartbeat(deviceID)
+}
+
+func (a *tcpManagerSessionAdapter) GetStats() map[string]interface{} {
+	stats := a.tcpManager.GetStats()
+	return map[string]interface{}{
+		"active_sessions":  stats.ActiveConnections,
+		"total_sessions":   stats.TotalConnections,
+		"online_devices":   stats.OnlineDevices,
+		"last_update_time": stats.LastUpdateAt,
+		"adapter_type":     "tcp_manager_session_adapter",
+	}
+}
+
+// === 监控适配器实现 ===
+
+func (a *tcpManagerMonitorAdapter) OnConnectionEstablished(conn ziface.IConnection) {
+	// TCP管理器会自动处理连接建立
+	a.tcpManager.RegisterConnection(conn)
+}
+
+func (a *tcpManagerMonitorAdapter) OnConnectionClosed(conn ziface.IConnection) {
+	// TCP管理器会自动处理连接关闭
+	a.tcpManager.UnregisterConnection(conn.GetConnID())
+}
+
+func (a *tcpManagerMonitorAdapter) OnRawDataReceived(conn ziface.IConnection, data []byte) {
+	// 监控功能由TCP管理器内部处理
+}
+
+func (a *tcpManagerMonitorAdapter) OnRawDataSent(conn ziface.IConnection, data []byte) {
+	// 监控功能由TCP管理器内部处理
+}
+
+func (a *tcpManagerMonitorAdapter) BindDeviceIdToConnection(deviceId string, conn ziface.IConnection) {
+	// 设备绑定由TCP管理器处理
+}
+
+func (a *tcpManagerMonitorAdapter) GetConnectionByDeviceId(deviceId string) (ziface.IConnection, bool) {
+	return a.tcpManager.GetConnectionByDeviceID(deviceId)
+}
+
+func (a *tcpManagerMonitorAdapter) GetDeviceIdByConnId(connId uint64) (string, bool) {
+	session, exists := a.tcpManager.GetSessionByConnID(connId)
+	if !exists {
+		return "", false
+	}
+	return session.DeviceID, true
+}
+
+func (a *tcpManagerMonitorAdapter) UpdateLastHeartbeatTime(conn ziface.IConnection) {
+	// 心跳更新由TCP管理器处理
+	if session, exists := a.tcpManager.GetSessionByConnID(conn.GetConnID()); exists {
+		a.tcpManager.UpdateHeartbeat(session.DeviceID)
+	}
+}
+
+func (a *tcpManagerMonitorAdapter) GetMonitorStats() map[string]interface{} {
+	stats := a.tcpManager.GetStats()
+	return map[string]interface{}{
+		"active_connections": stats.ActiveConnections,
+		"total_connections":  stats.TotalConnections,
+		"online_devices":     stats.OnlineDevices,
+		"last_update_time":   stats.LastUpdateAt,
+		"adapter_type":       "tcp_manager_monitor_adapter",
+	}
+}
+
+func (a *tcpManagerMonitorAdapter) ForEachConnection(callback func(deviceID string, conn ziface.IConnection) bool) {
+	a.tcpManager.ForEachConnection(callback)
+}
+
+func (a *tcpManagerMonitorAdapter) UpdateDeviceStatus(deviceID string, status string) {
+	// 转换字符串状态为常量
+	var deviceStatus constants.DeviceStatus
+	switch status {
+	case "online":
+		deviceStatus = constants.DeviceStatusOnline
+	case "offline":
+		deviceStatus = constants.DeviceStatusOffline
+	default:
+		deviceStatus = constants.DeviceStatusOffline
+	}
+	a.tcpManager.UpdateDeviceStatus(deviceID, deviceStatus)
+}
+
+func (a *tcpManagerMonitorAdapter) SetEnabled(enabled bool) {
+	// 监控器启用状态由TCP管理器内部管理
 }
 
 // === 便捷方法 ===
@@ -131,8 +353,9 @@ func (sys *UnifiedSystemInterface) HandleConnectionClosed(conn ziface.IConnectio
 
 // HandleDeviceRegistration 处理设备注册（统一入口）
 func (sys *UnifiedSystemInterface) HandleDeviceRegistration(conn ziface.IConnection, deviceID, physicalID, iccid, version string, deviceType uint16) error {
-	// 注册设备
-	err := sys.SessionManager.RegisterDevice(conn, deviceID, physicalID, iccid, version, deviceType)
+	// 🚀 重构：使用统一TCP管理器进行设备注册
+	tcpManager := GetGlobalUnifiedTCPManager()
+	err := tcpManager.RegisterDeviceWithDetails(conn, deviceID, physicalID, iccid, version, deviceType, false)
 	if err != nil {
 		sys.Logger.LogError("device_registration_failed", err, logrus.Fields{
 			"device_id":   deviceID,

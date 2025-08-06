@@ -10,6 +10,7 @@ import (
 	"github.com/bujia-iot/iot-zinx/pkg/monitor"
 	"github.com/bujia-iot/iot-zinx/pkg/network"
 	"github.com/bujia-iot/iot-zinx/pkg/protocol"
+	"github.com/bujia-iot/iot-zinx/pkg/session"
 )
 
 // InitUnifiedArchitecture 初始化统一架构
@@ -108,6 +109,31 @@ func InitUnifiedArchitecture() {
 		} else {
 			logger.Info("全局监控管理器已启动")
 		}
+	}
+
+	// 🚀 新增：设置统一TCP管理器和会话管理器的集成
+	tcpManager := core.GetGlobalUnifiedTCPManager()
+	if tcpManager != nil {
+		// 启动统一TCP管理器
+		if err := tcpManager.Start(); err != nil {
+			logger.Errorf("启动统一TCP管理器失败: %v", err)
+		} else {
+			logger.Info("统一TCP管理器已启动")
+		}
+
+		// 设置会话管理器的TCP适配器
+		session.SetGlobalTCPManagerGetter(func() interface{} {
+			return core.GetGlobalUnifiedTCPManager()
+		})
+		logger.Info("会话管理器TCP适配器已设置")
+
+		// 设置监控器的TCP适配器
+		monitor.SetGlobalMonitorTCPManagerGetter(func() interface{} {
+			return core.GetGlobalUnifiedTCPManager()
+		})
+		logger.Info("监控器TCP适配器已设置")
+
+		// 注意：API服务的TCP适配器设置在应用启动时进行，避免循环导入
 	}
 
 	// 13. 设置向后兼容性

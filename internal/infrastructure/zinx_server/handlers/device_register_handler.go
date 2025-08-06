@@ -11,7 +11,6 @@ import (
 	"github.com/bujia-iot/iot-zinx/internal/domain/dny_protocol"
 	"github.com/bujia-iot/iot-zinx/internal/infrastructure/config"
 	"github.com/bujia-iot/iot-zinx/internal/infrastructure/logger"
-	"github.com/bujia-iot/iot-zinx/pkg"
 	"github.com/bujia-iot/iot-zinx/pkg/constants"
 	"github.com/bujia-iot/iot-zinx/pkg/core"
 	"github.com/bujia-iot/iot-zinx/pkg/network"
@@ -196,46 +195,40 @@ func (h *DeviceRegisterHandler) handleDeviceRegister(deviceId string, physicalId
 		return
 	}
 
-	// 🔧 修复：同时注册到设备组管理器和统一连接管理器
-	unifiedSystem := pkg.GetUnifiedSystem()
+	// 🚀 重构：使用统一TCP管理器进行设备注册
 	physicalIdStr := fmt.Sprintf("%d", physicalId)
 
-	// 1. 注册到设备组管理器（用于主从设备管理）
-	regErr := unifiedSystem.GroupManager.RegisterDevice(conn, deviceId, physicalIdStr, iccidFromProp)
+	// 获取统一TCP管理器
+	tcpManager := core.GetGlobalUnifiedTCPManager()
+
+	// 统一设备注册（替代原来的多个管理器注册）
+	regErr := tcpManager.RegisterDeviceWithDetails(
+		conn,
+		deviceId,
+		physicalIdStr,
+		iccidFromProp,
+		"",    // version - 从设备注册包中获取
+		0,     // deviceType - 从设备注册包中获取
+		false, // directMode - 默认false
+	)
 	if regErr != nil {
 		logger.WithFields(logrus.Fields{
 			"deviceId": deviceId,
 			"connID":   conn.GetConnID(),
 			"error":    regErr.Error(),
-		}).Error("DeviceRegisterHandler: 设备组注册失败")
+		}).Error("DeviceRegisterHandler: 统一TCP管理器注册失败")
 		h.sendRegisterErrorResponse(deviceId, physicalId, messageID, conn, "设备注册失败")
 		return
 	}
 
-	// 2. 🔧 修复：注册到统一连接管理器（用于设备查找）
-	connectionMgr := core.GetUnifiedConnectionManager()
-	if connectionMgr != nil {
-		connRegErr := connectionMgr.RegisterDevice(conn, deviceId, physicalIdStr, iccidFromProp)
-		if connRegErr != nil {
-			logger.WithFields(logrus.Fields{
-				"deviceId": deviceId,
-				"connID":   conn.GetConnID(),
-				"error":    connRegErr.Error(),
-			}).Error("DeviceRegisterHandler: 统一连接管理器注册失败")
-			h.sendRegisterErrorResponse(deviceId, physicalId, messageID, conn, "连接管理器注册失败")
-			return
-		}
+	logger.WithFields(logrus.Fields{
+		"deviceId": deviceId,
+		"connID":   conn.GetConnID(),
+		"iccid":    iccidFromProp,
+	}).Info("设备已成功注册到统一TCP管理器")
 
-		logger.WithFields(logrus.Fields{
-			"deviceId": deviceId,
-			"connID":   conn.GetConnID(),
-		}).Info("设备已成功注册到统一连接管理器")
-	} else {
-		logger.WithField("deviceId", deviceId).Warn("统一连接管理器未初始化")
-	}
-
-	// 验证注册是否成功 - 使用设备组管理器验证
-	if boundConn, exists := unifiedSystem.GroupManager.GetConnectionByDeviceID(deviceId); !exists || boundConn.GetConnID() != conn.GetConnID() {
+	// 验证注册是否成功 - 使用统一TCP管理器验证
+	if boundConn, exists := tcpManager.GetConnectionByDeviceID(deviceId); !exists || boundConn.GetConnID() != conn.GetConnID() {
 		logger.WithFields(logrus.Fields{
 			"deviceId":        deviceId,
 			"connID":          conn.GetConnID(),

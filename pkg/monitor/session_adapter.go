@@ -4,7 +4,9 @@ import (
 	"time"
 
 	"github.com/aceld/zinx/ziface"
+	"github.com/bujia-iot/iot-zinx/internal/infrastructure/logger"
 	"github.com/bujia-iot/iot-zinx/pkg/constants"
+	"github.com/sirupsen/logrus"
 )
 
 // ISession 会话接口（避免循环导入）
@@ -64,14 +66,8 @@ func (a *SessionMonitorAdapter) OnSessionCreated(session ISession) {
 	connID := session.GetConnID()
 
 	if deviceID != "" {
-		a.monitor.connToDevice.Store(connID, deviceID)
-		a.monitor.deviceToConn.Store(deviceID, connID)
-
-		// 更新连接指标中的设备ID
-		if metricsInterface, exists := a.monitor.connectionMetrics.Load(connID); exists {
-			metrics := metricsInterface.(*ConnectionMetrics)
-			metrics.DeviceID = deviceID
-		}
+		// 🚀 重构：不再维护本地映射关系，映射关系由统一TCP管理器维护
+		// 此处保留用于向后兼容，但不执行任何操作
 	}
 
 	// 发送事件通知
@@ -92,19 +88,8 @@ func (a *SessionMonitorAdapter) OnSessionRegistered(session ISession) {
 	deviceID := session.GetDeviceID()
 	now := time.Now()
 
-	// 创建或更新设备指标
-	metrics := &DeviceMetrics{
-		DeviceID:     deviceID,
-		PhysicalID:   session.GetPhysicalID(),
-		ICCID:        session.GetICCID(),
-		State:        session.GetState(),
-		Status:       "registered",
-		ConnectedAt:  session.GetConnectedAt(),
-		RegisteredAt: now,
-		LastActivity: now,
-	}
-
-	a.monitor.deviceMetrics.Store(deviceID, metrics)
+	// 🚀 重构：不再维护本地设备指标，设备注册由统一TCP管理器处理
+	// 此处保留用于向后兼容，但不执行任何操作
 
 	// 更新设备统计
 	a.monitor.updateDeviceStats(func(stats *DeviceStats) {
@@ -132,12 +117,8 @@ func (a *SessionMonitorAdapter) OnSessionRemoved(session ISession, reason string
 	connID := session.GetConnID()
 	now := time.Now()
 
-	// 清理映射关系
-	a.monitor.connToDevice.Delete(connID)
-	a.monitor.deviceToConn.Delete(deviceID)
-
-	// 移除设备指标
-	a.monitor.deviceMetrics.Delete(deviceID)
+	// 🚀 重构：不再维护本地映射关系，映射关系由统一TCP管理器维护
+	// 此处保留用于向后兼容，但不执行任何操作
 
 	// 更新设备统计
 	a.monitor.updateDeviceStats(func(stats *DeviceStats) {
@@ -166,15 +147,15 @@ func (a *SessionMonitorAdapter) OnSessionRemoved(session ISession, reason string
 
 // OnSessionStateChanged 会话状态变更事件
 func (a *SessionMonitorAdapter) OnSessionStateChanged(session ISession, oldState, newState constants.DeviceConnectionState) {
-	deviceID := session.GetDeviceID()
-	now := time.Now()
+	// 🚀 重构：不再维护本地设备指标，状态变更由统一TCP管理器处理
+	// 此处保留用于向后兼容，但不执行任何操作
 
-	// 更新设备指标
-	if metricsInterface, exists := a.monitor.deviceMetrics.Load(deviceID); exists {
-		metrics := metricsInterface.(*DeviceMetrics)
-		metrics.State = newState
-		metrics.LastActivity = now
-	}
+	logger.WithFields(logrus.Fields{
+		"device_id":  session.GetDeviceID(),
+		"old_state":  oldState,
+		"new_state":  newState,
+		"session_id": session.GetSessionID(),
+	}).Debug("会话状态变更（通过统一TCP管理器处理）")
 }
 
 // === 设备监控实现 ===

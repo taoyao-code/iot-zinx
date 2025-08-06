@@ -12,6 +12,14 @@ import (
 	"github.com/sirupsen/logrus"
 )
 
+// 🚀 重构：全局TCP管理器获取函数，避免循环导入
+var deviceSessionTCPManagerGetter func() interface{}
+
+// SetDeviceSessionTCPManagerGetter 设置设备会话的TCP管理器获取函数
+func SetDeviceSessionTCPManagerGetter(getter func() interface{}) {
+	deviceSessionTCPManagerGetter = getter
+}
+
 // DeviceSession 设备会话管理器 - 替代散乱的SetProperty/GetProperty
 // 解决当前架构中数据分散、类型不安全、性能低下的问题
 type DeviceSession struct {
@@ -44,26 +52,27 @@ type DeviceSession struct {
 	SessionID      string `json:"session_id"`      // 会话ID
 
 	// 内部状态（不序列化）
-	mutex           sync.RWMutex               `json:"-"`
-	connection      ziface.IConnection         `json:"-"` // 连接引用
-	propertyManager *ConnectionPropertyManager `json:"-"` // 属性管理器
+	mutex      sync.RWMutex       `json:"-"`
+	connection ziface.IConnection `json:"-"` // 连接引用
+	// 🚀 重构：不再使用独立的属性管理器，使用统一TCP管理器的属性管理
+	// propertyManager *ConnectionPropertyManager `json:"-"` // 已废弃
 }
 
 // NewDeviceSession 创建新的设备会话
 func NewDeviceSession(conn ziface.IConnection) *DeviceSession {
 	now := time.Now()
 	session := &DeviceSession{
-		ConnID:          conn.GetConnID(),
-		RemoteAddr:      conn.RemoteAddr().String(),
-		State:           constants.ConnStatusAwaitingICCID, // 🔧 状态重构：使用标准常量
-		Status:          constants.DeviceStatusOnline,      // 🔧 状态重构：使用标准常量
-		ConnectedAt:     now,
-		LastHeartbeat:   now,
-		LastActivityAt:  now,
-		ReconnectCount:  0,
-		SessionID:       generateSessionID(conn),
-		connection:      conn,
-		propertyManager: NewConnectionPropertyManager(),
+		ConnID:         conn.GetConnID(),
+		RemoteAddr:     conn.RemoteAddr().String(),
+		State:          constants.ConnStatusAwaitingICCID, // 🔧 状态重构：使用标准常量
+		Status:         constants.DeviceStatusOnline,      // 🔧 状态重构：使用标准常量
+		ConnectedAt:    now,
+		LastHeartbeat:  now,
+		LastActivityAt: now,
+		ReconnectCount: 0,
+		SessionID:      generateSessionID(conn),
+		connection:     conn,
+		// 🚀 重构：不再创建独立的属性管理器
 	}
 	return session
 }
@@ -316,32 +325,88 @@ func (s *DeviceSession) IsActive() bool {
 
 // SetProperty 设置自定义属性
 func (s *DeviceSession) SetProperty(key string, value interface{}) {
-	s.propertyManager.SetProperty(key, value)
+	// 🚀 重构：通过统一TCP管理器设置属性
+	if deviceSessionTCPManagerGetter != nil {
+		if tcpManager := deviceSessionTCPManagerGetter(); tcpManager != nil {
+			if manager, ok := tcpManager.(interface {
+				SetConnectionProperty(connID uint64, key string, value interface{}) error
+			}); ok {
+				manager.SetConnectionProperty(s.ConnID, key, value)
+			}
+		}
+	}
 }
 
 // GetProperty 获取自定义属性
 func (s *DeviceSession) GetProperty(key string) (interface{}, bool) {
-	return s.propertyManager.GetProperty(key)
+	// 🚀 重构：通过统一TCP管理器获取属性
+	if deviceSessionTCPManagerGetter != nil {
+		if tcpManager := deviceSessionTCPManagerGetter(); tcpManager != nil {
+			if manager, ok := tcpManager.(interface {
+				GetConnectionProperty(connID uint64, key string) (interface{}, bool)
+			}); ok {
+				return manager.GetConnectionProperty(s.ConnID, key)
+			}
+		}
+	}
+	return nil, false
 }
 
 // RemoveProperty 移除自定义属性
 func (s *DeviceSession) RemoveProperty(key string) {
-	s.propertyManager.RemoveProperty(key)
+	// 🚀 重构：通过统一TCP管理器移除属性
+	if deviceSessionTCPManagerGetter != nil {
+		if tcpManager := deviceSessionTCPManagerGetter(); tcpManager != nil {
+			if manager, ok := tcpManager.(interface {
+				RemoveConnectionProperty(connID uint64, key string) error
+			}); ok {
+				manager.RemoveConnectionProperty(s.ConnID, key)
+			}
+		}
+	}
 }
 
 // GetAllProperties 获取所有自定义属性
 func (s *DeviceSession) GetAllProperties() map[string]interface{} {
-	return s.propertyManager.GetAllProperties()
+	// 🚀 重构：通过统一TCP管理器获取所有属性
+	if deviceSessionTCPManagerGetter != nil {
+		if tcpManager := deviceSessionTCPManagerGetter(); tcpManager != nil {
+			if manager, ok := tcpManager.(interface {
+				GetAllConnectionProperties(connID uint64) (map[string]interface{}, error)
+			}); ok {
+				if properties, err := manager.GetAllConnectionProperties(s.ConnID); err == nil {
+					return properties
+				}
+			}
+		}
+	}
+	return make(map[string]interface{})
 }
 
 // HasProperty 检查属性是否存在
 func (s *DeviceSession) HasProperty(key string) bool {
-	return s.propertyManager.HasProperty(key)
+	// 🚀 重构：通过统一TCP管理器检查属性
+	if deviceSessionTCPManagerGetter != nil {
+		if tcpManager := deviceSessionTCPManagerGetter(); tcpManager != nil {
+			if manager, ok := tcpManager.(interface {
+				HasConnectionProperty(connID uint64, key string) bool
+			}); ok {
+				return manager.HasConnectionProperty(s.ConnID, key)
+			}
+		}
+	}
+	return false
 }
 
 // ClearProperties 清空所有自定义属性
 func (s *DeviceSession) ClearProperties() {
-	s.propertyManager.Clear()
+	// 🚀 重构：通过统一TCP管理器清空属性
+	// 由于没有直接的清空方法，我们获取所有属性然后逐个删除
+	if properties := s.GetAllProperties(); len(properties) > 0 {
+		for key := range properties {
+			s.RemoveProperty(key)
+		}
+	}
 }
 
 // ToJSON 序列化为JSON

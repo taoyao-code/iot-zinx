@@ -23,6 +23,10 @@ type ConnectionHooks struct {
 	onDeviceHeartbeat       func(deviceID string, conn ziface.IConnection)
 	onDeviceDisconnect      func(deviceID string, conn ziface.IConnection, reason string)
 
+	// 🚀 新增：统一TCP管理器回调
+	onTCPConnectionRegister   func(conn ziface.IConnection) error
+	onTCPConnectionUnregister func(connID uint64) error
+
 	// TCP连接参数
 	readDeadLine    time.Duration
 	writeDeadLine   time.Duration
@@ -70,6 +74,16 @@ func (ch *ConnectionHooks) SetOnConnectionEstablishedFunc(fn func(conn ziface.IC
 	ch.onConnectionEstablished = fn
 }
 
+// SetOnTCPConnectionRegisterFunc 设置TCP连接注册回调函数
+func (ch *ConnectionHooks) SetOnTCPConnectionRegisterFunc(fn func(conn ziface.IConnection) error) {
+	ch.onTCPConnectionRegister = fn
+}
+
+// SetOnTCPConnectionUnregisterFunc 设置TCP连接注销回调函数
+func (ch *ConnectionHooks) SetOnTCPConnectionUnregisterFunc(fn func(connID uint64) error) {
+	ch.onTCPConnectionUnregister = fn
+}
+
 // OnConnectionStart 当连接建立时的钩子函数
 // 按照 Zinx 生命周期最佳实践，在连接建立时设置 TCP 参数和连接属性
 func (ch *ConnectionHooks) OnConnectionStart(conn ziface.IConnection) {
@@ -77,32 +91,55 @@ func (ch *ConnectionHooks) OnConnectionStart(conn ziface.IConnection) {
 	connID := conn.GetConnID()
 	remoteAddr := conn.RemoteAddr().String()
 
-	// 设置连接属性
+	// 🚀 重构：优先使用统一TCP管理器注册连接
 	now := time.Now()
-	ch.setConnectionInitialProperties(conn, now, remoteAddr) // 保留现有属性设置
+	tcpManagerRegistered := false
 
-	// 🔧 修复：使用统一状态管理，确保状态一致性
-	deviceSession := session.GetDeviceSession(conn)
-	if deviceSession != nil {
-		// 更新连接状态为等待ICCID
-		deviceSession.UpdateState(constants.ConnStatusAwaitingICCID)
-		// 同步到连接属性
-		deviceSession.SyncToConnection(conn)
+	// 如果设置了TCP连接注册回调，优先使用
+	if ch.onTCPConnectionRegister != nil {
+		if err := ch.onTCPConnectionRegister(conn); err != nil {
+			logger.WithFields(logrus.Fields{
+				"connID":     connID,
+				"remoteAddr": remoteAddr,
+				"error":      err.Error(),
+			}).Error("统一TCP管理器注册连接失败")
+			// 继续使用旧的方式作为备用
+		} else {
+			logger.WithFields(logrus.Fields{
+				"connID":     connID,
+				"remoteAddr": remoteAddr,
+			}).Info("连接已注册到统一TCP管理器")
+			tcpManagerRegistered = true
+		}
+	}
 
-		// 更新心跳时间
-		deviceSession.UpdateHeartbeat()
+	// 如果统一TCP管理器注册失败，使用原有的设备会话管理作为备用
+	if !tcpManagerRegistered {
+		ch.setConnectionInitialProperties(conn, now, remoteAddr) // 保留现有属性设置
 
-		// 直接设置会话字段（需要加锁访问）
-		deviceSession.SessionID = fmt.Sprintf("%d_%s", connID, remoteAddr)
-		deviceSession.ReconnectCount = 0
+		// 🔧 修复：使用统一状态管理，确保状态一致性
+		deviceSession := session.GetDeviceSession(conn)
+		if deviceSession != nil {
+			// 更新连接状态为等待ICCID
+			deviceSession.UpdateState(constants.ConnStatusAwaitingICCID)
+			// 同步到连接属性
+			deviceSession.SyncToConnection(conn)
 
-		// 最终同步到连接属性（为了兼容性）
-		deviceSession.SyncToConnection(conn)
-	} else {
-		logger.WithFields(logrus.Fields{
-			"connID":     connID,
-			"remoteAddr": remoteAddr,
-		}).Error("创建设备会话失败，但继续连接建立流程")
+			// 更新心跳时间
+			deviceSession.UpdateHeartbeat()
+
+			// 直接设置会话字段（需要加锁访问）
+			deviceSession.SessionID = fmt.Sprintf("%d_%s", connID, remoteAddr)
+			deviceSession.ReconnectCount = 0
+
+			// 最终同步到连接属性（为了兼容性）
+			deviceSession.SyncToConnection(conn)
+		} else {
+			logger.WithFields(logrus.Fields{
+				"connID":     connID,
+				"remoteAddr": remoteAddr,
+			}).Error("创建设备会话失败，但继续连接建立流程")
+		}
 	}
 
 	// 获取TCP连接并设置TCP参数
@@ -324,7 +361,23 @@ func (ch *ConnectionHooks) OnConnectionStop(conn ziface.IConnection) {
 	connID := conn.GetConnID()
 	remoteAddr := conn.RemoteAddr().String()
 
-	// 🔧 修复：使用统一状态管理处理连接断开
+	// 🚀 重构：优先使用统一TCP管理器注销连接
+	if ch.onTCPConnectionUnregister != nil {
+		if err := ch.onTCPConnectionUnregister(connID); err != nil {
+			logger.WithFields(logrus.Fields{
+				"connID":     connID,
+				"remoteAddr": remoteAddr,
+				"error":      err.Error(),
+			}).Error("统一TCP管理器注销连接失败")
+		} else {
+			logger.WithFields(logrus.Fields{
+				"connID":     connID,
+				"remoteAddr": remoteAddr,
+			}).Info("连接已从统一TCP管理器注销")
+		}
+	}
+
+	// 🔧 修复：使用统一状态管理处理连接断开（备用方案）
 	deviceSession := session.GetDeviceSession(conn)
 	if deviceSession != nil {
 		// 调用断开处理方法

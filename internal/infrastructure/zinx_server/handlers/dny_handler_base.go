@@ -10,6 +10,7 @@ import (
 	"github.com/bujia-iot/iot-zinx/internal/domain/dny_protocol"
 	"github.com/bujia-iot/iot-zinx/internal/infrastructure/logger"
 	"github.com/bujia-iot/iot-zinx/pkg/constants"
+	"github.com/bujia-iot/iot-zinx/pkg/core"
 	"github.com/bujia-iot/iot-zinx/pkg/monitor"
 	"github.com/bujia-iot/iot-zinx/pkg/network"
 	"github.com/bujia-iot/iot-zinx/pkg/protocol"
@@ -146,15 +147,33 @@ func (h *DNYHandlerBase) GetICCID(conn ziface.IConnection) string {
 
 // UpdateDeviceStatus 更新设备状态
 func (h *DNYHandlerBase) UpdateDeviceStatus(deviceID string, status string) {
-	monitor.GetGlobalConnectionMonitor().UpdateDeviceStatus(deviceID, status)
+	// 🚀 重构：通过统一TCP管理器更新设备状态，不再直接调用监控器
+	tcpManager := core.GetGlobalUnifiedTCPManager()
+	if tcpManager != nil {
+		var deviceStatus constants.DeviceStatus
+		switch status {
+		case "online":
+			deviceStatus = constants.DeviceStatusOnline
+		case "offline":
+			deviceStatus = constants.DeviceStatusOffline
+		default:
+			deviceStatus = constants.DeviceStatusOffline
+		}
+		tcpManager.UpdateDeviceStatus(deviceID, deviceStatus)
+	}
 }
 
 // UpdateHeartbeat 更新设备心跳时间
-// 优化：移除冗余的状态更新调用，UpdateLastHeartbeatTime内部已处理状态更新
+// 🚀 重构：通过统一TCP管理器更新心跳时间，不再直接调用监控器
 func (h *DNYHandlerBase) UpdateHeartbeat(conn ziface.IConnection) {
-	// 只调用更新心跳时间，内部会自动处理设备状态更新
-	// 这样避免了重复调用UpdateDeviceStatus导致的性能问题
-	monitor.GetGlobalConnectionMonitor().UpdateLastHeartbeatTime(conn)
+	// 通过统一TCP管理器更新心跳时间
+	tcpManager := core.GetGlobalUnifiedTCPManager()
+	if tcpManager != nil {
+		// 获取设备ID
+		if session, exists := tcpManager.GetSessionByConnID(conn.GetConnID()); exists {
+			tcpManager.UpdateHeartbeat(session.DeviceID)
+		}
+	}
 	// 同时更新自定义心跳管理器的连接活动时间
 	network.UpdateConnectionActivity(conn)
 }

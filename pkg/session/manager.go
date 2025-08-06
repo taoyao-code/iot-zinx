@@ -22,6 +22,9 @@ type UnifiedSessionManager struct {
 	// === 状态管理 ===
 	stateManager IStateManager
 
+	// === TCP管理器适配器 ===
+	tcpAdapter ITCPManagerAdapter
+
 	// === 监控管理 ===
 	monitor ISessionMonitor
 
@@ -58,6 +61,7 @@ func NewUnifiedSessionManager(config *SessionManagerConfig) *UnifiedSessionManag
 
 	manager := &UnifiedSessionManager{
 		stateManager:   stateManager,
+		tcpAdapter:     GetGlobalTCPManagerAdapter(),
 		monitor:        nil, // 将在Start()方法中初始化
 		config:         config,
 		stats:          &SessionManagerStats{},
@@ -97,6 +101,20 @@ func (m *UnifiedSessionManager) CreateSession(conn ziface.IConnection) (ISession
 	// 检查会话数量限制
 	if m.GetSessionCount() >= m.config.MaxSessions {
 		return nil, fmt.Errorf("会话数量已达上限: %d", m.config.MaxSessions)
+	}
+
+	// 🚀 优先通过TCP适配器注册连接
+	if m.tcpAdapter != nil {
+		if err := m.tcpAdapter.RegisterConnection(conn); err != nil {
+			logger.WithFields(logrus.Fields{
+				"connID": connID,
+				"error":  err.Error(),
+			}).Warn("TCP适配器注册连接失败，使用传统方式")
+		} else {
+			logger.WithFields(logrus.Fields{
+				"connID": connID,
+			}).Debug("连接已通过TCP适配器注册")
+		}
 	}
 
 	// 创建新的统一会话
@@ -151,6 +169,25 @@ func (m *UnifiedSessionManager) CreateSession(conn ziface.IConnection) (ISession
 
 // RegisterDevice 注册设备
 func (m *UnifiedSessionManager) RegisterDevice(deviceID, physicalID, iccid, version string, deviceType uint16, directMode bool) error {
+	// 🚀 优先通过TCP适配器注册设备
+	if m.tcpAdapter != nil {
+		// 首先需要获取连接对象
+		if conn, exists := m.tcpAdapter.GetConnectionByDeviceID(deviceID); exists {
+			if err := m.tcpAdapter.RegisterDevice(conn, deviceID, physicalID, iccid); err != nil {
+				logger.WithFields(logrus.Fields{
+					"deviceID": deviceID,
+					"error":    err.Error(),
+				}).Warn("TCP适配器注册设备失败，使用传统方式")
+			} else {
+				logger.WithFields(logrus.Fields{
+					"deviceID": deviceID,
+					"iccid":    iccid,
+				}).Debug("设备已通过TCP适配器注册")
+				// TCP适配器注册成功，继续处理会话层面的注册
+			}
+		}
+	}
+
 	// 通过ICCID查找会话
 	sessionInterface, exists := m.iccidIndex.Load(iccid)
 	if !exists {
