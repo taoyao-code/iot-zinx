@@ -282,11 +282,7 @@ func (m *ConnectionMonitor) GetDeviceConnection(deviceID string) (uint32, bool) 
 			return 0, false
 		}
 
-		// 检查TCP连接有效性
-		if !m.isConnectionHealthy(connInfo.Connection) {
-			m.cleanupInvalidConnection(connID, deviceID)
-			return 0, false
-		}
+		// 业务场景：多个设备通过串联共享同一个连接，不需要额外的连接健康检查
 
 		return connID, true
 	}
@@ -315,12 +311,7 @@ func (m *ConnectionMonitor) GetConnectionByDeviceId(deviceID string) (ziface.ICo
 		return nil, false
 	}
 
-	// 检查TCP连接有效性
-	if !m.isConnectionHealthy(connInfo.Connection) {
-		m.cleanupInvalidConnection(connID, deviceID)
-		return nil, false
-	}
-
+	// 业务场景：多个设备通过串联共享同一个连接，直接返回连接对象
 	return connInfo.Connection, true
 }
 
