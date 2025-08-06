@@ -35,7 +35,7 @@ var DefaultSendConfig = SendConfig{
 	Type:           SendTypeDNYPacket,
 	MaxRetries:     3,
 	RetryDelay:     100 * time.Millisecond,
-	HealthCheck:    true,
+	HealthCheck:    false, // 禁用健康检查，支持物联网设备串联架构
 	TimeoutProtect: true,
 }
 
