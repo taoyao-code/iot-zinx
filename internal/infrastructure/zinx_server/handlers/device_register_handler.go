@@ -3,7 +3,6 @@ package handlers
 import (
 	"fmt"
 	"net"
-	"sync"
 	"time"
 
 	"github.com/aceld/zinx/ziface"
@@ -23,11 +22,10 @@ import (
 // DeviceRegisterHandler 处理设备注册包 (命令ID: 0x20)
 type DeviceRegisterHandler struct {
 	protocol.DNYFrameHandlerBase
-	// 🔧 新增：重复注册防护
-	lastRegisterTimes sync.Map // deviceID -> time.Time
-	// 🚀 新增：智能注册决策系统
-	deviceStates        sync.Map // deviceID -> *DeviceRegistrationState
-	registrationMetrics sync.Map // deviceID -> *RegistrationMetrics
+	// 🚀 重构：移除重复存储，使用统一TCP管理器
+	// lastRegisterTimes sync.Map // 已删除：重复存储，使用统一TCP管理器
+	// deviceStates        sync.Map // 已删除：重复存储，使用统一TCP管理器
+	// registrationMetrics sync.Map // 已删除：重复存储，使用统一TCP管理器
 }
 
 // DeviceRegistrationState 设备注册状态跟踪
@@ -384,86 +382,70 @@ func (h *DeviceRegisterHandler) sendRegisterErrorResponse(deviceId string, physi
 	}).Warn("设备注册失败响应已发送")
 }
 
-// 🚀 智能注册分析
+// 🚀 智能注册分析（重构：使用统一TCP管理器）
 func (h *DeviceRegisterHandler) analyzeRegistrationRequest(deviceId string, conn ziface.IConnection) *RegistrationDecision {
 	now := time.Now()
 	connID := conn.GetConnID()
 
-	// 获取或创建设备状态
-	stateInterface, _ := h.deviceStates.LoadOrStore(deviceId, &DeviceRegistrationState{
-		FirstRegistrationTime: now,
-		LastRegistrationTime:  now, // 🔧 修复：初始化为当前时间，避免时间计算溢出
-		RegistrationCount:     0,
-		LastDecision:          nil,
-	})
-	state := stateInterface.(*DeviceRegistrationState)
+	// 🚀 重构：通过统一TCP管理器获取设备状态
+	tcpManager := core.GetGlobalUnifiedTCPManager()
 
-	// 更新统计信息
-	state.RegistrationCount++
-	timeSinceLastReg := now.Sub(state.LastRegistrationTime)
+	// 检查设备是否已存在
+	session, exists := tcpManager.GetSessionByDeviceID(deviceId)
 
 	decision := &RegistrationDecision{
-		TimeSinceLastReg:     timeSinceLastReg,
+		TimeSinceLastReg:     0,
 		ShouldNotifyBusiness: false,
 		Timestamp:            now,
 	}
 
-	// 首次注册
-	if state.RegistrationCount == 1 {
+	if !exists {
+		// 新设备注册
 		decision.Action = "accept"
-		decision.Reason = "首次注册"
+		decision.Reason = "新设备首次注册"
 		decision.ShouldNotifyBusiness = true
-		state.FirstRegistrationTime = now
-		state.CurrentConnectionID = connID
-		state.LastConnectionState = "registering"
-		state.ConsecutiveRetries = 0
-	} else {
-		// 分析重复注册类型
-		switch {
-		case timeSinceLastReg < 5*time.Second:
-			// 5秒内的重复注册 - 可能是网络重传
-			decision.Action = "ignore"
-			decision.Reason = "短时间内重复注册(可能是重传)"
-			state.ConsecutiveRetries++
-
-		case timeSinceLastReg < 30*time.Second && state.CurrentConnectionID == connID:
-			// 30秒内同连接重复注册 - 可能是设备状态同步
-			if state.ConsecutiveRetries < 3 {
-				decision.Action = "update"
-				decision.Reason = "同连接状态同步注册"
-				decision.ShouldNotifyBusiness = false
-			} else {
-				decision.Action = "ignore"
-				decision.Reason = "连续重试过多，暂停处理"
-			}
-
-		case state.CurrentConnectionID != connID:
-			// 不同连接的注册 - 可能是重连
-			decision.Action = "accept"
-			decision.Reason = "连接变更，重新注册"
-			decision.ShouldNotifyBusiness = true
-			state.CurrentConnectionID = connID
-			state.ConsecutiveRetries = 0
-
-		case timeSinceLastReg > 5*time.Minute:
-			// 超过5分钟的重新注册 - 正常的周期性注册
-			decision.Action = "accept"
-			decision.Reason = "周期性重新注册"
-			decision.ShouldNotifyBusiness = true
-			state.ConsecutiveRetries = 0
-
-		default:
-			// 其他情况 - 更新处理
-			decision.Action = "update"
-			decision.Reason = "常规状态更新"
-			decision.ShouldNotifyBusiness = false
-		}
+		return decision
 	}
 
-	// 更新设备状态
-	state.LastRegistrationTime = now
-	state.LastDecision = decision
-	h.deviceStates.Store(deviceId, state)
+	// 计算距离上次活动的时间
+	timeSinceLastActivity := now.Sub(session.LastActivity)
+
+	// 分析注册决策（基于统一TCP管理器的会话信息）
+	switch {
+	case session.ConnID != connID:
+		// 不同连接的注册 - 可能是重连
+		decision.Action = "accept"
+		decision.Reason = "连接变更，重新注册"
+		decision.ShouldNotifyBusiness = true
+		decision.TimeSinceLastReg = timeSinceLastActivity
+
+	case timeSinceLastActivity < 5*time.Second:
+		// 5秒内的重复注册 - 可能是网络重传
+		decision.Action = "ignore"
+		decision.Reason = "短时间内重复注册(可能是重传)"
+		decision.TimeSinceLastReg = timeSinceLastActivity
+
+	case timeSinceLastActivity < 30*time.Second:
+		// 30秒内重复注册 - 状态同步
+		decision.Action = "update"
+		decision.Reason = "状态同步注册"
+		decision.ShouldNotifyBusiness = false
+		decision.TimeSinceLastReg = timeSinceLastActivity
+
+	case timeSinceLastActivity > 5*time.Minute:
+		// 超过5分钟的重新注册 - 正常的周期性注册
+		decision.Action = "accept"
+		decision.Reason = "周期性重新注册"
+		decision.ShouldNotifyBusiness = true
+		decision.TimeSinceLastReg = timeSinceLastActivity
+
+	default:
+		// 其他情况 - 更新处理
+		decision.Action = "update"
+		decision.Reason = "常规状态更新"
+		decision.ShouldNotifyBusiness = false
+		decision.TimeSinceLastReg = timeSinceLastActivity
+	}
 
 	return decision
 }
@@ -490,72 +472,68 @@ func (h *DeviceRegisterHandler) handleRegistrationUpdate(deviceId string, physic
 	h.sendRegisterResponse(deviceId, physicalId, messageID, conn)
 }
 
-// 🚀 更新注册统计指标
+// 🚀 更新注册统计指标（重构：使用统一TCP管理器）
 func (h *DeviceRegisterHandler) updateRegistrationMetrics(deviceId string, action string) {
-	now := time.Now()
-	metricsInterface, _ := h.registrationMetrics.LoadOrStore(deviceId, &RegistrationMetrics{
-		TotalAttempts:  0,
-		SuccessfulRegs: 0,
-		IgnoredRegs:    0,
-		UpdateRegs:     0,
-		LastUpdated:    now,
-	})
-	metrics := metricsInterface.(*RegistrationMetrics)
-
-	metrics.TotalAttempts++
-	switch action {
-	case "accept":
-		metrics.SuccessfulRegs++
-	case "ignore":
-		metrics.IgnoredRegs++
-	case "update":
-		metrics.UpdateRegs++
+	// 🚀 重构：通过统一TCP管理器记录统计信息
+	tcpManager := core.GetGlobalUnifiedTCPManager()
+	if tcpManager == nil {
+		return
 	}
-	metrics.LastUpdated = now
 
-	h.registrationMetrics.Store(deviceId, metrics)
+	// 更新设备活动时间
+	tcpManager.UpdateHeartbeat(deviceId)
+
+	// 记录日志用于统计分析
+	logger.WithFields(logrus.Fields{
+		"deviceId":  deviceId,
+		"action":    action,
+		"timestamp": time.Now(),
+	}).Debug("设备注册统计更新")
 }
 
-// 🚀 获取设备注册统计
-func (h *DeviceRegisterHandler) GetRegistrationStats(deviceId string) (*DeviceRegistrationState, *RegistrationMetrics) {
-	var state *DeviceRegistrationState
-	var metrics *RegistrationMetrics
-
-	if stateInterface, exists := h.deviceStates.Load(deviceId); exists {
-		state = stateInterface.(*DeviceRegistrationState)
+// 🚀 获取设备注册统计（重构：使用统一TCP管理器）
+func (h *DeviceRegisterHandler) GetRegistrationStats(deviceId string) map[string]interface{} {
+	// 🚀 重构：通过统一TCP管理器获取设备统计信息
+	tcpManager := core.GetGlobalUnifiedTCPManager()
+	if tcpManager == nil {
+		return nil
 	}
 
-	if metricsInterface, exists := h.registrationMetrics.Load(deviceId); exists {
-		metrics = metricsInterface.(*RegistrationMetrics)
+	session, exists := tcpManager.GetSessionByDeviceID(deviceId)
+	if !exists {
+		return nil
 	}
 
-	return state, metrics
+	return map[string]interface{}{
+		"device_id":      session.DeviceID,
+		"conn_id":        session.ConnID,
+		"physical_id":    session.PhysicalID,
+		"iccid":          session.ICCID,
+		"device_status":  session.DeviceStatus,
+		"last_activity":  session.LastActivity,
+		"last_heartbeat": session.LastHeartbeat,
+		"remote_addr":    session.RemoteAddr,
+	}
 }
 
-// 🚀 清理过期的设备状态（定期调用）
+// 🚀 清理过期的设备状态（重构：使用统一TCP管理器）
 func (h *DeviceRegisterHandler) CleanupExpiredStates() {
-	now := time.Now()
-	expiredDevices := make([]string, 0)
-
-	h.deviceStates.Range(func(key, value interface{}) bool {
-		deviceId := key.(string)
-		state := value.(*DeviceRegistrationState)
-
-		// 1小时未活动的设备状态可以清理
-		if now.Sub(state.LastRegistrationTime) > time.Hour {
-			expiredDevices = append(expiredDevices, deviceId)
-		}
-		return true
-	})
-
-	for _, deviceId := range expiredDevices {
-		h.deviceStates.Delete(deviceId)
-		h.registrationMetrics.Delete(deviceId)
-		logger.WithField("deviceId", deviceId).Debug("清理过期设备注册状态")
+	// 🚀 重构：清理功能已集成到统一TCP管理器中
+	// 统一TCP管理器会自动清理过期的连接和会话
+	tcpManager := core.GetGlobalUnifiedTCPManager()
+	if tcpManager == nil {
+		return
 	}
 
-	if len(expiredDevices) > 0 {
-		logger.WithField("cleanedCount", len(expiredDevices)).Info("清理过期设备注册状态完成")
+	// 获取统计信息用于日志记录
+	stats := tcpManager.GetStats()
+	if stats != nil {
+		logger.WithFields(logrus.Fields{
+			"total_connections":  stats.TotalConnections,
+			"active_connections": stats.ActiveConnections,
+			"total_devices":      stats.TotalDevices,
+			"online_devices":     stats.OnlineDevices,
+		}).Debug("设备状态清理检查完成")
 	}
 }
 

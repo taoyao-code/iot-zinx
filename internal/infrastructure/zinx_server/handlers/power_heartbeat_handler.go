@@ -9,7 +9,7 @@ import (
 	"github.com/aceld/zinx/ziface"
 	"github.com/bujia-iot/iot-zinx/internal/infrastructure/logger"
 	"github.com/bujia-iot/iot-zinx/pkg/constants"
-	"github.com/bujia-iot/iot-zinx/pkg/monitor"
+	"github.com/bujia-iot/iot-zinx/pkg/core"
 	"github.com/bujia-iot/iot-zinx/pkg/network"
 	"github.com/bujia-iot/iot-zinx/pkg/notification"
 	"github.com/bujia-iot/iot-zinx/pkg/protocol"
@@ -226,7 +226,13 @@ func (h *PowerHeartbeatHandler) processPowerHeartbeat(decodedFrame *protocol.Dec
 	}
 
 	// 更新心跳时间
-	monitor.GetGlobalConnectionMonitor().UpdateLastHeartbeatTime(conn)
+	// 🚀 重构：使用统一TCP管理器更新心跳时间
+	tcpManager := core.GetGlobalUnifiedTCPManager()
+	if tcpManager != nil {
+		if session, exists := tcpManager.GetSessionByConnID(conn.GetConnID()); exists {
+			tcpManager.UpdateHeartbeat(session.DeviceID)
+		}
+	}
 
 	// 🔧 修复：更新自定义心跳管理器的连接活动时间
 	// 这是解决连接超时问题的关键修复

@@ -9,17 +9,45 @@ import (
 func InitializeAllAdapters() {
 	// 获取统一TCP管理器实例
 	tcpManager := GetGlobalUnifiedTCPManager()
-	
+
 	// 设置会话管理器适配器
 	initSessionManagerAdapter(tcpManager)
-	
+
 	// 设置监控器适配器
 	initMonitorAdapter(tcpManager)
-	
+
 	// 设置API服务适配器
 	initAPIServiceAdapter(tcpManager)
-	
+
 	logger.Info("所有TCP管理器适配器已初始化")
+}
+
+// InitializeAllAdaptersAsync 异步初始化所有TCP管理器适配器
+// 🚀 修复：通过异步方式避免循环导入和死锁问题
+func InitializeAllAdaptersAsync() {
+	defer func() {
+		if r := recover(); r != nil {
+			logger.Errorf("异步初始化适配器时发生panic: %v", r)
+		}
+	}()
+
+	// 获取统一TCP管理器实例
+	tcpManager := GetGlobalUnifiedTCPManager()
+	if tcpManager == nil {
+		logger.Error("异步初始化适配器失败：统一TCP管理器未初始化")
+		return
+	}
+
+	// 设置会话管理器适配器
+	initSessionManagerAdapter(tcpManager)
+
+	// 设置监控器适配器
+	initMonitorAdapter(tcpManager)
+
+	// 设置API服务适配器
+	initAPIServiceAdapter(tcpManager)
+
+	logger.Info("所有TCP管理器适配器已异步初始化")
 }
 
 // initSessionManagerAdapter 初始化会话管理器适配器

@@ -121,6 +121,34 @@ func NewUnifiedStateSynchronizer(sessionManager ISessionManager, stateManager IS
 	}
 }
 
+// NewTCPManagerBasedStateSynchronizer 创建基于统一TCP管理器的状态同步器
+// 🚀 重构：避免绕过统一TCP管理器，使用现有管理器但确保它们基于统一TCP管理器
+func NewTCPManagerBasedStateSynchronizer(tcpManagerGetter func() interface{}, config *StateSynchronizerConfig) *UnifiedStateSynchronizer {
+	if config == nil {
+		config = DefaultStateSynchronizerConfig
+	}
+
+	// 🚀 重构：使用现有的统一会话管理器和状态管理器
+	// 它们已经配置为使用统一TCP管理器
+	sessionManager := GetGlobalUnifiedSessionManager()
+	stateManager := GetGlobalStateManager()
+
+	// 确保TCP管理器获取器已设置
+	if tcpManagerGetter != nil {
+		SetGlobalTCPManagerGetter(tcpManagerGetter)
+	}
+
+	return &UnifiedStateSynchronizer{
+		sessionManager: sessionManager,
+		stateManager:   stateManager,
+		config:         config,
+		syncStats:      &StateSyncStats{},
+		conflicts:      make([]StateConflict, 0),
+		autoSyncStop:   make(chan struct{}),
+		running:        false,
+	}
+}
+
 // === 同步操作实现 ===
 
 // SyncSessionToStateManager 将会话状态同步到状态管理器
@@ -544,19 +572,30 @@ var (
 func GetGlobalStateSynchronizer() *UnifiedStateSynchronizer {
 	logger.Warn("GetGlobalStateSynchronizer已弃用，状态同步功能已集成到统一TCP管理器")
 	globalStateSynchronizerOnce.Do(func() {
-		// 🚀 重构：使用旧管理器但标记为弃用
-		sessionManager := GetGlobalSessionManager()
-		stateManager := GetGlobalStateManager()
-		globalStateSynchronizer = NewUnifiedStateSynchronizer(sessionManager, stateManager, DefaultStateSynchronizerConfig)
+		// 🚀 重构：使用统一TCP管理器，避免绕过路径
+		// 状态同步功能已集成到统一TCP管理器，这里创建一个适配器
+		tcpManagerGetter := getGlobalTCPManagerGetter()
+		if tcpManagerGetter == nil {
+			logger.Error("无法创建状态同步器：TCP管理器获取器未设置")
+			return
+		}
+
+		// 创建基于统一TCP管理器的状态同步器
+		globalStateSynchronizer = NewTCPManagerBasedStateSynchronizer(tcpManagerGetter, DefaultStateSynchronizerConfig)
 
 		if err := globalStateSynchronizer.Start(); err != nil {
 			logger.WithFields(logrus.Fields{
 				"error": err.Error(),
 			}).Error("启动全局状态同步器失败")
+		} else {
+			logger.Info("基于统一TCP管理器的状态同步器已启动")
 		}
 	})
 	return globalStateSynchronizer
 }
+
+// === 状态同步器已重构为使用统一TCP管理器 ===
+// 通过现有的统一会话管理器和状态管理器，确保数据流向统一
 
 // SetGlobalStateSynchronizer 设置全局状态同步器实例（用于测试）
 func SetGlobalStateSynchronizer(synchronizer *UnifiedStateSynchronizer) {

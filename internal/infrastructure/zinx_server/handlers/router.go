@@ -3,7 +3,6 @@ package handlers
 import (
 	"github.com/aceld/zinx/ziface"
 	"github.com/bujia-iot/iot-zinx/pkg/constants"
-	"github.com/bujia-iot/iot-zinx/pkg/monitor"
 )
 
 // RegisterRouters 注册所有路由
@@ -44,10 +43,10 @@ func RegisterRouters(server ziface.IServer) {
 
 	// 五、业务逻辑
 	// ----------------------------------------------------------------------------
-	server.AddRouter(constants.CmdSwipeCard, &SwipeCardHandler{})                                               // 0x02 刷卡操作
-	server.AddRouter(constants.CmdChargeControl, NewChargeControlHandler(monitor.GetGlobalConnectionMonitor())) // 0x82 充电控制
-	server.AddRouter(constants.CmdSettlement, &SettlementHandler{})                                             // 0x03 结算消费信息上传
-	server.AddRouter(constants.CmdTimeBillingSettlement, NewTimeBillingSettlementHandler())                     // 0x23 分时收费结算专用
+	server.AddRouter(constants.CmdSwipeCard, &SwipeCardHandler{})                           // 0x02 刷卡操作
+	server.AddRouter(constants.CmdChargeControl, NewChargeControlHandler(nil))              // 0x82 充电控制 - 🚀 重构：移除旧监控器依赖
+	server.AddRouter(constants.CmdSettlement, &SettlementHandler{})                         // 0x03 结算消费信息上传
+	server.AddRouter(constants.CmdTimeBillingSettlement, NewTimeBillingSettlementHandler()) // 0x23 分时收费结算专用
 
 	// 六、参数设置
 	// ----------------------------------------------------------------------------

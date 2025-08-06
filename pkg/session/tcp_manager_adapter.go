@@ -72,12 +72,24 @@ func (a *TCPManagerAdapter) RegisterConnection(conn ziface.IConnection) error {
 		return fmt.Errorf("统一TCP管理器未初始化")
 	}
 
-	// 使用反射调用，避免循环导入
+	// 🚀 修复：实现真实的连接注册功能
 	if manager, ok := tcpManager.(interface {
 		RegisterConnection(conn ziface.IConnection) (interface{}, error)
 	}); ok {
 		_, err := manager.RegisterConnection(conn)
-		return err
+		if err != nil {
+			logger.WithFields(logrus.Fields{
+				"connID": conn.GetConnID(),
+				"error":  err.Error(),
+			}).Error("注册连接失败")
+			return err
+		}
+
+		logger.WithFields(logrus.Fields{
+			"connID":     conn.GetConnID(),
+			"remoteAddr": conn.RemoteAddr().String(),
+		}).Info("连接注册成功")
+		return nil
 	}
 
 	return fmt.Errorf("TCP管理器不支持RegisterConnection方法")
@@ -90,10 +102,23 @@ func (a *TCPManagerAdapter) UnregisterConnection(connID uint64) error {
 		return fmt.Errorf("统一TCP管理器未初始化")
 	}
 
+	// 🚀 修复：实现真实的连接注销功能
 	if manager, ok := tcpManager.(interface {
 		UnregisterConnection(connID uint64) error
 	}); ok {
-		return manager.UnregisterConnection(connID)
+		err := manager.UnregisterConnection(connID)
+		if err != nil {
+			logger.WithFields(logrus.Fields{
+				"connID": connID,
+				"error":  err.Error(),
+			}).Error("注销连接失败")
+			return err
+		}
+
+		logger.WithFields(logrus.Fields{
+			"connID": connID,
+		}).Info("连接注销成功")
+		return nil
 	}
 
 	return fmt.Errorf("TCP管理器不支持UnregisterConnection方法")
@@ -124,10 +149,29 @@ func (a *TCPManagerAdapter) RegisterDevice(conn ziface.IConnection, deviceID, ph
 		return fmt.Errorf("统一TCP管理器未初始化")
 	}
 
+	// 🚀 修复：实现真实的设备注册功能
 	if manager, ok := tcpManager.(interface {
 		RegisterDevice(conn ziface.IConnection, deviceID, physicalID, iccid string) error
 	}); ok {
-		return manager.RegisterDevice(conn, deviceID, physicalID, iccid)
+		err := manager.RegisterDevice(conn, deviceID, physicalID, iccid)
+		if err != nil {
+			logger.WithFields(logrus.Fields{
+				"deviceID":   deviceID,
+				"physicalID": physicalID,
+				"iccid":      iccid,
+				"connID":     conn.GetConnID(),
+				"error":      err.Error(),
+			}).Error("注册设备失败")
+			return err
+		}
+
+		logger.WithFields(logrus.Fields{
+			"deviceID":   deviceID,
+			"physicalID": physicalID,
+			"iccid":      iccid,
+			"connID":     conn.GetConnID(),
+		}).Info("设备注册成功")
+		return nil
 	}
 
 	return fmt.Errorf("TCP管理器不支持RegisterDevice方法")
@@ -140,10 +184,23 @@ func (a *TCPManagerAdapter) UnregisterDevice(deviceID string) error {
 		return fmt.Errorf("统一TCP管理器未初始化")
 	}
 
+	// 🚀 修复：实现真实的设备注销功能
 	if manager, ok := tcpManager.(interface {
 		UnregisterDevice(deviceID string) error
 	}); ok {
-		return manager.UnregisterDevice(deviceID)
+		err := manager.UnregisterDevice(deviceID)
+		if err != nil {
+			logger.WithFields(logrus.Fields{
+				"deviceID": deviceID,
+				"error":    err.Error(),
+			}).Error("注销设备失败")
+			return err
+		}
+
+		logger.WithFields(logrus.Fields{
+			"deviceID": deviceID,
+		}).Info("设备注销成功")
+		return nil
 	}
 
 	return fmt.Errorf("TCP管理器不支持UnregisterDevice方法")
@@ -158,10 +215,23 @@ func (a *TCPManagerAdapter) UpdateHeartbeat(deviceID string) error {
 		return fmt.Errorf("统一TCP管理器未初始化")
 	}
 
+	// 🚀 修复：实现真实的心跳更新功能
 	if manager, ok := tcpManager.(interface {
 		UpdateHeartbeat(deviceID string) error
 	}); ok {
-		return manager.UpdateHeartbeat(deviceID)
+		err := manager.UpdateHeartbeat(deviceID)
+		if err != nil {
+			logger.WithFields(logrus.Fields{
+				"deviceID": deviceID,
+				"error":    err.Error(),
+			}).Error("更新设备心跳失败")
+			return err
+		}
+
+		logger.WithFields(logrus.Fields{
+			"deviceID": deviceID,
+		}).Debug("设备心跳更新成功")
+		return nil
 	}
 
 	return fmt.Errorf("TCP管理器不支持UpdateHeartbeat方法")
@@ -174,10 +244,25 @@ func (a *TCPManagerAdapter) UpdateDeviceStatus(deviceID string, status constants
 		return fmt.Errorf("统一TCP管理器未初始化")
 	}
 
+	// 🚀 修复：实现真实的设备状态更新功能
 	if manager, ok := tcpManager.(interface {
 		UpdateDeviceStatus(deviceID string, status constants.DeviceStatus) error
 	}); ok {
-		return manager.UpdateDeviceStatus(deviceID, status)
+		err := manager.UpdateDeviceStatus(deviceID, status)
+		if err != nil {
+			logger.WithFields(logrus.Fields{
+				"deviceID": deviceID,
+				"status":   status,
+				"error":    err.Error(),
+			}).Error("更新设备状态失败")
+			return err
+		}
+
+		logger.WithFields(logrus.Fields{
+			"deviceID": deviceID,
+			"status":   status,
+		}).Debug("设备状态更新成功")
+		return nil
 	}
 
 	return fmt.Errorf("TCP管理器不支持UpdateDeviceStatus方法")
@@ -190,10 +275,25 @@ func (a *TCPManagerAdapter) UpdateConnectionState(deviceID string, state constan
 		return fmt.Errorf("统一TCP管理器未初始化")
 	}
 
+	// 🚀 修复：实现真实的连接状态更新功能
 	if manager, ok := tcpManager.(interface {
 		UpdateConnectionState(deviceID string, state constants.ConnStatus) error
 	}); ok {
-		return manager.UpdateConnectionState(deviceID, state)
+		err := manager.UpdateConnectionState(deviceID, state)
+		if err != nil {
+			logger.WithFields(logrus.Fields{
+				"deviceID": deviceID,
+				"state":    state,
+				"error":    err.Error(),
+			}).Error("更新连接状态失败")
+			return err
+		}
+
+		logger.WithFields(logrus.Fields{
+			"deviceID": deviceID,
+			"state":    state,
+		}).Debug("连接状态更新成功")
+		return nil
 	}
 
 	return fmt.Errorf("TCP管理器不支持UpdateConnectionState方法")
@@ -270,8 +370,13 @@ func (a *TCPManagerAdapter) GetConnectionStats() map[string]interface{} {
 		}
 	}
 
+	// 🚀 修复：提供基本的统计信息
+	logger.Warn("TCP管理器不支持GetStats方法，返回空统计信息")
 	return map[string]interface{}{
-		"error": "TCP管理器不支持GetStats方法",
+		"active_connections": 0,
+		"online_devices":     0,
+		"total_connections":  0,
+		"error":              "TCP管理器不支持GetStats方法",
 	}
 }
 
@@ -312,7 +417,16 @@ func GetGlobalTCPManagerAdapter() ITCPManagerAdapter {
 func SetGlobalTCPManagerGetter(getter func() interface{}) {
 	// 🚀 修复：设置全局获取函数
 	tcpManagerGetter = getter
+	logger.Debug("全局TCP管理器获取函数已设置")
+}
 
+// getGlobalTCPManagerGetter 获取全局TCP管理器获取函数
+func getGlobalTCPManagerGetter() func() interface{} {
+	return tcpManagerGetter
+}
+
+// SetupGlobalTCPManagerAdapter 设置全局TCP管理器适配器
+func SetupGlobalTCPManagerAdapter() {
 	if globalTCPManagerAdapter == nil {
 		globalTCPManagerAdapter = NewTCPManagerAdapter(func() interface{} {
 			return getUnifiedTCPManagerInstance()

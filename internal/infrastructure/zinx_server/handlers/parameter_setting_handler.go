@@ -10,7 +10,7 @@ import (
 	"github.com/bujia-iot/iot-zinx/internal/domain/dny_protocol"
 	"github.com/bujia-iot/iot-zinx/internal/infrastructure/logger"
 	"github.com/bujia-iot/iot-zinx/pkg/constants"
-	"github.com/bujia-iot/iot-zinx/pkg/monitor"
+	"github.com/bujia-iot/iot-zinx/pkg/core"
 	"github.com/bujia-iot/iot-zinx/pkg/protocol"
 	"github.com/bujia-iot/iot-zinx/pkg/session"
 	"github.com/sirupsen/logrus"
@@ -120,5 +120,11 @@ func (h *ParameterSettingHandler) processParameterSetting(decodedFrame *protocol
 	}).Debug("参数设置响应发送成功")
 
 	// 更新心跳时间
-	monitor.GetGlobalConnectionMonitor().UpdateLastHeartbeatTime(conn)
+	// 🚀 重构：使用统一TCP管理器更新心跳时间
+	tcpManager := core.GetGlobalUnifiedTCPManager()
+	if tcpManager != nil {
+		if session, exists := tcpManager.GetSessionByConnID(conn.GetConnID()); exists {
+			tcpManager.UpdateHeartbeat(session.DeviceID)
+		}
+	}
 }

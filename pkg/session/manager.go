@@ -315,49 +315,179 @@ func (m *UnifiedSessionManager) GetSession(deviceID string) (ISession, bool) {
 
 // GetSessionByConnID 通过连接ID获取会话
 func (m *UnifiedSessionManager) GetSessionByConnID(connID uint64) (ISession, bool) {
-	// 🚀 重构：通过TCP适配器查找设备ID，然后获取会话
-	// 这里需要实现connID到deviceID的映射查找
-	// 暂时返回false，需要TCP适配器支持此功能
-	logger.Debug("GetSessionByConnID暂未实现，需要TCP适配器支持")
+	// 🚀 重构：通过全局TCP管理器获取器访问统一TCP管理器
+	// 使用tcp_manager_adapter.go中定义的全局获取器
+	tcpManagerGetter := getGlobalTCPManagerGetter()
+	if tcpManagerGetter == nil {
+		logger.Warn("全局TCP管理器获取器未设置")
+		return nil, false
+	}
+
+	tcpManager := tcpManagerGetter()
+	if tcpManager == nil {
+		logger.Warn("统一TCP管理器未初始化")
+		return nil, false
+	}
+
+	// 通过类型断言调用统一TCP管理器的GetSessionByConnID方法
+	if manager, ok := tcpManager.(interface {
+		GetSessionByConnID(connID uint64) (interface{}, bool)
+	}); ok {
+		if sessionInterface, exists := manager.GetSessionByConnID(connID); exists {
+			// 从会话接口获取连接
+			if session, ok := sessionInterface.(interface {
+				GetConnection() ziface.IConnection
+			}); ok {
+				// 创建会话包装器
+				unifiedSession := NewUnifiedSession(session.GetConnection())
+				return unifiedSession, true
+			}
+		}
+	}
+
 	return nil, false
 }
 
 // GetSessionByICCID 通过ICCID获取会话
 func (m *UnifiedSessionManager) GetSessionByICCID(iccid string) (ISession, bool) {
-	// 🚀 重构：通过TCP适配器查找ICCID对应的设备
-	// 暂时返回false，需要TCP适配器支持此功能
-	logger.Debug("GetSessionByICCID暂未实现，需要TCP适配器支持")
+	// 🚀 重构：通过全局TCP管理器获取器访问统一TCP管理器
+	tcpManagerGetter := getGlobalTCPManagerGetter()
+	if tcpManagerGetter == nil {
+		logger.Warn("全局TCP管理器获取器未设置")
+		return nil, false
+	}
+
+	tcpManager := tcpManagerGetter()
+	if tcpManager == nil {
+		logger.Warn("统一TCP管理器未初始化")
+		return nil, false
+	}
+
+	// 通过类型断言调用统一TCP管理器的GetDeviceGroup方法
+	if manager, ok := tcpManager.(interface {
+		GetDeviceGroup(iccid string) (interface{}, bool)
+	}); ok {
+		if groupInterface, exists := manager.GetDeviceGroup(iccid); exists {
+			// 从设备组获取主设备会话
+			if group, ok := groupInterface.(interface {
+				GetPrimaryDevice() string
+				GetSessionList() []interface{}
+			}); ok {
+				primaryDevice := group.GetPrimaryDevice()
+				if primaryDevice != "" {
+					// 通过主设备ID获取会话
+					return m.GetSession(primaryDevice)
+				}
+
+				// 如果没有主设备，返回第一个会话
+				sessions := group.GetSessionList()
+				if len(sessions) > 0 {
+					if session, ok := sessions[0].(interface {
+						GetConnection() ziface.IConnection
+					}); ok {
+						unifiedSession := NewUnifiedSession(session.GetConnection())
+						return unifiedSession, true
+					}
+				}
+			}
+		}
+	}
+
 	return nil, false
 }
 
 // GetAllSessions 获取所有会话
 func (m *UnifiedSessionManager) GetAllSessions() map[string]ISession {
-	// 🚀 重构：通过TCP适配器获取所有设备，然后创建会话包装器
+	// 🚀 重构：通过全局TCP管理器获取器访问统一TCP管理器
 	result := make(map[string]ISession)
-	if m.tcpAdapter != nil {
-		// 这里需要TCP适配器提供获取所有设备的功能
-		// 暂时返回空map
-		logger.Debug("GetAllSessions暂未实现，需要TCP适配器支持")
+
+	tcpManagerGetter := getGlobalTCPManagerGetter()
+	if tcpManagerGetter == nil {
+		logger.Warn("全局TCP管理器获取器未设置")
+		return result
 	}
+
+	tcpManager := tcpManagerGetter()
+	if tcpManager == nil {
+		logger.Warn("统一TCP管理器未初始化")
+		return result
+	}
+
+	// 通过类型断言调用统一TCP管理器的GetAllSessions方法
+	if manager, ok := tcpManager.(interface {
+		GetAllSessions() map[string]interface{}
+	}); ok {
+		sessions := manager.GetAllSessions()
+		for deviceID, sessionInterface := range sessions {
+			// 从会话接口获取连接
+			if session, ok := sessionInterface.(interface {
+				GetConnection() ziface.IConnection
+			}); ok {
+				// 创建会话包装器
+				unifiedSession := NewUnifiedSession(session.GetConnection())
+				result[deviceID] = unifiedSession
+			}
+		}
+	}
+
 	return result
 }
 
 // ForEachSession 遍历所有会话
 func (m *UnifiedSessionManager) ForEachSession(callback func(ISession) bool) {
-	// 🚀 重构：通过TCP适配器遍历所有设备
-	if m.tcpAdapter != nil {
-		// 这里需要TCP适配器提供遍历功能
-		logger.Debug("ForEachSession暂未实现，需要TCP适配器支持")
+	// 🚀 重构：通过全局TCP管理器获取器访问统一TCP管理器
+	tcpManagerGetter := getGlobalTCPManagerGetter()
+	if tcpManagerGetter == nil {
+		logger.Warn("全局TCP管理器获取器未设置")
+		return
+	}
+
+	tcpManager := tcpManagerGetter()
+	if tcpManager == nil {
+		logger.Warn("统一TCP管理器未初始化")
+		return
+	}
+
+	// 通过类型断言调用统一TCP管理器的ForEachConnection方法
+	if manager, ok := tcpManager.(interface {
+		ForEachConnection(callback func(deviceID string, conn ziface.IConnection) bool)
+	}); ok {
+		manager.ForEachConnection(func(deviceID string, conn ziface.IConnection) bool {
+			// 创建会话包装器
+			unifiedSession := NewUnifiedSession(conn)
+			// 调用用户提供的回调函数
+			return callback(unifiedSession)
+		})
 	}
 }
 
 // GetSessionCount 获取会话数量
 func (m *UnifiedSessionManager) GetSessionCount() int {
-	// 🚀 重构：通过TCP适配器获取设备数量
-	if m.tcpAdapter != nil {
-		// 这里需要TCP适配器提供统计功能
-		logger.Debug("GetSessionCount暂未实现，需要TCP适配器支持")
+	// 🚀 重构：通过全局TCP管理器获取器访问统一TCP管理器
+	tcpManagerGetter := getGlobalTCPManagerGetter()
+	if tcpManagerGetter == nil {
+		logger.Warn("全局TCP管理器获取器未设置")
+		return 0
 	}
+
+	tcpManager := tcpManagerGetter()
+	if tcpManager == nil {
+		logger.Warn("统一TCP管理器未初始化")
+		return 0
+	}
+
+	// 通过类型断言调用统一TCP管理器的GetStats方法
+	if manager, ok := tcpManager.(interface {
+		GetStats() interface{}
+	}); ok {
+		stats := manager.GetStats()
+		if statsInterface, ok := stats.(interface {
+			GetOnlineDevices() int64
+		}); ok {
+			return int(statsInterface.GetOnlineDevices())
+		}
+	}
+
 	return 0
 }
 

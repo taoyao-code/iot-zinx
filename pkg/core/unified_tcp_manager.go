@@ -759,7 +759,14 @@ func (m *UnifiedTCPManager) Stop() error {
 	}
 
 	m.running = false
-	close(m.stopChan)
+
+	// 安全关闭通道，避免重复关闭
+	select {
+	case <-m.stopChan:
+		// 通道已经关闭
+	default:
+		close(m.stopChan)
+	}
 
 	logger.Info("统一TCP管理器停止成功")
 	return nil

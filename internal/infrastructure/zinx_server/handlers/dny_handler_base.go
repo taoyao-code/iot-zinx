@@ -11,7 +11,6 @@ import (
 	"github.com/bujia-iot/iot-zinx/internal/infrastructure/logger"
 	"github.com/bujia-iot/iot-zinx/pkg/constants"
 	"github.com/bujia-iot/iot-zinx/pkg/core"
-	"github.com/bujia-iot/iot-zinx/pkg/monitor"
 	"github.com/bujia-iot/iot-zinx/pkg/network"
 	"github.com/bujia-iot/iot-zinx/pkg/protocol"
 	"github.com/bujia-iot/iot-zinx/pkg/utils"
@@ -33,7 +32,7 @@ func (h *DNYHandlerBase) PreHandle(request ziface.IRequest) {
 	msgID := msg.GetMsgID()
 	if msgID == constants.MsgIDLinkHeartbeat || msgID == constants.MsgIDICCID || msgID == constants.MsgIDUnknown {
 		// 特殊消息不进行DNY消息转换，直接更新心跳时间
-		monitor.GetGlobalConnectionMonitor().UpdateLastHeartbeatTime(conn)
+		h.UpdateHeartbeat(conn)
 		// 同时更新自定义心跳管理器的连接活动时间
 		network.UpdateConnectionActivity(conn)
 		return
@@ -82,7 +81,7 @@ func (h *DNYHandlerBase) PreHandle(request ziface.IRequest) {
 		}
 
 		// 更新心跳时间并继续处理
-		monitor.GetGlobalConnectionMonitor().UpdateLastHeartbeatTime(conn)
+		h.UpdateHeartbeat(conn)
 		// 同时更新自定义心跳管理器的连接活动时间
 		network.UpdateConnectionActivity(conn)
 		return
@@ -115,7 +114,7 @@ func (h *DNYHandlerBase) PreHandle(request ziface.IRequest) {
 	}
 
 	// 更新心跳时间
-	monitor.GetGlobalConnectionMonitor().UpdateLastHeartbeatTime(conn)
+	h.UpdateHeartbeat(conn)
 	// 同时更新自定义心跳管理器的连接活动时间
 	network.UpdateConnectionActivity(conn)
 }

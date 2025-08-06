@@ -3,7 +3,6 @@ package handlers
 import (
 	"encoding/binary"
 	"fmt"
-	"sync"
 	"time"
 
 	"github.com/aceld/zinx/ziface"
@@ -18,40 +17,47 @@ import (
 // GetServerTimeHandler 处理设备获取服务器时间请求 (命令ID: 0x22)
 type GetServerTimeHandler struct {
 	protocol.DNYFrameHandlerBase
-	// 🔧 修复：添加时间同步流控机制，解决频繁请求导致的写缓冲区堆积
-	lastSyncTime    map[string]time.Time // deviceID -> 最后同步时间
-	syncMutex       sync.RWMutex         // 保护同步时间映射
-	minSyncInterval time.Duration        // 最小同步间隔，用于流控
+	// 🚀 重构：移除重复存储，使用统一TCP管理器进行流控
+	// lastSyncTime    map[string]time.Time // 已删除：重复存储，使用统一TCP管理器
+	// syncMutex       sync.RWMutex         // 已删除：重复存储，使用统一TCP管理器
+	minSyncInterval time.Duration // 最小同步间隔，用于流控
 }
 
 // NewGetServerTimeHandler 创建获取服务器时间处理器
 func NewGetServerTimeHandler() *GetServerTimeHandler {
 	return &GetServerTimeHandler{
-		lastSyncTime:    make(map[string]time.Time),
 		minSyncInterval: 30 * time.Second, // 最小30秒间隔，防止频繁时间同步
 	}
 }
 
-// shouldProcessTimeSync 检查是否应该处理时间同步（流控机制）
+// shouldProcessTimeSync 检查是否应该处理时间同步（重构：使用统一TCP管理器）
 func (h *GetServerTimeHandler) shouldProcessTimeSync(deviceID string) bool {
-	h.syncMutex.Lock()
-	defer h.syncMutex.Unlock()
+	// 🚀 重构：通过统一TCP管理器获取设备会话信息进行流控
+	tcpManager := core.GetGlobalUnifiedTCPManager()
+	if tcpManager == nil {
+		return true // 如果管理器不可用，允许处理
+	}
+
+	session, exists := tcpManager.GetSessionByDeviceID(deviceID)
+	if !exists {
+		return true // 如果设备不存在，允许处理（可能是新设备）
+	}
 
 	now := time.Now()
-	lastTime, exists := h.lastSyncTime[deviceID]
+	lastActivity := session.LastActivity
 
-	if !exists || now.Sub(lastTime) >= h.minSyncInterval {
-		h.lastSyncTime[deviceID] = now
+	// 检查距离上次活动的时间间隔
+	if now.Sub(lastActivity) >= h.minSyncInterval {
 		return true
 	}
 
 	// 记录被流控的时间同步请求
 	logger.WithFields(logrus.Fields{
-		"deviceID":    deviceID,
-		"lastTime":    lastTime.Format(constants.TimeFormatDefault),
-		"currentTime": now.Format(constants.TimeFormatDefault),
-		"interval":    now.Sub(lastTime).String(),
-		"minInterval": h.minSyncInterval.String(),
+		"deviceID":     deviceID,
+		"lastActivity": lastActivity.Format(constants.TimeFormatDefault),
+		"currentTime":  now.Format(constants.TimeFormatDefault),
+		"interval":     now.Sub(lastActivity).String(),
+		"minInterval":  h.minSyncInterval.String(),
 	}).Debug("时间同步被流控，间隔过短")
 
 	return false

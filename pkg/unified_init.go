@@ -111,6 +111,15 @@ func InitUnifiedArchitecture() {
 		}
 	}
 
+	// 🚀 新增：注册适配器设置函数，避免循环导入
+	core.RegisterSessionAdapterSetter(func(getter func() interface{}) {
+		session.SetGlobalTCPManagerGetter(getter)
+	})
+
+	core.RegisterMonitorAdapterSetter(func(getter func() interface{}) {
+		monitor.SetGlobalMonitorTCPManagerGetter(getter)
+	})
+
 	// 🚀 新增：设置统一TCP管理器和会话管理器的集成
 	tcpManager := core.GetGlobalUnifiedTCPManager()
 	if tcpManager != nil {
