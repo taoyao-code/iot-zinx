@@ -114,43 +114,55 @@ func (m *ConnectionMonitor) OnConnectionOpened(conn ziface.IConnection) {
 	)
 }
 
-// OnConnectionClosed 连接断开时调用 - 增强版，立即清理状态防止竞态条件
+// OnConnectionClosed 连接断开时调用 - 增强版，清理同一连接上的所有设备
 func (m *ConnectionMonitor) OnConnectionClosed(conn ziface.IConnection) {
 	connID := uint32(conn.GetConnID())
 	m.Log("连接断开: %d", connID)
 
-	// 获取连接信息
+	// 查找并清理所有关联到此连接的设备
+	var affectedDevices []string
+	m.deviceConns.Range(func(key, value interface{}) bool {
+		deviceID := key.(string)
+		deviceConnID := value.(uint32)
+		if deviceConnID == connID {
+			affectedDevices = append(affectedDevices, deviceID)
+		}
+		return true
+	})
+
+	// 处理所有受影响的设备
+	for _, deviceID := range affectedDevices {
+		// 立即清理设备连接映射
+		m.deviceConns.Delete(deviceID)
+
+		if device, exists := storage.GlobalDeviceStore.Get(deviceID); exists {
+			oldStatus := device.Status
+			device.SetStatusWithReason(storage.StatusOffline, "连接断开")
+			storage.GlobalDeviceStore.Set(deviceID, device)
+
+			m.Log("设备 %s 因连接断开而离线", deviceID)
+
+			// 触发设备离线事件
+			storage.GlobalDeviceStore.TriggerStatusChangeEvent(
+				deviceID,
+				oldStatus,
+				storage.StatusOffline,
+				storage.EventTypeDeviceOffline,
+				"连接断开",
+			)
+		}
+	}
+
+	// 更新连接信息
 	if connInfoValue, exists := m.connections.Load(connID); exists {
 		connInfo := connInfoValue.(*ConnectionInfo)
-
-		// 如果连接已关联设备，处理设备离线
-		if connInfo.DeviceID != "" {
-			// 立即清理设备连接映射，防止新连接复用相同ID时的状态混乱
-			m.deviceConns.Delete(connInfo.DeviceID)
-
-			if device, exists := storage.GlobalDeviceStore.Get(connInfo.DeviceID); exists {
-				oldStatus := device.Status
-				device.SetStatusWithReason(storage.StatusOffline, "连接断开")
-				storage.GlobalDeviceStore.Set(connInfo.DeviceID, device)
-
-				m.Log("设备 %s 因连接断开而离线", connInfo.DeviceID)
-
-				// 触发设备离线事件
-				storage.GlobalDeviceStore.TriggerStatusChangeEvent(
-					connInfo.DeviceID,
-					oldStatus,
-					storage.StatusOffline,
-					storage.EventTypeDeviceOffline,
-					"连接断开",
-				)
-			}
-		}
-
 		// 立即更新连接状态为断开
 		connInfo.State = StateDisconnected
 		connInfo.DeviceID = "" // 清空设备ID关联
 		m.connections.Store(connID, connInfo)
 	}
+
+	m.Log("连接 %d 断开，清理了 %d 个设备", connID, len(affectedDevices))
 
 	// 延迟清理连接信息（保留一段时间用于调试）
 	go func() {

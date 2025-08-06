@@ -101,21 +101,10 @@ func (api *DeviceAPI) sendProtocolPacket(deviceID string, physicalID uint32, mes
 		zap.String("remote_addr", remoteAddr),
 	)
 
-	// 3. 获取TCP连接并验证
-	tcpConn := conn.GetConnection()
-	if tcpConn == nil {
-		logger.Error("无法获取TCP连接对象",
-			zap.String("component", "device_api"),
-			zap.String("device_id", deviceID),
-			zap.Uint32("conn_id", connID),
-		)
-		return fmt.Errorf("无法获取TCP连接对象")
-	}
-
-	// 4. 构建协议包
+	// 3. 构建协议包
 	packet := dny_protocol.BuildDNYPacket(physicalID, messageID, command, data)
 
-	// 详细日志：记录发送的协议包内容
+	// 4. 详细日志：记录发送的协议包内容
 	logger.Info("发送协议包详情",
 		zap.String("component", "device_api"),
 		zap.String("device_id", deviceID),
@@ -128,8 +117,10 @@ func (api *DeviceAPI) sendProtocolPacket(deviceID string, physicalID uint32, mes
 		zap.String("data_hex", fmt.Sprintf("%X", data)),
 	)
 
-	// 5. 发送数据并处理错误
-	_, err := tcpConn.Write(packet)
+	// 5. 🔧 修复：使用conn.SendBuffMsg替代直接TCP写操作
+	// 这样可以利用Zinx框架的缓冲机制，比直接TCP写操作更可靠
+	// 虽然不如统一发送器完整，但比直接tcpConn.Write()要好
+	err := conn.SendBuffMsg(0, packet)
 	if err != nil {
 		logger.Error("发送协议包失败",
 			zap.String("component", "device_api"),
