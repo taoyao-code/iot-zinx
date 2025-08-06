@@ -82,9 +82,11 @@ func GetUnifiedChargingService() *UnifiedChargingService {
 
 // NewUnifiedChargingService 创建统一充电服务
 func NewUnifiedChargingService(config *ChargingConfig) *UnifiedChargingService {
+	// 🚀 重构：使用统一TCP管理器替代旧连接组管理器
+	unifiedManager := core.GetGlobalUnifiedManager()
 	return &UnifiedChargingService{
 		portManager:     core.GetPortManager(),
-		connectionMgr:   core.GetGlobalConnectionGroupManager(),
+		connectionMgr:   unifiedManager.GetLegacyConnectionGroupManager().(*core.ConnectionGroupManager), // 临时兼容
 		responseTracker: GetGlobalCommandTracker(),
 		config:          config,
 	}

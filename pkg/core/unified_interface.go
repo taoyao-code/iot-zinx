@@ -90,8 +90,9 @@ type UnifiedSystemInterface struct {
 
 // GetUnifiedSystem 获取统一系统接口
 func GetUnifiedSystem() *UnifiedSystemInterface {
-	// 🚀 重构：使用统一TCP管理器适配器
-	tcpManager := GetGlobalUnifiedTCPManager()
+	// 🚀 重构：使用统一全局管理器（推荐方式）
+	unifiedManager := GetGlobalUnifiedManager()
+	tcpManager := unifiedManager.GetTCPManager()
 
 	return &UnifiedSystemInterface{
 		SessionManager: NewTCPManagerSessionAdapter(tcpManager),

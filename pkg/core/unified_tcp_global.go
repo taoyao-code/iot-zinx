@@ -49,6 +49,9 @@ func GetGlobalUnifiedTCPManager() IUnifiedTCPManager {
 		isGlobalTCPManagerInitialized = true
 		globalInitMutex.Unlock()
 
+		// 🚀 修复：延迟初始化适配器，避免死锁
+		// InitializeAllAdapters() // 移到外部调用
+
 		logger.Info("全局统一TCP管理器已初始化")
 	})
 	return globalUnifiedTCPManager

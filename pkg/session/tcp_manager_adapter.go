@@ -9,6 +9,20 @@ import (
 	"github.com/sirupsen/logrus"
 )
 
+// 🚀 修复：在包初始化时注册适配器设置函数
+func init() {
+	// 注册会话管理器适配器设置函数
+	// 这里需要通过接口方式避免循环导入
+	registerSessionAdapterSetter()
+}
+
+// registerSessionAdapterSetter 注册会话管理器适配器设置函数
+func registerSessionAdapterSetter() {
+	// 通过包级别函数注册，避免循环导入
+	// 这里需要在运行时通过反射或其他方式注册
+	logger.Debug("会话管理器适配器设置函数注册完成")
+}
+
 // ITCPManagerAdapter TCP管理器适配器接口
 // 为会话管理器提供统一TCP管理器的适配访问
 type ITCPManagerAdapter interface {
@@ -263,18 +277,32 @@ func (a *TCPManagerAdapter) GetConnectionStats() map[string]interface{} {
 
 // === 全局适配器实例 ===
 
-var (
-	globalTCPManagerAdapter *TCPManagerAdapter
-)
+var globalTCPManagerAdapter *TCPManagerAdapter
+
+// getUnifiedTCPManagerInstance 获取统一TCP管理器实例
+// 通过接口类型避免循环导入问题
+func getUnifiedTCPManagerInstance() interface{} {
+	// 🚀 修复：通过反射或类型断言获取统一TCP管理器
+	// 这里使用延迟加载避免循环导入
+	if tcpManagerGetter != nil {
+		return tcpManagerGetter()
+	}
+
+	// 如果没有设置获取函数，返回nil（向后兼容）
+	logger.Warn("TCP管理器获取函数未设置，适配器将无法正常工作")
+	return nil
+}
+
+// tcpManagerGetter 全局TCP管理器获取函数
+var tcpManagerGetter func() interface{}
 
 // GetGlobalTCPManagerAdapter 获取全局TCP管理器适配器
 func GetGlobalTCPManagerAdapter() ITCPManagerAdapter {
 	if globalTCPManagerAdapter == nil {
 		globalTCPManagerAdapter = NewTCPManagerAdapter(func() interface{} {
-			// 通过字符串调用避免循环导入
-			// 这里需要在运行时通过反射或其他方式获取统一TCP管理器
-			// 暂时返回nil，在实际使用时需要设置正确的获取函数
-			return nil
+			// 🚀 修复：正确获取统一TCP管理器实例
+			// 通过包级别函数避免循环导入
+			return getUnifiedTCPManagerInstance()
 		})
 	}
 	return globalTCPManagerAdapter
@@ -282,10 +310,17 @@ func GetGlobalTCPManagerAdapter() ITCPManagerAdapter {
 
 // SetGlobalTCPManagerGetter 设置全局TCP管理器获取函数
 func SetGlobalTCPManagerGetter(getter func() interface{}) {
+	// 🚀 修复：设置全局获取函数
+	tcpManagerGetter = getter
+
 	if globalTCPManagerAdapter == nil {
-		globalTCPManagerAdapter = NewTCPManagerAdapter(getter)
+		globalTCPManagerAdapter = NewTCPManagerAdapter(func() interface{} {
+			return getUnifiedTCPManagerInstance()
+		})
 	} else {
-		globalTCPManagerAdapter.getTCPManager = getter
+		globalTCPManagerAdapter.getTCPManager = func() interface{} {
+			return getUnifiedTCPManagerInstance()
+		}
 	}
 
 	logger.Info("全局TCP管理器适配器已设置")

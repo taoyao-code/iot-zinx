@@ -539,8 +539,12 @@ var (
 )
 
 // GetGlobalStateSynchronizer 获取全局状态同步器实例
+// 🚀 重构：已弃用，状态同步功能已集成到统一TCP管理器
+// Deprecated: 状态同步功能已集成到统一TCP管理器
 func GetGlobalStateSynchronizer() *UnifiedStateSynchronizer {
+	logger.Warn("GetGlobalStateSynchronizer已弃用，状态同步功能已集成到统一TCP管理器")
 	globalStateSynchronizerOnce.Do(func() {
+		// 🚀 重构：使用旧管理器但标记为弃用
 		sessionManager := GetGlobalSessionManager()
 		stateManager := GetGlobalStateManager()
 		globalStateSynchronizer = NewUnifiedStateSynchronizer(sessionManager, stateManager, DefaultStateSynchronizerConfig)

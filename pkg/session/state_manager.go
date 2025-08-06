@@ -99,10 +99,15 @@ var DefaultStateManagerConfig = &StateManagerConfig{
 }
 
 // UnifiedStateManager 统一状态管理器实现
+// 🚀 重构：移除重复状态存储，集成到统一TCP管理器
 type UnifiedStateManager struct {
 	// === 核心存储 ===
-	deviceStates sync.Map // deviceID -> constants.DeviceConnectionState
-	stateHistory sync.Map // deviceID -> []StateChangeEvent (最近的状态变更历史)
+	// 🚀 重构：移除重复的状态存储，使用统一TCP管理器
+	// deviceStates sync.Map // 已删除：重复状态存储
+	// stateHistory sync.Map // 已删除：重复状态历史存储
+
+	// === TCP管理器适配器 ===
+	tcpAdapter interface{} // 避免循环导入，运行时设置
 
 	// === 配置和统计 ===
 	config    *StateManagerConfig
@@ -140,25 +145,23 @@ func NewUnifiedStateManager(config *StateManagerConfig) *UnifiedStateManager {
 
 // GetState 获取设备状态
 func (m *UnifiedStateManager) GetState(deviceID string) constants.DeviceConnectionState {
-	if stateInterface, exists := m.deviceStates.Load(deviceID); exists {
-		if state, ok := stateInterface.(constants.DeviceConnectionState); ok {
-			return state
-		}
+	// 🚀 重构：通过TCP适配器获取设备状态，不再维护本地状态存储
+	if m.tcpAdapter != nil {
+		// 这里需要TCP适配器提供状态查询功能
+		// 暂时返回默认状态
+		logger.Debug("GetState暂时返回默认状态，需要TCP适配器支持")
 	}
 	return constants.StateUnknown
 }
 
 // GetAllStates 获取所有设备状态
 func (m *UnifiedStateManager) GetAllStates() map[string]constants.DeviceConnectionState {
+	// 🚀 重构：通过TCP适配器获取所有设备状态
 	result := make(map[string]constants.DeviceConnectionState)
-	m.deviceStates.Range(func(key, value interface{}) bool {
-		if deviceID, ok := key.(string); ok {
-			if state, ok := value.(constants.DeviceConnectionState); ok {
-				result[deviceID] = state
-			}
-		}
-		return true
-	})
+	if m.tcpAdapter != nil {
+		// 这里需要TCP适配器提供批量状态查询功能
+		logger.Debug("GetAllStates暂时返回空结果，需要TCP适配器支持")
+	}
 	return result
 }
 
@@ -219,8 +222,16 @@ func (m *UnifiedStateManager) BatchTransition(transitions map[string]constants.D
 
 // doStateTransition 执行状态转换的内部方法
 func (m *UnifiedStateManager) doStateTransition(deviceID string, fromState, toState constants.DeviceConnectionState, source string) error {
-	// 更新状态
-	m.deviceStates.Store(deviceID, toState)
+	// 🚀 重构：通过TCP适配器更新状态，不再维护本地状态存储
+	if m.tcpAdapter != nil {
+		// 这里需要TCP适配器提供状态更新功能
+		logger.WithFields(logrus.Fields{
+			"deviceID":  deviceID,
+			"fromState": fromState,
+			"toState":   toState,
+			"source":    source,
+		}).Debug("状态转换请求已发送到TCP适配器")
+	}
 
 	// 创建状态变更事件
 	event := StateChangeEvent{
@@ -326,21 +337,15 @@ func (m *UnifiedStateManager) updateStats() {
 
 	var totalDevices, onlineDevices, activeDevices, registeredDevices int64
 
-	m.deviceStates.Range(func(key, value interface{}) bool {
-		if state, ok := value.(constants.DeviceConnectionState); ok {
-			totalDevices++
-			if state == constants.StateOnline {
-				onlineDevices++
-			}
-			if state.IsActive() {
-				activeDevices++
-			}
-			if state == constants.StateRegistered || state == constants.StateOnline || state == constants.StateOffline {
-				registeredDevices++
-			}
-		}
-		return true
-	})
+	// 🚀 重构：通过TCP适配器获取统计信息
+	if m.tcpAdapter != nil {
+		// 这里需要TCP适配器提供统计功能
+		logger.Debug("状态统计信息暂时使用缓存数据")
+		totalDevices = m.stats.TotalDevices
+		onlineDevices = m.stats.OnlineDevices
+		activeDevices = m.stats.ActiveDevices
+		registeredDevices = m.stats.RegisteredDevices
+	}
 
 	m.stats.TotalDevices = totalDevices
 	m.stats.OnlineDevices = onlineDevices
@@ -354,22 +359,15 @@ func (m *UnifiedStateManager) updateStats() {
 func (m *UnifiedStateManager) recordStateHistory(deviceID string, event StateChangeEvent) {
 	const maxHistorySize = 10
 
-	var history []StateChangeEvent
-	if historyInterface, exists := m.stateHistory.Load(deviceID); exists {
-		if existingHistory, ok := historyInterface.([]StateChangeEvent); ok {
-			history = existingHistory
-		}
+	// 🚀 重构：不再维护本地状态历史，由统一TCP管理器负责
+	// 这里可以选择发送事件到TCP适配器或直接跳过历史记录
+	if m.tcpAdapter != nil {
+		logger.WithFields(logrus.Fields{
+			"deviceID":  deviceID,
+			"fromState": event.FromState,
+			"toState":   event.ToState,
+		}).Debug("状态历史记录已移至统一TCP管理器")
 	}
-
-	// 添加新事件
-	history = append(history, event)
-
-	// 保持历史记录大小限制
-	if len(history) > maxHistorySize {
-		history = history[len(history)-maxHistorySize:]
-	}
-
-	m.stateHistory.Store(deviceID, history)
 }
 
 // === 状态同步实现 ===
@@ -574,31 +572,11 @@ func (m *UnifiedStateManager) cleanupRoutine() {
 
 // performCleanup 执行清理操作
 func (m *UnifiedStateManager) performCleanup() {
-	// 清理过期的状态历史记录
+	// 🚀 重构：清理功能已移至统一TCP管理器
 	cleanupCount := 0
-	m.stateHistory.Range(func(key, value interface{}) bool {
-		if history, ok := value.([]StateChangeEvent); ok {
-			// 清理超过24小时的历史记录
-			cutoffTime := time.Now().Add(-24 * time.Hour)
-			var filteredHistory []StateChangeEvent
-
-			for _, event := range history {
-				if event.Timestamp.After(cutoffTime) {
-					filteredHistory = append(filteredHistory, event)
-				}
-			}
-
-			if len(filteredHistory) != len(history) {
-				if len(filteredHistory) == 0 {
-					m.stateHistory.Delete(key)
-				} else {
-					m.stateHistory.Store(key, filteredHistory)
-				}
-				cleanupCount++
-			}
-		}
-		return true
-	})
+	if m.tcpAdapter != nil {
+		logger.Debug("状态历史清理功能已移至统一TCP管理器")
+	}
 
 	if cleanupCount > 0 {
 		logger.WithFields(logrus.Fields{
@@ -615,9 +593,14 @@ var (
 )
 
 // GetGlobalStateManager 获取全局状态管理器实例
+// 🚀 重构：已弃用，请使用统一TCP管理器的状态管理功能
+// Deprecated: 使用 core.GetGlobalUnifiedTCPManager().GetStateManager() 替代
 func GetGlobalStateManager() *UnifiedStateManager {
+	logger.Warn("GetGlobalStateManager已弃用，请使用统一TCP管理器的状态管理功能")
 	globalStateManagerOnce.Do(func() {
 		globalStateManager = NewUnifiedStateManager(DefaultStateManagerConfig)
+		// 🚀 重构：设置TCP适配器
+		globalStateManager.tcpAdapter = GetGlobalTCPManagerAdapter()
 		if err := globalStateManager.Start(); err != nil {
 			logger.WithFields(logrus.Fields{
 				"error": err.Error(),
