@@ -94,9 +94,14 @@ func (api *DeviceAPI) sendProtocolPacket(deviceID string, physicalID uint32, mes
 		zap.String("data_hex", fmt.Sprintf("%X", data)),
 	)
 
-	// 使用Zinx框架的标准消息发送机制
-	// 发送完整的DNY协议包作为消息数据
-	err := conn.Send(packet)
+	// 关键修复：直接使用原始TCP连接发送DNY协议数据
+	// 避免Zinx框架对协议包进行二次封装
+	tcpConn := conn.GetTCPConnection()
+	if tcpConn == nil {
+		return fmt.Errorf("无法获取TCP连接对象")
+	}
+
+	_, err := tcpConn.Write(packet)
 	if err != nil {
 		logger.Error("发送协议包失败",
 			zap.String("component", "device_api"),
