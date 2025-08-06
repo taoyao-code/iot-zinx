@@ -28,7 +28,7 @@ func (api *DeviceAPI) SetConnectionMonitor(monitor *handlers.ConnectionMonitor) 
 	api.connectionMonitor = monitor
 }
 
-// sendProtocolPacket 发送协议包到设备
+// sendProtocolPacket 发送协议包到设备 - 增强版，添加多层验证和错误处理
 func (api *DeviceAPI) sendProtocolPacket(deviceID string, physicalID uint32, messageID uint16, command uint8, data []byte) error {
 	if api.connectionMonitor == nil {
 		return fmt.Errorf("连接监控器未初始化")
@@ -47,15 +47,38 @@ func (api *DeviceAPI) sendProtocolPacket(deviceID string, physicalID uint32, mes
 		zap.Int("data_length", len(data)),
 	)
 
-	// 获取设备连接对象
-	conn, exists := api.connectionMonitor.GetConnectionByDeviceId(hexDeviceID)
+	// 1. 预检查设备状态
+	device, exists := storage.GlobalDeviceStore.Get(hexDeviceID)
 	if !exists {
-		logger.Error("设备连接不存在",
+		logger.Error("设备不存在",
 			zap.String("component", "device_api"),
 			zap.String("device_id", deviceID),
 			zap.String("hex_device_id", hexDeviceID),
 		)
-		return fmt.Errorf("设备 %s 未连接", deviceID)
+		return fmt.Errorf("设备 %s 不存在", deviceID)
+	}
+
+	if !device.IsOnline() {
+		logger.Error("设备不在线",
+			zap.String("component", "device_api"),
+			zap.String("device_id", deviceID),
+			zap.String("current_status", device.Status),
+		)
+		return fmt.Errorf("设备 %s 不在线，当前状态: %s", deviceID, device.Status)
+	}
+
+	// 2. 获取并验证连接（现在包含连接有效性检查）
+	conn, exists := api.connectionMonitor.GetConnectionByDeviceId(hexDeviceID)
+	if !exists {
+		logger.Error("设备连接不存在或无效",
+			zap.String("component", "device_api"),
+			zap.String("device_id", deviceID),
+			zap.String("hex_device_id", hexDeviceID),
+		)
+		// 连接无效时，确保设备状态同步
+		device.SetStatusWithReason(storage.StatusOffline, "连接不存在")
+		storage.GlobalDeviceStore.Set(hexDeviceID, device)
+		return fmt.Errorf("设备 %s 连接不存在或无效", deviceID)
 	}
 
 	// 验证连接状态
@@ -78,7 +101,18 @@ func (api *DeviceAPI) sendProtocolPacket(deviceID string, physicalID uint32, mes
 		zap.String("remote_addr", remoteAddr),
 	)
 
-	// 构建DNY协议包
+	// 3. 获取TCP连接并验证
+	tcpConn := conn.GetConnection()
+	if tcpConn == nil {
+		logger.Error("无法获取TCP连接对象",
+			zap.String("component", "device_api"),
+			zap.String("device_id", deviceID),
+			zap.Uint32("conn_id", connID),
+		)
+		return fmt.Errorf("无法获取TCP连接对象")
+	}
+
+	// 4. 构建协议包
 	packet := dny_protocol.BuildDNYPacket(physicalID, messageID, command, data)
 
 	// 详细日志：记录发送的协议包内容
@@ -94,21 +128,19 @@ func (api *DeviceAPI) sendProtocolPacket(deviceID string, physicalID uint32, mes
 		zap.String("data_hex", fmt.Sprintf("%X", data)),
 	)
 
-	// 关键修复：直接使用原始TCP连接发送DNY协议数据
-	// 避免Zinx框架对协议包进行二次封装
-	tcpConn := conn.GetTCPConnection()
-	if tcpConn == nil {
-		return fmt.Errorf("无法获取TCP连接对象")
-	}
-
+	// 5. 发送数据并处理错误
 	_, err := tcpConn.Write(packet)
 	if err != nil {
 		logger.Error("发送协议包失败",
 			zap.String("component", "device_api"),
 			zap.String("device_id", deviceID),
 			zap.Uint32("conn_id", connID),
+			zap.String("remote_addr", remoteAddr),
 			zap.Error(err),
 		)
+
+		// 发送失败时立即清理连接状态
+		api.connectionMonitor.HandleConnectionError(conn, err)
 		return fmt.Errorf("发送协议包失败: %v", err)
 	}
 
@@ -119,7 +151,6 @@ func (api *DeviceAPI) sendProtocolPacket(deviceID string, physicalID uint32, mes
 		zap.Uint32("conn_id", connID),
 		zap.Uint8("command", command),
 		zap.Int("data_length", len(data)),
-		// 十六进制数据
 		zap.String("raw_hex", hex.EncodeToString(data)),
 	)
 

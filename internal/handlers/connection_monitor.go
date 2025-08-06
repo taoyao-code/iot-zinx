@@ -114,7 +114,7 @@ func (m *ConnectionMonitor) OnConnectionOpened(conn ziface.IConnection) {
 	)
 }
 
-// OnConnectionClosed 连接断开时调用 - 1.2 连接生命周期管理增强
+// OnConnectionClosed 连接断开时调用 - 增强版，立即清理状态防止竞态条件
 func (m *ConnectionMonitor) OnConnectionClosed(conn ziface.IConnection) {
 	connID := uint32(conn.GetConnID())
 	m.Log("连接断开: %d", connID)
@@ -125,6 +125,9 @@ func (m *ConnectionMonitor) OnConnectionClosed(conn ziface.IConnection) {
 
 		// 如果连接已关联设备，处理设备离线
 		if connInfo.DeviceID != "" {
+			// 立即清理设备连接映射，防止新连接复用相同ID时的状态混乱
+			m.deviceConns.Delete(connInfo.DeviceID)
+
 			if device, exists := storage.GlobalDeviceStore.Get(connInfo.DeviceID); exists {
 				oldStatus := device.Status
 				device.SetStatusWithReason(storage.StatusOffline, "连接断开")
@@ -140,18 +143,16 @@ func (m *ConnectionMonitor) OnConnectionClosed(conn ziface.IConnection) {
 					storage.EventTypeDeviceOffline,
 					"连接断开",
 				)
-
-				// 清理设备连接映射
-				m.deviceConns.Delete(connInfo.DeviceID)
 			}
 		}
 
-		// 更新连接状态
+		// 立即更新连接状态为断开
 		connInfo.State = StateDisconnected
+		connInfo.DeviceID = "" // 清空设备ID关联
 		m.connections.Store(connID, connInfo)
 	}
 
-	// 清理连接信息（延迟清理，保留一段时间用于调试）
+	// 延迟清理连接信息（保留一段时间用于调试）
 	go func() {
 		time.Sleep(5 * time.Minute)
 		m.connections.Delete(connID)
@@ -259,7 +260,7 @@ func (m *ConnectionMonitor) GetDeviceConnection(deviceID string) (uint32, bool) 
 	return 0, false
 }
 
-// GetConnectionByDeviceId 根据设备ID获取连接对象
+// GetConnectionByDeviceId 根据设备ID获取连接对象 - 增强版，添加连接有效性检查
 func (m *ConnectionMonitor) GetConnectionByDeviceId(deviceID string) (ziface.IConnection, bool) {
 	// 首先获取连接ID
 	connID, exists := m.GetDeviceConnection(deviceID)
@@ -269,12 +270,25 @@ func (m *ConnectionMonitor) GetConnectionByDeviceId(deviceID string) (ziface.ICo
 
 	// 然后获取连接信息
 	connInfo, exists := m.GetConnectionInfo(connID)
-	if !exists {
+	if !exists || connInfo.Connection == nil {
+		// 清理无效的设备连接映射
+		m.deviceConns.Delete(deviceID)
 		return nil, false
 	}
 
-	// 返回存储的连接对象
-	return connInfo.Connection, connInfo.Connection != nil
+	// 检查连接状态
+	if connInfo.State == StateDisconnected || connInfo.State == StateError {
+		m.cleanupInvalidConnection(connID, deviceID)
+		return nil, false
+	}
+
+	// 检查TCP连接有效性
+	if !m.isConnectionHealthy(connInfo.Connection) {
+		m.cleanupInvalidConnection(connID, deviceID)
+		return nil, false
+	}
+
+	return connInfo.Connection, true
 }
 
 // GetAllConnections 获取所有连接信息
@@ -384,4 +398,71 @@ func (m *ConnectionMonitor) GetConnectionStatistics() map[string]interface{} {
 
 	stats["last_updated"] = time.Now()
 	return stats
+}
+
+// isConnectionHealthy 检查连接是否健康
+func (m *ConnectionMonitor) isConnectionHealthy(conn ziface.IConnection) bool {
+	if conn == nil {
+		return false
+	}
+
+	tcpConn := conn.GetConnection()
+	if tcpConn == nil {
+		return false
+	}
+
+	// 使用非阻塞方式检查连接状态
+	// 尝试设置写超时，如果失败说明连接已关闭
+	err := tcpConn.SetWriteDeadline(time.Now().Add(time.Millisecond))
+	if err != nil {
+		return false
+	}
+
+	// 重置写超时为无限制
+	tcpConn.SetWriteDeadline(time.Time{})
+	return true
+}
+
+// cleanupInvalidConnection 清理无效连接
+func (m *ConnectionMonitor) cleanupInvalidConnection(connID uint32, deviceID string) {
+	// 立即清理设备连接映射
+	m.deviceConns.Delete(deviceID)
+
+	// 更新连接状态
+	if connInfoValue, exists := m.connections.Load(connID); exists {
+		connInfo := connInfoValue.(*ConnectionInfo)
+		connInfo.State = StateDisconnected
+		m.connections.Store(connID, connInfo)
+	}
+
+	// 更新设备状态
+	if device, exists := storage.GlobalDeviceStore.Get(deviceID); exists {
+		device.SetStatusWithReason(storage.StatusOffline, "连接无效")
+		storage.GlobalDeviceStore.Set(deviceID, device)
+	}
+
+	m.Log("清理无效连接: connID=%d, deviceID=%s", connID, deviceID)
+}
+
+// HandleConnectionError 处理连接错误
+func (m *ConnectionMonitor) HandleConnectionError(conn ziface.IConnection, err error) {
+	if conn == nil {
+		return
+	}
+
+	connID := uint32(conn.GetConnID())
+
+	// 查找关联的设备ID
+	var deviceID string
+	if connInfoValue, exists := m.connections.Load(connID); exists {
+		connInfo := connInfoValue.(*ConnectionInfo)
+		deviceID = connInfo.DeviceID
+	}
+
+	m.Log("处理连接错误: connID=%d, deviceID=%s, error=%v", connID, deviceID, err)
+
+	// 立即清理连接状态
+	if deviceID != "" {
+		m.cleanupInvalidConnection(connID, deviceID)
+	}
 }
