@@ -1,6 +1,7 @@
 package apis
 
 import (
+	"encoding/hex"
 	"fmt"
 	"strconv"
 	"time"
@@ -80,18 +81,22 @@ func (api *DeviceAPI) sendProtocolPacket(deviceID string, physicalID uint32, mes
 	// 构建DNY协议包
 	packet := dny_protocol.BuildDNYPacket(physicalID, messageID, command, data)
 
-	// 通过TCP连接直接发送（绕过Zinx封装）
-	tcpConn := conn.GetTCPConnection()
-	if tcpConn == nil {
-		logger.Error("无法获取TCP连接",
-			zap.String("component", "device_api"),
-			zap.String("device_id", deviceID),
-			zap.Uint32("conn_id", connID),
-		)
-		return fmt.Errorf("无法获取TCP连接")
-	}
+	// 详细日志：记录发送的协议包内容
+	logger.Info("发送协议包详情",
+		zap.String("component", "device_api"),
+		zap.String("device_id", deviceID),
+		zap.String("hex_device_id", hexDeviceID),
+		zap.Uint32("physical_id", physicalID),
+		zap.Uint16("message_id", messageID),
+		zap.Uint8("command", command),
+		zap.Int("packet_length", len(packet)),
+		zap.String("packet_hex", fmt.Sprintf("%X", packet)),
+		zap.String("data_hex", fmt.Sprintf("%X", data)),
+	)
 
-	_, err := tcpConn.Write(packet)
+	// 使用Zinx框架的标准消息发送机制
+	// 发送完整的DNY协议包作为消息数据
+	err := conn.Send(packet)
 	if err != nil {
 		logger.Error("发送协议包失败",
 			zap.String("component", "device_api"),
@@ -109,6 +114,8 @@ func (api *DeviceAPI) sendProtocolPacket(deviceID string, physicalID uint32, mes
 		zap.Uint32("conn_id", connID),
 		zap.Uint8("command", command),
 		zap.Int("data_length", len(data)),
+		// 十六进制数据
+		zap.String("raw_hex", hex.EncodeToString(data)),
 	)
 
 	return nil
