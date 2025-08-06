@@ -6,9 +6,9 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/bujia-iot/iot-zinx/internal/domain/dny_protocol"
 	"github.com/bujia-iot/iot-zinx/internal/handlers"
 	"github.com/bujia-iot/iot-zinx/internal/infrastructure/logger"
+	"github.com/bujia-iot/iot-zinx/pkg/protocol"
 	"github.com/bujia-iot/iot-zinx/pkg/storage"
 	"go.uber.org/zap"
 )
@@ -101,10 +101,7 @@ func (api *DeviceAPI) sendProtocolPacket(deviceID string, physicalID uint32, mes
 		zap.String("remote_addr", remoteAddr),
 	)
 
-	// 3. 构建协议包
-	packet := dny_protocol.BuildDNYPacket(physicalID, messageID, command, data)
-
-	// 4. 详细日志：记录发送的协议包内容
+	// 3. 详细日志：记录发送的协议包内容
 	logger.Info("发送协议包详情",
 		zap.String("component", "device_api"),
 		zap.String("device_id", deviceID),
@@ -112,15 +109,13 @@ func (api *DeviceAPI) sendProtocolPacket(deviceID string, physicalID uint32, mes
 		zap.Uint32("physical_id", physicalID),
 		zap.Uint16("message_id", messageID),
 		zap.Uint8("command", command),
-		zap.Int("packet_length", len(packet)),
-		zap.String("packet_hex", fmt.Sprintf("%X", packet)),
+		zap.Int("data_length", len(data)),
 		zap.String("data_hex", fmt.Sprintf("%X", data)),
 	)
 
-	// 5. 🔧 修复：使用conn.SendBuffMsg替代直接TCP写操作
-	// 这样可以利用Zinx框架的缓冲机制，比直接TCP写操作更可靠
-	// 虽然不如统一发送器完整，但比直接tcpConn.Write()要好
-	err := conn.SendBuffMsg(0, packet)
+	// 4. 🔧 完整修复：使用protocol.SendDNYRequest替代所有底层发送操作
+	// 这样可以利用完整的网络层保障机制：重试、超时处理、连接健康管理等
+	err := protocol.SendDNYRequest(conn, physicalID, messageID, command, data)
 	if err != nil {
 		logger.Error("发送协议包失败",
 			zap.String("component", "device_api"),

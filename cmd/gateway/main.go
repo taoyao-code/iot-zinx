@@ -40,6 +40,7 @@ import (
 	"github.com/bujia-iot/iot-zinx/internal/infrastructure/config"
 	"github.com/bujia-iot/iot-zinx/internal/infrastructure/logger"
 	"github.com/bujia-iot/iot-zinx/internal/ports"
+	"github.com/bujia-iot/iot-zinx/pkg/network"
 	"github.com/bujia-iot/iot-zinx/pkg/notification"
 	"github.com/bujia-iot/iot-zinx/pkg/utils"
 	"go.uber.org/zap"
@@ -71,6 +72,12 @@ func main() {
 	utils.SetupZinxLogger()
 
 	logger.Info("日志系统初始化完成")
+
+	// 初始化统一发送器
+	if err := network.InitGlobalSender(); err != nil {
+		logger.Fatal("统一发送器初始化失败", zap.Error(err))
+	}
+	logger.Info("统一发送器初始化完成")
 
 	// 初始化通知系统
 	ctx := context.Background()
