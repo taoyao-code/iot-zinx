@@ -38,9 +38,8 @@ func NewGinHTTPServer(port int, connectionMonitor *handlers.ConnectionMonitor) *
 	router.Use(gin.Recovery())
 	router.Use(corsMiddleware())
 
-	// 创建设备API
+	// 创建设备API - API层通过TCP模块的全局接口获取连接信息
 	deviceAPI := NewDeviceAPI()
-	deviceAPI.SetConnectionMonitor(connectionMonitor)
 
 	// 注册路由
 	registerRoutes(router, deviceAPI)

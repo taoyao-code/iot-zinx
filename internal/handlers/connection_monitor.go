@@ -433,27 +433,15 @@ func (m *ConnectionMonitor) GetConnectionStatistics() map[string]interface{} {
 	return stats
 }
 
-// isConnectionHealthy 检查连接是否健康
+// isConnectionHealthy 检查连接是否健康 - 简化版本，避免过度检查
 func (m *ConnectionMonitor) isConnectionHealthy(conn ziface.IConnection) bool {
 	if conn == nil {
 		return false
 	}
 
+	// 只检查基本的连接对象是否存在，不进行激进的网络检查
 	tcpConn := conn.GetConnection()
-	if tcpConn == nil {
-		return false
-	}
-
-	// 使用非阻塞方式检查连接状态
-	// 尝试设置写超时，如果失败说明连接已关闭
-	err := tcpConn.SetWriteDeadline(time.Now().Add(time.Millisecond))
-	if err != nil {
-		return false
-	}
-
-	// 重置写超时为无限制
-	tcpConn.SetWriteDeadline(time.Time{})
-	return true
+	return tcpConn != nil
 }
 
 // cleanupInvalidConnection 清理无效连接

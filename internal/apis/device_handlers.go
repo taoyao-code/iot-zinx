@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/bujia-iot/iot-zinx/internal/ports"
 	"github.com/bujia-iot/iot-zinx/pkg/constants"
 	"github.com/bujia-iot/iot-zinx/pkg/storage"
 	"github.com/gin-gonic/gin"
@@ -77,24 +78,12 @@ func (api *DeviceAPI) GetDevicesGin(c *gin.Context) {
 	deviceList := make([]DeviceInfo, len(devices))
 	for i, device := range devices {
 		remoteAddr := ""
-		if api.connectionMonitor != nil {
-			// 🔧 修复：现在GetDeviceConnection也进行严格的连接有效性检查
-			// 与定位API使用完全相同的检查逻辑，确保数据一致性
-			if connID, exists := api.connectionMonitor.GetDeviceConnection(device.DeviceID); exists {
-				if connInfo, exists := api.connectionMonitor.GetConnectionInfo(connID); exists {
+		// 通过TCP模块的全局接口获取连接信息
+		if connectionMonitor := ports.GetConnectionMonitor(); connectionMonitor != nil {
+			// 获取连接信息用于显示，不修改设备状态
+			if connID, exists := connectionMonitor.GetDeviceConnection(device.DeviceID); exists {
+				if connInfo, exists := connectionMonitor.GetConnectionInfo(connID); exists {
 					remoteAddr = connInfo.RemoteAddr
-
-					// 确保设备状态与连接状态同步
-					if device.Status != storage.StatusOnline {
-						device.SetStatusWithReason(storage.StatusOnline, "连接有效")
-						storage.GlobalDeviceStore.Set(device.DeviceID, device)
-					}
-				}
-			} else {
-				// 连接无效，确保设备状态为离线
-				if device.Status == storage.StatusOnline {
-					device.SetStatusWithReason(storage.StatusOffline, "连接无效")
-					storage.GlobalDeviceStore.Set(device.DeviceID, device)
 				}
 			}
 		}
@@ -149,9 +138,10 @@ func (api *DeviceAPI) GetDeviceGin(c *gin.Context) {
 	// 获取设备的实时连接信息（如果设备在线）
 	var connectionInfo interface{}
 	remoteAddr := ""
-	if api.connectionMonitor != nil {
-		if connID, exists := api.connectionMonitor.GetDeviceConnection(deviceID); exists {
-			if connInfo, exists := api.connectionMonitor.GetConnectionInfo(connID); exists {
+	// 通过TCP模块的全局接口获取连接信息
+	if connectionMonitor := ports.GetConnectionMonitor(); connectionMonitor != nil {
+		if connID, exists := connectionMonitor.GetDeviceConnection(deviceID); exists {
+			if connInfo, exists := connectionMonitor.GetConnectionInfo(connID); exists {
 				connectionInfo = connInfo
 				remoteAddr = connInfo.RemoteAddr
 			}
@@ -179,9 +169,9 @@ func (api *DeviceAPI) GetDeviceGin(c *gin.Context) {
 func (api *DeviceAPI) GetDeviceStatisticsGin(c *gin.Context) {
 	stats := storage.GlobalDeviceStore.GetStatusStatistics()
 
-	// 添加连接统计信息
-	if api.connectionMonitor != nil {
-		connectionStats := api.connectionMonitor.GetConnectionStatistics()
+	// 添加连接统计信息 - 通过TCP模块的全局接口
+	if connectionMonitor := ports.GetConnectionMonitor(); connectionMonitor != nil {
+		connectionStats := connectionMonitor.GetConnectionStatistics()
 		stats["connections"] = connectionStats
 	}
 
@@ -344,8 +334,9 @@ func (api *DeviceAPI) UpdateDeviceStatusGin(c *gin.Context) {
 func (api *DeviceAPI) GetConnectionInfoGin(c *gin.Context) {
 	var result map[string]interface{}
 
-	if api.connectionMonitor != nil {
-		result = api.connectionMonitor.GetConnectionStatistics()
+	// 通过TCP模块的全局接口获取连接统计
+	if connectionMonitor := ports.GetConnectionMonitor(); connectionMonitor != nil {
+		result = connectionMonitor.GetConnectionStatistics()
 	} else {
 		result = map[string]interface{}{
 			"total":       0,
@@ -370,8 +361,9 @@ func (api *DeviceAPI) GetSystemStatusGin(c *gin.Context) {
 	deviceStats := storage.GlobalDeviceStore.GetStatusStatistics()
 
 	var connectionStats map[string]interface{}
-	if api.connectionMonitor != nil {
-		connectionStats = api.connectionMonitor.GetConnectionStatistics()
+	// 通过TCP模块的全局接口获取连接统计
+	if connectionMonitor := ports.GetConnectionMonitor(); connectionMonitor != nil {
+		connectionStats = connectionMonitor.GetConnectionStatistics()
 	}
 
 	result := SystemStatus{

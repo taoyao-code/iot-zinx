@@ -6,16 +6,17 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/bujia-iot/iot-zinx/internal/handlers"
 	"github.com/bujia-iot/iot-zinx/internal/infrastructure/logger"
+	"github.com/bujia-iot/iot-zinx/internal/ports"
 	"github.com/bujia-iot/iot-zinx/pkg/protocol"
 	"github.com/bujia-iot/iot-zinx/pkg/storage"
 	"go.uber.org/zap"
 )
 
-// DeviceAPI 设备API
+// DeviceAPI 设备API - 只负责API调用，不管理TCP连接
 type DeviceAPI struct {
-	connectionMonitor *handlers.ConnectionMonitor
+	// API层不应该直接持有连接管理器
+	// 所有连接相关操作通过统一数据中心获取
 }
 
 // NewDeviceAPI 创建设备API
@@ -23,15 +24,12 @@ func NewDeviceAPI() *DeviceAPI {
 	return &DeviceAPI{}
 }
 
-// SetConnectionMonitor 设置连接监控器
-func (api *DeviceAPI) SetConnectionMonitor(monitor *handlers.ConnectionMonitor) {
-	api.connectionMonitor = monitor
-}
-
-// sendProtocolPacket 发送协议包到设备 - 增强版，添加多层验证和错误处理
+// sendProtocolPacket 发送协议包到设备 - 修复：使用TCP模块的全局接口
 func (api *DeviceAPI) sendProtocolPacket(deviceID string, physicalID uint32, messageID uint16, command uint8, data []byte) error {
-	if api.connectionMonitor == nil {
-		return fmt.Errorf("连接监控器未初始化")
+	// 通过TCP模块的全局接口获取连接监控器
+	connectionMonitor := ports.GetConnectionMonitor()
+	if connectionMonitor == nil {
+		return fmt.Errorf("TCP模块连接监控器未初始化")
 	}
 
 	// 将物理ID转换为系统内部使用的十六进制格式
@@ -67,18 +65,15 @@ func (api *DeviceAPI) sendProtocolPacket(deviceID string, physicalID uint32, mes
 		return fmt.Errorf("设备 %s 不在线，当前状态: %s", deviceID, device.Status)
 	}
 
-	// 2. 获取并验证连接（现在包含连接有效性检查）
-	conn, exists := api.connectionMonitor.GetConnectionByDeviceId(hexDeviceID)
+	// 2. 获取设备连接 - 使用TCP模块的全局接口
+	conn, exists := connectionMonitor.GetConnectionByDeviceId(hexDeviceID)
 	if !exists {
-		logger.Error("设备连接不存在或无效",
+		logger.Error("设备不在线",
 			zap.String("component", "device_api"),
 			zap.String("device_id", deviceID),
 			zap.String("hex_device_id", hexDeviceID),
 		)
-		// 连接无效时，确保设备状态同步
-		device.SetStatusWithReason(storage.StatusOffline, "连接不存在")
-		storage.GlobalDeviceStore.Set(hexDeviceID, device)
-		return fmt.Errorf("设备 %s 连接不存在或无效", deviceID)
+		return fmt.Errorf("设备不在线")
 	}
 
 	// 验证连接状态
@@ -125,8 +120,12 @@ func (api *DeviceAPI) sendProtocolPacket(deviceID string, physicalID uint32, mes
 			zap.Error(err),
 		)
 
-		// 发送失败时立即清理连接状态
-		api.connectionMonitor.HandleConnectionError(conn, err)
+		// 发送失败时记录错误（连接状态由TCP模块管理）
+		logger.Error("协议包发送失败",
+			zap.String("component", "device_api"),
+			zap.String("device_id", deviceID),
+			zap.Error(err),
+		)
 		return fmt.Errorf("发送协议包失败: %v", err)
 	}
 
