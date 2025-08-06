@@ -212,33 +212,48 @@ func (s *UnifiedSender) sendWithConfig(conn ziface.IConnection, data []byte, con
 func (s *UnifiedSender) isConnectionHealthy(conn ziface.IConnection) bool {
 	// 基础健康检查
 	if conn == nil {
+		logger.Debug("连接健康检查失败：连接为空", zap.String("component", "UnifiedSender"))
 		return false
 	}
 
 	// 检查连接是否已关闭
 	tcpConn := conn.GetConnection()
 	if tcpConn == nil {
+		logger.Debug("连接健康检查失败：TCP连接为空",
+			zap.String("component", "UnifiedSender"),
+			zap.Uint64("conn_id", conn.GetConnID()))
+		return false
+	}
+
+	// 🔧 增强：检查Zinx连接状态
+	if !conn.IsAlive() {
+		logger.Debug("连接健康检查失败：Zinx连接已关闭",
+			zap.String("component", "UnifiedSender"),
+			zap.Uint64("conn_id", conn.GetConnID()))
 		return false
 	}
 
 	// 检查网络连接状态
 	if netConn, ok := tcpConn.(*net.TCPConn); ok {
-		// 尝试设置读超时来检测连接状态
-		netConn.SetReadDeadline(time.Now().Add(1 * time.Millisecond))
-		buffer := make([]byte, 1)
-		_, err := netConn.Read(buffer)
-		netConn.SetReadDeadline(time.Time{}) // 重置超时
+		// 🔧 增强：使用更安全的连接检查方式
+		// 检查连接是否可写
+		netConn.SetWriteDeadline(time.Now().Add(1 * time.Millisecond))
+		_, err := netConn.Write([]byte{})
+		netConn.SetWriteDeadline(time.Time{}) // 重置超时
 
-		// 如果是超时错误，说明连接正常但没有数据
-		if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
-			return true
+		if err != nil {
+			logger.Debug("连接健康检查失败：网络连接不可写",
+				zap.String("component", "UnifiedSender"),
+				zap.Uint64("conn_id", conn.GetConnID()),
+				zap.Error(err))
+			return false
 		}
-
-		// 其他错误可能表示连接问题
-		return err == nil
 	}
 
-	return true // 默认认为健康
+	logger.Debug("连接健康检查通过",
+		zap.String("component", "UnifiedSender"),
+		zap.Uint64("conn_id", conn.GetConnID()))
+	return true
 }
 
 // sendWithRetry 带重试的发送

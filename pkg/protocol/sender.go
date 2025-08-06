@@ -40,6 +40,17 @@ func SendDNYRequest(conn ziface.IConnection, physicalID uint32, messageID uint16
 		return fmt.Errorf("连接为空")
 	}
 
+	// 🔧 增强：连接活跃性检查
+	if !conn.IsAlive() {
+		logger.Error("连接已断开，无法发送DNY请求",
+			zap.String("component", "protocol"),
+			zap.Uint64("conn_id", conn.GetConnID()),
+			zap.Uint32("physical_id", physicalID),
+			zap.Uint8("command", command),
+		)
+		return fmt.Errorf("连接已断开，无法发送命令")
+	}
+
 	// 2. 物理ID校验和修复
 	if physicalID == 0 {
 		logger.Warn("物理ID为0，可能存在问题",

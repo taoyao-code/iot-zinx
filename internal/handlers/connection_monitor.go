@@ -263,10 +263,31 @@ func (m *ConnectionMonitor) GetConnectionInfo(connID uint32) (*ConnectionInfo, b
 	return nil, false
 }
 
-// GetDeviceConnection 获取设备的连接ID
+// GetDeviceConnection 获取设备的连接ID - 🔧 修复：添加连接有效性检查
 func (m *ConnectionMonitor) GetDeviceConnection(deviceID string) (uint32, bool) {
 	if connIDValue, exists := m.deviceConns.Load(deviceID); exists {
 		connID := connIDValue.(uint32)
+
+		// 🔧 修复：检查连接是否仍然有效，与GetConnectionByDeviceId保持一致
+		connInfo, exists := m.GetConnectionInfo(connID)
+		if !exists || connInfo.Connection == nil {
+			// 清理无效的设备连接映射
+			m.deviceConns.Delete(deviceID)
+			return 0, false
+		}
+
+		// 检查连接状态
+		if connInfo.State == StateDisconnected || connInfo.State == StateError {
+			m.cleanupInvalidConnection(connID, deviceID)
+			return 0, false
+		}
+
+		// 检查TCP连接有效性
+		if !m.isConnectionHealthy(connInfo.Connection) {
+			m.cleanupInvalidConnection(connID, deviceID)
+			return 0, false
+		}
+
 		return connID, true
 	}
 	return 0, false

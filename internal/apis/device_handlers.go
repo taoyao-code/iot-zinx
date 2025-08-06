@@ -73,14 +73,28 @@ func (api *DeviceAPI) GetDevicesGin(c *gin.Context) {
 		devices = devices[start:end]
 	}
 
-	// 转换格式（包含连接信息）
+	// 转换格式（包含连接信息）- 🔧 修复：统一连接检查逻辑
 	deviceList := make([]DeviceInfo, len(devices))
 	for i, device := range devices {
 		remoteAddr := ""
 		if api.connectionMonitor != nil {
+			// 🔧 修复：现在GetDeviceConnection也进行严格的连接有效性检查
+			// 与定位API使用完全相同的检查逻辑，确保数据一致性
 			if connID, exists := api.connectionMonitor.GetDeviceConnection(device.DeviceID); exists {
 				if connInfo, exists := api.connectionMonitor.GetConnectionInfo(connID); exists {
 					remoteAddr = connInfo.RemoteAddr
+
+					// 确保设备状态与连接状态同步
+					if device.Status != storage.StatusOnline {
+						device.SetStatusWithReason(storage.StatusOnline, "连接有效")
+						storage.GlobalDeviceStore.Set(device.DeviceID, device)
+					}
+				}
+			} else {
+				// 连接无效，确保设备状态为离线
+				if device.Status == storage.StatusOnline {
+					device.SetStatusWithReason(storage.StatusOffline, "连接无效")
+					storage.GlobalDeviceStore.Set(device.DeviceID, device)
 				}
 			}
 		}
