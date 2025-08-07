@@ -173,11 +173,7 @@ func (m *DeviceStatusManager) GetAllDeviceStatuses() map[string]string {
 
 // ===== 内部方法 =====
 
-// getStatusFromConnection 从连接状态获取设备状态
-// 🚀 重构：此方法已废弃，直接使用统一TCP管理器
-func (m *DeviceStatusManager) getStatusFromConnection(deviceID string) string {
-	return m.GetDeviceStatus(deviceID)
-}
+// getStatusFromConnection方法已删除，请直接使用GetDeviceStatus
 
 // startCleanupRoutine 启动清理协程
 func (m *DeviceStatusManager) startCleanupRoutine() {
@@ -185,16 +181,12 @@ func (m *DeviceStatusManager) startCleanupRoutine() {
 	defer ticker.Stop()
 
 	for range ticker.C {
-		m.cleanupExpiredStatuses()
+		// 清理方法已删除，统一TCP管理器自动管理状态
+		logger.Debug("设备状态清理：使用统一TCP管理器，无需手动清理")
 	}
 }
 
-// cleanupExpiredStatuses 清理过期的状态缓存
-func (m *DeviceStatusManager) cleanupExpiredStatuses() {
-	// 🚀 重构：不再需要清理缓存，统一TCP管理器自动管理状态
-	// 此方法保留用于向后兼容，但不执行任何操作
-	logger.Debug("设备状态清理：使用统一TCP管理器，无需手动清理")
-}
+// cleanupExpiredStatuses方法已删除，统一TCP管理器自动管理状态
 
 // startSyncRoutine 启动状态同步协程
 func (m *DeviceStatusManager) startSyncRoutine() {
@@ -202,16 +194,12 @@ func (m *DeviceStatusManager) startSyncRoutine() {
 	defer ticker.Stop()
 
 	for range ticker.C {
-		m.syncDeviceStatuses()
+		// 同步方法已删除，统一TCP管理器自动同步状态
+		logger.Debug("设备状态同步：使用统一TCP管理器，自动同步状态")
 	}
 }
 
-// syncDeviceStatuses 同步设备状态
-func (m *DeviceStatusManager) syncDeviceStatuses() {
-	// 🚀 重构：统一TCP管理器自动同步状态，无需手动同步
-	// 此方法保留用于向后兼容，但不执行任何操作
-	logger.Debug("设备状态同步：使用统一TCP管理器，自动同步状态")
-}
+// syncDeviceStatuses方法已删除，统一TCP管理器自动同步状态
 
 // updateStats 更新统计信息
 func (m *DeviceStatusManager) updateStats() {

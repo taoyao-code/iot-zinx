@@ -84,7 +84,8 @@ var DefaultStateSynchronizerConfig = &StateSynchronizerConfig{
 	RetryInterval:      1 * time.Second,
 }
 
-// UnifiedStateSynchronizer 统一状态同步器实现
+// UnifiedStateSynchronizer 统一状态同步器实现（简化版）
+// 🔧 重构：简化状态同步，删除过度设计的冲突解决和复杂同步策略
 type UnifiedStateSynchronizer struct {
 	// === 核心组件 ===
 	sessionManager ISessionManager

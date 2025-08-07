@@ -98,7 +98,8 @@ var DefaultStateManagerConfig = &StateManagerConfig{
 	MaxDevices:        10000,
 }
 
-// UnifiedStateManager 统一状态管理器实现
+// UnifiedStateManager 统一状态管理器实现（简化版）
+// 🔧 重构：简化状态管理，删除过度设计的状态同步和历史记录功能
 // 🚀 重构：移除重复状态存储，集成到统一TCP管理器
 type UnifiedStateManager struct {
 	// === 核心存储 ===

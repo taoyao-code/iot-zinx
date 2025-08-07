@@ -262,7 +262,7 @@ func (d *DNY_Decoder) Intercept(chain ziface.IChain) ziface.IcResp {
 // tryParseICCIDDirect 直接解析ICCID消息
 // 根据ITU-T E.118标准：ICCID长度固定为20字节，十六进制字符，以"89"开头
 func (d *DNY_Decoder) tryParseICCIDDirect(data []byte, connID uint64) []byte {
-	if len(data) != constants.IOT_SIM_CARD_LENGTH {
+	if len(data) != constants.IotSimCardLength {
 		return nil
 	}
 
@@ -333,7 +333,7 @@ func (d *DNY_Decoder) tryParseDNYFrameDirect(data []byte, connID uint64) []byte 
 // isValidICCIDBytes 验证ICCID字节格式
 // 🔧 修复：支持真实ICCID格式，十六进制字符(0-9,A-F)，以"89"开头
 func (d *DNY_Decoder) isValidICCIDBytes(data []byte) bool {
-	if len(data) != constants.IOT_SIM_CARD_LENGTH {
+	if len(data) != constants.IotSimCardLength {
 		return false
 	}
 

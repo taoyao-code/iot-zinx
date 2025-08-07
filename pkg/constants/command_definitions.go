@@ -84,24 +84,5 @@ func GetCommandPriorityByType(command uint8) int {
 	return GetCommandPriority(command)
 }
 
-// 向后兼容的命令映射（保持与原DNYCommandMap的兼容性）
-type LegacyCommandInfo struct {
-	Name        string
-	Description string
-}
-
-// GetLegacyCommandMap 获取向后兼容的命令映射
-func GetLegacyCommandMap() map[byte]LegacyCommandInfo {
-	registry := GetGlobalCommandRegistry()
-	allCommands := registry.GetAllCommands()
-
-	legacyMap := make(map[byte]LegacyCommandInfo)
-	for id, info := range allCommands {
-		legacyMap[byte(id)] = LegacyCommandInfo{
-			Name:        info.Name,
-			Description: info.Description,
-		}
-	}
-
-	return legacyMap
-}
+// 向后兼容代码已清理
+// 请直接使用统一的命令注册表API

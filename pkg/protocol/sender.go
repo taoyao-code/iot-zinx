@@ -9,7 +9,6 @@ import (
 	"time"
 
 	"github.com/aceld/zinx/ziface"
-	"github.com/bujia-iot/iot-zinx/internal/domain/dny_protocol"
 	"github.com/bujia-iot/iot-zinx/internal/infrastructure/logger"
 	"github.com/bujia-iot/iot-zinx/pkg/constants"
 	"github.com/bujia-iot/iot-zinx/pkg/network"
@@ -271,7 +270,8 @@ func BuildDNYRequestPacket(physicalID uint32, messageID uint16, command uint8, d
 // buildDNYPacket 构建DNY协议数据包的通用实现
 // 🔧 重构：使用统一DNY构建器，替代原有重复实现
 func buildDNYPacket(physicalID uint32, messageID uint16, command uint8, data []byte) []byte {
-	// 计算纯数据内容长度（物理ID + 消息ID + 命令 + 实际数据 + 校验和）
+	// 直接调用统一构建器
+	return BuildUnifiedDNYPacket(physicalID, messageID, command, data)
 	// 根据协议，“长度”字段的值应为 PhysicalID(4) + MessageID(2) + 命令(1) + 数据(n) + 校验(2) 的总和
 	contentLen := PhysicalIDLength + MessageIDLength + CommandLength + len(data) + ChecksumLength
 
@@ -386,22 +386,22 @@ func NeedConfirmation(command uint8) bool {
 	}
 
 	// 心跳类命令不需要确认（兼容性检查）
-	if command == dny_protocol.CmdHeartbeat ||
-		command == uint8(dny_protocol.CmdDeviceHeart) ||
-		command == dny_protocol.CmdMainHeartbeat ||
-		command == dny_protocol.CmdDeviceHeart {
+	if command == constants.CmdHeartbeat ||
+		command == uint8(constants.CmdDeviceHeart) ||
+		command == constants.CmdMainHeartbeat ||
+		command == constants.CmdDeviceHeart {
 		return false
 	}
 
 	// 根据协议规范，以下命令服务器不需要应答（兼容性检查）
-	if command == dny_protocol.CmdMainHeartbeat || // 0x11 主机状态心跳包
-		command == dny_protocol.CmdDeviceVersion || // 0x35 上传分机版本号与设备类型
-		command == dny_protocol.CmdNetworkStatus { // 0x81 查询设备联网状态
+	if command == constants.CmdMainHeartbeat || // 0x11 主机状态心跳包
+		command == constants.CmdDeviceVersion || // 0x35 上传分机版本号与设备类型
+		command == constants.CmdNetworkStatus { // 0x81 查询设备联网状态
 		return false
 	}
 
 	// 充电控制命令需要确认
-	if command == dny_protocol.CmdChargeControl {
+	if command == constants.CmdChargeControl {
 		return true
 	}
 

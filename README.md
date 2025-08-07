@@ -180,7 +180,7 @@ make build
 - `device_monitor.go`：设备状态监控器，监控设备心跳状态
 - `command_manager.go`：命令管理器，管理发送命令的确认和超时重发
 - `monitor.go`：TCP 数据监视器，记录设备数据传输过程
-- `raw_data_handler.go`：原始数据处理器，处理非结构化数据
+- `raw_data_handler.go`：原始数据处理器（已删除，请使用 `pkg/protocol/raw_data_hook.go` 替代）
 
 ### 端口和适配器架构
 

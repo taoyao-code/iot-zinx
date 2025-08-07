@@ -354,8 +354,4 @@ func (chc *ConnectionHealthChecker) IsEnabled() bool {
 	return chc.enabled
 }
 
-// SetConnectionProvider 设置连接提供者回调函数（已废弃）
-// � 重构：此方法已废弃，使用SetTCPManagerGetter代替
-func (chc *ConnectionHealthChecker) SetConnectionProvider(provider func() map[string]ziface.IConnection) {
-	logger.Debug("SetConnectionProvider已废弃，请使用SetTCPManagerGetter")
-}
+// SetConnectionProvider方法已删除，请使用SetTCPManagerGetter

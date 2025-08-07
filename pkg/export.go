@@ -95,8 +95,8 @@ var Protocol = ProtocolExport{
 	IsHexString:            protocol.IsHexString,
 	IsAllDigits:            protocol.IsAllDigits,
 	HandleSpecialMessage:   protocol.IsSpecialMessage, // 修正：指向统一解析器中的函数
-	IOT_SIM_CARD_LENGTH:    constants.IOT_SIM_CARD_LENGTH,
-	IOT_LINK_HEARTBEAT:     constants.IOT_LINK_HEARTBEAT,
+	IOT_SIM_CARD_LENGTH:    constants.IotSimCardLength,
+	IOT_LINK_HEARTBEAT:     constants.IotLinkHeartbeat,
 	NewRawDataHook:         protocol.NewRawDataHook,
 	DefaultRawDataHandler:  protocol.DefaultRawDataHandler,
 	PrintRawData:           protocol.PrintRawData,
@@ -118,8 +118,6 @@ var Network = struct {
 	SetSendCommandFunc func(fn network.SendCommandFuncType)
 	// 创建连接钩子
 	NewConnectionHooks func(readDeadLine, writeDeadLine, keepAlivePeriod time.Duration) network.IConnectionHooks
-	// 创建原始数据处理器
-	NewRawDataHandler func(handlePacketFunc func(conn ziface.IConnection, data []byte) bool) ziface.IRouter
 	// 设备心跳超时处理
 	OnDeviceNotAlive func(conn ziface.IConnection)
 	// 设置更新设备状态函数
@@ -149,7 +147,6 @@ var Network = struct {
 	NewConnectionHooks: func(readDeadLine, writeDeadLine, keepAlivePeriod time.Duration) network.IConnectionHooks {
 		return network.NewConnectionHooks(readDeadLine, writeDeadLine, keepAlivePeriod)
 	},
-	NewRawDataHandler:         network.NewRawDataHandler,
 	OnDeviceNotAlive:          network.OnDeviceNotAlive,
 	SetUpdateDeviceStatusFunc: network.SetUpdateDeviceStatusFunc,
 	SetGlobalHeartbeatManager: network.SetGlobalHeartbeatManager,
@@ -174,16 +171,6 @@ var Network = struct {
 type MonitorInterface struct {
 	GetGlobalMonitor func() monitor.IConnectionMonitor
 
-	// 🔧 新增：设备组管理接口
-	GetDeviceGroupManager func() monitor.IDeviceGroupManager
-	GetSessionManager     func() monitor.ISessionManager
-
-	// 🔧 清理：删除废弃的设备监控器接口
-	// 统一架构中不再需要单独的设备监控器
-
-	// 🔧 清理：删除废弃的设备会话管理和设备组管理接口
-	// 这些功能已集成到 core.GetGlobalConnectionGroupManager() 中
-
 	// 连接管理
 	GetConnectionByDeviceId  func(deviceId string) (ziface.IConnection, bool)
 	BindDeviceIdToConnection func(deviceId string, conn ziface.IConnection)
@@ -196,17 +183,6 @@ var Monitor = MonitorInterface{
 		// 返回全局连接监视器，如果未初始化则返回 nil
 		return globalConnectionMonitor
 	},
-
-	// 🔧 统一架构：这些功能已集成到统一架构中
-	GetDeviceGroupManager: func() monitor.IDeviceGroupManager {
-		return nil // 统一架构中不再需要单独的设备组管理器
-	},
-	GetSessionManager: func() monitor.ISessionManager {
-		return nil // 统一架构中不再需要单独的会话管理器
-	},
-
-	// 🔧 清理：废弃的设备监控器和会话管理功能已删除
-	// 统一架构中这些功能已集成到 core.GetGlobalConnectionGroupManager() 中
 
 	// 连接管理实现
 	GetConnectionByDeviceId: func(deviceId string) (ziface.IConnection, bool) {
@@ -238,6 +214,3 @@ var Utils = struct {
 	SetupImprovedZinxLogger: utils.SetupImprovedZinxLogger,
 	GetGlobalImprovedLogger: utils.GetGlobalImprovedLogger,
 }
-
-// 🔧 注意：心跳服务已集成到统一架构中
-// 旧的心跳服务导出已被统一架构替代

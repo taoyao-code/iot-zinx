@@ -52,18 +52,8 @@ type ISessionManager interface {
 	GetAllSessions() map[string]*session.DeviceSession
 }
 
-// IDeviceGroupManager 设备组管理器接口（已废弃）
-//
-// DEPRECATED: 此接口已废弃，请使用 pkg/core/connection_device_group.go 中的接口
-//
-// 迁移指南：
-// - 使用 core.GetGlobalConnectionGroupManager() 替代此接口
-// - 设备组功能已集成到统一的连接设备组管理器中
-// - 新架构基于TCP连接而非ICCID进行设备组管理
-type IDeviceGroupManager interface {
-	// 已废弃的方法，保留用于向后兼容
-	GetGroupStatistics() map[string]interface{}
-}
+// 已废弃接口已清理
+// 请使用 pkg/core/connection_device_group.go 中的统一接口
 
 // === 全局监控器访问函数 ===
 // 注意：这些函数在global.go中实现，这里只是声明

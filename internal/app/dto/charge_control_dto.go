@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"github.com/bujia-iot/iot-zinx/internal/domain/dny_protocol"
+	"github.com/bujia-iot/iot-zinx/pkg/constants"
 )
 
 // ChargeControlRequest 充电控制请求DTO - 统一的充电控制请求数据结构
@@ -142,35 +143,35 @@ func (resp *ChargeControlResponse) FromProtocolData(data []byte) error {
 // GetChargeResponseStatusDesc 获取充电响应状态描述
 func GetChargeResponseStatusDesc(status byte) string {
 	switch status {
-	case dny_protocol.ChargeResponseSuccess:
+	case constants.ChargeStatusSuccess:
 		return "执行成功"
-	case dny_protocol.ChargeResponseNoCharger:
+	case constants.ChargeStatusNoCharger:
 		return "端口未插充电器"
-	case dny_protocol.ChargeResponseSameState:
+	case constants.ChargeStatusSameState:
 		return "端口状态和充电命令相同"
-	case dny_protocol.ChargeResponsePortError:
+	case constants.ChargeStatusPortFault:
 		return "端口故障"
-	case dny_protocol.ChargeResponseNoSuchPort:
+	case constants.ChargeStatusInvalidPort:
 		return "无此端口号"
-	case dny_protocol.ChargeResponseMultipleWaitPorts:
+	case 0x07: // ChargeResponseMultipleWaitPorts
 		return "有多个待充端口"
-	case dny_protocol.ChargeResponseOverPower:
+	case constants.ChargeStatusPowerOverload:
 		return "多路设备功率超标"
-	case dny_protocol.ChargeResponseStorageError:
+	case constants.ChargeStatusStorageCorrupted:
 		return "存储器损坏"
-	case dny_protocol.ChargeResponseRelayFault:
+	case 0x08: // ChargeResponseRelayFault
 		return "继电器坏或保险丝断"
-	case dny_protocol.ChargeResponseRelayStuck:
+	case 0x09: // ChargeResponseRelayStuck
 		return "继电器粘连"
-	case dny_protocol.ChargeResponseShortCircuit:
+	case 0x0A: // ChargeResponseShortCircuit
 		return "负载短路"
-	case dny_protocol.ChargeResponseSmokeAlarm:
+	case 0x0B: // ChargeResponseSmokeAlarm
 		return "烟感报警"
-	case dny_protocol.ChargeResponseOverVoltage:
+	case 0x0C: // ChargeResponseOverVoltage
 		return "过压"
-	case dny_protocol.ChargeResponseUnderVoltage:
+	case 0x0D: // ChargeResponseUnderVoltage
 		return "欠压"
-	case dny_protocol.ChargeResponseNoResponse:
+	case 0x0E: // ChargeResponseNoResponse
 		return "未响应"
 	default:
 		return "未知状态"

@@ -144,9 +144,11 @@ func NewConnectionSession(conn ziface.IConnection) *ConnectionSession {
 	}
 }
 
-// generateUnifiedSessionID 生成统一会话ID
+// generateUnifiedSessionID 生成统一会话ID - 统一实现
 func generateUnifiedSessionID(conn ziface.IConnection) string {
-	return fmt.Sprintf("unified_session_%d_%d", conn.GetConnID(), time.Now().UnixNano())
+	// 使用连接ID作为临时设备ID，后续会被实际设备ID替换
+	tempDeviceID := fmt.Sprintf("temp_%d", conn.GetConnID())
+	return fmt.Sprintf("session_%d_%s_%d", conn.GetConnID(), tempDeviceID, time.Now().UnixNano())
 }
 
 // NewUnifiedDeviceGroup 创建新的统一设备组

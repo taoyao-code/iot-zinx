@@ -11,7 +11,28 @@ import (
 	"github.com/sirupsen/logrus"
 )
 
-// UnifiedSessionManager 统一会话管理器实现
+// SessionFactory 会话工厂函数类型
+type SessionFactory func(conn ziface.IConnection) ISession
+
+// globalSessionFactory 全局会话工厂
+var globalSessionFactory SessionFactory
+
+// SetSessionFactory 设置会话工厂
+func SetSessionFactory(factory SessionFactory) {
+	globalSessionFactory = factory
+}
+
+// NewUnifiedSession 创建统一会话（通过工厂）
+func NewUnifiedSession(conn ziface.IConnection) ISession {
+	if globalSessionFactory != nil {
+		return globalSessionFactory(conn)
+	}
+	// 如果没有设置工厂，返回基础会话实现
+	return NewDeviceSession(conn)
+}
+
+// UnifiedSessionManager 统一会话管理器实现（简化版）
+// 🔧 重构：简化会话管理，删除过度设计的事件系统和复杂统计功能
 // 🚀 重构：移除重复存储，完全通过TCP适配器访问统一TCP管理器
 // 整合会话管理和状态管理，提供完整的设备会话管理功能
 type UnifiedSessionManager struct {
@@ -121,8 +142,12 @@ func (m *UnifiedSessionManager) CreateSession(conn ziface.IConnection) (ISession
 	// 创建新的统一会话
 	session := NewUnifiedSession(conn)
 
-	// 设置状态管理器
-	session.SetStateManager(m.stateManager)
+	// 设置状态管理器（如果支持）
+	if stateManagerSetter, ok := session.(interface {
+		SetStateManager(IStateManager)
+	}); ok {
+		stateManagerSetter.SetStateManager(m.stateManager)
+	}
 
 	// 🚀 重构：通过TCP适配器注册连接，不再本地存储
 	if m.tcpAdapter != nil {

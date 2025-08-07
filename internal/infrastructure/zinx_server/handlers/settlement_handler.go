@@ -98,7 +98,7 @@ func (h *SettlementHandler) processSettlement(decodedFrame *protocol.DecodedDNYF
 
 		command := decodedFrame.Command
 
-		responseData := []byte{dny_protocol.ResponseFailed}
+		responseData := []byte{constants.StatusError}
 		if err := protocol.SendDNYResponse(conn, physicalId, messageID, uint8(command), responseData); err != nil {
 			logger.WithFields(logrus.Fields{
 				"connID":     conn.GetConnID(),
@@ -169,9 +169,9 @@ func (h *SettlementHandler) processSettlement(decodedFrame *protocol.DecodedDNYF
 	// 构建响应数据
 	var responseData []byte
 	if success {
-		responseData = []byte{dny_protocol.ResponseSuccess}
+		responseData = []byte{constants.StatusSuccess}
 	} else {
-		responseData = []byte{dny_protocol.ResponseFailed}
+		responseData = []byte{constants.StatusError}
 	}
 
 	command := decodedFrame.Command

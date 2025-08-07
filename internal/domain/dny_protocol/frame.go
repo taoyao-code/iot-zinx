@@ -2,6 +2,7 @@ package dny_protocol
 
 import (
 	"github.com/aceld/zinx/ziface"
+	"github.com/bujia-iot/iot-zinx/pkg/constants"
 )
 
 // Message 实现了Zinx框架的IMessage接口，表示一个DNY协议帧
@@ -204,11 +205,11 @@ func BuildChargeControlPacket(
 	data[36] = 0
 
 	// 构建完整的DNY协议包
-	return buildDNYPacket(physicalID, messageID, CmdChargeControl, data)
+	return buildDNYPacket(physicalID, messageID, constants.CmdChargeControl, data)
 }
 
-// buildDNYPacket 构建DNY协议数据包的通用实现 (已废弃)
-// 🔧 重构：此函数已废弃，使用 pkg/protocol/unified_dny_builder.go 中的统一构建器
+// buildDNYPacket 构建DNY协议数据包的通用实现 (临时保留)
+// 🔧 重构：此函数应该与统一构建器保持一致
 func buildDNYPacket(physicalID uint32, messageID uint16, command uint8, data []byte) []byte {
 	// 🔧 修复：使用正确的协议规范，长度字段包含校验和
 	contentLen := 4 + 2 + 1 + len(data) + 2 // PhysicalID(4) + MessageID(2) + Command(1) + Data + Checksum(2)

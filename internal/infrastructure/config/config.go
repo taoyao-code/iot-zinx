@@ -107,9 +107,6 @@ type LoggerConfig struct {
 	MaxBackups   int    `mapstructure:"maxBackups"`   // 按大小轮转: 最大备份文件数
 	MaxAgeDays   int    `mapstructure:"maxAgeDays"`   // 保留天数
 	Compress     bool   `mapstructure:"compress"`     // 是否压缩旧文件
-
-	// 兼容性字段 (废弃，但保留以避免配置错误)
-	FilePath string `mapstructure:"filePath"` // 废弃: 使用 fileDir + filePrefix
 }
 
 // TimeoutsConfig 超时配置

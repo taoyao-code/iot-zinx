@@ -43,10 +43,6 @@ func InitUnifiedArchitecture() {
 		return nil, "", false
 	})
 
-	// 6. 设置monitor包的DNY协议发送器（已废弃）
-	// DEPRECATED: monitor.DeviceGroup 已废弃，此调用不再需要
-	// monitor.SetDNYProtocolSender(&unifiedDNYProtocolSenderAdapter{})
-
 	// 7. 修复：为CommandManager设置命令发送函数，激活重试机制
 	network.SetSendCommandFunc(func(conn ziface.IConnection, physicalID uint32, messageID uint16, command uint8, data []byte) error {
 		// 🔧 修复：处理充电控制命令的特殊数据格式
@@ -149,8 +145,6 @@ func InitUnifiedArchitecture() {
 			return core.GetGlobalUnifiedTCPManager()
 		})
 		logger.Info("监控器TCP适配器已设置")
-
-		// 注意：API服务的TCP适配器设置在应用启动时进行，避免循环导入
 	}
 
 	// 13. 设置向后兼容性

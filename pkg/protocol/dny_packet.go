@@ -92,7 +92,7 @@ func (dp *DNYPacket) packDNYMessage(msg ziface.IMessage) ([]byte, error) {
 	dataBuff := bytes.NewBuffer([]byte{})
 
 	// 写入包头"DNY" (3字节)
-	if _, err := dataBuff.WriteString(dny_protocol.DnyHeader); err != nil {
+	if _, err := dataBuff.WriteString(constants.ProtocolHeader); err != nil {
 		return nil, err
 	}
 
@@ -241,17 +241,17 @@ func (dp *DNYPacket) Unpack(binaryData []byte) (ziface.IMessage, error) {
 // handleDNYProtocolBasic 处理DNY协议数据的基础检查（不进行完整解析）
 func (dp *DNYPacket) handleDNYProtocolBasic(data []byte) (ziface.IMessage, error) {
 	// 检查数据长度是否足够包含最小包长度
-	if len(data) < dny_protocol.MinPackageLen {
+	if len(data) < constants.MinPacketSize {
 		logger.WithFields(logrus.Fields{
 			"dataLen": len(data),
-			"minLen":  dny_protocol.MinPackageLen,
+			"minLen":  constants.MinPacketSize,
 			"dataHex": hex.EncodeToString(data),
 		}).Debug("数据不足以解析DNY协议包，等待更多数据")
 		return nil, ErrNotEnoughData
 	}
 
 	// 检查包头是否为"DNY"
-	if !bytes.HasPrefix(data, []byte(dny_protocol.DnyHeader)) {
+	if !bytes.HasPrefix(data, []byte(constants.ProtocolHeader)) {
 		headerHex := hex.EncodeToString(data[:3])
 		logger.WithFields(logrus.Fields{
 			"header":  headerHex,
@@ -264,7 +264,7 @@ func (dp *DNYPacket) handleDNYProtocolBasic(data []byte) (ziface.IMessage, error
 	dataLen := binary.LittleEndian.Uint16(data[3:5])
 
 	// 检查数据包长度是否完整
-	totalLen := dny_protocol.DnyHeaderLen + int(dataLen)
+	totalLen := constants.MinHeaderSize + int(dataLen)
 	if len(data) < totalLen {
 		logger.WithFields(logrus.Fields{
 			"dataLen":  len(data),

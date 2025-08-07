@@ -1,13 +1,27 @@
 package core
 
 import (
+	"encoding/json"
 	"fmt"
 	"sync"
 	"time"
 
 	"github.com/aceld/zinx/ziface"
+	"github.com/bujia-iot/iot-zinx/internal/infrastructure/logger"
 	"github.com/bujia-iot/iot-zinx/pkg/constants"
+	"github.com/sirupsen/logrus"
 )
+
+// IStateManager 统一状态管理器接口
+type IStateManager interface {
+	// === 状态查询 ===
+	GetState(deviceID string) constants.DeviceConnectionState
+	IsOnline(deviceID string) bool
+	IsActive(deviceID string) bool
+
+	// === 状态转换 ===
+	ForceTransitionTo(deviceID string, targetState constants.DeviceConnectionState) error
+}
 
 // UnifiedDeviceSession 统一设备会话模型
 // 替代所有分散的会话管理：DeviceSession, MonitorDeviceSession, DeviceInfo等
@@ -48,8 +62,14 @@ type UnifiedDeviceSession struct {
 	DataBytesIn    int64 `json:"data_bytes_in"`   // 接收字节数
 	DataBytesOut   int64 `json:"data_bytes_out"`  // 发送字节数
 
+	// === 业务状态 ===
+	Properties map[string]interface{} `json:"properties"` // 扩展属性
+
 	// === 内部状态 ===
-	mutex sync.RWMutex `json:"-"` // 读写锁
+	mutex        sync.RWMutex  `json:"-"` // 读写锁
+	createdAt    time.Time     `json:"-"` // 创建时间（内部使用）
+	updatedAt    time.Time     `json:"-"` // 更新时间（内部使用）
+	stateManager IStateManager `json:"-"` // 状态管理器（可选）
 }
 
 // UnifiedSessionState 统一会话状态枚举
@@ -114,6 +134,9 @@ func NewUnifiedDeviceSession(conn ziface.IConnection) *UnifiedDeviceSession {
 		LastActivity:    now,
 		LastHeartbeat:   now,
 		SessionID:       generateSessionID(conn),
+		Properties:      make(map[string]interface{}),
+		createdAt:       now,
+		updatedAt:       now,
 	}
 }
 
@@ -206,7 +229,159 @@ func (s *UnifiedDeviceSession) OnDisconnect() {
 	s.Connection = nil
 }
 
-// generateSessionID 生成会话ID
+// === 属性管理方法 ===
+
+// SetProperty 设置扩展属性
+func (s *UnifiedDeviceSession) SetProperty(key string, value interface{}) {
+	s.mutex.Lock()
+	defer s.mutex.Unlock()
+
+	s.Properties[key] = value
+	s.updatedAt = time.Now()
+}
+
+// GetProperty 获取扩展属性
+func (s *UnifiedDeviceSession) GetProperty(key string) (interface{}, bool) {
+	s.mutex.RLock()
+	defer s.mutex.RUnlock()
+
+	value, exists := s.Properties[key]
+	return value, exists
+}
+
+// RemoveProperty 移除扩展属性
+func (s *UnifiedDeviceSession) RemoveProperty(key string) {
+	s.mutex.Lock()
+	defer s.mutex.Unlock()
+
+	delete(s.Properties, key)
+	s.updatedAt = time.Now()
+}
+
+// UpdateCommand 更新命令统计
+func (s *UnifiedDeviceSession) UpdateCommand(bytesIn, bytesOut int64) {
+	s.mutex.Lock()
+	defer s.mutex.Unlock()
+
+	s.CommandCount++
+	s.DataBytesIn += bytesIn
+	s.DataBytesOut += bytesOut
+	s.updatedAt = time.Now()
+}
+
+// === 状态管理器集成方法 ===
+
+// SetStateManager 设置状态管理器
+func (s *UnifiedDeviceSession) SetStateManager(stateManager IStateManager) {
+	s.mutex.Lock()
+	defer s.mutex.Unlock()
+	s.stateManager = stateManager
+}
+
+// GetStateManager 获取状态管理器
+func (s *UnifiedDeviceSession) GetStateManager() IStateManager {
+	s.mutex.RLock()
+	defer s.mutex.RUnlock()
+	return s.stateManager
+}
+
+// notifyStateChange 通知状态变更
+func (s *UnifiedDeviceSession) notifyStateChange(oldState, newState constants.DeviceConnectionState) {
+	if s.stateManager != nil && s.DeviceID != "" {
+		// 异步通知状态管理器
+		go func() {
+			if err := s.stateManager.ForceTransitionTo(s.DeviceID, newState); err != nil {
+				logger.WithFields(logrus.Fields{
+					"device_id": s.DeviceID,
+					"old_state": oldState,
+					"new_state": newState,
+					"error":     err,
+				}).Error("状态管理器状态转换失败")
+			}
+		}()
+	}
+}
+
+// === JSON序列化方法 ===
+
+// ToJSON 序列化为JSON
+func (s *UnifiedDeviceSession) ToJSON() ([]byte, error) {
+	s.mutex.RLock()
+	defer s.mutex.RUnlock()
+
+	// 创建一个可导出的结构体用于JSON序列化
+	data := struct {
+		DeviceID        string                 `json:"device_id"`
+		PhysicalID      string                 `json:"physical_id"`
+		ICCID           string                 `json:"iccid"`
+		SessionID       string                 `json:"session_id"`
+		ConnID          uint64                 `json:"conn_id"`
+		RemoteAddr      string                 `json:"remote_addr"`
+		DeviceType      uint16                 `json:"device_type"`
+		DeviceVersion   string                 `json:"device_version"`
+		DirectMode      bool                   `json:"direct_mode"`
+		ConnectionState constants.ConnStatus   `json:"connection_state"`
+		DeviceStatus    constants.DeviceStatus `json:"device_status"`
+		BusinessState   string                 `json:"business_state"`
+		ConnectedAt     time.Time              `json:"connected_at"`
+		RegisteredAt    time.Time              `json:"registered_at"`
+		LastHeartbeat   time.Time              `json:"last_heartbeat"`
+		LastActivity    time.Time              `json:"last_activity"`
+		LastDisconnect  time.Time              `json:"last_disconnect"`
+		ReconnectCount  int                    `json:"reconnect_count"`
+		HeartbeatCount  int64                  `json:"heartbeat_count"`
+		CommandCount    int64                  `json:"command_count"`
+		DataBytesIn     int64                  `json:"data_bytes_in"`
+		DataBytesOut    int64                  `json:"data_bytes_out"`
+		Properties      map[string]interface{} `json:"properties"`
+	}{
+		DeviceID:        s.DeviceID,
+		PhysicalID:      s.PhysicalID,
+		ICCID:           s.ICCID,
+		SessionID:       s.SessionID,
+		ConnID:          s.ConnID,
+		RemoteAddr:      s.RemoteAddr,
+		DeviceType:      s.DeviceType,
+		DeviceVersion:   s.DeviceVersion,
+		DirectMode:      s.DirectMode,
+		ConnectionState: s.ConnectionState,
+		DeviceStatus:    s.DeviceStatus,
+		BusinessState:   s.BusinessState,
+		ConnectedAt:     s.ConnectedAt,
+		RegisteredAt:    s.RegisteredAt,
+		LastHeartbeat:   s.LastHeartbeat,
+		LastActivity:    s.LastActivity,
+		LastDisconnect:  s.LastDisconnect,
+		ReconnectCount:  s.ReconnectCount,
+		HeartbeatCount:  s.HeartbeatCount,
+		CommandCount:    s.CommandCount,
+		DataBytesIn:     s.DataBytesIn,
+		DataBytesOut:    s.DataBytesOut,
+		Properties:      s.Properties,
+	}
+
+	return json.Marshal(data)
+}
+
+// String 返回会话的字符串表示
+func (s *UnifiedDeviceSession) String() string {
+	s.mutex.RLock()
+	defer s.mutex.RUnlock()
+
+	return fmt.Sprintf("UnifiedDeviceSession{DeviceID:%s, PhysicalID:%s, ICCID:%s, State:%s}",
+		s.DeviceID, s.PhysicalID, s.ICCID, s.ConnectionState)
+}
+
+// generateSessionID 生成会话ID - 统一实现
 func generateSessionID(conn ziface.IConnection) string {
-	return fmt.Sprintf("session_%d_%d", conn.GetConnID(), time.Now().UnixNano())
+	// 使用连接ID作为临时设备ID，后续会被实际设备ID替换
+	tempDeviceID := fmt.Sprintf("temp_%d", conn.GetConnID())
+	return fmt.Sprintf("session_%d_%s_%d", conn.GetConnID(), tempDeviceID, time.Now().UnixNano())
+}
+
+// SetupUnifiedSessionFactory 设置统一会话工厂
+// 这个函数应该在系统初始化时调用，避免循环导入
+func SetupUnifiedSessionFactory() {
+	// 这里需要通过反射或者其他方式设置工厂
+	// 由于循环导入问题，我们需要在统一初始化中处理
 }

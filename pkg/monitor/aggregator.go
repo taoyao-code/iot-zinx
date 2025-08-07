@@ -18,14 +18,11 @@ type IMonitorAggregator interface {
 	GetAggregatedMetrics(timeRange TimeRange) (*AggregatedMetrics, error)
 	GetTrendData(metric string, timeRange TimeRange) (*TrendData, error)
 
-	// === 实时分析 ===
-	AnalyzeRealTimeMetrics() (*RealTimeAnalysis, error)
-	DetectAnomalies() ([]Anomaly, error)
-	CalculateHealthScore() (*HealthScore, error)
+	// === 基础分析（简化版） ===
+	// 删除复杂的实时分析功能，保留基础监控
 
-	// === 报告生成 ===
-	GenerateReport(reportType ReportType, timeRange TimeRange) (*MonitorReport, error)
-	ExportMetrics(format ExportFormat, timeRange TimeRange) ([]byte, error)
+	// === 基础报告（简化版） ===
+	// 删除复杂的报告生成功能，保留基础指标导出
 
 	// === 管理操作 ===
 	Start() error
@@ -279,10 +276,7 @@ func (a *MonitorAggregator) Start() error {
 	// 启动聚合协程
 	go a.aggregationRoutine()
 
-	// 启动异常检测协程
-	go a.anomalyDetectionRoutine()
-
-	// 启动清理协程
+	// 启动清理协程（删除异常检测协程，简化监控）
 	go a.cleanupRoutine()
 
 	logger.Info("监控数据聚合器启动成功")
@@ -415,192 +409,12 @@ func (a *MonitorAggregator) GetTrendData(metric string, timeRange TimeRange) (*T
 	return nil, fmt.Errorf("未找到指标的趋势数据: %s", metric)
 }
 
-// === 实时分析实现 ===
+// === 基础分析实现（简化版） ===
+// 删除复杂的实时分析功能，保留基础监控
 
-// AnalyzeRealTimeMetrics 分析实时指标
-func (a *MonitorAggregator) AnalyzeRealTimeMetrics() (*RealTimeAnalysis, error) {
-	now := time.Now()
+// 异常检测功能已删除，简化监控架构
 
-	// 获取当前指标
-	connStats := a.monitor.GetConnectionStats()
-	deviceStats := a.monitor.GetDeviceStats()
-	perfStats := a.monitor.GetPerformanceStats()
-	alertStats := a.monitor.GetAlertStats()
-
-	// 分析健康状态
-	healthLevel := a.analyzeOverallHealth(connStats, deviceStats, perfStats, alertStats)
-
-	// 检测关键问题
-	criticalIssues := a.detectCriticalIssues(connStats, deviceStats, perfStats, alertStats)
-
-	// 生成建议
-	recommendations := a.generateRecommendations(criticalIssues, perfStats)
-
-	// 收集关键指标
-	keyMetrics := map[string]float64{
-		"active_connections": float64(connStats.ActiveConnections),
-		"online_devices":     float64(deviceStats.OnlineDevices),
-		"error_rate":         perfStats.ErrorRate,
-		"avg_latency_ms":     float64(perfStats.AverageLatency.Nanoseconds()) / 1e6,
-		"throughput":         perfStats.Throughput,
-		"active_alerts":      float64(alertStats.ActiveAlerts),
-	}
-
-	// 获取活跃告警
-	activeAlerts := a.monitor.GetActiveAlerts()
-
-	return &RealTimeAnalysis{
-		Timestamp:       now,
-		OverallHealth:   healthLevel,
-		CriticalIssues:  criticalIssues,
-		Recommendations: recommendations,
-		KeyMetrics:      keyMetrics,
-		Alerts:          activeAlerts,
-	}, nil
-}
-
-// DetectAnomalies 检测异常
-func (a *MonitorAggregator) DetectAnomalies() ([]Anomaly, error) {
-	var anomalies []Anomaly
-	now := time.Now()
-
-	// 获取当前指标
-	perfStats := a.monitor.GetPerformanceStats()
-	connStats := a.monitor.GetConnectionStats()
-
-	// 检测性能异常
-	if perfStats.ErrorRate > 5.0 { // 错误率超过5%
-		anomalies = append(anomalies, Anomaly{
-			ID:          fmt.Sprintf("error_rate_%d", now.Unix()),
-			Metric:      "error_rate",
-			Value:       perfStats.ErrorRate,
-			Expected:    2.0,
-			Deviation:   perfStats.ErrorRate - 2.0,
-			Severity:    "high",
-			DetectedAt:  now,
-			Description: "错误率异常偏高",
-		})
-	}
-
-	// 检测延迟异常
-	avgLatencyMs := float64(perfStats.AverageLatency.Nanoseconds()) / 1e6
-	if avgLatencyMs > 1000 { // 平均延迟超过1秒
-		anomalies = append(anomalies, Anomaly{
-			ID:          fmt.Sprintf("latency_%d", now.Unix()),
-			Metric:      "average_latency",
-			Value:       avgLatencyMs,
-			Expected:    100.0,
-			Deviation:   avgLatencyMs - 100.0,
-			Severity:    "medium",
-			DetectedAt:  now,
-			Description: "平均延迟异常偏高",
-		})
-	}
-
-	// 检测连接异常
-	if connStats.ActiveConnections == 0 && connStats.TotalConnections > 0 {
-		anomalies = append(anomalies, Anomaly{
-			ID:          fmt.Sprintf("no_active_conn_%d", now.Unix()),
-			Metric:      "active_connections",
-			Value:       0,
-			Expected:    float64(connStats.TotalConnections * 80 / 100), // 期望80%的连接活跃
-			Deviation:   float64(connStats.TotalConnections),
-			Severity:    "critical",
-			DetectedAt:  now,
-			Description: "所有连接都不活跃",
-		})
-	}
-
-	// 存储异常数据
-	if len(anomalies) > 0 {
-		a.anomalies.Store(now.Unix(), anomalies)
-	}
-
-	return anomalies, nil
-}
-
-// CalculateHealthScore 计算健康评分
-func (a *MonitorAggregator) CalculateHealthScore() (*HealthScore, error) {
-	now := time.Now()
-
-	// 获取统计数据
-	connStats := a.monitor.GetConnectionStats()
-	deviceStats := a.monitor.GetDeviceStats()
-	perfStats := a.monitor.GetPerformanceStats()
-	alertStats := a.monitor.GetAlertStats()
-
-	// 计算各组件评分
-	components := make(map[string]float64)
-
-	// 连接健康评分 (0-100)
-	connScore := 100.0
-	if connStats.TotalConnections > 0 {
-		activeRatio := float64(connStats.ActiveConnections) / float64(connStats.TotalConnections)
-		connScore = activeRatio * 100
-	}
-	components["connections"] = connScore
-
-	// 设备健康评分 (0-100)
-	deviceScore := 100.0
-	if deviceStats.TotalDevices > 0 {
-		onlineRatio := float64(deviceStats.OnlineDevices) / float64(deviceStats.TotalDevices)
-		deviceScore = onlineRatio * 100
-	}
-	components["devices"] = deviceScore
-
-	// 性能健康评分 (0-100)
-	perfScore := 100.0 - perfStats.ErrorRate // 错误率越低评分越高
-	if perfScore < 0 {
-		perfScore = 0
-	}
-	components["performance"] = perfScore
-
-	// 告警健康评分 (0-100)
-	alertScore := 100.0
-	if alertStats.TotalAlerts > 0 {
-		activeRatio := float64(alertStats.ActiveAlerts) / float64(alertStats.TotalAlerts)
-		alertScore = (1 - activeRatio) * 100 // 活跃告警越少评分越高
-	}
-	components["alerts"] = alertScore
-
-	// 计算总体评分
-	overall := (connScore + deviceScore + perfScore + alertScore) / 4
-
-	// 确定健康等级
-	var level HealthLevel
-	var issues []string
-	var suggestions []string
-
-	switch {
-	case overall >= 90:
-		level = HealthExcellent
-	case overall >= 75:
-		level = HealthGood
-	case overall >= 60:
-		level = HealthWarning
-		if connScore < 75 {
-			issues = append(issues, "连接活跃度偏低")
-			suggestions = append(suggestions, "检查网络连接质量")
-		}
-		if deviceScore < 75 {
-			issues = append(issues, "设备在线率偏低")
-			suggestions = append(suggestions, "检查设备状态和网络")
-		}
-	default:
-		level = HealthCritical
-		issues = append(issues, "系统健康状况严重")
-		suggestions = append(suggestions, "立即检查系统状态")
-	}
-
-	return &HealthScore{
-		Overall:     overall,
-		Components:  components,
-		Timestamp:   now,
-		Level:       level,
-		Issues:      issues,
-		Suggestions: suggestions,
-	}, nil
-}
+// 健康评分计算功能已删除，简化监控架构
 
 // === 报告生成实现 ===
 
@@ -708,9 +522,8 @@ func (a *MonitorAggregator) generateReportSummary(metrics *AggregatedMetrics, al
 		performanceScore = 0
 	}
 
-	// 计算健康评分
-	healthScore, _ := a.CalculateHealthScore()
-	overallHealthScore := healthScore.Overall
+	// 健康评分计算已删除，使用简化评分
+	overallHealthScore := 100.0 // 简化为固定值
 
 	// 统计关键告警
 	criticalAlerts := int64(0)
@@ -1211,25 +1024,7 @@ func (a *MonitorAggregator) aggregationRoutine() {
 	}
 }
 
-// anomalyDetectionRoutine 异常检测协程
-func (a *MonitorAggregator) anomalyDetectionRoutine() {
-	ticker := time.NewTicker(1 * time.Minute) // 每分钟检测一次异常
-	defer ticker.Stop()
-
-	for {
-		select {
-		case <-ticker.C:
-			if _, err := a.DetectAnomalies(); err != nil {
-				logger.WithFields(logrus.Fields{
-					"error": err.Error(),
-				}).Error("异常检测失败")
-			}
-
-		case <-a.stopChan:
-			return
-		}
-	}
-}
+// 异常检测协程已删除，简化监控架构
 
 // cleanupRoutine 清理协程
 func (a *MonitorAggregator) cleanupRoutine() {

@@ -78,9 +78,13 @@ func NewMonitoringManager(config *MonitoringConfig, connectionMonitor interface 
 		config.UnhealthyThreshold,
 	)
 
+	// 设置TCP管理器获取器（替代废弃的连接提供者）
+	mm.healthChecker.SetTCPManagerGetter(func() interface{} {
+		return mm.connectionMonitor
+	})
+
 	// 设置连接提供者
 	connectionProvider := mm.getConnectionProvider()
-	mm.healthChecker.SetConnectionProvider(connectionProvider)
 	mm.writeBufferMonitor.SetConnectionProvider(connectionProvider)
 
 	logger.WithFields(logrus.Fields{
@@ -279,11 +283,15 @@ func SetGlobalConnectionMonitor(connectionMonitor interface {
 		globalMonitoringManager.mutex.Lock()
 		globalMonitoringManager.connectionMonitor = connectionMonitor
 
+		// 重新设置TCP管理器获取器（替代废弃的连接提供者）
+		if globalMonitoringManager.healthChecker != nil {
+			globalMonitoringManager.healthChecker.SetTCPManagerGetter(func() interface{} {
+				return globalMonitoringManager.connectionMonitor
+			})
+		}
+
 		// 重新设置连接提供者
 		connectionProvider := globalMonitoringManager.getConnectionProvider()
-		if globalMonitoringManager.healthChecker != nil {
-			globalMonitoringManager.healthChecker.SetConnectionProvider(connectionProvider)
-		}
 		if globalMonitoringManager.writeBufferMonitor != nil {
 			globalMonitoringManager.writeBufferMonitor.SetConnectionProvider(connectionProvider)
 		}

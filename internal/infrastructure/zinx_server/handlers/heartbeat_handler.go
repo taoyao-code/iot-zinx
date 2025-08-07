@@ -80,11 +80,11 @@ func (h *HeartbeatHandler) processHeartbeat(decodedFrame *protocol.DecodedDNYFra
 	// 不同类型的心跳包有不同的最小长度要求
 	var minDataLen int
 	switch decodedFrame.Command {
-	case uint8(dny_protocol.CmdHeartbeat): // 0x01 旧版心跳
+	case uint8(constants.CmdHeartbeat): // 0x01 旧版心跳
 		minDataLen = 20 // 根据协议文档，旧版心跳包固定20字节
-	case uint8(dny_protocol.CmdDeviceHeart): // 0x21 新版心跳
+	case uint8(constants.CmdDeviceHeart): // 0x21 新版心跳
 		minDataLen = 4 // 新版心跳包最少4字节
-	case uint8(dny_protocol.CmdMainHeartbeat): // 0x11 主机心跳
+	case uint8(constants.CmdMainHeartbeat): // 0x11 主机心跳
 		minDataLen = 8 // 主机心跳包最少8字节
 	default:
 		minDataLen = 4 // 默认最小长度
@@ -119,13 +119,13 @@ func (h *HeartbeatHandler) processHeartbeat(decodedFrame *protocol.DecodedDNYFra
 	}
 
 	// 🔧 新增：解析0x21简化心跳包中的端口状态数据
-	if decodedFrame.Command == uint8(dny_protocol.CmdDeviceHeart) && len(data) >= 4 {
+	if decodedFrame.Command == uint8(constants.CmdDeviceHeart) && len(data) >= 4 {
 		h.parseSimplifiedHeartbeatPortStatus(data, deviceId, conn, deviceSession)
 	}
 
 	// 检测是否为旧格式心跳包（命令字为0x01，数据长度为20字节）
 	// TODO: 这里可以添加更详细的旧格式解析逻辑
-	if decodedFrame.Command == uint8(dny_protocol.CmdHeartbeat) && len(data) == 20 {
+	if decodedFrame.Command == uint8(constants.CmdHeartbeat) && len(data) == 20 {
 		// 解析物理ID字符串为数字（physicalId格式如"0x04A228CD"）
 		// 由于已经通过边界检查，这里可以安全访问数组
 	}

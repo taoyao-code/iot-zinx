@@ -20,7 +20,8 @@ func SetDeviceSessionTCPManagerGetter(getter func() interface{}) {
 	deviceSessionTCPManagerGetter = getter
 }
 
-// DeviceSession 设备会话管理器 - 替代散乱的SetProperty/GetProperty
+// DeviceSession 设备会话管理器（向后兼容）
+// 🔧 重构：此实现保留用于向后兼容，新代码请使用 pkg/core/unified_session.go 中的 UnifiedDeviceSession
 // 解决当前架构中数据分散、类型不安全、性能低下的问题
 type DeviceSession struct {
 	// 设备标识信息
@@ -314,6 +315,149 @@ func (s *DeviceSession) GetConnection() ziface.IConnection {
 	return s.connection
 }
 
+// === ISession接口实现 ===
+
+// GetDeviceID 获取设备ID
+func (s *DeviceSession) GetDeviceID() string {
+	s.mutex.RLock()
+	defer s.mutex.RUnlock()
+	return s.DeviceID
+}
+
+// GetPhysicalID 获取物理ID
+func (s *DeviceSession) GetPhysicalID() string {
+	s.mutex.RLock()
+	defer s.mutex.RUnlock()
+	return s.PhysicalID
+}
+
+// GetICCID 获取ICCID
+func (s *DeviceSession) GetICCID() string {
+	s.mutex.RLock()
+	defer s.mutex.RUnlock()
+	return s.ICCID
+}
+
+// GetSessionID 获取会话ID
+func (s *DeviceSession) GetSessionID() string {
+	s.mutex.RLock()
+	defer s.mutex.RUnlock()
+	return s.SessionID
+}
+
+// GetConnID 获取连接ID
+func (s *DeviceSession) GetConnID() uint64 {
+	s.mutex.RLock()
+	defer s.mutex.RUnlock()
+	return s.ConnID
+}
+
+// GetRemoteAddr 获取远程地址
+func (s *DeviceSession) GetRemoteAddr() string {
+	s.mutex.RLock()
+	defer s.mutex.RUnlock()
+	return s.RemoteAddr
+}
+
+// GetDeviceType 获取设备类型
+func (s *DeviceSession) GetDeviceType() uint16 {
+	s.mutex.RLock()
+	defer s.mutex.RUnlock()
+	return s.DeviceType
+}
+
+// GetDeviceVersion 获取设备版本
+func (s *DeviceSession) GetDeviceVersion() string {
+	s.mutex.RLock()
+	defer s.mutex.RUnlock()
+	return s.DeviceVersion
+}
+
+// IsDirectMode 是否直连模式
+func (s *DeviceSession) IsDirectMode() bool {
+	s.mutex.RLock()
+	defer s.mutex.RUnlock()
+	return s.DirectMode
+}
+
+// GetState 获取当前状态
+func (s *DeviceSession) GetState() constants.DeviceConnectionState {
+	s.mutex.RLock()
+	defer s.mutex.RUnlock()
+	return constants.DeviceConnectionState(s.State)
+}
+
+// IsRegistered 检查设备是否已注册
+func (s *DeviceSession) IsRegistered() bool {
+	s.mutex.RLock()
+	defer s.mutex.RUnlock()
+	return s.DeviceID != ""
+}
+
+// GetConnectedAt 获取连接时间
+func (s *DeviceSession) GetConnectedAt() time.Time {
+	s.mutex.RLock()
+	defer s.mutex.RUnlock()
+	return s.ConnectedAt
+}
+
+// GetLastHeartbeat 获取最后心跳时间
+func (s *DeviceSession) GetLastHeartbeat() time.Time {
+	s.mutex.RLock()
+	defer s.mutex.RUnlock()
+	return s.LastHeartbeat
+}
+
+// GetLastActivity 获取最后活动时间
+func (s *DeviceSession) GetLastActivity() time.Time {
+	s.mutex.RLock()
+	defer s.mutex.RUnlock()
+	return s.LastActivityAt
+}
+
+// GetStats 获取统计信息
+func (s *DeviceSession) GetStats() map[string]interface{} {
+	s.mutex.RLock()
+	defer s.mutex.RUnlock()
+
+	uptime := time.Since(s.ConnectedAt).Seconds()
+	return map[string]interface{}{
+		"reconnect_count": s.ReconnectCount,
+		"uptime_seconds":  uptime,
+		"device_id":       s.DeviceID,
+		"physical_id":     s.PhysicalID,
+		"iccid":           s.ICCID,
+		"state":           s.State,
+		"status":          s.Status,
+		"connected_at":    s.ConnectedAt,
+		"last_heartbeat":  s.LastHeartbeat,
+		"last_activity":   s.LastActivityAt,
+	}
+}
+
+// UpdateActivity 更新活动时间
+func (s *DeviceSession) UpdateActivity() {
+	s.mutex.Lock()
+	defer s.mutex.Unlock()
+	s.LastActivityAt = time.Now()
+}
+
+// SetICCID 设置ICCID（原子操作）
+func (s *DeviceSession) SetICCID(iccid string) error {
+	s.mutex.Lock()
+	defer s.mutex.Unlock()
+	s.ICCID = iccid
+	s.LastActivityAt = time.Now()
+	return nil
+}
+
+// UpdateCommand 更新命令统计（空实现，保持接口兼容）
+func (s *DeviceSession) UpdateCommand(bytesIn, bytesOut int64) {
+	s.mutex.Lock()
+	defer s.mutex.Unlock()
+	s.LastActivityAt = time.Now()
+}
+
 // IsActive 检查会话是否活跃
 func (s *DeviceSession) IsActive() bool {
 	s.mutex.RLock()
@@ -426,12 +570,11 @@ func (s *DeviceSession) String() string {
 		s.DeviceID, s.PhysicalID, s.State, s.Status)
 }
 
-// 生成会话ID
+// 生成会话ID - 统一实现
 func generateSessionID(conn ziface.IConnection) string {
-	return fmt.Sprintf("%d_%s_%d",
-		conn.GetConnID(),
-		conn.RemoteAddr().String(),
-		time.Now().Unix())
+	// 使用连接ID作为临时设备ID，后续会被实际设备ID替换
+	tempDeviceID := fmt.Sprintf("temp_%d", conn.GetConnID())
+	return fmt.Sprintf("session_%d_%s_%d", conn.GetConnID(), tempDeviceID, time.Now().UnixNano())
 }
 
 // GetDeviceSession 从连接中获取设备会话，如果不存在则创建新的

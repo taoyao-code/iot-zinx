@@ -120,17 +120,7 @@ func (il *ImprovedLogger) InitImproved(cfg *config.LoggerConfig) error {
 
 	// 5. 文件输出配置
 	if cfg.EnableFile {
-		// 处理兼容性：如果使用旧的FilePath配置
-		if cfg.FilePath != "" && cfg.FileDir == "" {
-			cfg.FileDir = filepath.Dir(cfg.FilePath)
-			filename := filepath.Base(cfg.FilePath)
-			// 移除扩展名作为前缀
-			if ext := filepath.Ext(filename); ext != "" {
-				cfg.FilePrefix = strings.TrimSuffix(filename, ext)
-			} else {
-				cfg.FilePrefix = filename
-			}
-		}
+		// FilePath兼容性代码已删除，请使用FileDir + FilePrefix
 
 		// 设置默认值
 		if cfg.FileDir == "" {
@@ -234,18 +224,22 @@ func (il *ImprovedLogger) InitWithConsole(cfg *config.LoggerConfig) error {
 	fmt.Printf("强制设置级别: %s\n", forcedLevel)
 	fmt.Printf("实际使用级别: %s\n", level.String())
 	fmt.Printf("日志格式: %s\n", cfg.Format)
-	fmt.Printf("日志文件路径: %s\n", cfg.FilePath)
+	fmt.Printf("日志文件目录: %s, 前缀: %s\n", cfg.FileDir, cfg.FilePrefix)
 
 	// 设置同时输出到控制台和文件
 	writers := []io.Writer{os.Stdout}
 
-	// 如果配置了文件路径，添加文件输出
-	if cfg.FilePath != "" {
+	// 如果配置了文件目录，添加文件输出
+	if cfg.FileDir != "" {
+		// 构建完整文件路径
+		filename := fmt.Sprintf("%s.log", cfg.FilePrefix)
+		fullPath := filepath.Join(cfg.FileDir, filename)
+
 		// 获取绝对路径
-		absPath, err := filepath.Abs(cfg.FilePath)
+		absPath, err := filepath.Abs(fullPath)
 		if err != nil {
 			fmt.Printf("获取日志文件绝对路径失败: %v\n", err)
-			absPath = cfg.FilePath
+			absPath = fullPath
 		}
 		fmt.Printf("日志文件绝对路径: %s\n", absPath)
 
