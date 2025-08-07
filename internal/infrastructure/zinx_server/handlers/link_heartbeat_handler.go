@@ -48,11 +48,20 @@ func (h *LinkHeartbeatHandler) Handle(request ziface.IRequest) {
 	// 记录帧处理日志
 	h.LogFrameProcessing("LinkHeartbeatHandler", decodedFrame, conn)
 
-	// 验证是否为link心跳帧
+	// 验证是否为link心跳帧（放宽检查条件）
 	if decodedFrame.FrameType != protocol.FrameTypeLinkHeartbeat {
-		h.HandleError("LinkHeartbeatHandler",
-			fmt.Errorf("期望link心跳帧，但获得类型: %s", decodedFrame.FrameType.String()), conn)
-		return
+		// 如果不是link心跳帧，但数据内容是"link"，则认为是有效的
+		if len(decodedFrame.Payload) >= 4 && string(decodedFrame.Payload[:4]) == "link" {
+			logger.WithFields(logrus.Fields{
+				"connID":    conn.GetConnID(),
+				"frameType": decodedFrame.FrameType.String(),
+				"payload":   string(decodedFrame.Payload),
+			}).Debug("LinkHeartbeatHandler: 帧类型不匹配但内容为link，继续处理")
+		} else {
+			h.HandleError("LinkHeartbeatHandler",
+				fmt.Errorf("期望link心跳帧，但获得类型: %s", decodedFrame.FrameType.String()), conn)
+			return
+		}
 	}
 
 	// 获取或创建设备会话

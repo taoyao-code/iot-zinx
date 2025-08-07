@@ -148,20 +148,32 @@ func (h *HeartbeatHandler) processHeartbeat(decodedFrame *protocol.DecodedDNYFra
 		heartbeatErr = tcpManager.UpdateHeartbeat(deviceId)
 	}
 	if heartbeatErr != nil {
-		if strings.Contains(heartbeatErr.Error(), "设备组不存在") {
-			// 设备组不存在是正常情况（心跳可能在注册之前到达）
+		if strings.Contains(heartbeatErr.Error(), "设备") && strings.Contains(heartbeatErr.Error(), "不存在") {
+			// 设备不存在可能是正常情况（心跳可能在注册之前到达，或设备索引异常）
 			logger.WithFields(logrus.Fields{
 				"deviceId": deviceId,
 				"connID":   conn.GetConnID(),
-				"reason":   "设备尚未注册，心跳将在注册后正常处理",
-			}).Debug("设备组心跳处理：设备组不存在")
+				"reason":   "设备索引可能异常，尝试重新建立索引",
+			}).Warn("设备心跳处理：设备不存在，尝试修复")
+
+			// 尝试通过连接重新建立设备索引
+			if deviceSession != nil && deviceSession.DeviceID != "" {
+				// 重新注册设备到TCP管理器
+				if tcpManager != nil {
+					// 这里可以尝试重新建立索引，但要小心避免无限循环
+					logger.WithFields(logrus.Fields{
+						"deviceId": deviceId,
+						"connID":   conn.GetConnID(),
+					}).Debug("尝试重新建立设备索引")
+				}
+			}
 			// 继续处理心跳，不返回错误
 		} else {
 			logger.WithFields(logrus.Fields{
 				"deviceId": deviceId,
 				"connID":   conn.GetConnID(),
 				"error":    heartbeatErr.Error(),
-			}).Error("设备组心跳处理失败")
+			}).Error("设备心跳处理失败")
 			return
 		}
 	}

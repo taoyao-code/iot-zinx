@@ -58,7 +58,7 @@ func RegisterRouters(server ziface.IServer) {
 
 	// 七、设备版本信息
 	// ----------------------------------------------------------------------------
-	// server.AddRouter(constants.CmdDeviceVersion, &DeviceVersionHandler{}) // 0x35 上传分机版本号与设备类型 - 已删除
+	server.AddRouter(constants.CmdDeviceVersion, &DeviceVersionHandler{}) // 0x35 上传分机版本号与设备类型
 
 	// 八、🔧 修复：添加缺失的命令处理器，解决"api msgID = X is not FOUND!"错误
 	// ----------------------------------------------------------------------------

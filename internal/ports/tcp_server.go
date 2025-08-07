@@ -45,6 +45,9 @@ func (s *TCPServer) Start() error {
 	// 正确初始化包依赖关系，传入必要的依赖
 	s.initializePackageDependencies()
 
+	// 启动心跳管理器 - 必须在其他组件之前启动
+	s.startHeartbeatManager()
+
 	// 🚀 启动优先级2和3的定期清理任务
 	s.startMaintenanceTasks()
 
