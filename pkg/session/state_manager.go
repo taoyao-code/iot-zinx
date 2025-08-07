@@ -594,21 +594,7 @@ var (
 
 // GetGlobalStateManager 获取全局状态管理器实例
 // 🚀 重构：已弃用，请使用统一TCP管理器的状态管理功能
-// Deprecated: 使用 core.GetGlobalUnifiedTCPManager().GetStateManager() 替代
-func GetGlobalStateManager() *UnifiedStateManager {
-	logger.Warn("GetGlobalStateManager已弃用，请使用统一TCP管理器的状态管理功能")
-	globalStateManagerOnce.Do(func() {
-		globalStateManager = NewUnifiedStateManager(DefaultStateManagerConfig)
-		// 🚀 重构：设置TCP适配器
-		globalStateManager.tcpAdapter = GetGlobalTCPManagerAdapter()
-		if err := globalStateManager.Start(); err != nil {
-			logger.WithFields(logrus.Fields{
-				"error": err.Error(),
-			}).Error("启动全局状态管理器失败")
-		}
-	})
-	return globalStateManager
-}
+// 注意：此函数已被移除，请使用 core.GetGlobalUnifiedTCPManager().GetStateManager() 替代
 
 // SetGlobalStateManager 设置全局状态管理器实例（用于测试）
 func SetGlobalStateManager(manager *UnifiedStateManager) {

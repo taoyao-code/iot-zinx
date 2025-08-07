@@ -130,8 +130,8 @@ func NewTCPManagerBasedStateSynchronizer(tcpManagerGetter func() interface{}, co
 
 	// 🚀 重构：使用现有的统一会话管理器和状态管理器
 	// 它们已经配置为使用统一TCP管理器
-	sessionManager := GetGlobalUnifiedSessionManager()
-	stateManager := GetGlobalStateManager()
+	// 注意：这些管理器已弃用，状态同步功能已集成到统一TCP管理器
+	// stateManager := GetGlobalStateManager() // 已弃用
 
 	// 确保TCP管理器获取器已设置
 	if tcpManagerGetter != nil {
@@ -139,8 +139,8 @@ func NewTCPManagerBasedStateSynchronizer(tcpManagerGetter func() interface{}, co
 	}
 
 	return &UnifiedStateSynchronizer{
-		sessionManager: sessionManager,
-		stateManager:   stateManager,
+		sessionManager: nil, // 已弃用，使用统一TCP管理器
+		stateManager:   nil, // 已弃用，使用统一TCP管理器
 		config:         config,
 		syncStats:      &StateSyncStats{},
 		conflicts:      make([]StateConflict, 0),

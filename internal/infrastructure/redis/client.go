@@ -23,9 +23,9 @@ func GetClient() *redis.Client {
 func InitClient() error {
 	redisConfig := config.GetConfig().Redis
 
-	// 🔧 修复：如果Redis地址为空或默认值，跳过初始化
-	if redisConfig.Address == "" || redisConfig.Address == "172.18.0.9:6379" {
-		logger.Info("Redis配置为空或使用默认Docker地址，跳过Redis初始化")
+	// 🔧 修复：如果Redis地址为空，跳过初始化
+	if redisConfig.Address == "" {
+		logger.Info("Redis配置为空，跳过Redis初始化")
 		return nil
 	}
 

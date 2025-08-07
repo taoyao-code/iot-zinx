@@ -135,24 +135,7 @@ func (m *UnifiedGlobalManager) ValidateUnification() error {
 }
 
 // === 向后兼容性支持 ===
-
-// GetLegacySessionManager 获取旧会话管理器（向后兼容）
-// Deprecated: 使用 GetSessionManager() 替代
-func (m *UnifiedGlobalManager) GetLegacySessionManager() interface{} {
-	logger.Warn("GetLegacySessionManager已弃用，请使用GetSessionManager()")
-	return m.tcpManager
-}
-
-// GetLegacyStateManager 获取旧状态管理器（向后兼容）
-// Deprecated: 使用 GetStateManager() 替代
-func (m *UnifiedGlobalManager) GetLegacyStateManager() interface{} {
-	logger.Warn("GetLegacyStateManager已弃用，请使用GetStateManager()")
-	return m.tcpManager
-}
-
-// GetLegacyConnectionGroupManager 获取旧连接组管理器（向后兼容）
-// Deprecated: 使用 GetConnectionGroupManager() 替代
-func (m *UnifiedGlobalManager) GetLegacyConnectionGroupManager() interface{} {
-	logger.Warn("GetLegacyConnectionGroupManager已弃用，请使用GetConnectionGroupManager()")
-	return m.tcpManager
-}
+// 注意：弃用的Legacy方法已被移除，请使用对应的新方法：
+// - GetSessionManager() 替代 GetLegacySessionManager()
+// - GetStateManager() 替代 GetLegacyStateManager()
+// - GetConnectionGroupManager() 替代 GetLegacyConnectionGroupManager()

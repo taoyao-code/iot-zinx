@@ -824,21 +824,7 @@ var (
 
 // GetGlobalUnifiedSessionManager 获取全局统一会话管理器实例
 // 🚀 重构：已弃用，请使用统一TCP管理器的会话功能
-// Deprecated: 使用 core.GetGlobalUnifiedTCPManager() 替代
-func GetGlobalUnifiedSessionManager() *UnifiedSessionManager {
-	logger.Warn("GetGlobalUnifiedSessionManager已弃用，请使用统一TCP管理器")
-	globalUnifiedSessionManagerOnce.Do(func() {
-		globalUnifiedSessionManager = NewUnifiedSessionManager(DefaultSessionManagerConfig)
-		// 🚀 重构：设置TCP适配器
-		globalUnifiedSessionManager.tcpAdapter = GetGlobalTCPManagerAdapter()
-		if err := globalUnifiedSessionManager.Start(); err != nil {
-			logger.WithFields(logrus.Fields{
-				"error": err.Error(),
-			}).Error("启动全局统一会话管理器失败")
-		}
-	})
-	return globalUnifiedSessionManager
-}
+// 注意：此函数已被移除，请使用 core.GetGlobalUnifiedTCPManager() 替代
 
 // SetGlobalUnifiedSessionManager 设置全局统一会话管理器实例（用于测试）
 func SetGlobalUnifiedSessionManager(manager *UnifiedSessionManager) {

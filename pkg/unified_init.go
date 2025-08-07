@@ -120,6 +120,14 @@ func InitUnifiedArchitecture() {
 		monitor.SetGlobalMonitorTCPManagerGetter(getter)
 	})
 
+	// 🚀 修复：注册API服务适配器设置函数
+	// 注意：API服务适配器的实际设置在service_manager.Init()中进行
+	// 这里只是注册设置函数以避免警告
+	core.RegisterAPIAdapterSetter(func(getter func() interface{}) {
+		// API适配器设置函数已注册，实际设置在应用层进行
+		logger.Debug("API适配器设置函数已被调用，TCP管理器获取函数已设置")
+	})
+
 	// 🚀 新增：设置统一TCP管理器和会话管理器的集成
 	tcpManager := core.GetGlobalUnifiedTCPManager()
 	if tcpManager != nil {

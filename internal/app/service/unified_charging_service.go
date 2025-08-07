@@ -22,7 +22,7 @@ import (
 type UnifiedChargingService struct {
 	// 核心组件
 	portManager     *core.PortManager
-	connectionMgr   *core.ConnectionGroupManager // 🔧 使用core包的连接管理器
+	tcpManager      core.IUnifiedTCPManager // � 重构：使用统一TCP管理器接口
 	responseTracker *CommandResponseTracker
 
 	// 配置
@@ -83,10 +83,9 @@ func GetUnifiedChargingService() *UnifiedChargingService {
 // NewUnifiedChargingService 创建统一充电服务
 func NewUnifiedChargingService(config *ChargingConfig) *UnifiedChargingService {
 	// 🚀 重构：使用统一TCP管理器替代旧连接组管理器
-	unifiedManager := core.GetGlobalUnifiedManager()
 	return &UnifiedChargingService{
 		portManager:     core.GetPortManager(),
-		connectionMgr:   unifiedManager.GetLegacyConnectionGroupManager().(*core.ConnectionGroupManager), // 临时兼容
+		tcpManager:      core.GetGlobalUnifiedTCPManager(), // 🚀 重构：直接使用统一TCP管理器
 		responseTracker: GetGlobalCommandTracker(),
 		config:          config,
 	}
@@ -182,7 +181,8 @@ func (s *UnifiedChargingService) validateAndConvertRequest(req *ChargingRequest)
 
 // getDeviceConnection 获取设备连接 - 统一连接获取逻辑
 func (s *UnifiedChargingService) getDeviceConnection(deviceID string) (ziface.IConnection, error) {
-	conn, exists := s.connectionMgr.GetConnectionByDeviceID(deviceID)
+	// 🚀 重构：通过统一TCP管理器获取设备连接
+	conn, exists := s.tcpManager.GetConnectionByDeviceID(deviceID)
 	if !exists {
 		return nil, constants.NewDeviceError(errors.ErrDeviceNotFound, deviceID, "设备不存在或未连接")
 	}
@@ -489,7 +489,8 @@ func (s *UnifiedChargingService) GetServiceStats() map[string]interface{} {
 
 // IsDeviceOnline 检查设备是否在线
 func (s *UnifiedChargingService) IsDeviceOnline(deviceID string) bool {
-	_, exists := s.connectionMgr.GetConnectionByDeviceID(deviceID)
+	// 🚀 重构：通过统一TCP管理器检查设备在线状态
+	_, exists := s.tcpManager.GetConnectionByDeviceID(deviceID)
 	return exists
 }
 

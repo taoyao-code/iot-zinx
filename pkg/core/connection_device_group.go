@@ -46,14 +46,7 @@ var (
 
 // GetGlobalConnectionGroupManager 获取全局连接设备组管理器
 // 🚀 重构：已弃用，请使用统一TCP管理器的设备组功能
-// Deprecated: 使用 core.GetGlobalUnifiedTCPManager() 替代
-func GetGlobalConnectionGroupManager() *ConnectionGroupManager {
-	logger.Warn("GetGlobalConnectionGroupManager已弃用，请使用统一TCP管理器")
-	globalConnectionGroupManagerOnce.Do(func() {
-		globalConnectionGroupManager = &ConnectionGroupManager{}
-	})
-	return globalConnectionGroupManager
-}
+// 注意：此函数已被移除，请使用 core.GetGlobalUnifiedTCPManager() 替代
 
 // NewConnectionDeviceGroup 创建新的连接设备组
 func NewConnectionDeviceGroup(conn ziface.IConnection, iccid string) *ConnectionDeviceGroup {

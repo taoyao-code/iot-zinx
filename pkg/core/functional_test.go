@@ -4,7 +4,6 @@ import (
 	"testing"
 
 	"github.com/bujia-iot/iot-zinx/internal/infrastructure/logger"
-	"github.com/bujia-iot/iot-zinx/pkg/session"
 )
 
 // TestFunctionalIntegration 功能集成测试
@@ -64,31 +63,34 @@ func testUnifiedTCPManagerInitialization(t *testing.T) {
 
 // testSessionManagerFunctionality 测试会话管理器功能
 func testSessionManagerFunctionality(t *testing.T) {
-	// 获取统一会话管理器
-	sessionManager := session.GetGlobalUnifiedSessionManager()
-	if sessionManager == nil {
-		t.Fatal("统一会话管理器初始化失败")
+	// 获取统一TCP管理器 - 新的统一架构
+	tcpManager := GetGlobalUnifiedTCPManager()
+	if tcpManager == nil {
+		t.Fatal("统一TCP管理器初始化失败")
 	}
 
 	// 测试获取所有会话（应该返回空map，不报错）
-	allSessions := sessionManager.GetAllSessions()
+	allSessions := tcpManager.GetAllSessions()
 	if allSessions == nil {
 		t.Error("GetAllSessions返回nil")
 	}
 
-	// 测试获取会话数量
-	count := sessionManager.GetSessionCount()
-	if count < 0 {
-		t.Error("会话数量不能为负数")
+	// 测试获取统计信息
+	stats := tcpManager.GetStats()
+	if stats == nil {
+		t.Error("GetStats返回nil")
+	}
+	if stats.ActiveConnections < 0 {
+		t.Error("连接数量不能为负数")
 	}
 
-	// 测试获取不存在的会话
-	_, exists := sessionManager.GetSession("NON_EXISTENT_DEVICE")
+	// 测试获取不存在的连接
+	_, exists := tcpManager.GetConnectionByDeviceID("NON_EXISTENT_DEVICE")
 	if exists {
-		t.Error("不应该找到不存在的设备会话")
+		t.Error("不应该找到不存在的设备连接")
 	}
 
-	t.Log("会话管理器功能测试通过")
+	t.Log("会话管理器功能测试通过（使用统一TCP管理器）")
 }
 
 // testBasicFunctionality 测试基本功能可用性
@@ -159,14 +161,6 @@ func testGlobalSingletonConsistency(t *testing.T) {
 
 	if tcpManager1 != tcpManager2 {
 		t.Error("统一TCP管理器不是单例")
-	}
-
-	// 多次获取会话管理器，应该是同一个实例
-	sessionManager1 := session.GetGlobalUnifiedSessionManager()
-	sessionManager2 := session.GetGlobalUnifiedSessionManager()
-
-	if sessionManager1 != sessionManager2 {
-		t.Error("统一会话管理器不是单例")
 	}
 
 	t.Log("全局单例一致性测试通过")
