@@ -7,14 +7,14 @@ import (
 	"github.com/bujia-iot/iot-zinx/internal/infrastructure/logger"
 	"github.com/bujia-iot/iot-zinx/pkg/constants"
 	"github.com/bujia-iot/iot-zinx/pkg/core"
-	"github.com/bujia-iot/iot-zinx/pkg/monitor"
 	"github.com/bujia-iot/iot-zinx/pkg/network"
 	"github.com/bujia-iot/iot-zinx/pkg/protocol"
 	"github.com/bujia-iot/iot-zinx/pkg/utils"
 )
 
-// 全局连接监控器变量（从 pkg/init.go 迁移）
-var globalConnectionMonitor monitor.IConnectionMonitor
+// 全局连接监控器变量（已迁移到统一架构）
+// 🔧 重构：pkg/monitor包已删除，使用统一架构的监控器
+var globalConnectionMonitor core.IUnifiedConnectionMonitor
 
 // 设备状态常量
 const (
@@ -167,24 +167,26 @@ var Network = struct {
 	InitHeartbeatService: network.InitHeartbeatService,
 }
 
-// Monitor 监控器相关接口
+// Monitor 监控器相关接口（已迁移到统一架构）
+// 🔧 重构：pkg/monitor包已删除，使用统一架构的监控器
 type MonitorInterface struct {
-	GetGlobalMonitor func() monitor.IConnectionMonitor
+	GetGlobalMonitor func() core.IUnifiedConnectionMonitor
 
-	// 连接管理
+	// 连接管理（通过统一架构实现）
 	GetConnectionByDeviceId  func(deviceId string) (ziface.IConnection, bool)
 	BindDeviceIdToConnection func(deviceId string, conn ziface.IConnection)
 	UpdateLastHeartbeatTime  func(conn ziface.IConnection)
 }
 
-// Monitor 监控相关工具导出
+// Monitor 监控相关工具导出（已迁移到统一架构）
+// 🔧 重构：pkg/monitor包已删除，使用统一架构的监控器
 var Monitor = MonitorInterface{
-	GetGlobalMonitor: func() monitor.IConnectionMonitor {
-		// 返回全局连接监视器，如果未初始化则返回 nil
+	GetGlobalMonitor: func() core.IUnifiedConnectionMonitor {
+		// 返回统一架构的连接监控器
 		return globalConnectionMonitor
 	},
 
-	// 连接管理实现
+	// 连接管理实现（通过统一架构）
 	GetConnectionByDeviceId: func(deviceId string) (ziface.IConnection, bool) {
 		if globalConnectionMonitor != nil {
 			return globalConnectionMonitor.GetConnectionByDeviceId(deviceId)

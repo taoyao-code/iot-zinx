@@ -4,7 +4,6 @@ import (
 	"time"
 
 	"github.com/aceld/zinx/ziface"
-	"github.com/bujia-iot/iot-zinx/internal/infrastructure/logger"
 	"github.com/bujia-iot/iot-zinx/pkg/constants"
 )
 
@@ -216,13 +215,6 @@ type MigrationConfig struct {
 }
 
 // === 全局函数接口 ===
-
-// GetGlobalSessionManager 获取全局会话管理器
-// 注意：已弃用，请使用 core.GetGlobalUnifiedTCPManager() 替代
-func GetGlobalSessionManager() ISessionManager {
-	logger.Warn("GetGlobalSessionManager已弃用，请使用统一TCP管理器")
-	return nil
-}
 
 // === 监控器集成接口 ===
 

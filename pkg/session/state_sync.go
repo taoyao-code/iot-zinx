@@ -129,24 +129,17 @@ func NewTCPManagerBasedStateSynchronizer(tcpManagerGetter func() interface{}, co
 		config = DefaultStateSynchronizerConfig
 	}
 
-	// 🚀 重构：使用现有的统一会话管理器和状态管理器
-	// 它们已经配置为使用统一TCP管理器
-	// 注意：这些管理器已弃用，状态同步功能已集成到统一TCP管理器
-	// stateManager := GetGlobalStateManager() // 已弃用
-
 	// 确保TCP管理器获取器已设置
 	if tcpManagerGetter != nil {
 		SetGlobalTCPManagerGetter(tcpManagerGetter)
 	}
 
 	return &UnifiedStateSynchronizer{
-		sessionManager: nil, // 已弃用，使用统一TCP管理器
-		stateManager:   nil, // 已弃用，使用统一TCP管理器
-		config:         config,
-		syncStats:      &StateSyncStats{},
-		conflicts:      make([]StateConflict, 0),
-		autoSyncStop:   make(chan struct{}),
-		running:        false,
+		config:       config,
+		syncStats:    &StateSyncStats{},
+		conflicts:    make([]StateConflict, 0),
+		autoSyncStop: make(chan struct{}),
+		running:      false,
 	}
 }
 
@@ -566,34 +559,6 @@ var (
 	globalStateSynchronizer     *UnifiedStateSynchronizer
 	globalStateSynchronizerOnce sync.Once
 )
-
-// GetGlobalStateSynchronizer 获取全局状态同步器实例
-// 🚀 重构：已弃用，状态同步功能已集成到统一TCP管理器
-// Deprecated: 状态同步功能已集成到统一TCP管理器
-func GetGlobalStateSynchronizer() *UnifiedStateSynchronizer {
-	logger.Warn("GetGlobalStateSynchronizer已弃用，状态同步功能已集成到统一TCP管理器")
-	globalStateSynchronizerOnce.Do(func() {
-		// 🚀 重构：使用统一TCP管理器，避免绕过路径
-		// 状态同步功能已集成到统一TCP管理器，这里创建一个适配器
-		tcpManagerGetter := getGlobalTCPManagerGetter()
-		if tcpManagerGetter == nil {
-			logger.Error("无法创建状态同步器：TCP管理器获取器未设置")
-			return
-		}
-
-		// 创建基于统一TCP管理器的状态同步器
-		globalStateSynchronizer = NewTCPManagerBasedStateSynchronizer(tcpManagerGetter, DefaultStateSynchronizerConfig)
-
-		if err := globalStateSynchronizer.Start(); err != nil {
-			logger.WithFields(logrus.Fields{
-				"error": err.Error(),
-			}).Error("启动全局状态同步器失败")
-		} else {
-			logger.Info("基于统一TCP管理器的状态同步器已启动")
-		}
-	})
-	return globalStateSynchronizer
-}
 
 // === 状态同步器已重构为使用统一TCP管理器 ===
 // 通过现有的统一会话管理器和状态管理器，确保数据流向统一

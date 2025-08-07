@@ -7,7 +7,7 @@ import (
 	"github.com/aceld/zinx/ziface"
 	"github.com/bujia-iot/iot-zinx/internal/app/service"
 	"github.com/bujia-iot/iot-zinx/internal/infrastructure/logger"
-	"github.com/bujia-iot/iot-zinx/pkg/monitor"
+	"github.com/bujia-iot/iot-zinx/pkg/core"
 	"github.com/bujia-iot/iot-zinx/pkg/network"
 	"github.com/bujia-iot/iot-zinx/pkg/notification"
 	"github.com/bujia-iot/iot-zinx/pkg/protocol"
@@ -19,12 +19,12 @@ import (
 // 🔧 重构：简化为只处理协议解析和响应，业务逻辑由统一充电服务处理
 type ChargeControlHandler struct {
 	protocol.DNYFrameHandlerBase
-	monitor                monitor.IConnectionMonitor
+	monitor                core.IUnifiedConnectionMonitor
 	unifiedChargingService *service.UnifiedChargingService
 }
 
 // NewChargeControlHandler 创建充电控制处理器
-func NewChargeControlHandler(mon monitor.IConnectionMonitor) *ChargeControlHandler {
+func NewChargeControlHandler(mon core.IUnifiedConnectionMonitor) *ChargeControlHandler {
 	return &ChargeControlHandler{
 		monitor:                mon,
 		unifiedChargingService: service.GetUnifiedChargingService(),

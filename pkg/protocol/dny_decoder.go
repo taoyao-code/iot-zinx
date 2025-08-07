@@ -22,7 +22,6 @@ const (
 	// DNY标准协议相关常量 - 根据文档：包头为"DNY"，即16进制字节为0x44 0x4E 0x59
 	DNY_HEADER_LENGTH = 3 // DNY包头长度
 	// 使用统一的协议常量
-	DNY_HEADER_MAGIC      = constants.ProtocolHeader                  // 已弃用，使用 constants.ProtocolHeader
 	DNY_LENGTH_FIELD_SIZE = 2                                         // 长度字段大小
 	DNY_MIN_HEADER_SIZE   = DNY_HEADER_LENGTH + DNY_LENGTH_FIELD_SIZE // DNY最小头部大小(5字节)
 

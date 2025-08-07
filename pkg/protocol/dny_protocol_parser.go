@@ -22,11 +22,9 @@ import (
 
 const (
 	// 使用统一的协议常量
-	HeaderDNY  = constants.ProtocolHeader // 已弃用，使用 constants.ProtocolHeader
 	HeaderLink = "link"
 	// 使用统一的协议常量
-	MinPacketLength    = constants.MinPacketSize // 已弃用，使用 constants.MinPacketSize
-	LinkPacketLength   = 4                       // link
+	LinkPacketLength   = 4 // link
 	PhysicalIDLength   = 4
 	MessageIDLength    = 2
 	CommandLength      = 1
@@ -70,16 +68,16 @@ func ParseDNYProtocolData(data []byte) (*dny_protocol.Message, error) {
 	}
 
 	// 尝试解析为标准DNY协议帧
-	if dataLen < MinPacketLength {
+	if dataLen < constants.MinPacketSize {
 		msg.MessageType = "error"
 		msg.ErrorMessage = fmt.Sprintf("packet too short for DNY frame: %d bytes", dataLen)
 		return msg, errors.New(msg.ErrorMessage)
 	}
 
 	msg.PacketHeader = string(data[:PacketHeaderLength])
-	if msg.PacketHeader != HeaderDNY {
+	if msg.PacketHeader != constants.ProtocolHeader {
 		msg.MessageType = "error"
-		msg.ErrorMessage = fmt.Sprintf("invalid packet header: expected '%s', got '%s'", HeaderDNY, msg.PacketHeader)
+		msg.ErrorMessage = fmt.Sprintf("invalid packet header: expected '%s', got '%s'", constants.ProtocolHeader, msg.PacketHeader)
 		return msg, errors.New(msg.ErrorMessage)
 	}
 
@@ -205,7 +203,7 @@ func BuildDNYResponsePacketUnified(msg *dny_protocol.Message) ([]byte, error) {
 	packet := new(bytes.Buffer)
 
 	// 1. 写入包头和长度
-	packet.WriteString(HeaderDNY)
+	packet.WriteString(constants.ProtocolHeader)
 	if err := binary.Write(packet, binary.LittleEndian, contentLen); err != nil {
 		// 忽略错误，因为写入bytes.Buffer通常不会失败
 		_ = err
@@ -390,12 +388,12 @@ func isValidICCIDStrict(data []byte) bool {
 // ValidateDNYFrame 验证DNY协议帧的完整性和校验和
 // 根据文档要求，这是DNY协议解析的核心验证函数
 func ValidateDNYFrame(frameData []byte) (bool, error) {
-	if len(frameData) < MinPacketLength {
-		return false, fmt.Errorf("frame too short: %d bytes, minimum required: %d", len(frameData), MinPacketLength)
+	if len(frameData) < constants.MinPacketSize {
+		return false, fmt.Errorf("frame too short: %d bytes, minimum required: %d", len(frameData), constants.MinPacketSize)
 	}
 
 	// 检查包头
-	if string(frameData[:3]) != HeaderDNY {
+	if string(frameData[:3]) != constants.ProtocolHeader {
 		return false, fmt.Errorf("invalid header: expected 'DNY', got '%s'", string(frameData[:3]))
 	}
 
@@ -481,7 +479,7 @@ func SplitPacketsFromBuffer(buffer []byte) ([][]byte, []byte, error) {
 		// 尝试识别DNY协议包
 		if remaining >= PacketHeaderLength {
 			// 检查DNY包头
-			if string(buffer[offset:offset+PacketHeaderLength]) == HeaderDNY {
+			if string(buffer[offset:offset+PacketHeaderLength]) == constants.ProtocolHeader {
 				// 检查是否有足够数据读取长度字段
 				if remaining < PacketHeaderLength+DataLengthBytes {
 					// 数据不完整，返回剩余数据
@@ -674,7 +672,7 @@ func detectAndHandleSpecialData(buffer []byte, offset int, packets *[][]byte, ne
 	if remaining >= 20 && buffer[offset] == 0x00 {
 		// 寻找可能的DNY协议头
 		for i := offset + 1; i < min(offset+50, len(buffer)-3); i++ {
-			if string(buffer[i:i+3]) == HeaderDNY {
+			if string(buffer[i:i+3]) == constants.ProtocolHeader {
 				logger.WithFields(logrus.Fields{
 					"offset":        offset,
 					"dnyFoundAt":    i,
@@ -698,7 +696,7 @@ func findGzipEnd(buffer []byte, start int) int {
 	// 实际实现应该解析gzip header来确定数据长度
 	for i := start + 10; i < len(buffer)-8; i++ {
 		// 检查是否后面紧跟其他已知格式的数据
-		if i+3 < len(buffer) && string(buffer[i:i+3]) == HeaderDNY {
+		if i+3 < len(buffer) && string(buffer[i:i+3]) == constants.ProtocolHeader {
 			return i
 		}
 		if i+20 < len(buffer) && isValidICCIDStrict(buffer[i:i+20]) {

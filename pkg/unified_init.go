@@ -7,7 +7,6 @@ import (
 	"github.com/bujia-iot/iot-zinx/internal/infrastructure/logger"
 	"github.com/bujia-iot/iot-zinx/pkg/constants"
 	"github.com/bujia-iot/iot-zinx/pkg/core"
-	"github.com/bujia-iot/iot-zinx/pkg/monitor"
 	"github.com/bujia-iot/iot-zinx/pkg/network"
 	"github.com/bujia-iot/iot-zinx/pkg/protocol"
 	"github.com/bujia-iot/iot-zinx/pkg/session"
@@ -25,7 +24,7 @@ func InitUnifiedArchitecture() {
 	unifiedSystem := core.GetUnifiedSystem()
 
 	// 3. 设置全局连接监控器为统一监控器
-	monitor.SetConnectionMonitor(unifiedSystem.Monitor)
+
 	globalConnectionMonitor = unifiedSystem.Monitor
 
 	// 4. 设置protocol包访问统一监控器的函数
@@ -96,7 +95,7 @@ func InitUnifiedArchitecture() {
 	// 12. 启动监控管理器
 	monitoringManager := network.GetGlobalMonitoringManager()
 	if monitoringManager != nil {
-		// 设置连接监控器
+		// 设置连接监控器（使用统一架构）
 		network.SetGlobalConnectionMonitor(unifiedSystem.Monitor)
 
 		// 启动监控管理器
@@ -113,7 +112,7 @@ func InitUnifiedArchitecture() {
 	})
 
 	core.RegisterMonitorAdapterSetter(func(getter func() interface{}) {
-		monitor.SetGlobalMonitorTCPManagerGetter(getter)
+		// monitor.SetGlobalMonitorTCPManagerGetter(getter)
 	})
 
 	// 🚀 修复：注册API服务适配器设置函数
@@ -140,11 +139,6 @@ func InitUnifiedArchitecture() {
 		})
 		logger.Info("会话管理器TCP适配器已设置")
 
-		// 设置监控器的TCP适配器
-		monitor.SetGlobalMonitorTCPManagerGetter(func() interface{} {
-			return core.GetGlobalUnifiedTCPManager()
-		})
-		logger.Info("监控器TCP适配器已设置")
 	}
 
 	// 13. 设置向后兼容性
@@ -200,9 +194,10 @@ func GetUnifiedSystem() *core.UnifiedSystemInterface {
 }
 
 // SetupUnifiedMonitorCompatibility 设置统一架构的向后兼容性
+// 🔧 重构：pkg/monitor包已删除，使用统一架构的监控器
 func SetupUnifiedMonitorCompatibility() {
 	// 重新设置Monitor变量为统一架构
-	Monitor.GetGlobalMonitor = func() monitor.IConnectionMonitor {
+	Monitor.GetGlobalMonitor = func() core.IUnifiedConnectionMonitor {
 		return core.GetUnifiedSystem().Monitor
 	}
 }

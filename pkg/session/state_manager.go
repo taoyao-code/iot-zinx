@@ -592,12 +592,3 @@ var (
 	globalStateManager     *UnifiedStateManager
 	globalStateManagerOnce sync.Once
 )
-
-// GetGlobalStateManager 获取全局状态管理器实例
-// 🚀 重构：已弃用，请使用统一TCP管理器的状态管理功能
-// 注意：此函数已被移除，请使用 core.GetGlobalUnifiedTCPManager().GetStateManager() 替代
-
-// SetGlobalStateManager 设置全局状态管理器实例（用于测试）
-func SetGlobalStateManager(manager *UnifiedStateManager) {
-	globalStateManager = manager
-}

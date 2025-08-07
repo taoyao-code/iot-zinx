@@ -847,15 +847,6 @@ var (
 	globalUnifiedSessionManagerOnce sync.Once
 )
 
-// GetGlobalUnifiedSessionManager 获取全局统一会话管理器实例
-// 🚀 重构：已弃用，请使用统一TCP管理器的会话功能
-// 注意：此函数已被移除，请使用 core.GetGlobalUnifiedTCPManager() 替代
-
-// SetGlobalUnifiedSessionManager 设置全局统一会话管理器实例（用于测试）
-func SetGlobalUnifiedSessionManager(manager *UnifiedSessionManager) {
-	globalUnifiedSessionManager = manager
-}
-
 // === 接口实现检查 ===
 
 // 确保UnifiedSessionManager实现了ISessionManager接口

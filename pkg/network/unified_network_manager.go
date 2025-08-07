@@ -4,28 +4,23 @@ import (
 	"time"
 
 	"github.com/bujia-iot/iot-zinx/internal/infrastructure/logger"
-	"github.com/bujia-iot/iot-zinx/pkg/monitor"
 	"github.com/sirupsen/logrus"
 )
 
 // UnifiedNetworkManager 统一网络管理器
 type UnifiedNetworkManager struct {
-	tcpWriteMonitor *monitor.TCPWriteMonitor
-	tcpWriter       *TCPWriter
-	commandQueue    *CommandQueue
-	commandManager  ICommandManager
-	logger          *logrus.Logger
+	tcpWriter      *TCPWriter
+	commandQueue   *CommandQueue
+	commandManager ICommandManager
+	logger         *logrus.Logger
 }
 
 // NewUnifiedNetworkManager 创建统一网络管理器
 func NewUnifiedNetworkManager() *UnifiedNetworkManager {
 	logger := logger.GetLogger()
 
-	// 创建TCP写入监控器
-	tcpWriteMonitor := monitor.NewTCPWriteMonitor(logger)
-
-	// 创建TCP写入器
-	tcpWriter := NewTCPWriter(DefaultRetryConfig, tcpWriteMonitor, logger)
+	// 创建TCP写入器（使用统一架构，不再需要独立的监控器）
+	tcpWriter := NewTCPWriter(DefaultRetryConfig, logger)
 
 	// 创建命令队列
 	commandQueue := NewCommandQueue(4, tcpWriter, logger) // 4个工作协程
@@ -34,11 +29,10 @@ func NewUnifiedNetworkManager() *UnifiedNetworkManager {
 	commandManager := GetCommandManager()
 
 	manager := &UnifiedNetworkManager{
-		tcpWriteMonitor: tcpWriteMonitor,
-		tcpWriter:       tcpWriter,
-		commandQueue:    commandQueue,
-		commandManager:  commandManager,
-		logger:          logger,
+		tcpWriter:      tcpWriter,
+		commandQueue:   commandQueue,
+		commandManager: commandManager,
+		logger:         logger,
 	}
 
 	// 启动组件
@@ -57,11 +51,6 @@ func (m *UnifiedNetworkManager) Start() {
 	// 启动命令队列
 	if m.commandQueue != nil {
 		m.commandQueue.Start()
-	}
-
-	// 启动TCP写入监控器的定期统计
-	if m.tcpWriteMonitor != nil {
-		m.tcpWriteMonitor.StartPeriodicLogging(5 * time.Minute)
 	}
 
 	// 启动命令队列的定期统计
@@ -107,9 +96,4 @@ func (m *UnifiedNetworkManager) GetCommandQueue() *CommandQueue {
 // GetCommandManager 获取命令管理器
 func (m *UnifiedNetworkManager) GetCommandManager() ICommandManager {
 	return m.commandManager
-}
-
-// GetTCPWriteMonitor 获取TCP写入监控器
-func (m *UnifiedNetworkManager) GetTCPWriteMonitor() *monitor.TCPWriteMonitor {
-	return m.tcpWriteMonitor
 }

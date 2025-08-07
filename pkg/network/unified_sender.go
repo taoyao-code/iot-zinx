@@ -113,7 +113,7 @@ func NewUnifiedSender() *UnifiedSender {
 	logger := logrus.New()
 
 	// 创建核心组件
-	tcpWriter := NewTCPWriter(config.RetryConfig, nil, logger)
+	tcpWriter := NewTCPWriter(config.RetryConfig, logger)
 	commandQueue := NewCommandQueue(config.MaxWorkers, tcpWriter, logger)
 	bufferMonitor := NewWriteBufferMonitor(config.MonitorInterval, config.WriteTimeout)
 
