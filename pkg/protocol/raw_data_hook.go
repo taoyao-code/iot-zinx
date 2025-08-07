@@ -9,6 +9,7 @@ import (
 	"github.com/bujia-iot/iot-zinx/internal/infrastructure/logger"
 	"github.com/bujia-iot/iot-zinx/pkg/network"
 	"github.com/bujia-iot/iot-zinx/pkg/session"
+	"github.com/bujia-iot/iot-zinx/pkg/utils"
 	"github.com/sirupsen/logrus"
 )
 
@@ -52,7 +53,7 @@ func DefaultRawDataHandler(conn ziface.IConnection, data []byte) bool {
 	}
 
 	// 检查是否为纯十六进制数据
-	if IsHexString(data) {
+	if utils.IsHexString(data) {
 		logger.WithFields(logrus.Fields{
 			"connID":     conn.GetConnID(),
 			"remoteAddr": conn.RemoteAddr().String(),

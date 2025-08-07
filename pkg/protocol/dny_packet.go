@@ -12,6 +12,7 @@ import (
 	"github.com/bujia-iot/iot-zinx/internal/domain/dny_protocol"
 	"github.com/bujia-iot/iot-zinx/internal/infrastructure/logger"
 	"github.com/bujia-iot/iot-zinx/pkg/constants"
+	"github.com/bujia-iot/iot-zinx/pkg/utils"
 	"github.com/sirupsen/logrus"
 )
 
@@ -185,7 +186,7 @@ func (dp *DNYPacket) Unpack(binaryData []byte) (ziface.IMessage, error) {
 	}
 
 	// 🔧 关键重构：优先检查是否为十六进制编码的数据
-	if IsHexString(binaryData) {
+	if utils.IsHexString(binaryData) {
 		logger.Debug("检测到十六进制数据，尝试解码")
 
 		// 解码十六进制数据
@@ -208,7 +209,7 @@ func (dp *DNYPacket) Unpack(binaryData []byte) (ziface.IMessage, error) {
 			}
 
 			// 检查是否为ICCID（解码后为纯数字字符串）
-			if IsAllDigits(decoded) {
+			if utils.IsAllDigits(decoded) {
 				logger.WithFields(logrus.Fields{
 					"iccid": string(decoded),
 				}).Debug("解码后发现ICCID")

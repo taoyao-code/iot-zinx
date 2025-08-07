@@ -1,6 +1,7 @@
 package pkg
 
 import (
+	"sync/atomic"
 	"time"
 
 	"github.com/aceld/zinx/ziface"
@@ -15,6 +16,9 @@ import (
 // 全局连接监控器变量（已迁移到统一架构）
 // 🔧 重构：pkg/monitor包已删除，使用统一架构的监控器
 var globalConnectionMonitor core.IUnifiedConnectionMonitor
+
+// 简化的消息ID计数器（替代复杂的MessageIDManager）
+var messageIDCounter uint64
 
 // 设备状态常量
 const (
@@ -91,9 +95,6 @@ var Protocol = ProtocolExport{
 	ParseDNYDataWithConsumed: protocol.ParseDNYDataWithConsumed,
 	ParseMultipleDNYFrames:   protocol.ParseMultipleDNYFrames,
 
-	IsDNYProtocolData:      protocol.IsDNYProtocolData,
-	IsHexString:            protocol.IsHexString,
-	IsAllDigits:            protocol.IsAllDigits,
 	HandleSpecialMessage:   protocol.IsSpecialMessage, // 修正：指向统一解析器中的函数
 	IOT_SIM_CARD_LENGTH:    constants.IotSimCardLength,
 	IOT_LINK_HEARTBEAT:     constants.IotLinkHeartbeat,
@@ -106,7 +107,13 @@ var Protocol = ProtocolExport{
 	BuildDNYRequestPacket:  protocol.BuildDNYRequestPacket,
 	NeedConfirmation:       protocol.NeedConfirmation,
 	GetNextMessageID: func() uint16 {
-		return core.GetMessageIDManager().GetNextMessageID()
+		// 简化的消息ID生成器（替代复杂的MessageIDManager）
+		newValue := atomic.AddUint64(&messageIDCounter, 1)
+		messageID := uint16(newValue % 65535) // 避免使用0
+		if messageID == 0 {
+			messageID = 1
+		}
+		return messageID
 	},
 }
 

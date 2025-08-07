@@ -11,6 +11,7 @@ import (
 	"github.com/bujia-iot/iot-zinx/internal/infrastructure/logger"
 	"github.com/bujia-iot/iot-zinx/pkg/constants"
 	"github.com/bujia-iot/iot-zinx/pkg/protocol"
+	"github.com/bujia-iot/iot-zinx/pkg/utils"
 	"github.com/sirupsen/logrus"
 )
 
@@ -57,7 +58,7 @@ func (l *TCPDataLogger) LogData(connID uint64, remoteAddr string, data []byte, d
 
 	// 附加协议解析信息（如果启用）
 	var parseInfo string
-	if l.enableParsing && protocol.IsDNYProtocolData(data) {
+	if l.enableParsing && utils.IsDNYProtocolData(data) {
 		result, err := protocol.ParseDNYData(data)
 		if err == nil && result != nil {
 			parseInfo = fmt.Sprintf("DNY协议: PhysicalID=0x%08X, Command=0x%02X(%s), Length=%d, Data=%s, Checksum=%v\n",
