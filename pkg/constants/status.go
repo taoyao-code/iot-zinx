@@ -7,9 +7,6 @@ import (
 	"github.com/bujia-iot/iot-zinx/pkg/errors"
 )
 
-// 🔧 统一状态管理：将原有的 ConnStatus 和 DeviceStatus 合并为统一的状态系统
-// 这解决了原有三套状态系统（ConnState/ConnStatus/DeviceStatus）混乱的问题
-
 // DeviceConnectionState 统一的设备连接状态类型
 // 替换原有的 ConnStatus 和 DeviceStatus，提供一致的状态管理
 type DeviceConnectionState string
@@ -38,10 +35,6 @@ const (
 
 // 🔧 新增：函数类型定义，用于回调和依赖注入
 type UpdateDeviceStatusFuncType func(deviceID string, status DeviceStatus) error
-
-// 🔧 删除重复定义，统一到下面的状态常量中
-
-// 🔧 修复：时间格式化常量已在 protocol_constants.go 中定义，删除重复定义
 
 // 🔧 统一状态常量定义 - 使用 DeviceConnectionState 作为基础类型
 const (
@@ -82,8 +75,6 @@ func (cs ConnStatus) IsConsideredActive() bool {
 		return false
 	}
 }
-
-// 🔧 统一状态方法 - 为 DeviceConnectionState 添加完整的状态判断方法
 
 // IsActive 判断状态是否为活跃状态（可以进行业务操作）
 func (s DeviceConnectionState) IsActive() bool {
@@ -156,8 +147,6 @@ func (s DeviceConnectionState) IsValidTransition(newState DeviceConnectionState)
 	}
 	return false
 }
-
-// 🔧 精细化错误处理 - 设备相关错误码和错误类型
 
 // DeviceError 设备相关错误
 type DeviceError struct {

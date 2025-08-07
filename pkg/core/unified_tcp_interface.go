@@ -211,70 +211,8 @@ type ILegacyDeviceGroupManager interface {
 	RemoveConnection(connID uint64)
 }
 
-// === 适配器接口 ===
+// === 简化的适配器接口 ===
+// 🚀 简化：删除过度设计的事件接口，保留必要的适配器接口
 
-// ITCPManagerAdapter TCP管理器适配器接口
-// 用于在新旧系统之间进行适配
-type ITCPManagerAdapter interface {
-	// 适配器管理
-	SetUnifiedManager(manager IUnifiedTCPManager)
-	GetUnifiedManager() IUnifiedTCPManager
-
-	// 兼容接口适配
-	AdaptToLegacyConnectionManager() ILegacyConnectionManager
-	AdaptToLegacySessionManager() ILegacySessionManager
-	AdaptToLegacyDeviceGroupManager() ILegacyDeviceGroupManager
-}
-
-// === 事件接口 ===
-
-// ITCPManagerEventListener TCP管理器事件监听器接口
-type ITCPManagerEventListener interface {
-	OnConnectionEstablished(session *ConnectionSession)
-	OnConnectionClosed(session *ConnectionSession)
-	OnDeviceRegistered(session *ConnectionSession)
-	OnDeviceUnregistered(session *ConnectionSession)
-	OnHeartbeatReceived(session *ConnectionSession)
-	OnDeviceStatusChanged(session *ConnectionSession, oldStatus, newStatus constants.DeviceStatus)
-}
-
-// ITCPManagerEventEmitter TCP管理器事件发射器接口
-type ITCPManagerEventEmitter interface {
-	AddEventListener(listener ITCPManagerEventListener)
-	RemoveEventListener(listener ITCPManagerEventListener)
-	EmitConnectionEstablished(session *ConnectionSession)
-	EmitConnectionClosed(session *ConnectionSession)
-	EmitDeviceRegistered(session *ConnectionSession)
-	EmitDeviceUnregistered(session *ConnectionSession)
-	EmitHeartbeatReceived(session *ConnectionSession)
-	EmitDeviceStatusChanged(session *ConnectionSession, oldStatus, newStatus constants.DeviceStatus)
-}
-
-// === 配置接口 ===
-
-// ITCPManagerConfig TCP管理器配置接口
-type ITCPManagerConfig interface {
-	GetMaxConnections() int
-	GetMaxDevices() int
-	GetConnectionTimeout() time.Duration
-	GetHeartbeatTimeout() time.Duration
-	GetCleanupInterval() time.Duration
-	IsDebugLogEnabled() bool
-
-	SetMaxConnections(max int)
-	SetMaxDevices(max int)
-	SetConnectionTimeout(timeout time.Duration)
-	SetHeartbeatTimeout(timeout time.Duration)
-	SetCleanupInterval(interval time.Duration)
-	SetDebugLogEnabled(enabled bool)
-}
-
-// === 工厂接口 ===
-
-// ITCPManagerFactory TCP管理器工厂接口
-type ITCPManagerFactory interface {
-	CreateTCPManager(config ITCPManagerConfig) IUnifiedTCPManager
-	CreateConnectionSession(conn ziface.IConnection) IConnectionSession
-	CreateDeviceGroup(conn ziface.IConnection, iccid string) IUnifiedDeviceGroup
-	CreateAdapter() ITCPManagerAdapter
-}
+// === 简化的配置接口 ===
+// 🚀 简化：删除过度设计的配置和工厂接口，这些功能可以通过简单的结构体实现
