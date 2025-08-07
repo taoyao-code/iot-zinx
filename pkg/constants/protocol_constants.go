@@ -163,6 +163,10 @@ const (
 	WorkerPoolSize    = 100  // 工作池大小
 	ChannelBufferSize = 1000 // 通道缓冲区大小
 	BatchProcessSize  = 50   // 批处理大小
+
+	// 端口管理常量
+	MinPortNumber = 1  // 最小端口号(API层，1-based)
+	MaxPortNumber = 48 // 最大端口号(API层，1-based)
 )
 
 // 🔧 修复：连接属性键定义已在其他文件中定义，删除重复定义

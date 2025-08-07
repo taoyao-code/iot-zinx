@@ -14,7 +14,7 @@ import (
 
 // MaxTimeAndPowerHandler 设置最大充电时长、过载功率处理器 - 处理0x85指令
 type MaxTimeAndPowerHandler struct {
-	protocol.DNYFrameHandlerBase
+	protocol.SimpleHandlerBase
 }
 
 // MaxTimeAndPowerRequest 设置最大充电时长、过载功率请求数据结构
@@ -33,9 +33,7 @@ type MaxTimeAndPowerResponse struct {
 
 // NewMaxTimeAndPowerHandler 创建设置最大充电时长、过载功率处理器
 func NewMaxTimeAndPowerHandler() *MaxTimeAndPowerHandler {
-	return &MaxTimeAndPowerHandler{
-		DNYFrameHandlerBase: protocol.DNYFrameHandlerBase{},
-	}
+	return &MaxTimeAndPowerHandler{}
 }
 
 // PreHandle 前置处理

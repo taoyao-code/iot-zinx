@@ -14,13 +14,12 @@ import (
 	"github.com/bujia-iot/iot-zinx/pkg/network"
 	"github.com/bujia-iot/iot-zinx/pkg/notification"
 	"github.com/bujia-iot/iot-zinx/pkg/protocol"
-	"github.com/bujia-iot/iot-zinx/pkg/session"
 	"github.com/sirupsen/logrus"
 )
 
 // DeviceRegisterHandler 处理设备注册包 (命令ID: 0x20)
 type DeviceRegisterHandler struct {
-	protocol.DNYFrameHandlerBase
+	protocol.SimpleHandlerBase
 	// 🚀 重构：移除重复存储，使用统一TCP管理器
 	// lastRegisterTimes sync.Map // 已删除：重复存储，使用统一TCP管理器
 	// deviceStates        sync.Map // 已删除：重复存储，使用统一TCP管理器
@@ -196,7 +195,7 @@ func (h *DeviceRegisterHandler) handleDeviceRegister(deviceId string, physicalId
 	physicalIdStr := fmt.Sprintf("%d", physicalId)
 
 	// 获取统一TCP管理器
-	tcpManager := core.GetGlobalUnifiedTCPManager()
+	tcpManager := core.GetGlobalTCPManager()
 
 	// 统一设备注册（替代原来的多个管理器注册）
 	regErr := tcpManager.RegisterDeviceWithDetails(
@@ -204,9 +203,8 @@ func (h *DeviceRegisterHandler) handleDeviceRegister(deviceId string, physicalId
 		deviceId,
 		physicalIdStr,
 		iccidFromProp,
-		"",    // version - 从设备注册包中获取
-		0,     // deviceType - 从设备注册包中获取
-		false, // directMode - 默认false
+		0,  // deviceType - 从设备注册包中获取
+		"", // version - 从设备注册包中获取
 	)
 	if regErr != nil {
 		logger.WithFields(logrus.Fields{
@@ -246,8 +244,8 @@ func (h *DeviceRegisterHandler) handleDeviceRegister(deviceId string, physicalId
 	// 🔧 使用统一架构：设备状态由统一架构自动管理
 	// 设备注册成功后，状态自动设置为在线
 	// 4. 设置Zinx框架层的session
-	linkedSession := session.GetDeviceSession(conn)
-	if linkedSession != nil {
+	linkedSession, err := h.GetOrCreateDeviceSession(conn)
+	if err == nil && linkedSession != nil {
 		linkedSession.DeviceID = deviceId
 		linkedSession.PhysicalID = fmt.Sprintf("0x%08X", uint32(physicalId))
 		linkedSession.LastActivityAt = time.Now()
@@ -387,7 +385,7 @@ func (h *DeviceRegisterHandler) analyzeRegistrationRequest(deviceId string, conn
 	connID := conn.GetConnID()
 
 	// 🚀 重构：通过统一TCP管理器获取设备状态
-	tcpManager := core.GetGlobalUnifiedTCPManager()
+	tcpManager := core.GetGlobalTCPManager()
 
 	// 检查设备是否已存在
 	session, exists := tcpManager.GetSessionByDeviceID(deviceId)
@@ -452,9 +450,13 @@ func (h *DeviceRegisterHandler) analyzeRegistrationRequest(deviceId string, conn
 // 🚀 处理注册更新（不触发完整注册流程）
 func (h *DeviceRegisterHandler) handleRegistrationUpdate(deviceId string, physicalId uint32, messageID uint16, conn ziface.IConnection, data []byte, decision *RegistrationDecision) {
 	// 只更新心跳时间和连接状态，不触发业务逻辑
-	deviceSession := session.GetDeviceSession(conn)
-	if deviceSession != nil {
-		deviceSession.UpdateHeartbeat()
+	deviceSession, err := h.GetOrCreateDeviceSession(conn)
+	if err == nil && deviceSession != nil {
+		// 更新心跳时间通过TCP管理器处理
+		tcpManager := core.GetGlobalTCPManager()
+		if tcpManager != nil {
+			tcpManager.UpdateHeartbeat(deviceId)
+		}
 		logger.WithFields(logrus.Fields{
 			"connID":   conn.GetConnID(),
 			"deviceId": deviceId,
@@ -474,7 +476,7 @@ func (h *DeviceRegisterHandler) handleRegistrationUpdate(deviceId string, physic
 // 🚀 更新注册统计指标（重构：使用统一TCP管理器）
 func (h *DeviceRegisterHandler) updateRegistrationMetrics(deviceId string, action string) {
 	// 🚀 重构：通过统一TCP管理器记录统计信息
-	tcpManager := core.GetGlobalUnifiedTCPManager()
+	tcpManager := core.GetGlobalTCPManager()
 	if tcpManager == nil {
 		return
 	}
@@ -493,7 +495,7 @@ func (h *DeviceRegisterHandler) updateRegistrationMetrics(deviceId string, actio
 // 🚀 获取设备注册统计（重构：使用统一TCP管理器）
 func (h *DeviceRegisterHandler) GetRegistrationStats(deviceId string) map[string]interface{} {
 	// 🚀 重构：通过统一TCP管理器获取设备统计信息
-	tcpManager := core.GetGlobalUnifiedTCPManager()
+	tcpManager := core.GetGlobalTCPManager()
 	if tcpManager == nil {
 		return nil
 	}
@@ -519,7 +521,7 @@ func (h *DeviceRegisterHandler) GetRegistrationStats(deviceId string) map[string
 func (h *DeviceRegisterHandler) CleanupExpiredStates() {
 	// 🚀 重构：清理功能已集成到统一TCP管理器中
 	// 统一TCP管理器会自动清理过期的连接和会话
-	tcpManager := core.GetGlobalUnifiedTCPManager()
+	tcpManager := core.GetGlobalTCPManager()
 	if tcpManager == nil {
 		return
 	}

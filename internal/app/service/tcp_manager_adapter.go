@@ -185,12 +185,37 @@ func (a *APITCPAdapter) HandleDeviceOffline(deviceID string) error {
 // === 设备列表查询实现 ===
 
 // GetAllDevices 获取所有设备
+// TODO: MIGRATE - 建议迁移到统一接口
+// 推荐使用: tcpManager.GetDeviceListForAPI() 或 tcpManager.GetAllUnifiedDevices()
+// 当前实现存在数据不一致风险，因为从多个数据源分别获取信息
 func (a *APITCPAdapter) GetAllDevices() []DeviceInfo {
 	tcpManager := a.getTCPManager()
 	if tcpManager == nil {
 		return []DeviceInfo{}
 	}
 
+	// 🔄 尝试使用新的统一接口
+	if unifiedManager, ok := tcpManager.(interface {
+		GetDeviceListForAPI() ([]map[string]interface{}, error)
+	}); ok {
+		if apiDevices, err := unifiedManager.GetDeviceListForAPI(); err == nil {
+			// 转换为旧格式以保持兼容性
+			devices := make([]DeviceInfo, len(apiDevices))
+			for i, apiDevice := range apiDevices {
+				devices[i] = DeviceInfo{
+					DeviceID: fmt.Sprintf("%v", apiDevice["deviceId"]),
+					ICCID:    fmt.Sprintf("%v", apiDevice["iccid"]),
+					Status:   fmt.Sprintf("%v", apiDevice["status"]),
+				}
+				if lastSeen, ok := apiDevice["lastHeartbeat"].(int64); ok {
+					devices[i].LastSeen = lastSeen
+				}
+			}
+			return devices
+		}
+	}
+
+	// 🚨 DEPRECATED: 旧的分散数据获取方式（存在数据不一致风险）
 	var devices []DeviceInfo
 
 	if manager, ok := tcpManager.(interface {
@@ -228,7 +253,33 @@ func (a *APITCPAdapter) GetAllDevices() []DeviceInfo {
 }
 
 // GetEnhancedDeviceList 获取增强的设备列表
+// ✅ MIGRATED - 已迁移到新的统一接口
+// 优先使用新的GetDeviceListForAPI()方法，确保数据一致性
 func (a *APITCPAdapter) GetEnhancedDeviceList() []map[string]interface{} {
+	tcpManager := a.getTCPManager()
+	if tcpManager == nil {
+		return []map[string]interface{}{}
+	}
+
+	// 🚀 NEW: 使用新的统一接口（推荐）
+	if unifiedManager, ok := tcpManager.(interface {
+		GetDeviceListForAPI() ([]map[string]interface{}, error)
+	}); ok {
+		if apiDevices, err := unifiedManager.GetDeviceListForAPI(); err == nil {
+			logger.WithFields(logrus.Fields{
+				"device_count": len(apiDevices),
+				"method":       "GetDeviceListForAPI",
+			}).Debug("使用新的统一接口获取设备列表")
+			return apiDevices
+		} else {
+			logger.WithFields(logrus.Fields{
+				"error": err.Error(),
+			}).Warn("新统一接口获取设备列表失败，回退到旧方法")
+		}
+	}
+
+	// 🚨 FALLBACK: 旧的实现方式（兼容性保证）
+	logger.Debug("使用旧的分散数据获取方式（存在数据不一致风险）")
 	devices := a.GetAllDevices()
 	enhanced := make([]map[string]interface{}, len(devices))
 

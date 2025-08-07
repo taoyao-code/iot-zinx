@@ -2,114 +2,57 @@ package pkg
 
 import (
 	"sync/atomic"
-	"time"
 
 	"github.com/aceld/zinx/ziface"
-	"github.com/bujia-iot/iot-zinx/internal/infrastructure/logger"
-	"github.com/bujia-iot/iot-zinx/pkg/constants"
 	"github.com/bujia-iot/iot-zinx/pkg/core"
 	"github.com/bujia-iot/iot-zinx/pkg/network"
 	"github.com/bujia-iot/iot-zinx/pkg/protocol"
-	"github.com/bujia-iot/iot-zinx/pkg/utils"
 )
 
-// 全局连接监控器变量（已迁移到统一架构）
-// 🔧 重构：pkg/monitor包已删除，使用统一架构的监控器
-var globalConnectionMonitor core.IUnifiedConnectionMonitor
+// === 简化的全局变量 ===
 
-// 简化的消息ID计数器（替代复杂的MessageIDManager）
+// 简化的消息ID计数器
 var messageIDCounter uint64
 
-// 设备状态常量
-const (
-	DeviceStatusOnline       = constants.DeviceStatusOnline
-	DeviceStatusOffline      = constants.DeviceStatusOffline
-	DeviceStatusReconnecting = constants.DeviceStatusReconnecting
-)
+// === 核心导出接口 ===
 
-// 连接状态常量
-const (
-	ConnStatusActive   = constants.ConnStatusActive
-	ConnStatusInactive = constants.ConnStatusInactive
-	ConnStatusClosed   = constants.ConnStatusClosed
-)
-
-// 连接属性键常量
-const (
-	PropKeyDeviceId         = constants.PropKeyDeviceId
-	PropKeyICCID            = constants.PropKeyICCID
-	PropKeyLastHeartbeat    = constants.PropKeyLastHeartbeat
-	PropKeyLastHeartbeatStr = constants.PropKeyLastHeartbeatStr
-	PropKeyConnStatus       = constants.PropKeyConnStatus
-	PropKeySessionID        = constants.PropKeySessionID
-	PropKeyReconnectCount   = constants.PropKeyReconnectCount
-)
+// Core 核心模块导出
+var Core = struct {
+	// TCP管理器
+	GetGlobalTCPManager func() *core.TCPManager
+}{
+	GetGlobalTCPManager: func() *core.TCPManager {
+		return core.GetGlobalTCPManager()
+	},
+}
 
 // Protocol 协议相关功能导出
-type ProtocolExport struct {
-	// 数据包处理相关
+var Protocol = struct {
+	// 数据包处理
 	NewDNYDataPackFactory func() protocol.IDataPackFactory
 	NewDNYDecoder         func() ziface.IDecoder
 
-	// 数据解析相关
-	ParseManualData          func(hexData string, description string)
-	ParseDNYData             func(data []byte) (*protocol.DNYParseResult, error)
-	ParseDNYHexString        func(hexStr string) (*protocol.DNYParseResult, error)
-	ParseDNYDataWithConsumed func(data []byte) (*protocol.DNYParseResult, int, error)
-	ParseMultipleDNYFrames   func(data []byte) ([]*protocol.DNYParseResult, error)
-
-	// 数据校验相关
-	CalculatePacketChecksum func(data []byte) uint16
-	IsDNYProtocolData       func(data []byte) bool
-	IsHexString             func(data []byte) bool
-	IsAllDigits             func(data []byte) bool
-	HandleSpecialMessage    func(data []byte) bool
-
-	// 常量值
-	IOT_SIM_CARD_LENGTH int
-	IOT_LINK_HEARTBEAT  string
-
-	// 数据钩子
-	NewRawDataHook        func(handleRawDataFunc func(conn ziface.IConnection, data []byte) bool) *protocol.RawDataHook
-	DefaultRawDataHandler func(conn ziface.IConnection, data []byte) bool
-	PrintRawData          func(data []byte)
+	// 数据解析
+	ParseDNYData      func(data []byte) (*protocol.DNYParseResult, error)
+	ParseDNYHexString func(hexStr string) (*protocol.DNYParseResult, error)
 
 	// 数据发送
-	SendDNYResponse        func(conn ziface.IConnection, physicalId uint32, messageId uint16, command uint8, data []byte) error
-	SendDNYRequest         func(conn ziface.IConnection, physicalId uint32, messageId uint16, command uint8, data []byte) error
-	BuildDNYResponsePacket func(physicalID uint32, messageID uint16, command uint8, data []byte) []byte
-	BuildDNYRequestPacket  func(physicalID uint32, messageID uint16, command uint8, data []byte) []byte
-	NeedConfirmation       func(command uint8) bool
+	SendDNYResponse func(conn ziface.IConnection, physicalId uint32, messageId uint16, command uint8, data []byte) error
+	SendDNYRequest  func(conn ziface.IConnection, physicalId uint32, messageId uint16, command uint8, data []byte) error
 
 	// 消息ID管理
 	GetNextMessageID func() uint16
-}
-
-// Protocol 协议相关工具导出
-var Protocol = ProtocolExport{
-	NewDNYDataPackFactory:    protocol.NewDNYDataPackFactory,
-	NewDNYDecoder:            protocol.NewDNYDecoder,
-	ParseManualData:          protocol.ParseManualData,
-	ParseDNYData:             protocol.ParseDNYData,
-	ParseDNYHexString:        protocol.ParseDNYHexString,
-	ParseDNYDataWithConsumed: protocol.ParseDNYDataWithConsumed,
-	ParseMultipleDNYFrames:   protocol.ParseMultipleDNYFrames,
-
-	HandleSpecialMessage:   protocol.IsSpecialMessage, // 修正：指向统一解析器中的函数
-	IOT_SIM_CARD_LENGTH:    constants.IotSimCardLength,
-	IOT_LINK_HEARTBEAT:     constants.IotLinkHeartbeat,
-	NewRawDataHook:         protocol.NewRawDataHook,
-	DefaultRawDataHandler:  protocol.DefaultRawDataHandler,
-	PrintRawData:           protocol.PrintRawData,
-	SendDNYResponse:        protocol.SendDNYResponse,
-	SendDNYRequest:         protocol.SendDNYRequest,
-	BuildDNYResponsePacket: protocol.BuildDNYResponsePacket,
-	BuildDNYRequestPacket:  protocol.BuildDNYRequestPacket,
-	NeedConfirmation:       protocol.NeedConfirmation,
+}{
+	NewDNYDataPackFactory: protocol.NewDNYDataPackFactory,
+	NewDNYDecoder:         protocol.NewDNYDecoder,
+	ParseDNYData:          protocol.ParseDNYData,
+	ParseDNYHexString:     protocol.ParseDNYHexString,
+	SendDNYResponse:       protocol.SendDNYResponse,
+	SendDNYRequest:        protocol.SendDNYRequest,
 	GetNextMessageID: func() uint16 {
-		// 简化的消息ID生成器（替代复杂的MessageIDManager）
+		// 简化的消息ID生成器
 		newValue := atomic.AddUint64(&messageIDCounter, 1)
-		messageID := uint16(newValue % 65535) // 避免使用0
+		messageID := uint16(newValue % 65535)
 		if messageID == 0 {
 			messageID = 1
 		}
@@ -117,109 +60,32 @@ var Protocol = ProtocolExport{
 	},
 }
 
-// Network 网络相关工具导出
-var Network = struct {
-	// 获取命令管理器
-	GetCommandManager func() network.ICommandManager
-	// 设置命令发送函数
-	SetSendCommandFunc func(fn network.SendCommandFuncType)
-	// 创建连接钩子
-	NewConnectionHooks func(readDeadLine, writeDeadLine, keepAlivePeriod time.Duration) network.IConnectionHooks
-	// 设备心跳超时处理
-	OnDeviceNotAlive func(conn ziface.IConnection)
-	// 设置更新设备状态函数
-	SetUpdateDeviceStatusFunc func(fn network.UpdateDeviceStatusFuncType)
-	// 设置全局心跳管理器
-	SetGlobalHeartbeatManager func(manager network.HeartbeatManagerInterface)
-	// 更新连接活动时间
-	UpdateConnectionActivity func(conn ziface.IConnection)
+// === 简化的初始化函数 ===
 
-	// 新增心跳服务适配器注册函数
-	RegisterHeartbeatAdapter func(
-		getHeartbeatService func() interface{},
-		newHeartbeatListener func(connMonitor interface {
-			GetConnectionByConnID(connID uint64) (ziface.IConnection, bool)
-		}) interface{},
-	)
+// InitBasicArchitecture 初始化基础架构
+func InitBasicArchitecture() {
+	// 启动TCP管理器
+	tcpManager := core.GetGlobalTCPManager()
+	if err := tcpManager.Start(); err != nil {
+		panic("启动TCP管理器失败: " + err.Error())
+	}
 
-	// 初始化心跳服务
-	InitHeartbeatService func(monitorAdapter interface {
-		GetConnectionByConnID(connID uint64) (ziface.IConnection, bool)
-	}) error
-}{
-	GetCommandManager: func() network.ICommandManager {
-		return network.GetCommandManager()
-	},
-	SetSendCommandFunc: network.SetSendCommandFunc,
-	NewConnectionHooks: func(readDeadLine, writeDeadLine, keepAlivePeriod time.Duration) network.IConnectionHooks {
-		return network.NewConnectionHooks(readDeadLine, writeDeadLine, keepAlivePeriod)
-	},
-	OnDeviceNotAlive:          network.OnDeviceNotAlive,
-	SetUpdateDeviceStatusFunc: network.SetUpdateDeviceStatusFunc,
-	SetGlobalHeartbeatManager: network.SetGlobalHeartbeatManager,
-	UpdateConnectionActivity:  network.UpdateConnectionActivity,
-
-	// 新增心跳服务适配器注册函数
-	RegisterHeartbeatAdapter: func(
-		getHeartbeatService func() interface{},
-		newHeartbeatListener func(connMonitor interface {
-			GetConnectionByConnID(connID uint64) (ziface.IConnection, bool)
-		}) interface{},
-	) {
-		network.GetGlobalHeartbeatService = getHeartbeatService
-		network.NewHeartbeatListener = newHeartbeatListener
-	},
-
-	// 初始化心跳服务
-	InitHeartbeatService: network.InitHeartbeatService,
+	// 启动命令管理器
+	cmdMgr := network.GetCommandManager()
+	cmdMgr.Start()
 }
 
-// Monitor 监控器相关接口（已迁移到统一架构）
-// 🔧 重构：pkg/monitor包已删除，使用统一架构的监控器
-type MonitorInterface struct {
-	GetGlobalMonitor func() core.IUnifiedConnectionMonitor
+// CleanupBasicArchitecture 清理基础架构资源
+func CleanupBasicArchitecture() {
+	// 停止命令管理器
+	cmdMgr := network.GetCommandManager()
+	if cmdMgr != nil {
+		cmdMgr.Stop()
+	}
 
-	// 连接管理（通过统一架构实现）
-	GetConnectionByDeviceId  func(deviceId string) (ziface.IConnection, bool)
-	BindDeviceIdToConnection func(deviceId string, conn ziface.IConnection)
-	UpdateLastHeartbeatTime  func(conn ziface.IConnection)
-}
-
-// Monitor 监控相关工具导出（已迁移到统一架构）
-// 🔧 重构：pkg/monitor包已删除，使用统一架构的监控器
-var Monitor = MonitorInterface{
-	GetGlobalMonitor: func() core.IUnifiedConnectionMonitor {
-		// 返回统一架构的连接监控器
-		return globalConnectionMonitor
-	},
-
-	// 连接管理实现（通过统一架构）
-	GetConnectionByDeviceId: func(deviceId string) (ziface.IConnection, bool) {
-		if globalConnectionMonitor != nil {
-			return globalConnectionMonitor.GetConnectionByDeviceId(deviceId)
-		}
-		return nil, false
-	},
-	BindDeviceIdToConnection: func(deviceId string, conn ziface.IConnection) {
-		if globalConnectionMonitor != nil {
-			globalConnectionMonitor.BindDeviceIdToConnection(deviceId, conn)
-		}
-	},
-	UpdateLastHeartbeatTime: func(conn ziface.IConnection) {
-		if globalConnectionMonitor != nil {
-			globalConnectionMonitor.UpdateLastHeartbeatTime(conn)
-		}
-	},
-}
-
-// Utils 工具类导出
-var Utils = struct {
-	// 设置Zinx日志适配器
-	SetupZinxLogger         func()
-	SetupImprovedZinxLogger func(*logger.ImprovedLogger)
-	GetGlobalImprovedLogger func() *logger.ImprovedLogger
-}{
-	SetupZinxLogger:         utils.SetupZinxLogger,
-	SetupImprovedZinxLogger: utils.SetupImprovedZinxLogger,
-	GetGlobalImprovedLogger: utils.GetGlobalImprovedLogger,
+	// 停止TCP管理器
+	tcpManager := core.GetGlobalTCPManager()
+	if tcpManager != nil {
+		tcpManager.Stop()
+	}
 }

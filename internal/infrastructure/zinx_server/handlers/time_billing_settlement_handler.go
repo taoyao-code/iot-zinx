@@ -16,7 +16,7 @@ import (
 // TimeBillingSettlementHandler 处理分时收费结算专用 (命令ID: 0x23)
 // 这是2025-2-10新增的指令，专门用于分时收费设备的结算信息上传
 type TimeBillingSettlementHandler struct {
-	protocol.DNYFrameHandlerBase
+	protocol.SimpleHandlerBase
 }
 
 // NewTimeBillingSettlementHandler 创建分时收费结算处理器

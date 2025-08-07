@@ -10,16 +10,12 @@ import (
 	"github.com/bujia-iot/iot-zinx/pkg/constants"
 	"github.com/bujia-iot/iot-zinx/pkg/core"
 	"github.com/bujia-iot/iot-zinx/pkg/protocol"
-	"github.com/bujia-iot/iot-zinx/pkg/session"
 	"github.com/sirupsen/logrus"
 )
 
 // GetServerTimeHandler 处理设备获取服务器时间请求 (命令ID: 0x22)
 type GetServerTimeHandler struct {
-	protocol.DNYFrameHandlerBase
-	// 🚀 重构：移除重复存储，使用统一TCP管理器进行流控
-	// lastSyncTime    map[string]time.Time // 已删除：重复存储，使用统一TCP管理器
-	// syncMutex       sync.RWMutex         // 已删除：重复存储，使用统一TCP管理器
+	protocol.SimpleHandlerBase
 	minSyncInterval time.Duration // 最小同步间隔，用于流控
 }
 
@@ -33,7 +29,7 @@ func NewGetServerTimeHandler() *GetServerTimeHandler {
 // shouldProcessTimeSync 检查是否应该处理时间同步（重构：使用统一TCP管理器）
 func (h *GetServerTimeHandler) shouldProcessTimeSync(deviceID string) bool {
 	// 🚀 重构：通过统一TCP管理器获取设备会话信息进行流控
-	tcpManager := core.GetGlobalUnifiedTCPManager()
+	tcpManager := core.GetGlobalTCPManager()
 	if tcpManager == nil {
 		return true // 如果管理器不可用，允许处理
 	}
@@ -119,7 +115,7 @@ func (h *GetServerTimeHandler) Handle(request ziface.IRequest) {
 }
 
 // processGetServerTime 处理获取服务器时间业务逻辑
-func (h *GetServerTimeHandler) processGetServerTime(decodedFrame *protocol.DecodedDNYFrame, conn ziface.IConnection, deviceSession *session.DeviceSession) {
+func (h *GetServerTimeHandler) processGetServerTime(decodedFrame *protocol.DecodedDNYFrame, conn ziface.IConnection, deviceSession *protocol.DeviceSession) {
 	// 从RawPhysicalID提取uint32值
 	physicalId := binary.LittleEndian.Uint32(decodedFrame.RawPhysicalID)
 	messageId := decodedFrame.MessageID
@@ -165,7 +161,7 @@ func (h *GetServerTimeHandler) processGetServerTime(decodedFrame *protocol.Decod
 	}).Info("✅ 获取服务器时间响应发送成功")
 
 	// 🚀 重构：通过统一TCP管理器更新心跳时间，不再直接调用监控器
-	tcpManager := core.GetGlobalUnifiedTCPManager()
+	tcpManager := core.GetGlobalTCPManager()
 	if tcpManager != nil {
 		// 获取设备ID并更新心跳
 		if session, exists := tcpManager.GetSessionByConnID(conn.GetConnID()); exists {

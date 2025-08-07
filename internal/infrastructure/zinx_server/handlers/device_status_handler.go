@@ -14,7 +14,7 @@ import (
 
 // DeviceStatusHandler 处理设备状态上报 (命令ID: 0x81)
 type DeviceStatusHandler struct {
-	protocol.DNYFrameHandlerBase
+	protocol.SimpleHandlerBase
 }
 
 // PreHandle 预处理设备状态查询

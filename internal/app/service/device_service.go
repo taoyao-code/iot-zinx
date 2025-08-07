@@ -11,6 +11,7 @@ import (
 	"github.com/bujia-iot/iot-zinx/pkg/constants"
 	"github.com/bujia-iot/iot-zinx/pkg/errors"
 	"github.com/bujia-iot/iot-zinx/pkg/network"
+	"github.com/bujia-iot/iot-zinx/pkg/protocol"
 	"github.com/bujia-iot/iot-zinx/pkg/utils"
 	"github.com/sirupsen/logrus"
 )
@@ -180,7 +181,10 @@ func (s *DeviceService) SendDNYCommandToDevice(deviceID string, command byte, da
 	}
 
 	// 🔧 修复：发送命令应该使用BuildDNYRequestPacket（服务器主动请求）
-	packetData := pkg.Protocol.BuildDNYRequestPacket(uint32(physicalID), messageID, command, data)
+	packetData, err := protocol.BuildDNYPacket(uint32(physicalID), messageID, command, data)
+	if err != nil {
+		return nil, fmt.Errorf("构建DNY数据包失败: %v", err)
+	}
 
 	// 🔧 修复：使用统一发送器发送
 	globalSender := network.GetGlobalSender()

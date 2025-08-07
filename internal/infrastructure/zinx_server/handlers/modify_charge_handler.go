@@ -14,7 +14,7 @@ import (
 
 // ModifyChargeHandler 服务器修改充电时长/电量处理器 - 处理0x8A指令
 type ModifyChargeHandler struct {
-	protocol.DNYFrameHandlerBase
+	protocol.SimpleHandlerBase
 }
 
 // ModifyChargeRequest 修改充电请求数据结构
@@ -37,9 +37,7 @@ type ModifyChargeResponse struct {
 
 // NewModifyChargeHandler 创建修改充电处理器
 func NewModifyChargeHandler() *ModifyChargeHandler {
-	return &ModifyChargeHandler{
-		DNYFrameHandlerBase: protocol.DNYFrameHandlerBase{},
-	}
+	return &ModifyChargeHandler{}
 }
 
 // PreHandle 前置处理

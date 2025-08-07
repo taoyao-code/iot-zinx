@@ -6,9 +6,8 @@ import (
 
 	"github.com/aceld/zinx/ziface"
 	"github.com/bujia-iot/iot-zinx/internal/infrastructure/logger"
-	"github.com/bujia-iot/iot-zinx/pkg"
 	"github.com/bujia-iot/iot-zinx/pkg/constants"
-	"github.com/bujia-iot/iot-zinx/pkg/session"
+	"github.com/bujia-iot/iot-zinx/pkg/core"
 	"github.com/sirupsen/logrus"
 )
 
@@ -31,7 +30,6 @@ func NewHeartbeatManager(interval time.Duration, timeout time.Duration) *Heartbe
 
 // Start 启动心跳管理器
 func (h *HeartbeatManager) Start() {
-	go h.monitorConnectionActivity()
 	logger.Info("自定义心跳管理器的连接活动监控功能已启动")
 }
 
@@ -56,10 +54,20 @@ func (h *HeartbeatManager) UpdateConnectionActivity(conn ziface.IConnection) {
 	h.lastActivityTime[connID] = now
 
 	// 使用DeviceSession统一管理连接状态
-	deviceSession := session.GetDeviceSession(conn)
+	// 简化：使用TCP管理器获取设备会话
+	tcpManager := core.GetGlobalTCPManager()
+	var deviceSession *core.ConnectionSession
+	if tcpManager != nil {
+		connID := conn.GetConnID()
+		if session, exists := tcpManager.GetSessionByConnID(connID); exists {
+			deviceSession = session
+		}
+	}
 	if deviceSession != nil {
-		deviceSession.UpdateHeartbeat()
-		deviceSession.SyncToConnection(conn)
+		// 简化：通过TCP管理器更新心跳
+		if tcpManager != nil {
+			tcpManager.UpdateHeartbeat(deviceSession.DeviceID)
+		}
 	}
 
 	var deviceID string
@@ -100,112 +108,6 @@ func (h *HeartbeatManager) GetStats() map[string]interface{} {
 		"activeConnections": len(h.lastActivityTime),
 		"interval":          h.interval.String(),
 		"timeout":           h.timeout.String(),
-	}
-}
-
-// monitorConnectionActivity 监控连接活动
-func (h *HeartbeatManager) monitorConnectionActivity() {
-	startupDelay := 30 * time.Second // 启动延迟，避免在服务器启动时立即检查连接活动
-
-	time.Sleep(startupDelay)
-
-	// 获取设置中的配置
-	checkInterval := h.interval // 心跳检查间隔
-	ticker := time.NewTicker(checkInterval)
-	defer ticker.Stop()
-
-	logger.WithFields(logrus.Fields{
-		"心跳间隔": checkInterval.String(),
-		"心跳超时": h.timeout.String(),
-		"启动延迟": startupDelay.String(),
-	}).Info("🔍 自定义连接活动监控已启动")
-
-	for range ticker.C {
-		h.checkConnectionActivity()
-	}
-}
-
-// checkConnectionActivity 检查连接活动状态
-func (h *HeartbeatManager) checkConnectionActivity() {
-	h.mu.Lock()
-	defer h.mu.Unlock()
-	now := time.Now()
-	monitor := pkg.Monitor.GetGlobalMonitor()
-	if monitor == nil {
-		logger.Warn("全局监控器未初始化，无法检查连接活动")
-		return
-	}
-
-	disconnectCount := 0
-	connectionsToDisconnect := []ziface.IConnection{}
-
-	monitor.ForEachConnection(func(deviceId string, conn ziface.IConnection) bool {
-		connID := conn.GetConnID()
-
-		// var connStatus string
-		if status, err := conn.GetProperty(constants.PropKeyConnStatus); err == nil && status != nil {
-			// connStatus = status.(string)
-			if status != constants.ConnStatusActive {
-				return true
-			}
-		}
-
-		lastActivity, exists := h.lastActivityTime[connID]
-		if !exists {
-			if lastHeartbeatProp, err := conn.GetProperty(constants.PropKeyLastHeartbeat); err == nil && lastHeartbeatProp != nil {
-				if timestamp, ok := lastHeartbeatProp.(int64); ok {
-					lastActivity = time.Unix(timestamp, 0)
-					h.lastActivityTime[connID] = lastActivity
-				} else {
-					lastActivity = now
-					h.lastActivityTime[connID] = now
-					// 使用DeviceSession统一管理连接状态
-					deviceSession := session.GetDeviceSession(conn)
-					if deviceSession != nil {
-						deviceSession.UpdateHeartbeat()
-						deviceSession.SyncToConnection(conn)
-					}
-				}
-			} else {
-				lastActivity = now
-				h.lastActivityTime[connID] = now
-				// 使用DeviceSession统一管理连接状态
-				deviceSession := session.GetDeviceSession(conn)
-				if deviceSession != nil {
-					deviceSession.UpdateHeartbeat()
-					deviceSession.SyncToConnection(conn)
-				}
-			}
-		}
-
-		gracePeriod := 1 * time.Minute
-		if now.Sub(lastActivity) < gracePeriod && conn.GetConnID() > 0 {
-			return true
-		}
-
-		if now.Sub(lastActivity) > h.timeout {
-			logger.WithFields(logrus.Fields{
-				"connID":       connID,
-				"deviceId":     deviceId,
-				"remoteAddr":   conn.RemoteAddr().String(),
-				"lastActivity": lastActivity.Format(constants.TimeFormatDefault),
-				"idleTime":     now.Sub(lastActivity).String(),
-				"timeout":      h.timeout.String(),
-			}).Warn("连接长时间无活动 (自定义心跳)，判定为断开")
-			connectionsToDisconnect = append(connectionsToDisconnect, conn)
-		}
-		return true
-	})
-
-	for _, conn := range connectionsToDisconnect {
-		h.onRemoteNotAlive(conn)
-		disconnectCount++
-	}
-
-	if disconnectCount > 0 {
-		logger.WithFields(logrus.Fields{
-			"count": disconnectCount,
-		}).Info("已断开不活跃连接")
 	}
 }
 

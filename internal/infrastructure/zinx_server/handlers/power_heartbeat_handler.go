@@ -13,13 +13,12 @@ import (
 	"github.com/bujia-iot/iot-zinx/pkg/network"
 	"github.com/bujia-iot/iot-zinx/pkg/notification"
 	"github.com/bujia-iot/iot-zinx/pkg/protocol"
-	"github.com/bujia-iot/iot-zinx/pkg/session"
 	"github.com/sirupsen/logrus"
 )
 
 // PowerHeartbeatHandler 处理功率心跳 (命令ID: 0x06)
 type PowerHeartbeatHandler struct {
-	protocol.DNYFrameHandlerBase
+	protocol.SimpleHandlerBase
 	// 🔧 修复：添加心跳去重机制，解决重复请求导致的写缓冲区堆积
 	lastHeartbeatTime    map[string]time.Time // deviceID -> 最后心跳时间
 	heartbeatMutex       sync.RWMutex         // 保护心跳时间映射
@@ -111,7 +110,7 @@ func (h *PowerHeartbeatHandler) Handle(request ziface.IRequest) {
 }
 
 // processPowerHeartbeat 处理功率心跳业务逻辑
-func (h *PowerHeartbeatHandler) processPowerHeartbeat(decodedFrame *protocol.DecodedDNYFrame, conn ziface.IConnection, deviceSession *session.DeviceSession) {
+func (h *PowerHeartbeatHandler) processPowerHeartbeat(decodedFrame *protocol.DecodedDNYFrame, conn ziface.IConnection, deviceSession *protocol.DeviceSession) {
 	// 从RawPhysicalID提取uint32值
 	physicalId := binary.LittleEndian.Uint32(decodedFrame.RawPhysicalID)
 	messageID := decodedFrame.MessageID
@@ -226,8 +225,8 @@ func (h *PowerHeartbeatHandler) processPowerHeartbeat(decodedFrame *protocol.Dec
 	}
 
 	// 更新心跳时间
-	// 🚀 重构：使用统一TCP管理器更新心跳时间
-	tcpManager := core.GetGlobalUnifiedTCPManager()
+	// 简化：使用简化的TCP管理器更新心跳时间
+	tcpManager := core.GetGlobalTCPManager()
 	if tcpManager != nil {
 		if session, exists := tcpManager.GetSessionByConnID(conn.GetConnID()); exists {
 			tcpManager.UpdateHeartbeat(session.DeviceID)

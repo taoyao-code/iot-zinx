@@ -9,18 +9,16 @@ import (
 	"github.com/aceld/zinx/ziface"
 	"github.com/bujia-iot/iot-zinx/internal/infrastructure/logger"
 	"github.com/bujia-iot/iot-zinx/pkg/constants"
-	"github.com/bujia-iot/iot-zinx/pkg/core"
 	"github.com/bujia-iot/iot-zinx/pkg/network"
 	"github.com/bujia-iot/iot-zinx/pkg/notification"
 	"github.com/bujia-iot/iot-zinx/pkg/protocol"
-	"github.com/bujia-iot/iot-zinx/pkg/session"
 	"github.com/sirupsen/logrus"
 )
 
 // PortPowerHeartbeatHandler 处理端口充电时功率心跳包 (命令ID: 0x26)
 // 这是06指令的扩展版本，包含更多详细的功率和状态信息
 type PortPowerHeartbeatHandler struct {
-	protocol.DNYFrameHandlerBase
+	protocol.SimpleHandlerBase
 	// 心跳去重机制
 	lastHeartbeatTime map[string]time.Time
 	heartbeatMutex    sync.RWMutex
@@ -77,13 +75,6 @@ func (h *PortPowerHeartbeatHandler) Handle(request ziface.IRequest) {
 		return
 	}
 
-	// 3. 获取设备会话
-	deviceSession, err := h.GetOrCreateDeviceSession(conn)
-	if err != nil {
-		h.HandleError("PortPowerHeartbeatHandler", err, conn)
-		return
-	}
-
 	// 4. 检查心跳去重
 	physicalId := binary.LittleEndian.Uint32(decodedFrame.RawPhysicalID)
 	deviceId := fmt.Sprintf("%08X", physicalId)
@@ -100,11 +91,11 @@ func (h *PortPowerHeartbeatHandler) Handle(request ziface.IRequest) {
 	}
 
 	// 5. 处理端口功率心跳业务逻辑
-	h.processPortPowerHeartbeat(decodedFrame, conn, deviceSession)
+	h.processPortPowerHeartbeat(decodedFrame, conn)
 }
 
 // processPortPowerHeartbeat 处理端口功率心跳业务逻辑
-func (h *PortPowerHeartbeatHandler) processPortPowerHeartbeat(decodedFrame *protocol.DecodedDNYFrame, conn ziface.IConnection, deviceSession *session.DeviceSession) {
+func (h *PortPowerHeartbeatHandler) processPortPowerHeartbeat(decodedFrame *protocol.DecodedDNYFrame, conn ziface.IConnection) {
 	// 从RawPhysicalID提取uint32值
 	physicalId := binary.LittleEndian.Uint32(decodedFrame.RawPhysicalID)
 	messageID := decodedFrame.MessageID
@@ -139,13 +130,6 @@ func (h *PortPowerHeartbeatHandler) processPortPowerHeartbeat(decodedFrame *prot
 	logger.WithFields(logFields).Info("⚡ 端口功率心跳包处理完成")
 
 	// 更新心跳时间
-	// 🚀 重构：使用统一TCP管理器更新心跳时间
-	tcpManager := core.GetGlobalUnifiedTCPManager()
-	if tcpManager != nil {
-		if session, exists := tcpManager.GetSessionByConnID(conn.GetConnID()); exists {
-			tcpManager.UpdateHeartbeat(session.DeviceID)
-		}
-	}
 
 	// 更新连接活动时间
 	network.UpdateConnectionActivity(conn)

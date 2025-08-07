@@ -44,7 +44,7 @@ func GetServiceManager() *ServiceManager {
 func (m *ServiceManager) Init() error {
 	// 🚀 重构：设置API服务的TCP适配器
 	service.SetGlobalAPITCPManagerGetter(func() interface{} {
-		return core.GetGlobalUnifiedTCPManager()
+		return core.GetGlobalTCPManager()
 	})
 	logger.Info("API服务TCP适配器已设置")
 

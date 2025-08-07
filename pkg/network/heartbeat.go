@@ -7,7 +7,6 @@ import (
 	"github.com/aceld/zinx/ziface"
 	"github.com/bujia-iot/iot-zinx/internal/infrastructure/logger"
 	"github.com/bujia-iot/iot-zinx/pkg/constants"
-	"github.com/bujia-iot/iot-zinx/pkg/session"
 	"github.com/sirupsen/logrus"
 )
 
@@ -230,12 +229,10 @@ func OnDeviceNotAlive(conn ziface.IConnection) {
 			"reason":     "unregistered_device_timeout",
 		}).Debug("未注册设备连接心跳超时，关闭连接")
 
-		// 未注册设备超时，通过DeviceSession管理状态
-		deviceSession := session.GetDeviceSession(conn)
-		if deviceSession != nil {
-			deviceSession.UpdateStatus(constants.DeviceStatusOffline)
-			deviceSession.SyncToConnection(conn)
-		}
+		// 未注册设备超时，记录日志
+		logger.WithFields(logrus.Fields{
+			"connID": conn.GetConnID(),
+		}).Info("未注册设备心跳超时，连接将被关闭")
 		conn.Stop()
 		return
 	}
@@ -286,12 +283,11 @@ func OnDeviceNotAlive(conn ziface.IConnection) {
 		}
 	}
 
-	// 通过DeviceSession管理连接状态
-	deviceSession := session.GetDeviceSession(conn)
-	if deviceSession != nil {
-		deviceSession.UpdateStatus(constants.DeviceStatusOffline)
-		deviceSession.SyncToConnection(conn)
-	}
+	// 记录设备离线状态
+	logger.WithFields(logrus.Fields{
+		"deviceID": deviceID,
+		"connID":   conn.GetConnID(),
+	}).Info("设备心跳超时，标记为离线")
 
 	// 关闭连接
 	conn.Stop()

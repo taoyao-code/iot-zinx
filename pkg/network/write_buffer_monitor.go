@@ -6,7 +6,6 @@ import (
 
 	"github.com/aceld/zinx/ziface"
 	"github.com/bujia-iot/iot-zinx/internal/infrastructure/logger"
-	"github.com/bujia-iot/iot-zinx/pkg/session"
 	"github.com/sirupsen/logrus"
 )
 
@@ -178,45 +177,6 @@ func (wbm *WriteBufferMonitor) checkConnectionHealth(conn ziface.IConnection, de
 	if conn == nil {
 		return false
 	}
-
-	// 获取设备会话
-	deviceSession := session.GetDeviceSession(conn)
-	if deviceSession == nil {
-		return false
-	}
-
-	// 检查写缓冲区健康状态
-	healthy, err := deviceSession.CheckWriteBufferHealth()
-	if err != nil {
-		logger.WithFields(logrus.Fields{
-			"connID":   conn.GetConnID(),
-			"deviceID": deviceId,
-			"error":    err,
-		}).Debug("写缓冲区健康检查失败")
-		return false
-	}
-
-	if !healthy {
-		// 连接不健康，强制断开
-		reason := "写缓冲区不健康"
-		if err := deviceSession.ForceDisconnectIfUnhealthy(conn, reason); err != nil {
-			logger.WithFields(logrus.Fields{
-				"connID":   conn.GetConnID(),
-				"deviceID": deviceId,
-				"error":    err,
-			}).Error("强制断开不健康连接失败")
-			return false
-		}
-
-		logger.WithFields(logrus.Fields{
-			"connID":   conn.GetConnID(),
-			"deviceID": deviceId,
-			"reason":   reason,
-		}).Warn("已强制断开不健康连接")
-
-		return true
-	}
-
 	return false
 }
 

@@ -9,17 +9,16 @@ import (
 	"github.com/aceld/zinx/ziface"
 	"github.com/bujia-iot/iot-zinx/internal/domain/dny_protocol"
 	"github.com/bujia-iot/iot-zinx/internal/infrastructure/logger"
-	"github.com/bujia-iot/iot-zinx/pkg"
 	"github.com/bujia-iot/iot-zinx/pkg/constants"
+	"github.com/bujia-iot/iot-zinx/pkg/core"
 	"github.com/bujia-iot/iot-zinx/pkg/notification"
 	"github.com/bujia-iot/iot-zinx/pkg/protocol"
-	"github.com/bujia-iot/iot-zinx/pkg/session"
 	"github.com/sirupsen/logrus"
 )
 
 // HeartbeatHandler 处理设备心跳包 (命令ID: 0x01 & 0x21)
 type HeartbeatHandler struct {
-	protocol.DNYFrameHandlerBase
+	protocol.SimpleHandlerBase
 }
 
 // Handle 处理设备心跳请求
@@ -60,7 +59,7 @@ func (h *HeartbeatHandler) Handle(request ziface.IRequest) {
 }
 
 // processHeartbeat 处理心跳业务逻辑
-func (h *HeartbeatHandler) processHeartbeat(decodedFrame *protocol.DecodedDNYFrame, conn ziface.IConnection, deviceSession *session.DeviceSession) {
+func (h *HeartbeatHandler) processHeartbeat(decodedFrame *protocol.DecodedDNYFrame, conn ziface.IConnection, deviceSession *protocol.DeviceSession) {
 	// 从解码帧获取设备信息
 	deviceId := decodedFrame.DeviceID
 	data := decodedFrame.Payload
@@ -140,8 +139,14 @@ func (h *HeartbeatHandler) processHeartbeat(decodedFrame *protocol.DecodedDNYFra
 	}).Debug("🔧 心跳设备ID匹配检查")
 
 	// 🔧 修复：设备组心跳处理 - 如果设备组不存在，记录但不中断处理
-	unifiedSystem := pkg.GetUnifiedSystem()
-	heartbeatErr := unifiedSystem.GroupManager.HandleHeartbeat(deviceId, conn)
+	// 简化：移除对统一系统的依赖
+	// unifiedSystem := pkg.GetUnifiedSystem()
+	// 简化：使用TCP管理器处理心跳
+	tcpManager := core.GetGlobalTCPManager()
+	var heartbeatErr error
+	if tcpManager != nil {
+		heartbeatErr = tcpManager.UpdateHeartbeat(deviceId)
+	}
 	if heartbeatErr != nil {
 		if strings.Contains(heartbeatErr.Error(), "设备组不存在") {
 			// 设备组不存在是正常情况（心跳可能在注册之前到达）
@@ -160,17 +165,6 @@ func (h *HeartbeatHandler) processHeartbeat(decodedFrame *protocol.DecodedDNYFra
 			return
 		}
 	}
-
-	// 确保设备在连接组中（通过连接组管理器验证）
-	// groupManager := monitor.GetGlobalConnectionGroupManager()
-	// if !group.HasDevice(deviceId) {
-	// 	logger.WithFields(logrus.Fields{
-	// 		"connID":   conn.GetConnID(),
-	// 		"deviceID": deviceId,
-	// 	}).Error("设备不在连接组中，数据不一致")
-	// 	return
-	// }
-
 	// 记录设备心跳
 	now := time.Now()
 	nowStr := now.Format(constants.TimeFormatDefault)
@@ -188,9 +182,15 @@ func (h *HeartbeatHandler) processHeartbeat(decodedFrame *protocol.DecodedDNYFra
 
 // updateHeartbeatTime 更新心跳时间 - 使用统一架构
 func (h *HeartbeatHandler) updateHeartbeatTime(conn ziface.IConnection, _ interface{}) {
-	// 🔧 使用统一架构：统一处理心跳时间更新
-	unifiedSystem := pkg.GetUnifiedSystem()
-	unifiedSystem.Monitor.UpdateLastHeartbeatTime(conn)
+	// 简化：使用TCP管理器更新心跳时间
+	tcpManager := core.GetGlobalTCPManager()
+	if tcpManager != nil {
+		// 通过连接ID查找设备并更新心跳
+		connID := conn.GetConnID()
+		if session, exists := tcpManager.GetSessionByConnID(connID); exists {
+			tcpManager.UpdateHeartbeat(session.DeviceID)
+		}
+	}
 
 	logger.WithFields(logrus.Fields{
 		"connID":    conn.GetConnID(),
@@ -200,7 +200,7 @@ func (h *HeartbeatHandler) updateHeartbeatTime(conn ziface.IConnection, _ interf
 
 // parseSimplifiedHeartbeatPortStatus 解析0x21简化心跳包中的端口状态
 // 数据格式：电压(2字节) + 端口数量(1字节) + 各端口状态(n字节)
-func (h *HeartbeatHandler) parseSimplifiedHeartbeatPortStatus(data []byte, deviceId string, conn ziface.IConnection, deviceSession *session.DeviceSession) {
+func (h *HeartbeatHandler) parseSimplifiedHeartbeatPortStatus(data []byte, deviceId string, conn ziface.IConnection, deviceSession *protocol.DeviceSession) {
 	if len(data) < 4 {
 		logger.WithFields(logrus.Fields{
 			"connID":   conn.GetConnID(),
@@ -252,7 +252,7 @@ func (h *HeartbeatHandler) parseSimplifiedHeartbeatPortStatus(data []byte, devic
 }
 
 // monitorChargingStatusChanges 监控充电状态变化
-func (h *HeartbeatHandler) monitorChargingStatusChanges(deviceId string, portStatuses []uint8, conn ziface.IConnection, deviceSession *session.DeviceSession) {
+func (h *HeartbeatHandler) monitorChargingStatusChanges(deviceId string, portStatuses []uint8, conn ziface.IConnection, deviceSession *protocol.DeviceSession) {
 	for portIndex, status := range portStatuses {
 		portNumber := portIndex + 1
 

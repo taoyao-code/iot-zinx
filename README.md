@@ -92,22 +92,21 @@ case "error":       // 解析错误
 ```go
 import "github.com/bujia-iot/iot-zinx/pkg"
 
-// 初始化统一架构（v2.0.0+）
-pkg.InitUnifiedArchitecture()
+// 初始化基础架构
+pkg.InitBasicArchitecture()
 
 // 使用协议相关功能
 packet := pkg.Protocol.NewDNYDataPackFactory().NewDataPack(true)
-result := pkg.Protocol.ParseDNYProtocol(data)
+result := pkg.Protocol.ParseDNYData(data)
 pkg.Protocol.SendDNYResponse(conn, physicalId, messageId, command, data)
 
 // 使用网络相关功能
-hooks := pkg.Network.NewConnectionHooks(60*time.Second, 60*time.Second, 120*time.Second)
 cmdMgr := pkg.Network.GetCommandManager()
 
-// 使用监控相关功能
-monitor := pkg.Monitor.GetGlobalMonitor()
-monitor.BindDeviceIdToConnection(deviceId, conn)
-monitor.UpdateLastHeartbeatTime(conn)
+// 使用核心TCP管理器
+tcpManager := pkg.Core.GetGlobalTCPManager()
+tcpManager.RegisterDevice(conn, deviceId, physicalId, iccid)
+tcpManager.UpdateHeartbeat(deviceId)
 ```
 
 详细说明请参考 [pkg/README.md](pkg/README.md)。

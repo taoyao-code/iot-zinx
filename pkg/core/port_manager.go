@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/bujia-iot/iot-zinx/internal/infrastructure/logger"
+	"github.com/bujia-iot/iot-zinx/pkg/constants"
 	"github.com/sirupsen/logrus"
 )
 
@@ -60,7 +61,7 @@ var (
 // GetPortManager 获取全局端口管理器
 func GetPortManager() *PortManager {
 	globalPortManagerOnce.Do(func() {
-		globalPortManager = NewPortManager(MaxPortNumber)
+		globalPortManager = NewPortManager(constants.MaxPortNumber)
 		logger.Info("统一端口管理器已初始化")
 	})
 	return globalPortManager
@@ -118,9 +119,9 @@ func (pm *PortManager) SetDebounceInterval(interval time.Duration) {
 // APIToProtocol 将API端口号(1-based)转换为协议端口号(0-based)
 // 这是解决端口号混乱的核心方法
 func (pm *PortManager) APIToProtocol(apiPort int) (int, error) {
-	if apiPort < MinPortNumber || apiPort > MaxPortNumber {
+	if apiPort < constants.MinPortNumber || apiPort > constants.MaxPortNumber {
 		return 0, fmt.Errorf("API端口号超出范围: %d (有效范围: %d-%d)",
-			apiPort, MinPortNumber, MaxPortNumber)
+			apiPort, constants.MinPortNumber, constants.MaxPortNumber)
 	}
 
 	protocolPort := apiPort - 1 // 1-based -> 0-based
@@ -154,9 +155,9 @@ func (pm *PortManager) ProtocolToAPI(protocolPort int) (int, error) {
 
 // ValidateAPIPort 验证API端口号
 func (pm *PortManager) ValidateAPIPort(apiPort int) error {
-	if apiPort < MinPortNumber || apiPort > MaxPortNumber {
+	if apiPort < constants.MinPortNumber || apiPort > constants.MaxPortNumber {
 		return fmt.Errorf("API端口号无效: %d (有效范围: %d-%d)",
-			apiPort, MinPortNumber, MaxPortNumber)
+			apiPort, constants.MinPortNumber, constants.MaxPortNumber)
 	}
 	return nil
 }

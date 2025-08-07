@@ -10,16 +10,14 @@ import (
 	"github.com/bujia-iot/iot-zinx/internal/domain/dny_protocol"
 	"github.com/bujia-iot/iot-zinx/internal/infrastructure/logger"
 	"github.com/bujia-iot/iot-zinx/pkg/constants"
-	"github.com/bujia-iot/iot-zinx/pkg/core"
 	"github.com/bujia-iot/iot-zinx/pkg/notification"
 	"github.com/bujia-iot/iot-zinx/pkg/protocol"
-	"github.com/bujia-iot/iot-zinx/pkg/session"
 	"github.com/sirupsen/logrus"
 )
 
 // SettlementHandler 处理结算数据上报 (命令ID: 0x03)
 type SettlementHandler struct {
-	protocol.DNYFrameHandlerBase
+	protocol.SimpleHandlerBase
 }
 
 // Handle 处理结算数据上报
@@ -64,7 +62,7 @@ func (h *SettlementHandler) Handle(request ziface.IRequest) {
 }
 
 // processSettlement 处理结算业务逻辑
-func (h *SettlementHandler) processSettlement(decodedFrame *protocol.DecodedDNYFrame, conn ziface.IConnection, deviceSession *session.DeviceSession) {
+func (h *SettlementHandler) processSettlement(decodedFrame *protocol.DecodedDNYFrame, conn ziface.IConnection, deviceSession *protocol.DeviceSession) {
 	// 从RawPhysicalID提取uint32值
 	physicalId := binary.LittleEndian.Uint32(decodedFrame.RawPhysicalID)
 	messageID := decodedFrame.MessageID
@@ -196,10 +194,4 @@ func (h *SettlementHandler) processSettlement(decodedFrame *protocol.DecodedDNYF
 
 	// 更新心跳时间
 	// 🚀 重构：使用统一TCP管理器更新心跳时间
-	tcpManager := core.GetGlobalUnifiedTCPManager()
-	if tcpManager != nil {
-		if session, exists := tcpManager.GetSessionByConnID(conn.GetConnID()); exists {
-			tcpManager.UpdateHeartbeat(session.DeviceID)
-		}
-	}
 }

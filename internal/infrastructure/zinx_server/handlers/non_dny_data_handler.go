@@ -44,7 +44,7 @@ func (h *NonDNYDataHandler) Handle(request ziface.IRequest) {
 
 	// 为防止连接被意外关闭，更新心跳时间
 	// 🚀 重构：使用统一TCP管理器更新心跳时间
-	tcpManager := core.GetGlobalUnifiedTCPManager()
+	tcpManager := core.GetGlobalTCPManager()
 	if tcpManager != nil {
 		// 获取设备ID并更新心跳
 		if session, exists := tcpManager.GetSessionByConnID(conn.GetConnID()); exists {

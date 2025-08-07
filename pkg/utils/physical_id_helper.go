@@ -6,7 +6,6 @@ import (
 
 	"github.com/aceld/zinx/ziface"
 	"github.com/bujia-iot/iot-zinx/pkg/constants"
-	"github.com/bujia-iot/iot-zinx/pkg/session"
 )
 
 // GetPhysicalIDFromConnection 从连接中获取PhysicalID
@@ -22,18 +21,6 @@ func GetPhysicalIDFromConnection(conn ziface.IConnection) (uint32, string, error
 		}
 	}
 	return 0, "", fmt.Errorf("未找到有效的PhysicalID")
-}
-
-// SetPhysicalIDToConnection 设置PhysicalID到连接属性
-func SetPhysicalIDToConnection(conn ziface.IConnection, physicalID uint32) {
-	physicalIDStr := fmt.Sprintf("0x%08X", physicalID)
-
-	// 通过DeviceSession管理物理ID
-	deviceSession := session.GetDeviceSession(conn)
-	if deviceSession != nil {
-		deviceSession.SetPhysicalID(physicalIDStr)
-		deviceSession.SyncToConnection(conn)
-	}
 }
 
 // FormatPhysicalID 格式化PhysicalID为8位十六进制字符串

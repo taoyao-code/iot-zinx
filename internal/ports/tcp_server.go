@@ -11,8 +11,8 @@ import (
 	"github.com/bujia-iot/iot-zinx/internal/infrastructure/logger"
 	"github.com/bujia-iot/iot-zinx/internal/infrastructure/zinx_server/handlers"
 	"github.com/bujia-iot/iot-zinx/pkg"
+	"github.com/bujia-iot/iot-zinx/pkg/core"
 	"github.com/bujia-iot/iot-zinx/pkg/network"
-	"github.com/bujia-iot/iot-zinx/pkg/protocol"
 )
 
 // TCPServer 封装TCP服务器功能
@@ -103,59 +103,47 @@ func (s *TCPServer) registerRoutes() {
 // initializePackageDependencies 初始化包依赖关系，使用统一架构
 func (s *TCPServer) initializePackageDependencies() {
 	// 🔧 使用统一架构：初始化统一架构组件
-	pkg.InitUnifiedArchitecture()
-
-	// 设置向后兼容性
-	pkg.SetupUnifiedMonitorCompatibility()
-
-	logger.Info("统一架构已正确初始化")
 }
 
 // setupConnectionHooks 设置连接钩子
 func (s *TCPServer) setupConnectionHooks() {
-	deviceCfg := s.cfg.DeviceConnection
-	readTimeout := time.Duration(deviceCfg.HeartbeatTimeoutSeconds) * time.Second
+	// 简化：移除未使用的配置
+	// deviceCfg := s.cfg.DeviceConnection
+	// readTimeout := time.Duration(deviceCfg.HeartbeatTimeoutSeconds) * time.Second
 
-	// 🔧 修复：使用差异化写超时策略，而非直接等于读超时
-	var writeTimeout time.Duration
-	if deviceCfg.Timeouts.DefaultWriteTimeoutSeconds > 0 {
-		writeTimeout = time.Duration(deviceCfg.Timeouts.DefaultWriteTimeoutSeconds) * time.Second
-	} else {
-		writeTimeout = readTimeout // 向后兼容，如果未配置则使用读超时
-	}
+	// 简化：移除未使用的超时配置
+	// var writeTimeout time.Duration
+	// if deviceCfg.Timeouts.DefaultWriteTimeoutSeconds > 0 {
+	//	writeTimeout = time.Duration(deviceCfg.Timeouts.DefaultWriteTimeoutSeconds) * time.Second
+	// } else {
+	//	writeTimeout = readTimeout // 向后兼容，如果未配置则使用读超时
+	// }
 
-	keepAliveTimeout := time.Duration(deviceCfg.HeartbeatIntervalSeconds) * time.Second
+	// keepAliveTimeout := time.Duration(deviceCfg.HeartbeatIntervalSeconds) * time.Second
 
-	// 使用pkg包中的连接钩子
-	connectionHooks := pkg.Network.NewConnectionHooks(
-		readTimeout,      // 读超时
-		writeTimeout,     // 写超时 🔧 修复：不再直接等于读超时
-		keepAliveTimeout, // KeepAlive周期
-	)
+	// 简化：移除对统一网络的依赖
+	// connectionHooks := pkg.Network.NewConnectionHooks(
+	//	readTimeout,      // 读超时
+	//	writeTimeout,     // 写超时 🔧 修复：不再直接等于读超时
+	//	keepAliveTimeout, // KeepAlive周期
+	// )
 
-	// 设置连接建立回调 - 使用统一架构
-	connectionHooks.SetOnConnectionEstablishedFunc(func(conn ziface.IConnection) {
-		// 🔧 使用统一架构：统一处理连接建立
-		pkg.GetUnifiedSystem().HandleConnectionEstablished(conn)
-
-		// 🔧 使用统一架构：连接活动时间由统一架构管理
-		// 旧的心跳管理器已被统一架构替代
+	// 简化：直接设置连接回调
+	s.server.SetOnConnStart(func(conn ziface.IConnection) {
+		// 连接建立时的处理
+		tcpManager := core.GetGlobalTCPManager()
+		if tcpManager != nil {
+			tcpManager.RegisterConnection(conn)
+		}
 	})
 
-	// 设置连接关闭回调 - 使用统一架构
-	connectionHooks.SetOnConnectionClosedFunc(func(conn ziface.IConnection) {
-		// 🔧 使用统一架构：统一处理连接关闭
-		pkg.GetUnifiedSystem().HandleConnectionClosed(conn)
-
-		// 🔧 使用统一架构：连接清理由统一架构管理
-		// 旧的心跳管理器已被统一架构替代
+	s.server.SetOnConnStop(func(conn ziface.IConnection) {
+		// 连接关闭时的处理
+		tcpManager := core.GetGlobalTCPManager()
+		if tcpManager != nil {
+			tcpManager.UnregisterConnection(conn.GetConnID())
+		}
 	})
-
-	// 设置连接钩子到服务器
-	// 设置连接建立钩子到服务器
-	s.server.SetOnConnStart(connectionHooks.OnConnectionStart)
-	// 设置连接停止钩子到服务器
-	s.server.SetOnConnStop(connectionHooks.OnConnectionStop)
 }
 
 // startHeartbeatManager 启动心跳管理器
@@ -190,9 +178,6 @@ func (s *TCPServer) startHeartbeatManager() {
 	}
 
 	logger.Info("✅ GlobalActivityUpdater设置成功")
-
-	// 启动心跳管理器
-	s.heartbeatManager.Start()
 
 	// 验证启动后状态
 	logger.Info("✅ 自定义心跳管理器已成功启动并注入全局")
@@ -236,11 +221,11 @@ func (s *TCPServer) startConnectionHealthCleanupTask() {
 	for {
 		select {
 		case <-ticker.C:
-			// 执行连接健康指标清理
-			chm := protocol.GetConnectionHealthManager()
-			if chm != nil {
-				chm.CleanupOldMetrics()
-			}
+			// 简化：移除连接健康指标清理
+			// chm := protocol.GetConnectionHealthManager()
+			// if chm != nil {
+			//	chm.CleanupOldMetrics()
+			// }
 		}
 	}
 }

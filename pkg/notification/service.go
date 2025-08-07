@@ -536,41 +536,6 @@ func (s *NotificationService) updateStats(endpointName string, success bool, res
 	}
 }
 
-// GetStats 获取统计信息
-func (s *NotificationService) GetStats() *NotificationStats {
-	s.statsMu.RLock()
-	defer s.statsMu.RUnlock()
-
-	// 深拷贝统计信息
-	statsCopy := &NotificationStats{
-		TotalSent:       s.stats.TotalSent,
-		TotalSuccess:    s.stats.TotalSuccess,
-		TotalFailed:     s.stats.TotalFailed,
-		TotalRetried:    s.stats.TotalRetried,
-		SuccessRate:     s.stats.SuccessRate,
-		AvgResponseTime: s.stats.AvgResponseTime,
-		LastUpdateTime:  s.stats.LastUpdateTime,
-		EndpointStats:   make(map[string]*EndpointStats),
-	}
-
-	// 拷贝端点统计
-	for name, stats := range s.stats.EndpointStats {
-		statsCopy.EndpointStats[name] = &EndpointStats{
-			Name:            stats.Name,
-			TotalSent:       stats.TotalSent,
-			TotalSuccess:    stats.TotalSuccess,
-			TotalFailed:     stats.TotalFailed,
-			TotalRetried:    stats.TotalRetried,
-			SuccessRate:     stats.SuccessRate,
-			AvgResponseTime: stats.AvgResponseTime,
-			LastSuccess:     stats.LastSuccess,
-			LastFailure:     stats.LastFailure,
-		}
-	}
-
-	return statsCopy
-}
-
 // loadRetryEvents 从Redis加载重试事件
 func (s *NotificationService) loadRetryEvents() {
 	// TODO: 实现Redis重试事件加载

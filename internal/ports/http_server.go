@@ -33,9 +33,6 @@ func StartHTTPServer() error {
 	// 注册API路由
 	registerHTTPHandlers(r)
 
-	// 注册通知相关路由
-	http.RegisterNotificationRoutes(r)
-
 	// 注册设备控制相关路由
 	http.RegisterDeviceControlRoutes(r)
 
@@ -54,19 +51,20 @@ func registerHTTPHandlers(r *gin.Engine) {
 	api := r.Group("/api/v1")
 	{
 		// 设备相关API
-		api.GET("/devices", http.HandleDeviceList)
-		api.GET("/device/:deviceId/status", http.HandleDeviceStatus)
-		api.POST("/device/command", http.HandleSendCommand)
-		api.POST("/device/locate", http.HandleDeviceLocate) // 设备定位功能
+		api.GET("/devices", http.GetDeviceList)
+		api.GET("/device/:deviceId", http.GetDeviceInfo)
+		// api.POST("/device/command", http.HandleSendCommand) // 已删除
+		// api.POST("/device/locate", http.HandleDeviceLocate) // 设备定位功能 - 已删除
 		// DNY协议命令API
-		api.POST("/command/dny", http.HandleSendDNYCommand)
-		api.GET("/device/:deviceId/query", http.HandleQueryDeviceStatus)
+		// api.POST("/command/dny", http.HandleSendDNYCommand) // 已删除
+		// api.GET("/device/:deviceId/query", http.HandleQueryDeviceStatus) // 已删除
 		// 充电控制API
-		api.POST("/charging/start", http.HandleStartCharging)
-		api.POST("/charging/stop", http.HandleStopCharging)
+		// api.POST("/charging/start", http.HandleStartCharging) // 已删除
+		// api.POST("/charging/stop", http.HandleStopCharging) // 已删除
 	}
 	// 健康检查（根路径）
-	api.GET("/health", http.HandleHealthCheck)
+	api.GET("/health", http.HealthCheck)
+	api.GET("/stats", http.GetSystemStats)
 
 	// 调试API - 显示所有路由
 	// @Summary 获取所有路由

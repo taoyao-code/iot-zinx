@@ -10,13 +10,12 @@ import (
 	"github.com/bujia-iot/iot-zinx/pkg/constants"
 	"github.com/bujia-iot/iot-zinx/pkg/network"
 	"github.com/bujia-iot/iot-zinx/pkg/protocol"
-	"github.com/bujia-iot/iot-zinx/pkg/session"
 	"github.com/sirupsen/logrus"
 )
 
 // MainHeartbeatHandler 处理主机心跳包 (命令ID: 0x11)
 type MainHeartbeatHandler struct {
-	protocol.DNYFrameHandlerBase
+	protocol.SimpleHandlerBase
 }
 
 // Handle 处理主机心跳请求
@@ -75,7 +74,7 @@ func (h *MainHeartbeatHandler) ValidateFrame(decodedFrame *protocol.DecodedDNYFr
 }
 
 // processMainHeartbeat 处理主机心跳业务逻辑
-func (h *MainHeartbeatHandler) processMainHeartbeat(decodedFrame *protocol.DecodedDNYFrame, conn ziface.IConnection, deviceSession *session.DeviceSession) {
+func (h *MainHeartbeatHandler) processMainHeartbeat(decodedFrame *protocol.DecodedDNYFrame, conn ziface.IConnection, deviceSession *protocol.DeviceSession) {
 	// 从解码帧获取设备信息
 	deviceId := decodedFrame.DeviceID
 	data := decodedFrame.Payload
@@ -119,7 +118,7 @@ func (h *MainHeartbeatHandler) processMainHeartbeat(decodedFrame *protocol.Decod
 }
 
 // updateMainHeartbeatTime 更新主机心跳时间
-func (h *MainHeartbeatHandler) updateMainHeartbeatTime(conn ziface.IConnection, deviceSession *session.DeviceSession) {
+func (h *MainHeartbeatHandler) updateMainHeartbeatTime(conn ziface.IConnection, deviceSession *protocol.DeviceSession) {
 	// 通过DeviceSession管理心跳时间
 	if deviceSession != nil {
 		deviceSession.UpdateHeartbeat()

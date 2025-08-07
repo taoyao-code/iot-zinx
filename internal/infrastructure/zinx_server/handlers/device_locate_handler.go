@@ -11,7 +11,7 @@ import (
 
 // DeviceLocateHandler 设备定位处理器 - 处理0x96声光寻找设备功能
 type DeviceLocateHandler struct {
-	*protocol.DNYFrameHandlerBase
+	protocol.SimpleHandlerBase
 }
 
 // PreHandle 前置处理
@@ -26,9 +26,7 @@ func (h *DeviceLocateHandler) PostHandle(request ziface.IRequest) {
 
 // NewDeviceLocateHandler 创建设备定位处理器
 func NewDeviceLocateHandler() *DeviceLocateHandler {
-	return &DeviceLocateHandler{
-		DNYFrameHandlerBase: &protocol.DNYFrameHandlerBase{},
-	}
+	return &DeviceLocateHandler{}
 }
 
 // Handle 处理设备定位响应
