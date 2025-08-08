@@ -488,9 +488,9 @@ func (m *TCPManager) GetDeviceListForAPI() ([]map[string]interface{}, error) {
 
 	apiDevices := make([]map[string]interface{}, 0, len(sessions))
 	for deviceID, session := range sessions {
-		// 计算在线指标：心跳超时内且状态为online
+		// 计算在线指标：心跳超时内且状态为online；注册状态也视为“在线候选”
 		timeout := m.config.HeartbeatTimeout
-		isOnline := session.DeviceStatus == constants.DeviceStatusOnline
+		isOnline := session.DeviceStatus == constants.DeviceStatusOnline || session.State == constants.StateRegistered
 		if timeout > 0 {
 			if session.LastActivity.IsZero() {
 				isOnline = false
@@ -500,19 +500,29 @@ func (m *TCPManager) GetDeviceListForAPI() ([]map[string]interface{}, error) {
 		}
 
 		device := map[string]interface{}{
-			"deviceId":       deviceID,
-			"connId":         session.ConnID,
-			"remoteAddr":     session.RemoteAddr,
-			"physicalId":     session.PhysicalID,
-			"iccid":          session.ICCID,
-			"deviceType":     session.DeviceType,
-			"deviceVersion":  session.DeviceVersion,
-			"state":          string(session.State),
-			"status":         string(session.DeviceStatus),
-			"connectedAt":    session.ConnectedAt,
-			"lastActivity":   session.LastActivity,
-			"lastHeartbeat":  session.LastHeartbeat.Unix(),
-			"heartbeatTime":  session.LastHeartbeat.Format("2006-01-02 15:04:05"),
+			"deviceId":      deviceID,
+			"connId":        session.ConnID,
+			"remoteAddr":    session.RemoteAddr,
+			"physicalId":    session.PhysicalID,
+			"iccid":         session.ICCID,
+			"deviceType":    session.DeviceType,
+			"deviceVersion": session.DeviceVersion,
+			"state":         string(session.State),
+			"status":        string(session.DeviceStatus),
+			"connectedAt":   session.ConnectedAt,
+			"lastActivity":  session.LastActivity,
+			"lastHeartbeat": func() int64 {
+				if session.LastHeartbeat.IsZero() {
+					return 0
+				}
+				return session.LastHeartbeat.Unix()
+			}(),
+			"heartbeatTime": func() string {
+				if session.LastHeartbeat.IsZero() {
+					return ""
+				}
+				return session.LastHeartbeat.Format("2006-01-02 15:04:05")
+			}(),
 			"heartbeatCount": session.HeartbeatCount,
 			"commandCount":   session.CommandCount,
 			"isOnline":       isOnline,

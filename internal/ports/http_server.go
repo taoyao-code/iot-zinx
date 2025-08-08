@@ -64,7 +64,7 @@ func registerHTTPHandlers(r *gin.Engine) {
 		api.POST("/charging/start", http.HandleStartCharging)
 		api.POST("/charging/stop", http.HandleStopCharging)
 	}
-	// 健康检查（根路径）
+	// 系统监控（v1 路径）
 	api.GET("/health", http.HandleHealthCheck)
 	api.GET("/stats", http.HandleSystemStats)
 
@@ -75,7 +75,7 @@ func registerHTTPHandlers(r *gin.Engine) {
 	// @Accept json
 	// @Produce json
 	// @Success 200 {object} APIResponse{data=RoutesResponse} "路由列表"
-	// @Router /routes [get]
+	// @Router /api/v1/routes [get]
 	api.GET("/routes", func(c *gin.Context) {
 		var routes []http.RouteInfo
 		for _, routeInfo := range r.Routes() {

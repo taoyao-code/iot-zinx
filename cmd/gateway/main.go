@@ -67,6 +67,13 @@ func main() {
 		os.Exit(1)
 	}
 
+	// 初始化通信日志（与主日志分离），便于分析设备收发
+	if loggerConfig.EnableFile {
+		if err := improvedLogger.InitCommunicationLogger(loggerConfig.FileDir); err != nil {
+			fmt.Printf("初始化通信日志失败: %v\n", err)
+		}
+	}
+
 	// 记录启动信息
 	improvedLogger.Info("充电设备网关启动中...", map[string]interface{}{
 		"component": "gateway",

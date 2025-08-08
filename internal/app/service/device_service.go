@@ -1,6 +1,7 @@
 package service
 
 import (
+	"encoding/hex"
 	"fmt"
 	"time"
 
@@ -151,6 +152,14 @@ func (s *DeviceService) SendCommandToDevice(deviceID string, command byte, data 
 	// 生成消息ID - 使用全局消息ID管理器
 	messageID := pkg.Protocol.GetNextMessageID()
 
+	logger.WithFields(logrus.Fields{
+		"deviceId": deviceID,
+		"command":  command,
+		"data_hex": hex.EncodeToString(data),
+		"conn_id":  conn.GetConnID(),
+		// 发送的原始数据包
+	}).Info("发送命令到设备成功")
+
 	// 🔧 修复：发送命令到设备应该使用SendDNYRequest（服务器主动请求）
 	err = pkg.Protocol.SendDNYRequest(conn, uint32(physicalID), messageID, command, data)
 	if err != nil {
@@ -201,6 +210,14 @@ func (s *DeviceService) SendDNYCommandToDevice(deviceID string, command byte, da
 		}).Error("发送DNY命令到设备失败")
 		return nil, fmt.Errorf("发送DNY命令失败: %v", err)
 	}
+
+	logger.WithFields(logrus.Fields{
+		"deviceId": deviceID,
+		"command":  command,
+		"data_hex": hex.EncodeToString(data),
+		"conn_id":  conn.GetConnID(),
+		// 发送的原始数据包
+	}).Info("发送命令到设备成功")
 
 	logger.Info("发送DNY命令到设备成功")
 

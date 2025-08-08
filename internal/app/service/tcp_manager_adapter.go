@@ -85,7 +85,8 @@ func (a *APITCPAdapter) IsDeviceOnline(deviceID string) bool {
 				GetState() constants.DeviceConnectionState
 			}); ok {
 				state := sessionWithState.GetState()
-				return state == constants.StateOnline
+				// 注册或在线都视为“在线”，避免刚注册但未收到心跳时被判为离线
+				return state == constants.StateOnline || state == constants.StateRegistered || state.IsActive()
 			}
 		}
 	}
