@@ -95,7 +95,7 @@ func RegisterRouters(server ziface.IServer) {
 	// server.AddRouter(constants.CmdRequestFSKParam, &GenericCommandHandler{}) // 0x3B 请求服务器FSK主机参数 - 已删除
 	// server.AddRouter(uint32(constants.CmdAlarm), &GenericCommandHandler{})   // 0x42 报警推送 - 已删除
 
-	// 十、固件升级相关（复杂功能，暂未实现）
+	// 十、固件升级相关（复杂功能，暂不实现）
 	// ----------------------------------------------------------------------------
 	// server.AddRouter(CmdUpgradeSlave, &UpgradeSlaveHandler{})     // 0xE0 设备固件升级(分机)
 	// server.AddRouter(CmdUpgradePower, &UpgradePowerHandler{})     // 0xE1 设备固件升级(电源板)

@@ -168,7 +168,7 @@ func (m *TCPManager) RegisterConnection(conn ziface.IConnection) (*ConnectionSes
 		logger.WithFields(logrus.Fields{
 			"connID":    connID,
 			"sessionID": session.SessionID,
-		}).Warn("连接已存在，返回现有会话")
+		}).Debug("🔧 连接已存在，返回现有会话（正常情况）")
 		return session, nil
 	}
 
@@ -262,6 +262,28 @@ func (m *TCPManager) RegisterDevice(conn ziface.IConnection, deviceID, physicalI
 	}).Info("设备注册成功")
 
 	return nil
+}
+
+// RebuildDeviceIndex 重新建立设备索引
+// 用于修复设备索引丢失的问题
+func (m *TCPManager) RebuildDeviceIndex(deviceID string, session *ConnectionSession) {
+	if session == nil || deviceID == "" {
+		return
+	}
+
+	// 重新建立设备索引
+	m.deviceIndex.Store(deviceID, session)
+
+	// 如果有ICCID，也重新建立ICCID索引
+	if session.ICCID != "" {
+		m.iccidIndex.Store(session.ICCID, session)
+	}
+
+	logger.WithFields(logrus.Fields{
+		"deviceID": deviceID,
+		"connID":   session.ConnID,
+		"iccid":    session.ICCID,
+	}).Debug("设备索引已重建")
 }
 
 // GetSessionByDeviceID 通过设备ID获取会话

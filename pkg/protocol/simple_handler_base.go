@@ -6,6 +6,7 @@ import (
 
 	"github.com/aceld/zinx/ziface"
 	"github.com/bujia-iot/iot-zinx/internal/infrastructure/logger"
+	"github.com/bujia-iot/iot-zinx/pkg/constants"
 	"github.com/bujia-iot/iot-zinx/pkg/core"
 	"github.com/sirupsen/logrus"
 )
@@ -62,8 +63,46 @@ func (h *SimpleHandlerBase) PostHandle(request ziface.IRequest) {
 // ExtractDecodedFrame 提取解码后的DNY帧数据（兼容性方法）
 func (h *SimpleHandlerBase) ExtractDecodedFrame(request ziface.IRequest) (*DecodedDNYFrame, error) {
 	data := request.GetData()
+	msgID := request.GetMsgID()
 
-	// 解析DNY协议数据
+	// 🔧 修复：根据消息ID判断帧类型
+	var frameType DNYFrameType
+	switch msgID {
+	case constants.MsgIDLinkHeartbeat:
+		frameType = FrameTypeLinkHeartbeat
+	case constants.MsgIDICCID:
+		frameType = FrameTypeICCID
+	case constants.MsgIDUnknown:
+		frameType = FrameTypeParseError
+	default:
+		frameType = FrameTypeStandard
+	}
+
+	// 🔧 修复：对于Link心跳包，直接创建帧而不解析DNY协议
+	if frameType == FrameTypeLinkHeartbeat {
+		frame := &DecodedDNYFrame{
+			FrameType:       FrameTypeLinkHeartbeat,
+			RawData:         data,
+			DeviceID:        "", // Link心跳包没有设备ID
+			Payload:         data,
+			IsChecksumValid: true,
+		}
+		return frame, nil
+	}
+
+	// 🔧 修复：对于ICCID包，直接创建帧
+	if frameType == FrameTypeICCID {
+		frame := &DecodedDNYFrame{
+			FrameType:  FrameTypeICCID,
+			RawData:    data,
+			ICCIDValue: string(data),
+			DeviceID:   "", // ICCID包没有设备ID
+			Payload:    data,
+		}
+		return frame, nil
+	}
+
+	// 解析DNY协议数据（仅用于标准帧）
 	result, err := ParseDNYData(data)
 	if err != nil {
 		return nil, fmt.Errorf("解析DNY数据失败: %v", err)
@@ -71,7 +110,7 @@ func (h *SimpleHandlerBase) ExtractDecodedFrame(request ziface.IRequest) (*Decod
 
 	// 转换为DecodedDNYFrame格式（使用现有结构）
 	frame := &DecodedDNYFrame{
-		FrameType:       FrameTypeStandard,
+		FrameType:       frameType,
 		RawData:         data,
 		DeviceID:        fmt.Sprintf("%08X", result.PhysicalID),
 		RawPhysicalID:   make([]byte, 4),

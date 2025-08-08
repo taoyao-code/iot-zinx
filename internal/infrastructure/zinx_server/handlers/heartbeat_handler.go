@@ -156,15 +156,34 @@ func (h *HeartbeatHandler) processHeartbeat(decodedFrame *protocol.DecodedDNYFra
 				"reason":   "设备索引可能异常，尝试重新建立索引",
 			}).Warn("设备心跳处理：设备不存在，尝试修复")
 
-			// 尝试通过连接重新建立设备索引
-			if deviceSession != nil && deviceSession.DeviceID != "" {
-				// 重新注册设备到TCP管理器
-				if tcpManager != nil {
-					// 这里可以尝试重新建立索引，但要小心避免无限循环
-					logger.WithFields(logrus.Fields{
-						"deviceId": deviceId,
-						"connID":   conn.GetConnID(),
-					}).Debug("尝试重新建立设备索引")
+			// 🔧 修复：尝试通过连接重新建立设备索引
+			if deviceSession != nil && deviceSession.DeviceID != "" && tcpManager != nil {
+				// 获取ICCID用于重新注册
+				var iccid string
+				if val, err := conn.GetProperty(constants.PropKeyICCID); err == nil && val != nil {
+					iccid = val.(string)
+				}
+
+				if iccid != "" {
+					// 尝试重新建立设备索引（直接调用内部方法）
+					if session, exists := tcpManager.GetSessionByConnID(conn.GetConnID()); exists {
+						// 重新建立设备索引映射
+						tcpManager.RebuildDeviceIndex(deviceId, session)
+
+						logger.WithFields(logrus.Fields{
+							"deviceId": deviceId,
+							"connID":   conn.GetConnID(),
+							"iccid":    iccid,
+						}).Info("🔧 设备索引重建成功")
+
+						// 重新尝试更新心跳
+						if retryErr := tcpManager.UpdateHeartbeat(deviceId); retryErr == nil {
+							logger.WithFields(logrus.Fields{
+								"deviceId": deviceId,
+								"connID":   conn.GetConnID(),
+							}).Info("🔧 设备心跳更新修复成功")
+						}
+					}
 				}
 			}
 			// 继续处理心跳，不返回错误
