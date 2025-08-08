@@ -207,46 +207,13 @@ func (s *DeviceService) SendDNYCommandToDevice(deviceID string, command byte, da
 	return packetData, nil
 }
 
-// GetEnhancedDeviceList 获取增强的设备列表（包含连接信息）
+// GetEnhancedDeviceList 获取增强的设备列表（统一从TCPManager获取）
 func (s *DeviceService) GetEnhancedDeviceList() []map[string]interface{} {
-	var devices []map[string]interface{}
-	allDeviceInfos := s.GetAllDevices()
-
-	for _, deviceInfo := range allDeviceInfos {
-		// 🔧 优先使用设备服务的业务状态（这是准确的状态）
-		isOnline := deviceInfo.Status == string(constants.DeviceStatusOnline)
-
-		// 尝试获取TCP连接详细信息作为补充
-		detailedInfo, err := s.GetDeviceConnectionInfo(deviceInfo.DeviceID)
-		if err != nil {
-			// 连接信息获取失败，但仍使用业务状态
-			logger.Debug("获取设备连接信息失败，使用业务状态")
-
-			devices = append(devices, map[string]interface{}{
-				"deviceId": deviceInfo.DeviceID,
-				"isOnline": isOnline,
-				"status":   deviceInfo.Status, // 使用准确的业务状态
-			})
-		} else {
-			// 成功获取连接信息，进行状态一致性检查
-			if isOnline != detailedInfo.IsOnline {
-				logger.Warn("⚠️ 业务状态与连接状态不一致")
-			}
-
-			devices = append(devices, map[string]interface{}{
-				"deviceId":       detailedInfo.DeviceID,
-				"iccid":          detailedInfo.ICCID,
-				"isOnline":       isOnline,          // 🔧 优先使用业务状态
-				"status":         deviceInfo.Status, // 🔧 优先使用业务状态
-				"lastHeartbeat":  detailedInfo.LastHeartbeat,
-				"heartbeatTime":  detailedInfo.HeartbeatTime,
-				"timeSinceHeart": detailedInfo.TimeSinceHeart,
-				"remoteAddr":     detailedInfo.RemoteAddr,
-			})
-		}
+	// 强制统一数据源：直接委托给 TCP 适配器
+	if s.tcpAdapter != nil {
+		return s.tcpAdapter.GetEnhancedDeviceList()
 	}
-
-	return devices
+	return []map[string]interface{}{}
 }
 
 // ValidateCard 验证卡片 - 更新为支持字符串卡号

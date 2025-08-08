@@ -215,41 +215,26 @@ func (a *APITCPAdapter) GetAllDevices() []DeviceInfo {
 		}
 	}
 
-	// 🚨 DEPRECATED: 旧的分散数据获取方式（存在数据不一致风险）
-	var devices []DeviceInfo
-
-	if manager, ok := tcpManager.(interface {
-		GetAllSessions() map[string]interface{}
+	// 强制：仅使用统一接口
+	if unifiedManager, ok := tcpManager.(interface {
+		GetDeviceListForAPI() ([]map[string]interface{}, error)
 	}); ok {
-		sessions := manager.GetAllSessions()
-		for deviceID, session := range sessions {
-			device := DeviceInfo{
-				DeviceID: deviceID,
+		if apiDevices, err := unifiedManager.GetDeviceListForAPI(); err == nil {
+			devices := make([]DeviceInfo, len(apiDevices))
+			for i, apiDevice := range apiDevices {
+				devices[i] = DeviceInfo{
+					DeviceID: fmt.Sprintf("%v", apiDevice["deviceId"]),
+					ICCID:    fmt.Sprintf("%v", apiDevice["iccid"]),
+					Status:   fmt.Sprintf("%v", apiDevice["status"]),
+				}
+				if lastSeen, ok := apiDevice["lastHeartbeat"].(int64); ok {
+					devices[i].LastSeen = lastSeen
+				}
 			}
-
-			// 获取ICCID
-			if sessionWithICCID, ok := session.(interface {
-				GetICCID() string
-			}); ok {
-				device.ICCID = sessionWithICCID.GetICCID()
-			}
-
-			// 获取状态
-			if status, exists := a.GetDeviceStatus(deviceID); exists {
-				device.Status = status
-			}
-
-			// 获取最后活动时间
-			lastActivity := a.GetLastActivity(deviceID)
-			if !lastActivity.IsZero() {
-				device.LastSeen = lastActivity.Unix()
-			}
-
-			devices = append(devices, device)
+			return devices
 		}
 	}
-
-	return devices
+	return []DeviceInfo{}
 }
 
 // GetEnhancedDeviceList 获取增强的设备列表
@@ -261,7 +246,7 @@ func (a *APITCPAdapter) GetEnhancedDeviceList() []map[string]interface{} {
 		return []map[string]interface{}{}
 	}
 
-	// 🚀 NEW: 使用新的统一接口（推荐）
+	// 🚀 强制：仅使用统一接口（无回退）
 	if unifiedManager, ok := tcpManager.(interface {
 		GetDeviceListForAPI() ([]map[string]interface{}, error)
 	}); ok {
@@ -269,38 +254,12 @@ func (a *APITCPAdapter) GetEnhancedDeviceList() []map[string]interface{} {
 			logger.WithFields(logrus.Fields{
 				"device_count": len(apiDevices),
 				"method":       "GetDeviceListForAPI",
-			}).Debug("使用新的统一接口获取设备列表")
+			}).Debug("使用统一接口获取设备列表")
 			return apiDevices
-		} else {
-			logger.WithFields(logrus.Fields{
-				"error": err.Error(),
-			}).Warn("新统一接口获取设备列表失败，回退到旧方法")
 		}
 	}
-
-	// 🚨 FALLBACK: 旧的实现方式（兼容性保证）
-	logger.Debug("使用旧的分散数据获取方式（存在数据不一致风险）")
-	devices := a.GetAllDevices()
-	enhanced := make([]map[string]interface{}, len(devices))
-
-	for i, device := range devices {
-		enhanced[i] = map[string]interface{}{
-			"deviceId":     device.DeviceID,
-			"iccid":        device.ICCID,
-			"status":       device.Status,
-			"lastSeen":     device.LastSeen,
-			"isOnline":     a.IsDeviceOnline(device.DeviceID),
-			"lastActivity": a.GetLastActivity(device.DeviceID),
-		}
-
-		// 获取连接信息
-		if conn, exists := a.GetDeviceConnection(device.DeviceID); exists {
-			enhanced[i]["connId"] = conn.GetConnID()
-			enhanced[i]["remoteAddr"] = conn.RemoteAddr().String()
-		}
-	}
-
-	return enhanced
+	logger.WithFields(logrus.Fields{"warning": "GetDeviceListForAPI 不可用或出错"}).Warn("统一接口不可用，返回空列表")
+	return []map[string]interface{}{}
 }
 
 // === 设备心跳管理实现 ===

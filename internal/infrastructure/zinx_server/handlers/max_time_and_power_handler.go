@@ -7,6 +7,7 @@ import (
 	"github.com/aceld/zinx/ziface"
 	"github.com/bujia-iot/iot-zinx/internal/infrastructure/logger"
 	"github.com/bujia-iot/iot-zinx/pkg/constants"
+	"github.com/bujia-iot/iot-zinx/pkg/core"
 	"github.com/bujia-iot/iot-zinx/pkg/network"
 	"github.com/bujia-iot/iot-zinx/pkg/protocol"
 	"github.com/sirupsen/logrus"
@@ -123,6 +124,13 @@ func (h *MaxTimeAndPowerHandler) updateConnectionActivity(conn ziface.IConnectio
 	now := time.Now()
 	conn.SetProperty(constants.PropKeyLastHeartbeat, now.Unix())
 	network.UpdateConnectionActivity(conn)
+
+	// 统一：通过 TCPManager 刷新设备会话心跳，保持 API 状态一致
+	if tm := core.GetGlobalTCPManager(); tm != nil {
+		if session, ok := tm.GetSessionByConnID(conn.GetConnID()); ok {
+			_ = tm.UpdateHeartbeat(session.DeviceID)
+		}
+	}
 
 	logger.WithFields(logrus.Fields{
 		"connID":    conn.GetConnID(),

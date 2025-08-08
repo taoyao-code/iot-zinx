@@ -57,6 +57,11 @@ func (s *TCPServer) Start() error {
 	// 设置连接钩子 - 核心连接管理（在依赖初始化完成后）
 	s.setupConnectionHooks()
 
+	// 在启动Zinx服务前对齐TCPManager心跳超时配置，确保API在线判定一致
+	if tm := core.GetGlobalTCPManager(); tm != nil {
+		tm.SetHeartbeatTimeout(time.Duration(s.cfg.DeviceConnection.HeartbeatTimeoutSeconds) * time.Second)
+	}
+
 	// 启动服务器
 	return s.startServer()
 }

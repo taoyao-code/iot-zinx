@@ -8,6 +8,7 @@ import (
 	"github.com/bujia-iot/iot-zinx/internal/infrastructure/config"
 	"github.com/bujia-iot/iot-zinx/internal/infrastructure/logger"
 	"github.com/bujia-iot/iot-zinx/pkg/constants"
+	"github.com/bujia-iot/iot-zinx/pkg/core"
 	"github.com/bujia-iot/iot-zinx/pkg/network"
 	"github.com/bujia-iot/iot-zinx/pkg/protocol"
 	"github.com/sirupsen/logrus"
@@ -80,6 +81,12 @@ func (h *LinkHeartbeatHandler) Handle(request ziface.IRequest) {
 	// Link心跳信息已通过network.UpdateConnectionActivity处理，无需额外属性
 	// 调用统一的连接活动更新函数
 	network.UpdateConnectionActivity(conn)
+	// 统一：通过TCPManager刷新心跳，保证API一致
+	if tm := core.GetGlobalTCPManager(); tm != nil {
+		if session, ok := tm.GetSessionByConnID(conn.GetConnID()); ok {
+			_ = tm.UpdateHeartbeat(session.DeviceID)
+		}
+	}
 
 	// 2. 重置TCP ReadDeadline - 使用优化后的配置
 	defaultReadDeadlineSeconds := config.GetConfig().TCPServer.DefaultReadDeadlineSeconds

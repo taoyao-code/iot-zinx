@@ -9,6 +9,7 @@ import (
 	"github.com/aceld/zinx/ziface"
 	"github.com/bujia-iot/iot-zinx/internal/infrastructure/logger"
 	"github.com/bujia-iot/iot-zinx/pkg/constants"
+	"github.com/bujia-iot/iot-zinx/pkg/core"
 	"github.com/bujia-iot/iot-zinx/pkg/network"
 	"github.com/bujia-iot/iot-zinx/pkg/notification"
 	"github.com/bujia-iot/iot-zinx/pkg/protocol"
@@ -85,8 +86,12 @@ func (h *PortPowerHeartbeatHandler) Handle(request ziface.IRequest) {
 			"deviceId": deviceId,
 		}).Debug("端口功率心跳被去重，间隔过短")
 
-		// 心跳被去重，但仍需更新活动时间
+		// 心跳被去重，但仍需更新活动时间并同步TCPManager状态
 		network.UpdateConnectionActivity(conn)
+		if tm := core.GetGlobalTCPManager(); tm != nil {
+			_ = tm.UpdateHeartbeat(deviceId)
+		}
+		h.updateHeartbeatTime(deviceId)
 		return
 	}
 
@@ -104,7 +109,10 @@ func (h *PortPowerHeartbeatHandler) processPortPowerHeartbeat(decodedFrame *prot
 	// 生成设备ID
 	deviceId := fmt.Sprintf("%08X", physicalId)
 
-	// 更新心跳时间
+	// 更新心跳时间：统一通过TCPManager并维护本地去重时钟
+	if tm := core.GetGlobalTCPManager(); tm != nil {
+		_ = tm.UpdateHeartbeat(deviceId)
+	}
 	h.updateHeartbeatTime(deviceId)
 
 	// 解析26指令的扩展功率心跳数据

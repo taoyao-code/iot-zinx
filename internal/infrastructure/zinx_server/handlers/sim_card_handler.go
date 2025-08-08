@@ -2,7 +2,6 @@ package handlers
 
 import (
 	"fmt"
-	"net"
 	"time"
 
 	"github.com/aceld/zinx/ziface"
@@ -10,6 +9,7 @@ import (
 	"github.com/bujia-iot/iot-zinx/internal/infrastructure/config"
 	"github.com/bujia-iot/iot-zinx/internal/infrastructure/logger"
 	"github.com/bujia-iot/iot-zinx/pkg/constants"
+	"github.com/bujia-iot/iot-zinx/pkg/core"
 	"github.com/bujia-iot/iot-zinx/pkg/network"
 	"github.com/sirupsen/logrus"
 )
@@ -41,13 +41,12 @@ func (h *SimCardHandler) Handle(request ziface.IRequest) {
 		iccidStr := string(data)
 		now := time.Now()
 
-		// 将ICCID存入连接属性中
+		// 将ICCID存入连接属性中（兼容）并同步到TCPManager（唯一事实来源）
 		conn.SetProperty(constants.PropKeyICCID, iccidStr)
-
-		// 🔧 使用统一架构：设备组功能已集成，无需单独创建
-		// 统一架构会自动管理设备组
-		// 设置连接状态
-		conn.SetProperty("connState", constants.ConnStatusICCIDReceived)
+		if tm := core.GetGlobalTCPManager(); tm != nil {
+			_ = tm.UpdateICCIDByConnID(conn.GetConnID(), iccidStr)
+			_ = tm.UpdateConnectionStateByConnID(conn.GetConnID(), constants.StateICCIDReceived)
+		}
 
 		// 更新连接活动
 		network.UpdateConnectionActivity(conn)
@@ -60,7 +59,8 @@ func (h *SimCardHandler) Handle(request ziface.IRequest) {
 		}
 		defaultReadDeadline := time.Duration(defaultReadDeadlineSeconds) * time.Second
 
-		if tcpConn, ok := conn.GetTCPConnection().(*net.TCPConn); ok {
+		tcpConn := conn.GetConnection()
+		if tcpConn != nil {
 			if err := tcpConn.SetReadDeadline(now.Add(defaultReadDeadline)); err != nil {
 				logger.WithFields(logrus.Fields{
 					"connID":  conn.GetConnID(),

@@ -4,6 +4,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"net/http"
+	"strconv"
 	"time"
 
 	"github.com/bujia-iot/iot-zinx/internal/infrastructure/logger"
@@ -104,16 +105,59 @@ func HandleDeviceList(c *gin.Context) {
 		return
 	}
 
-	// 通过设备服务获取增强的设备列表
-	devices := ctx.DeviceService.GetEnhancedDeviceList()
+	// 读取分页与过滤参数
+	pageStr := c.DefaultQuery("page", "1")
+	limitStr := c.DefaultQuery("limit", "50")
+	statusFilter := c.Query("status") // 可选: "online"/"offline"/"registered" 等
 
-	// 返回设备列表
+	page, _ := strconv.Atoi(pageStr)
+	limit, _ := strconv.Atoi(limitStr)
+	if page < 1 {
+		page = 1
+	}
+	if limit < 1 {
+		limit = 50
+	}
+	if limit > 500 {
+		limit = 500
+	}
+
+	// 从统一数据源获取列表
+	all := ctx.DeviceService.GetEnhancedDeviceList()
+
+	// 过滤
+	filtered := make([]map[string]interface{}, 0, len(all))
+	if statusFilter != "" {
+		for _, d := range all {
+			if s, ok := d["status"].(string); ok && s == statusFilter {
+				filtered = append(filtered, d)
+			}
+		}
+	} else {
+		filtered = all
+	}
+
+	// 计算分页
+	total := len(filtered)
+	start := (page - 1) * limit
+	if start > total {
+		start = total
+	}
+	end := start + limit
+	if end > total {
+		end = total
+	}
+	paged := filtered[start:end]
+
+	// 返回分页后的列表
 	c.JSON(http.StatusOK, APIResponse{
 		Code:    0,
 		Message: "成功",
 		Data: gin.H{
-			"devices": devices,
-			"total":   len(devices),
+			"devices": paged,
+			"total":   total,
+			"page":    page,
+			"limit":   limit,
 		},
 	})
 }

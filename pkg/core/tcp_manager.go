@@ -142,6 +142,31 @@ func NewConnectionSession(conn ziface.IConnection) *ConnectionSession {
 	}
 }
 
+// === ConnectionSession Getter Methods (for API adapter assertions) ===
+func (s *ConnectionSession) GetICCID() string {
+	s.mutex.RLock()
+	defer s.mutex.RUnlock()
+	return s.ICCID
+}
+
+func (s *ConnectionSession) GetDeviceStatus() constants.DeviceStatus {
+	s.mutex.RLock()
+	defer s.mutex.RUnlock()
+	return s.DeviceStatus
+}
+
+func (s *ConnectionSession) GetState() constants.DeviceConnectionState {
+	s.mutex.RLock()
+	defer s.mutex.RUnlock()
+	return s.State
+}
+
+func (s *ConnectionSession) GetLastActivity() time.Time {
+	s.mutex.RLock()
+	defer s.mutex.RUnlock()
+	return s.LastActivity
+}
+
 // NewDeviceGroup 创建设备组
 func NewDeviceGroup(conn ziface.IConnection, iccid string) *DeviceGroup {
 	return &DeviceGroup{
@@ -317,13 +342,57 @@ func (m *TCPManager) UpdateHeartbeat(deviceID string) error {
 	}
 
 	session.mutex.Lock()
-	session.LastHeartbeat = time.Now()
-	session.LastActivity = time.Now()
+	now := time.Now()
+	session.LastHeartbeat = now
+	session.LastActivity = now
 	session.HeartbeatCount++
+	// 保持业务状态为在线
 	session.DeviceStatus = constants.DeviceStatusOnline
-	session.UpdatedAt = time.Now()
+	// 同步连接状态为online，便于 API 通过 GetState 判断在线
+	session.State = constants.StateOnline
+	session.UpdatedAt = now
 	session.mutex.Unlock()
 
+	return nil
+}
+
+// SetHeartbeatTimeout 设置心跳超时时间（用于对齐配置）
+func (m *TCPManager) SetHeartbeatTimeout(timeout time.Duration) {
+	m.mutex.Lock()
+	defer m.mutex.Unlock()
+	if m.config != nil {
+		m.config.HeartbeatTimeout = timeout
+	}
+}
+
+// UpdateConnectionStateByConnID 按连接更新连接状态
+func (m *TCPManager) UpdateConnectionStateByConnID(connID uint64, state constants.DeviceConnectionState) error {
+	session, exists := m.GetSessionByConnID(connID)
+	if !exists {
+		return fmt.Errorf("连接 %d 不存在", connID)
+	}
+	session.mutex.Lock()
+	session.State = state
+	session.UpdatedAt = time.Now()
+	session.mutex.Unlock()
+	return nil
+}
+
+// UpdateICCIDByConnID 按连接更新ICCID并建立索引
+func (m *TCPManager) UpdateICCIDByConnID(connID uint64, iccid string) error {
+	if iccid == "" {
+		return fmt.Errorf("ICCID不能为空")
+	}
+	session, exists := m.GetSessionByConnID(connID)
+	if !exists {
+		return fmt.Errorf("连接 %d 不存在", connID)
+	}
+	session.mutex.Lock()
+	session.ICCID = iccid
+	session.UpdatedAt = time.Now()
+	session.mutex.Unlock()
+	// 建立ICCID索引（设备未注册时也可建立）
+	m.iccidIndex.Store(iccid, session)
 	return nil
 }
 
@@ -419,21 +488,34 @@ func (m *TCPManager) GetDeviceListForAPI() ([]map[string]interface{}, error) {
 
 	apiDevices := make([]map[string]interface{}, 0, len(sessions))
 	for deviceID, session := range sessions {
+		// 计算在线指标：心跳超时内且状态为online
+		timeout := m.config.HeartbeatTimeout
+		isOnline := session.DeviceStatus == constants.DeviceStatusOnline
+		if timeout > 0 {
+			if session.LastActivity.IsZero() {
+				isOnline = false
+			} else {
+				isOnline = isOnline && time.Since(session.LastActivity) <= timeout
+			}
+		}
+
 		device := map[string]interface{}{
-			"device_id":       deviceID,
-			"conn_id":         session.ConnID,
-			"remote_addr":     session.RemoteAddr,
-			"physical_id":     session.PhysicalID,
-			"iccid":           session.ICCID,
-			"device_type":     session.DeviceType,
-			"device_version":  session.DeviceVersion,
-			"state":           session.State,
-			"device_status":   session.DeviceStatus,
-			"connected_at":    session.ConnectedAt,
-			"last_activity":   session.LastActivity,
-			"last_heartbeat":  session.LastHeartbeat,
-			"heartbeat_count": session.HeartbeatCount,
-			"command_count":   session.CommandCount,
+			"deviceId":       deviceID,
+			"connId":         session.ConnID,
+			"remoteAddr":     session.RemoteAddr,
+			"physicalId":     session.PhysicalID,
+			"iccid":          session.ICCID,
+			"deviceType":     session.DeviceType,
+			"deviceVersion":  session.DeviceVersion,
+			"state":          string(session.State),
+			"status":         string(session.DeviceStatus),
+			"connectedAt":    session.ConnectedAt,
+			"lastActivity":   session.LastActivity,
+			"lastHeartbeat":  session.LastHeartbeat.Unix(),
+			"heartbeatTime":  session.LastHeartbeat.Format("2006-01-02 15:04:05"),
+			"heartbeatCount": session.HeartbeatCount,
+			"commandCount":   session.CommandCount,
+			"isOnline":       isOnline,
 		}
 		apiDevices = append(apiDevices, device)
 	}

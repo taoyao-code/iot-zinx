@@ -10,6 +10,7 @@ import (
 	"github.com/bujia-iot/iot-zinx/internal/domain/dny_protocol"
 	"github.com/bujia-iot/iot-zinx/internal/infrastructure/logger"
 	"github.com/bujia-iot/iot-zinx/pkg/constants"
+	"github.com/bujia-iot/iot-zinx/pkg/core"
 	"github.com/bujia-iot/iot-zinx/pkg/notification"
 	"github.com/bujia-iot/iot-zinx/pkg/protocol"
 	"github.com/sirupsen/logrus"
@@ -192,6 +193,10 @@ func (h *SettlementHandler) processSettlement(decodedFrame *protocol.DecodedDNYF
 		"success":    success,
 	}).Debug("结算响应发送成功")
 
-	// 更新心跳时间
-	// 🚀 重构：使用统一TCP管理器更新心跳时间
+	// 更新心跳时间并标记在线，保持API状态一致
+	if tcpManager := core.GetGlobalTCPManager(); tcpManager != nil {
+		if session, exists := tcpManager.GetSessionByConnID(conn.GetConnID()); exists {
+			_ = tcpManager.UpdateHeartbeat(session.DeviceID)
+		}
+	}
 }
