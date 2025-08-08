@@ -7,6 +7,7 @@ import (
 	"github.com/aceld/zinx/zconf"
 	"github.com/aceld/zinx/ziface"
 	"github.com/aceld/zinx/znet"
+	"github.com/bujia-iot/iot-zinx/internal/app/service"
 	"github.com/bujia-iot/iot-zinx/internal/infrastructure/config"
 	"github.com/bujia-iot/iot-zinx/internal/infrastructure/logger"
 	"github.com/bujia-iot/iot-zinx/internal/infrastructure/zinx_server/handlers"
@@ -42,9 +43,6 @@ func (s *TCPServer) Start() error {
 		return err
 	}
 
-	// 正确初始化包依赖关系，传入必要的依赖
-	s.initializePackageDependencies()
-
 	// 启动心跳管理器 - 必须在其他组件之前启动
 	s.startHeartbeatManager()
 
@@ -61,6 +59,12 @@ func (s *TCPServer) Start() error {
 	if tm := core.GetGlobalTCPManager(); tm != nil {
 		tm.SetHeartbeatTimeout(time.Duration(s.cfg.DeviceConnection.HeartbeatTimeoutSeconds) * time.Second)
 	}
+
+	// 🔧 修复：初始化全局API TCP适配器，确保API层能正确访问TCP管理器
+	service.SetGlobalAPITCPManagerGetter(func() interface{} {
+		return core.GetGlobalTCPManager()
+	})
+	logger.Info("✅ 全局API TCP管理器适配器已初始化")
 
 	// 启动服务器
 	return s.startServer()
@@ -108,34 +112,8 @@ func (s *TCPServer) registerRoutes() {
 	handlers.RegisterRouters(s.server)
 }
 
-// initializePackageDependencies 初始化包依赖关系，使用统一架构
-func (s *TCPServer) initializePackageDependencies() {
-	// 🔧 使用统一架构：初始化统一架构组件
-}
-
 // setupConnectionHooks 设置连接钩子
 func (s *TCPServer) setupConnectionHooks() {
-	// 简化：移除未使用的配置
-	// deviceCfg := s.cfg.DeviceConnection
-	// readTimeout := time.Duration(deviceCfg.HeartbeatTimeoutSeconds) * time.Second
-
-	// 简化：移除未使用的超时配置
-	// var writeTimeout time.Duration
-	// if deviceCfg.Timeouts.DefaultWriteTimeoutSeconds > 0 {
-	//	writeTimeout = time.Duration(deviceCfg.Timeouts.DefaultWriteTimeoutSeconds) * time.Second
-	// } else {
-	//	writeTimeout = readTimeout // 向后兼容，如果未配置则使用读超时
-	// }
-
-	// keepAliveTimeout := time.Duration(deviceCfg.HeartbeatIntervalSeconds) * time.Second
-
-	// 简化：移除对统一网络的依赖
-	// connectionHooks := pkg.Network.NewConnectionHooks(
-	//	readTimeout,      // 读超时
-	//	writeTimeout,     // 写超时 🔧 修复：不再直接等于读超时
-	//	keepAliveTimeout, // KeepAlive周期
-	// )
-
 	// 简化：直接设置连接回调
 	s.server.SetOnConnStart(func(conn ziface.IConnection) {
 		// 连接建立时的处理
@@ -199,9 +177,6 @@ func (s *TCPServer) startMaintenanceTasks() {
 	// 🚀 优先级2：启动设备注册状态清理任务
 	go s.startRegistrationCleanupTask()
 
-	// 🚀 优先级3：启动连接健康指标清理任务
-	go s.startConnectionHealthCleanupTask()
-
 	logger.Info("✅ 维护任务已启动（注册状态清理 + 连接健康清理）")
 }
 
@@ -217,23 +192,6 @@ func (s *TCPServer) startRegistrationCleanupTask() {
 			if handler := s.getDeviceRegisterHandler(); handler != nil {
 				handler.CleanupExpiredStates()
 			}
-		}
-	}
-}
-
-// startConnectionHealthCleanupTask 启动连接健康指标清理任务
-func (s *TCPServer) startConnectionHealthCleanupTask() {
-	ticker := time.NewTicker(1 * time.Hour) // 每1小时清理一次
-	defer ticker.Stop()
-
-	for {
-		select {
-		case <-ticker.C:
-			// 简化：移除连接健康指标清理
-			// chm := protocol.GetConnectionHealthManager()
-			// if chm != nil {
-			//	chm.CleanupOldMetrics()
-			// }
 		}
 	}
 }
