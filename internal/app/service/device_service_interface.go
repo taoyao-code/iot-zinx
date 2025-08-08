@@ -52,6 +52,9 @@ type DeviceServiceInterface interface {
 	// GetEnhancedDeviceList 获取增强的设备列表（包含连接信息）
 	GetEnhancedDeviceList() []map[string]interface{}
 
+	// GetDeviceDetail 获取设备详细信息（包含完整的连接会话信息）
+	GetDeviceDetail(deviceID string) (map[string]interface{}, error)
+
 	// ===============================
 	// 业务逻辑接口
 	// ===============================

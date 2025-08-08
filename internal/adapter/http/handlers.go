@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"github.com/bujia-iot/iot-zinx/internal/infrastructure/logger"
-	"github.com/bujia-iot/iot-zinx/pkg/constants"
 	"github.com/bujia-iot/iot-zinx/pkg/core"
 	"github.com/bujia-iot/iot-zinx/pkg/errors"
 	"github.com/gin-gonic/gin"
@@ -569,9 +568,9 @@ func HandleQueryDeviceStatus(c *gin.Context) {
 		return
 	}
 
-	// 获取设备会话详细信息
-	session, exists := tcpManager.GetSessionByDeviceID(deviceID)
-	if !exists {
+	// 🚀 使用新架构：通过设备服务获取设备详细信息
+	deviceDetail, err := ctx.DeviceService.GetDeviceDetail(deviceID)
+	if err != nil {
 		c.JSON(http.StatusNotFound, APIResponse{
 			Code:    404,
 			Message: "设备不存在或未连接",
@@ -583,67 +582,18 @@ func HandleQueryDeviceStatus(c *gin.Context) {
 	// 获取设备业务状态（通过设备服务）
 	businessStatus, hasBusinessStatus := ctx.DeviceService.GetDeviceStatus(deviceID)
 
-	// 构建完整的设备详细信息
-	deviceDetail := map[string]interface{}{
-		// === 基本信息 ===
-		"deviceId":      session.DeviceID,
-		"physicalId":    session.PhysicalID,
-		"iccid":         session.ICCID,
-		"deviceType":    session.DeviceType,
-		"deviceVersion": session.DeviceVersion,
-		"sessionId":     session.SessionID,
-
-		// === 连接状态信息 ===
-		"connId":          session.ConnID,
-		"remoteAddr":      session.RemoteAddr,
-		"connectionState": session.ConnectionState.String(),
-		"state":           session.State.String(),
-		"isOnline":        session.DeviceStatus == constants.DeviceStatusOnline,
-
-		// === 设备状态信息 ===
-		"deviceStatus":      session.DeviceStatus.String(),
-		"businessStatus":    businessStatus,
-		"hasBusinessStatus": hasBusinessStatus,
-
-		// === 时间信息 ===
-		"connectedAt":    session.ConnectedAt.Format("2006-01-02 15:04:05"),
-		"registeredAt":   session.RegisteredAt.Format("2006-01-02 15:04:05"),
-		"lastActivity":   session.LastActivity.Format("2006-01-02 15:04:05"),
-		"lastHeartbeat":  session.LastHeartbeat.Format("2006-01-02 15:04:05"),
-		"lastDisconnect": session.LastDisconnect.Format("2006-01-02 15:04:05"),
-
-		// === 时间戳信息 ===
-		"connectedAtTs":    session.ConnectedAt.Unix(),
-		"registeredAtTs":   session.RegisteredAt.Unix(),
-		"lastActivityTs":   session.LastActivity.Unix(),
-		"lastHeartbeatTs":  session.LastHeartbeat.Unix(),
-		"lastDisconnectTs": session.LastDisconnect.Unix(),
-
-		// === 活动统计 ===
-		"timeSinceLastActivity":  time.Since(session.LastActivity).Seconds(),
-		"timeSinceLastHeartbeat": time.Since(session.LastHeartbeat).Seconds(),
-		"heartbeatCount":         session.HeartbeatCount,
-		"commandCount":           session.CommandCount,
-
-		// === 数据统计 ===
-		"dataBytesIn":  session.DataBytesIn,
-		"dataBytesOut": session.DataBytesOut,
-
-		// === 扩展属性 ===
-		"properties":  session.Properties,
-		"updatedAt":   session.UpdatedAt.Format("2006-01-02 15:04:05"),
-		"updatedAtTs": session.UpdatedAt.Unix(),
+	// 添加业务状态信息
+	if hasBusinessStatus {
+		deviceDetail["businessStatus"] = businessStatus
+		deviceDetail["hasBusinessStatus"] = hasBusinessStatus
 	}
 
 	// 记录查询日志
 	logger.WithFields(logrus.Fields{
 		"deviceId":       deviceID,
-		"sessionId":      session.SessionID,
-		"connId":         session.ConnID,
-		"deviceStatus":   session.DeviceStatus.String(),
+		"deviceStatus":   deviceDetail["deviceStatus"],
 		"businessStatus": businessStatus,
-		"lastHeartbeat":  session.LastHeartbeat.Format("2006-01-02 15:04:05"),
-		"heartbeatCount": session.HeartbeatCount,
+		"isOnline":       deviceDetail["isOnline"],
 		"clientIP":       c.ClientIP(),
 		"userAgent":      c.GetHeader("User-Agent"),
 	}).Info("查询设备完整详细信息")

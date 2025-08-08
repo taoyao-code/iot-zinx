@@ -17,6 +17,7 @@ type IAPITCPAdapter interface {
 	GetDeviceConnection(deviceID string) (ziface.IConnection, bool)
 	IsDeviceOnline(deviceID string) bool
 	GetDeviceConnectionInfo(deviceID string) (*DeviceConnectionInfo, error)
+	GetDeviceDetail(deviceID string) (map[string]interface{}, error)
 
 	// === 设备状态管理 ===
 	GetDeviceStatus(deviceID string) (string, bool)
@@ -76,17 +77,56 @@ func (a *APITCPAdapter) IsDeviceOnline(deviceID string) bool {
 		return false
 	}
 
-	// 尝试通过状态管理器检查
+	// 🔧 修复：使用更可靠的在线判断逻辑
 	if manager, ok := tcpManager.(interface {
 		GetSessionByDeviceID(deviceID string) (interface{}, bool)
 	}); ok {
 		if session, exists := manager.GetSessionByDeviceID(deviceID); exists {
+			// 检查session的基本状态
 			if sessionWithState, ok := session.(interface {
 				GetState() constants.DeviceConnectionState
+				GetDeviceStatus() constants.DeviceStatus
+				GetLastActivity() time.Time
 			}); ok {
 				state := sessionWithState.GetState()
-				// 注册或在线都视为“在线”，避免刚注册但未收到心跳时被判为离线
-				return state == constants.StateOnline || state == constants.StateRegistered || state.IsActive()
+				deviceStatus := sessionWithState.GetDeviceStatus()
+				lastActivity := sessionWithState.GetLastActivity()
+
+				// 🔧 新的在线判断逻辑：
+				// 1. 设备状态为在线
+				// 2. 连接状态为注册、在线或活跃状态
+				// 3. 最近有活动（可选，避免过于严格的判断）
+				isStatusOnline := deviceStatus == constants.DeviceStatusOnline
+				isStateActive := state == constants.StateOnline ||
+					state == constants.StateRegistered ||
+					(state.IsActive != nil && state.IsActive())
+
+				// 如果有最后活动时间，检查是否在合理时间内（心跳超时时间的2倍）
+				hasRecentActivity := true
+				if !lastActivity.IsZero() {
+					// 获取心跳超时配置，默认60秒
+					timeout := 120 * time.Second // 2倍心跳超时时间作为宽松判断
+					if configManager, ok := tcpManager.(interface {
+						SetHeartbeatTimeout(time.Duration)
+						// 这里无法直接获取超时配置，使用默认值
+					}); ok {
+						_ = configManager // 避免未使用变量警告
+					}
+					hasRecentActivity = time.Since(lastActivity) <= timeout
+				}
+
+				logger.WithFields(logrus.Fields{
+					"deviceID":          deviceID,
+					"isStatusOnline":    isStatusOnline,
+					"isStateActive":     isStateActive,
+					"hasRecentActivity": hasRecentActivity,
+					"state":             state,
+					"deviceStatus":      deviceStatus,
+					"lastActivity":      lastActivity,
+				}).Debug("🔧 设备在线状态检查详情")
+
+				// 只要设备状态在线且连接状态活跃就认为在线（暂时不严格检查活动时间）
+				return isStatusOnline && isStateActive
 			}
 		}
 	}
@@ -371,6 +411,23 @@ func SetGlobalAPITCPManagerGetter(getter func() interface{}) {
 	}
 
 	logger.Info("全局API TCP管理器适配器已设置")
+}
+
+// GetDeviceDetail 获取设备详细信息（包含完整的连接会话信息）
+func (a *APITCPAdapter) GetDeviceDetail(deviceID string) (map[string]interface{}, error) {
+	tcpManager := a.getTCPManager()
+	if tcpManager == nil {
+		return nil, fmt.Errorf("统一TCP管理器未初始化")
+	}
+
+	// 🚀 新架构：直接调用TCPManager的GetDeviceDetail方法
+	if manager, ok := tcpManager.(interface {
+		GetDeviceDetail(deviceID string) (map[string]interface{}, error)
+	}); ok {
+		return manager.GetDeviceDetail(deviceID)
+	}
+
+	return nil, fmt.Errorf("TCP管理器不支持GetDeviceDetail方法")
 }
 
 // === 辅助方法 ===

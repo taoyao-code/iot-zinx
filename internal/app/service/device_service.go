@@ -8,7 +8,6 @@ import (
 	"github.com/aceld/zinx/ziface"
 	"github.com/bujia-iot/iot-zinx/internal/domain/dny_protocol"
 	"github.com/bujia-iot/iot-zinx/internal/infrastructure/logger"
-	"github.com/bujia-iot/iot-zinx/pkg"
 	"github.com/bujia-iot/iot-zinx/pkg/constants"
 	"github.com/bujia-iot/iot-zinx/pkg/errors"
 	"github.com/bujia-iot/iot-zinx/pkg/network"
@@ -150,7 +149,7 @@ func (s *DeviceService) SendCommandToDevice(deviceID string, command byte, data 
 	}
 
 	// 生成消息ID - 使用全局消息ID管理器
-	messageID := pkg.Protocol.GetNextMessageID()
+	messageID := protocol.GetNextMessageID()
 
 	logger.WithFields(logrus.Fields{
 		"deviceId": deviceID,
@@ -158,10 +157,10 @@ func (s *DeviceService) SendCommandToDevice(deviceID string, command byte, data 
 		"data_hex": hex.EncodeToString(data),
 		"conn_id":  conn.GetConnID(),
 		// 发送的原始数据包
-	}).Info("发送命令到设备成功")
+	}).Info("准备发送命令到设备")
 
 	// 🔧 修复：发送命令到设备应该使用SendDNYRequest（服务器主动请求）
-	err = pkg.Protocol.SendDNYRequest(conn, uint32(physicalID), messageID, command, data)
+	err = protocol.SendDNYRequest(conn, uint32(physicalID), messageID, command, data)
 	if err != nil {
 		logger.WithFields(logrus.Fields{
 			"deviceId": deviceID,
@@ -274,6 +273,21 @@ func (s *DeviceService) HandleParameterSetting(deviceId string, param *dny_proto
 
 	// 返回成功和空的结果值
 	return true, []byte{}
+}
+
+// GetDeviceDetail 获取设备详细信息（包含完整的连接会话信息）
+func (s *DeviceService) GetDeviceDetail(deviceID string) (map[string]interface{}, error) {
+	// 🚀 使用TCP适配器获取设备详细信息
+	deviceDetail, err := s.tcpAdapter.GetDeviceDetail(deviceID)
+	if err != nil {
+		logger.WithFields(logrus.Fields{
+			"deviceID": deviceID,
+			"error":    err.Error(),
+		}).Error("获取设备详细信息失败")
+		return nil, fmt.Errorf("设备不存在或未连接")
+	}
+
+	return deviceDetail, nil
 }
 
 // NowUnix 获取当前时间戳

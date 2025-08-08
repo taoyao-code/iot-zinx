@@ -12,13 +12,13 @@ import (
 )
 
 // TCPManager 简化的TCP连接管理器
-// 专注于核心的TCP连接和设备管理功能
+// 🚀 重构：基于WebSocket网关设计理念，简化架构
+// 业务模型：一个ICCID(物联网卡) = 一个TCP连接 = 一个设备组，组内多个设备共享连接
 type TCPManager struct {
-	// === 核心数据存储 ===
-	connections  sync.Map // connID -> *ConnectionSession
-	deviceIndex  sync.Map // deviceID -> *ConnectionSession
-	iccidIndex   sync.Map // iccid -> *ConnectionSession
-	deviceGroups sync.Map // iccid -> *DeviceGroup
+	// === 🚀 新架构：三层简化映射 ===
+	connections  sync.Map // connID → *ConnectionSession (TCP连接层)
+	deviceGroups sync.Map // iccid → *DeviceGroup (业务组层)
+	deviceIndex  sync.Map // deviceID → iccid (快速查找层)
 
 	// === 基础配置 ===
 	config *TCPManagerConfig
@@ -72,15 +72,35 @@ type ConnectionSession struct {
 }
 
 // DeviceGroup 设备组
+// 🚀 重构：管理一个ICCID下的多个设备，共享TCP连接
 type DeviceGroup struct {
 	ICCID         string                        `json:"iccid"`
 	ConnID        uint64                        `json:"conn_id"`
 	Connection    ziface.IConnection            `json:"-"`
-	Sessions      map[string]*ConnectionSession `json:"sessions"`
+	Sessions      map[string]*ConnectionSession `json:"sessions"` // deviceID → session
+	Devices       map[string]*Device            `json:"devices"`  // deviceID → device info
 	PrimaryDevice string                        `json:"primary_device"`
 	CreatedAt     time.Time                     `json:"created_at"`
 	LastActivity  time.Time                     `json:"last_activity"`
 	mutex         sync.RWMutex                  `json:"-"`
+}
+
+// Device 设备信息
+// 🚀 新增：独立的设备信息结构，从session中分离
+type Device struct {
+	DeviceID       string                          `json:"device_id"`
+	PhysicalID     string                          `json:"physical_id"`
+	ICCID          string                          `json:"iccid"`
+	DeviceType     uint16                          `json:"device_type"`
+	DeviceVersion  string                          `json:"device_version"`
+	Status         constants.DeviceStatus          `json:"status"`
+	State          constants.DeviceConnectionState `json:"state"`
+	RegisteredAt   time.Time                       `json:"registered_at"`
+	LastActivity   time.Time                       `json:"last_activity"`
+	LastHeartbeat  time.Time                       `json:"last_heartbeat"`
+	HeartbeatCount int64                           `json:"heartbeat_count"`
+	Properties     map[string]interface{}          `json:"properties"`
+	mutex          sync.RWMutex                    `json:"-"`
 }
 
 // TCPManagerConfig TCP管理器配置
@@ -174,6 +194,7 @@ func NewDeviceGroup(conn ziface.IConnection, iccid string) *DeviceGroup {
 		ConnID:       conn.GetConnID(),
 		Connection:   conn,
 		Sessions:     make(map[string]*ConnectionSession),
+		Devices:      make(map[string]*Device),
 		CreatedAt:    time.Now(),
 		LastActivity: time.Now(),
 	}
@@ -242,6 +263,24 @@ func (m *TCPManager) RegisterDevice(conn ziface.IConnection, deviceID, physicalI
 
 	session := sessionInterface.(*ConnectionSession)
 
+	// 🔧 检查设备是否已注册（避免重复注册导致的索引不一致）
+	if existingSession, alreadyExists := m.GetSessionByDeviceID(deviceID); alreadyExists {
+		if existingSession.ConnID == connID {
+			// 同一连接的重复注册，更新信息
+			logger.WithFields(logrus.Fields{
+				"deviceID": deviceID,
+				"connID":   connID,
+			}).Debug("设备重复注册，更新信息")
+		} else {
+			// 不同连接的重复注册，可能是设备重连
+			logger.WithFields(logrus.Fields{
+				"deviceID":  deviceID,
+				"oldConnID": existingSession.ConnID,
+				"newConnID": connID,
+			}).Warn("设备在不同连接上重复注册，更新映射")
+		}
+	}
+
 	// 更新会话信息
 	session.mutex.Lock()
 	session.DeviceID = deviceID
@@ -253,21 +292,50 @@ func (m *TCPManager) RegisterDevice(conn ziface.IConnection, deviceID, physicalI
 	session.UpdatedAt = time.Now()
 	session.mutex.Unlock()
 
-	// 建立设备索引
-	m.deviceIndex.Store(deviceID, session)
-	m.iccidIndex.Store(iccid, session)
+	// � 新架构：建立三层映射关系
+	// 1. deviceID → iccid (快速查找)
+	m.deviceIndex.Store(deviceID, iccid)
 
-	// 处理设备组
+	// 2. 处理设备组 (iccid → DeviceGroup)
+	var deviceGroup *DeviceGroup
 	if group, exists := m.deviceGroups.Load(iccid); exists {
-		deviceGroup := group.(*DeviceGroup)
+		deviceGroup = group.(*DeviceGroup)
 		deviceGroup.mutex.Lock()
+		// 更新设备组信息
+		if deviceGroup.Sessions == nil {
+			deviceGroup.Sessions = make(map[string]*ConnectionSession)
+		}
+		if deviceGroup.Devices == nil {
+			deviceGroup.Devices = make(map[string]*Device)
+		}
 		deviceGroup.Sessions[deviceID] = session
+		// 创建或更新设备信息
+		deviceGroup.Devices[deviceID] = &Device{
+			DeviceID:     deviceID,
+			PhysicalID:   physicalID,
+			ICCID:        iccid,
+			Status:       constants.DeviceStatusOnline,
+			State:        constants.StateRegistered,
+			RegisteredAt: time.Now(),
+			LastActivity: time.Now(),
+			Properties:   make(map[string]interface{}),
+		}
 		deviceGroup.LastActivity = time.Now()
 		deviceGroup.mutex.Unlock()
 	} else {
 		// 创建新设备组
-		deviceGroup := NewDeviceGroup(conn, iccid)
+		deviceGroup = NewDeviceGroup(conn, iccid)
 		deviceGroup.Sessions[deviceID] = session
+		deviceGroup.Devices[deviceID] = &Device{
+			DeviceID:     deviceID,
+			PhysicalID:   physicalID,
+			ICCID:        iccid,
+			Status:       constants.DeviceStatusOnline,
+			State:        constants.StateRegistered,
+			RegisteredAt: time.Now(),
+			LastActivity: time.Now(),
+			Properties:   make(map[string]interface{}),
+		}
 		deviceGroup.PrimaryDevice = deviceID
 		m.deviceGroups.Store(iccid, deviceGroup)
 	}
@@ -296,31 +364,131 @@ func (m *TCPManager) RebuildDeviceIndex(deviceID string, session *ConnectionSess
 		return
 	}
 
-	// 重新建立设备索引
-	m.deviceIndex.Store(deviceID, session)
+	// 🔧 修复：确保session数据一致性
+	session.mutex.Lock()
+	if session.DeviceID == "" {
+		session.DeviceID = deviceID
+	}
+	session.mutex.Unlock()
 
-	// 如果有ICCID，也重新建立ICCID索引
-	if session.ICCID != "" {
-		m.iccidIndex.Store(session.ICCID, session)
+	// 🚀 新架构：重建设备索引映射 (deviceID → iccid)
+	session.mutex.RLock()
+	iccid := session.ICCID
+	session.mutex.RUnlock()
+
+	if iccid != "" {
+		// 重建 deviceID → iccid 映射
+		m.deviceIndex.Store(deviceID, iccid)
 	}
 
 	logger.WithFields(logrus.Fields{
 		"deviceID": deviceID,
 		"connID":   session.ConnID,
-		"iccid":    session.ICCID,
+		"iccid":    iccid,
 	}).Debug("设备索引已重建")
 }
 
 // GetSessionByDeviceID 通过设备ID获取会话
 func (m *TCPManager) GetSessionByDeviceID(deviceID string) (*ConnectionSession, bool) {
-	sessionInterface, exists := m.deviceIndex.Load(deviceID)
+	// � 新架构：deviceID → iccid → DeviceGroup → Session
+	iccidInterface, exists := m.deviceIndex.Load(deviceID)
+	if !exists {
+		// 🔧 后备方案：遍历所有设备组查找设备
+		var foundSession *ConnectionSession
+		var foundICCID string
+
+		m.deviceGroups.Range(func(key, value interface{}) bool {
+			iccid := key.(string)
+			group := value.(*DeviceGroup)
+			group.mutex.RLock()
+			if session, deviceExists := group.Sessions[deviceID]; deviceExists {
+				foundSession = session
+				foundICCID = iccid
+				group.mutex.RUnlock()
+				return false // 找到了，停止遍历
+			}
+			group.mutex.RUnlock()
+			return true // 继续遍历
+		})
+
+		if foundSession != nil {
+			// 修复设备索引映射
+			m.deviceIndex.Store(deviceID, foundICCID)
+			logger.WithFields(logrus.Fields{
+				"deviceID": deviceID,
+				"iccid":    foundICCID,
+			}).Debug("🔧 修复设备索引映射")
+			return foundSession, true
+		}
+
+		return nil, false
+	}
+
+	iccid := iccidInterface.(string)
+	groupInterface, exists := m.deviceGroups.Load(iccid)
+	if !exists {
+		// 设备组不存在，清理无效的设备索引
+		m.deviceIndex.Delete(deviceID)
+		return nil, false
+	}
+
+	group := groupInterface.(*DeviceGroup)
+	group.mutex.RLock()
+	session, exists := group.Sessions[deviceID]
+	group.mutex.RUnlock()
+
+	if !exists {
+		// 设备组中没有该设备，清理无效的设备索引
+		m.deviceIndex.Delete(deviceID)
+		return nil, false
+	}
+
+	return session, true
+}
+
+// GetDeviceByID 通过设备ID获取设备信息
+// 🚀 新架构：专门用于获取设备信息的方法
+func (m *TCPManager) GetDeviceByID(deviceID string) (*Device, bool) {
+	iccidInterface, exists := m.deviceIndex.Load(deviceID)
 	if !exists {
 		return nil, false
 	}
-	return sessionInterface.(*ConnectionSession), true
+
+	iccid := iccidInterface.(string)
+	groupInterface, exists := m.deviceGroups.Load(iccid)
+	if !exists {
+		return nil, false
+	}
+
+	group := groupInterface.(*DeviceGroup)
+	group.mutex.RLock()
+	device, exists := group.Devices[deviceID]
+	group.mutex.RUnlock()
+
+	return device, exists
 }
 
-// GetAllSessions 获取所有会话
+// GetDeviceConnection 通过设备ID获取TCP连接
+// 🚀 新架构：获取设备对应的共享TCP连接
+func (m *TCPManager) GetDeviceConnection(deviceID string) (ziface.IConnection, bool) {
+	iccidInterface, exists := m.deviceIndex.Load(deviceID)
+	if !exists {
+		return nil, false
+	}
+
+	iccid := iccidInterface.(string)
+	groupInterface, exists := m.deviceGroups.Load(iccid)
+	if !exists {
+		return nil, false
+	}
+
+	group := groupInterface.(*DeviceGroup)
+	group.mutex.RLock()
+	conn := group.Connection
+	group.mutex.RUnlock()
+
+	return conn, conn != nil
+} // GetAllSessions 获取所有会话
 func (m *TCPManager) GetAllSessions() map[string]*ConnectionSession {
 	sessions := make(map[string]*ConnectionSession)
 
@@ -336,27 +504,81 @@ func (m *TCPManager) GetAllSessions() map[string]*ConnectionSession {
 
 // UpdateHeartbeat 更新设备心跳
 func (m *TCPManager) UpdateHeartbeat(deviceID string) error {
-	session, exists := m.GetSessionByDeviceID(deviceID)
+	// 🚀 新架构：通过deviceID → iccid → DeviceGroup查找
+	iccidInterface, exists := m.deviceIndex.Load(deviceID)
 	if !exists {
-		return fmt.Errorf("设备 %s 不存在", deviceID)
+		// 尝试通过遍历设备组修复索引
+		var foundGroup *DeviceGroup
+		var foundICCID string
+
+		m.deviceGroups.Range(func(key, value interface{}) bool {
+			iccid := key.(string)
+			group := value.(*DeviceGroup)
+			group.mutex.RLock()
+			if _, deviceExists := group.Devices[deviceID]; deviceExists {
+				foundGroup = group
+				foundICCID = iccid
+				group.mutex.RUnlock()
+				return false // 找到了，停止遍历
+			}
+			group.mutex.RUnlock()
+			return true // 继续遍历
+		})
+
+		if foundGroup != nil {
+			// 修复设备索引
+			m.deviceIndex.Store(deviceID, foundICCID)
+			logger.WithFields(logrus.Fields{
+				"deviceID": deviceID,
+				"iccid":    foundICCID,
+			}).Debug("🔧 修复心跳时发现的设备索引缺失")
+		} else {
+			return fmt.Errorf("设备 %s 不存在", deviceID)
+		}
 	}
 
-	session.mutex.Lock()
+	iccid := iccidInterface.(string)
+	groupInterface, exists := m.deviceGroups.Load(iccid)
+	if !exists {
+		return fmt.Errorf("设备组 %s 不存在", iccid)
+	}
+
+	group := groupInterface.(*DeviceGroup)
+	group.mutex.Lock()
+	device, exists := group.Devices[deviceID]
+	if !exists {
+		group.mutex.Unlock()
+		return fmt.Errorf("设备 %s 在设备组中不存在", deviceID)
+	}
+
+	// 更新设备心跳信息
 	now := time.Now()
-	session.LastHeartbeat = now
-	session.LastActivity = now
-	session.HeartbeatCount++
-	// 保持业务状态为在线
-	session.DeviceStatus = constants.DeviceStatusOnline
-	// 同步连接状态为online，便于 API 通过 GetState 判断在线
-	session.State = constants.StateOnline
-	session.UpdatedAt = now
-	session.mutex.Unlock()
+	device.mutex.Lock()
+	device.LastHeartbeat = now
+	device.LastActivity = now
+	device.HeartbeatCount++
+	device.Status = constants.DeviceStatusOnline
+	device.State = constants.StateOnline
+	device.mutex.Unlock()
+
+	// 更新设备组活动时间
+	group.LastActivity = now
+	group.mutex.Unlock()
+
+	// 同时更新session信息（保持兼容性）
+	if session, sessionExists := group.Sessions[deviceID]; sessionExists {
+		session.mutex.Lock()
+		session.LastHeartbeat = now
+		session.LastActivity = now
+		session.HeartbeatCount++
+		session.DeviceStatus = constants.DeviceStatusOnline
+		session.State = constants.StateOnline
+		session.UpdatedAt = now
+		session.mutex.Unlock()
+	}
 
 	return nil
-}
-
-// SetHeartbeatTimeout 设置心跳超时时间（用于对齐配置）
+} // SetHeartbeatTimeout 设置心跳超时时间（用于对齐配置）
 func (m *TCPManager) SetHeartbeatTimeout(timeout time.Duration) {
 	m.mutex.Lock()
 	defer m.mutex.Unlock()
@@ -391,8 +613,10 @@ func (m *TCPManager) UpdateICCIDByConnID(connID uint64, iccid string) error {
 	session.ICCID = iccid
 	session.UpdatedAt = time.Now()
 	session.mutex.Unlock()
-	// 建立ICCID索引（设备未注册时也可建立）
-	m.iccidIndex.Store(iccid, session)
+	// 🚀 新架构：如果已有设备ID，建立映射关系
+	if session.DeviceID != "" {
+		m.deviceIndex.Store(session.DeviceID, iccid)
+	}
 	return nil
 }
 
@@ -460,24 +684,44 @@ func GetGlobalTCPManager() *TCPManager {
 
 // GetConnectionByDeviceID 通过设备ID获取连接
 func (m *TCPManager) GetConnectionByDeviceID(deviceID string) (ziface.IConnection, bool) {
-	session, exists := m.GetSessionByDeviceID(deviceID)
-	if !exists {
-		return nil, false
-	}
-	return session.Connection, true
+	// 🚀 新架构：使用专门的GetDeviceConnection方法
+	return m.GetDeviceConnection(deviceID)
 }
 
 // UpdateDeviceStatus 更新设备状态
 func (m *TCPManager) UpdateDeviceStatus(deviceID string, status constants.DeviceStatus) error {
-	session, exists := m.GetSessionByDeviceID(deviceID)
+	// 🚀 新架构：通过设备组更新设备状态
+	iccidInterface, exists := m.deviceIndex.Load(deviceID)
 	if !exists {
 		return fmt.Errorf("设备 %s 不存在", deviceID)
 	}
 
-	session.mutex.Lock()
-	session.DeviceStatus = status
-	session.UpdatedAt = time.Now()
-	session.mutex.Unlock()
+	iccid := iccidInterface.(string)
+	groupInterface, exists := m.deviceGroups.Load(iccid)
+	if !exists {
+		return fmt.Errorf("设备组 %s 不存在", iccid)
+	}
+
+	group := groupInterface.(*DeviceGroup)
+	group.mutex.Lock()
+	device, exists := group.Devices[deviceID]
+	if !exists {
+		group.mutex.Unlock()
+		return fmt.Errorf("设备 %s 在设备组中不存在", deviceID)
+	}
+
+	device.mutex.Lock()
+	device.Status = status
+	device.mutex.Unlock()
+	group.mutex.Unlock()
+
+	// 同时更新session状态（保持兼容性）
+	if session, sessionExists := group.Sessions[deviceID]; sessionExists {
+		session.mutex.Lock()
+		session.DeviceStatus = status
+		session.UpdatedAt = time.Now()
+		session.mutex.Unlock()
+	}
 
 	return nil
 }
@@ -596,4 +840,83 @@ func (m *TCPManager) UnregisterConnection(connID uint64) error {
 	}).Info("连接已注销")
 
 	return nil
+}
+
+// GetDeviceDetail 获取设备详细信息（API专用）
+func (m *TCPManager) GetDeviceDetail(deviceID string) (map[string]interface{}, error) {
+	// 🚀 使用新架构：deviceID → iccid → DeviceGroup → Device/Session
+	iccidInterface, exists := m.deviceIndex.Load(deviceID)
+	if !exists {
+		return nil, fmt.Errorf("设备不存在")
+	}
+
+	iccid := iccidInterface.(string)
+	deviceGroupInterface, exists := m.deviceGroups.Load(iccid)
+	if !exists {
+		return nil, fmt.Errorf("设备组不存在")
+	}
+
+	deviceGroup := deviceGroupInterface.(*DeviceGroup)
+	deviceGroup.mutex.RLock()
+	defer deviceGroup.mutex.RUnlock()
+
+	// 获取设备信息
+	device, deviceExists := deviceGroup.Devices[deviceID]
+	if !deviceExists {
+		return nil, fmt.Errorf("设备信息不存在")
+	}
+
+	// 获取会话信息（设备组中的第一个会话，或匹配的会话）
+	var session *ConnectionSession
+	for _, sess := range deviceGroup.Sessions {
+		if sess.DeviceID == deviceID {
+			session = sess
+			break
+		}
+	}
+	if session == nil && len(deviceGroup.Sessions) > 0 {
+		// 如果没有匹配的会话，使用第一个会话（共享连接模式）
+		for _, sess := range deviceGroup.Sessions {
+			session = sess
+			break
+		}
+	}
+
+	// 构建详细信息
+	deviceDetail := map[string]interface{}{
+		// === 基本信息 ===
+		"deviceId":      device.DeviceID,
+		"physicalId":    device.PhysicalID,
+		"iccid":         deviceGroup.ICCID,
+		"deviceType":    device.DeviceType,
+		"deviceVersion": device.DeviceVersion,
+
+		// === 连接信息 ===
+		"isOnline":        device.Status == constants.DeviceStatusOnline,
+		"deviceStatus":    device.Status.String(),
+		"connectionState": device.State.String(),
+
+		// === 时间信息 ===
+		"lastActivity":    device.LastActivity.Format("2006-01-02 15:04:05"),
+		"lastHeartbeat":   device.LastHeartbeat.Format("2006-01-02 15:04:05"),
+		"lastActivityTs":  device.LastActivity.Unix(),
+		"lastHeartbeatTs": device.LastHeartbeat.Unix(),
+	}
+
+	// 添加会话信息（如果有）
+	if session != nil {
+		deviceDetail["sessionId"] = session.SessionID
+		deviceDetail["connId"] = session.ConnID
+		deviceDetail["remoteAddr"] = session.RemoteAddr
+		deviceDetail["connectedAt"] = session.ConnectedAt.Format("2006-01-02 15:04:05")
+		deviceDetail["registeredAt"] = session.RegisteredAt.Format("2006-01-02 15:04:05")
+		deviceDetail["connectedAtTs"] = session.ConnectedAt.Unix()
+		deviceDetail["registeredAtTs"] = session.RegisteredAt.Unix()
+	}
+
+	// 添加设备组统计信息
+	deviceDetail["groupDeviceCount"] = len(deviceGroup.Devices)
+	deviceDetail["groupSessionCount"] = len(deviceGroup.Sessions)
+
+	return deviceDetail, nil
 }
