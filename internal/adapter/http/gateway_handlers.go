@@ -94,6 +94,8 @@ func (h *DeviceGatewayHandlers) HandleDeviceList(c *gin.Context) {
 	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
 	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "50"))
 
+	fmt.Printf("🔍 [HandleDeviceList] 分页参数: page=%d, limit=%d\n", page, limit)
+
 	// 🚀 新架构：一行代码获取所有在线设备
 	onlineDevices := h.deviceGateway.GetAllOnlineDevices()
 
@@ -102,16 +104,25 @@ func (h *DeviceGatewayHandlers) HandleDeviceList(c *gin.Context) {
 	start := (page - 1) * limit
 	end := start + limit
 
+	fmt.Printf("🔍 [HandleDeviceList] 分页计算: total=%d, start=%d, end=%d\n", total, start, end)
+
 	if start >= total {
+		fmt.Printf("⚠️ [HandleDeviceList] start >= total, 重置为0\n")
 		start = 0
 		end = 0
 	} else if end > total {
+		fmt.Printf("🔍 [HandleDeviceList] end > total, 调整end为total\n")
 		end = total
 	}
+
+	fmt.Printf("🔍 [HandleDeviceList] 最终分页: start=%d, end=%d\n", start, end)
 
 	var pageDevices []string
 	if start < end {
 		pageDevices = onlineDevices[start:end]
+		fmt.Printf("✅ [HandleDeviceList] 分页成功: pageDevices=%v\n", pageDevices)
+	} else {
+		fmt.Printf("❌ [HandleDeviceList] 分页失败: start >= end\n")
 	}
 
 	// 🔍 直接打印调试信息到终端
