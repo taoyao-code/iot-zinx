@@ -5,8 +5,10 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/bujia-iot/iot-zinx/internal/infrastructure/logger"
 	"github.com/bujia-iot/iot-zinx/pkg/gateway"
 	"github.com/gin-gonic/gin"
+	"github.com/sirupsen/logrus"
 )
 
 // DeviceGatewayHandlers 基于DeviceGateway的简化API处理器
@@ -113,11 +115,26 @@ func (h *DeviceGatewayHandlers) HandleDeviceList(c *gin.Context) {
 		pageDevices = onlineDevices[start:end]
 	}
 
+	// 输出 pageDevices 中的数据
+	logger.WithFields(logrus.Fields{
+		"devices": pageDevices,
+		"total":   total,
+		"page":    page,
+		"limit":   limit,
+	}).Info("🔍 API: 正在获取设备列表")
+
 	// 构建设备详细信息
 	var deviceList []map[string]interface{}
 	for _, deviceID := range pageDevices {
+		logger.WithField("deviceID", deviceID).Info("🔍 API: 正在获取设备详细信息")
 		if detail, err := h.deviceGateway.GetDeviceDetail(deviceID); err == nil {
+			logger.WithField("deviceID", deviceID).Info("✅ API: 设备详细信息获取成功")
 			deviceList = append(deviceList, detail)
+		} else {
+			logger.WithFields(logrus.Fields{
+				"deviceID": deviceID,
+				"error":    err.Error(),
+			}).Error("❌ API: 设备详细信息获取失败")
 		}
 	}
 
