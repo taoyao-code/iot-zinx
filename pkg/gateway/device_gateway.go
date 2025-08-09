@@ -72,26 +72,48 @@ func (g *DeviceGateway) IsDeviceOnline(deviceID string) bool {
  * @return {[]string}
  */
 func (g *DeviceGateway) GetAllOnlineDevices() []string {
+	fmt.Printf("🔍 [DeviceGateway.GetAllOnlineDevices] 开始获取在线设备列表\n")
+
 	var onlineDevices []string
 
 	if g.tcpManager == nil {
+		fmt.Printf("❌ [DeviceGateway.GetAllOnlineDevices] TCP管理器未初始化\n")
 		return onlineDevices
 	}
 
+	groupCount := 0
+	totalDevices := 0
+
 	// 遍历所有设备组
 	g.tcpManager.GetDeviceGroups().Range(func(key, value interface{}) bool {
+		groupCount++
+		iccid := key.(string)
 		deviceGroup := value.(*core.DeviceGroup)
 		deviceGroup.RLock()
 
+		fmt.Printf("🔍 [DeviceGateway.GetAllOnlineDevices] 检查设备组 %d: iccid=%s, 设备数=%d\n",
+			groupCount, iccid, len(deviceGroup.Devices))
+
+		deviceInGroup := 0
 		for deviceID, device := range deviceGroup.Devices {
+			totalDevices++
+			deviceInGroup++
+			fmt.Printf("🔍 [DeviceGateway.GetAllOnlineDevices] 设备 %d: deviceID=%s, status=%s, isOnline=%t\n",
+				deviceInGroup, deviceID, device.Status.String(), device.Status == constants.DeviceStatusOnline)
+
 			if device.Status == constants.DeviceStatusOnline {
 				onlineDevices = append(onlineDevices, deviceID)
+				fmt.Printf("✅ [DeviceGateway.GetAllOnlineDevices] 添加在线设备: deviceID=%s\n", deviceID)
 			}
 		}
 
 		deviceGroup.RUnlock()
 		return true
 	})
+
+	fmt.Printf("✅ [DeviceGateway.GetAllOnlineDevices] 扫描完成: 设备组数=%d, 总设备数=%d, 在线设备数=%d\n",
+		groupCount, totalDevices, len(onlineDevices))
+	fmt.Printf("✅ [DeviceGateway.GetAllOnlineDevices] 在线设备列表: %v\n", onlineDevices)
 
 	logger.WithFields(logrus.Fields{
 		"onlineCount": len(onlineDevices),
