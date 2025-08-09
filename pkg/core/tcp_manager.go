@@ -646,7 +646,14 @@ func (m *TCPManager) GetDeviceByID(deviceID string) (*Device, bool) {
 			if exists {
 				group := groupInterface.(*DeviceGroup)
 				group.mutex.RLock()
+
+				// 🔧 修复：先尝试alternativeID，如果失败再尝试originalID
 				device, exists := group.Devices[alternativeID]
+				if !exists {
+					// 如果alternativeID找不到，尝试原始ID
+					device, exists = group.Devices[deviceID]
+				}
+
 				group.mutex.RUnlock()
 				if exists {
 					logger.WithFields(logrus.Fields{
