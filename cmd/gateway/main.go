@@ -156,6 +156,26 @@ func main() {
 	// 等待一小段时间确保服务启动
 	time.Sleep(2 * time.Second)
 
+	// 🔧 新增：启动定期索引健康检查
+	go func() {
+		tcpManager := core.GetGlobalTCPManager()
+		if tcpManager != nil {
+			// 每10分钟检查一次索引健康状态
+			ticker := time.NewTicker(10 * time.Minute)
+			defer ticker.Stop()
+
+			// 启动后立即执行一次检查
+			tcpManager.PeriodicIndexHealthCheck()
+
+			for {
+				select {
+				case <-ticker.C:
+					tcpManager.PeriodicIndexHealthCheck()
+				}
+			}
+		}
+	}()
+
 	improvedLogger.Info("充电设备网关启动完成，等待设备连接...", map[string]interface{}{
 		"component": "gateway",
 		"action":    "ready",

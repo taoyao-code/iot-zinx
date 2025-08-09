@@ -315,24 +315,37 @@ func (m *TCPManager) RegisterDevice(conn ziface.IConnection, deviceID, physicalI
 	session.UpdatedAt = time.Now()
 	session.mutex.Unlock()
 
-	// � 新架构：建立三层映射关系
-	// 1. deviceID → iccid (快速查找)
-	m.deviceIndex.Store(deviceID, iccid)
+	// � 新架构：建立三层映射关系 - 使用原子性操作
+	// 1. deviceID → iccid (快速查找) - 原子性建立索引
+	err := m.AtomicDeviceIndexOperation(deviceID, iccid, func() error {
+		m.deviceIndex.Store(deviceID, iccid)
+		return nil
+	})
+	if err != nil {
+		logger.WithFields(logrus.Fields{
+			"deviceID": deviceID,
+			"iccid":    iccid,
+			"error":    err,
+		}).Error("原子性建立设备索引失败")
+		return fmt.Errorf("建立设备索引失败: %v", err)
+	}
 
-	// 2. 处理设备组 (iccid → DeviceGroup)
+	// 2. 处理设备组 (iccid → DeviceGroup) - 原子性更新
 	var deviceGroup *DeviceGroup
 	if group, exists := m.deviceGroups.Load(iccid); exists {
 		deviceGroup = group.(*DeviceGroup)
 		deviceGroup.mutex.Lock()
-		// 更新设备组信息
+
+		// 确保设备组数据结构完整性
 		if deviceGroup.Sessions == nil {
 			deviceGroup.Sessions = make(map[string]*ConnectionSession)
 		}
 		if deviceGroup.Devices == nil {
 			deviceGroup.Devices = make(map[string]*Device)
 		}
+
+		// 更新设备组信息
 		deviceGroup.Sessions[deviceID] = session
-		// 创建或更新设备信息
 		deviceGroup.Devices[deviceID] = &Device{
 			DeviceID:     deviceID,
 			PhysicalID:   physicalID,
@@ -345,8 +358,14 @@ func (m *TCPManager) RegisterDevice(conn ziface.IConnection, deviceID, physicalI
 		}
 		deviceGroup.LastActivity = time.Now()
 		deviceGroup.mutex.Unlock()
+
+		logger.WithFields(logrus.Fields{
+			"deviceID": deviceID,
+			"iccid":    iccid,
+			"action":   "update_existing_group",
+		}).Debug("更新现有设备组")
 	} else {
-		// 创建新设备组
+		// 创建新设备组 - 确保原子性
 		deviceGroup = NewDeviceGroup(conn, iccid)
 		deviceGroup.Sessions[deviceID] = session
 		deviceGroup.Devices[deviceID] = &Device{
@@ -361,6 +380,12 @@ func (m *TCPManager) RegisterDevice(conn ziface.IConnection, deviceID, physicalI
 		}
 		deviceGroup.PrimaryDevice = deviceID
 		m.deviceGroups.Store(iccid, deviceGroup)
+
+		logger.WithFields(logrus.Fields{
+			"deviceID": deviceID,
+			"iccid":    iccid,
+			"action":   "create_new_group",
+		}).Debug("创建新设备组")
 	}
 
 	// 更新统计信息（仅对新设备或被视为重新接入的设备计数）
@@ -386,6 +411,22 @@ func (m *TCPManager) RegisterDevice(conn ziface.IConnection, deviceID, physicalI
 		"iccid":      iccid,
 		"connID":     connID,
 	}).Info("设备注册成功")
+
+	// 🔧 新增：注册后立即验证索引一致性
+	if valid, err := m.ValidateDeviceIndex(deviceID); !valid {
+		logger.WithFields(logrus.Fields{
+			"deviceID": deviceID,
+			"error":    err,
+		}).Warn("设备注册后索引验证失败，尝试修复")
+
+		if repairErr := m.RepairDeviceIndex(deviceID); repairErr != nil {
+			logger.WithFields(logrus.Fields{
+				"deviceID": deviceID,
+				"error":    repairErr,
+			}).Error("设备注册后索引修复失败")
+			return fmt.Errorf("设备注册成功但索引修复失败: %v", repairErr)
+		}
+	}
 
 	return nil
 }
@@ -524,12 +565,27 @@ func (m *TCPManager) GetDeviceConnection(deviceID string) (ziface.IConnection, b
 } // GetAllSessions 获取所有会话
 // (旧实现已移除，严格在线视图下在文件末尾新增重写版本)
 
-// UpdateHeartbeat 更新设备心跳
+// UpdateHeartbeat 更新设备心跳 - 增强版本
 func (m *TCPManager) UpdateHeartbeat(deviceID string) error {
+	// 🔧 增强：首先尝试智能索引修复
+	valid, validationErr := m.ValidateDeviceIndex(deviceID)
+	if !valid {
+		logger.WithFields(logrus.Fields{
+			"deviceID": deviceID,
+			"error":    validationErr,
+		}).Debug("心跳更新前检测到索引不一致，尝试修复")
+
+		if repairErr := m.RepairDeviceIndex(deviceID); repairErr != nil {
+			return fmt.Errorf("设备索引修复失败: %v", repairErr)
+		}
+
+		logger.WithField("deviceID", deviceID).Debug("设备索引修复成功，继续心跳更新")
+	}
+
 	// 🚀 新架构：通过deviceID → iccid → DeviceGroup查找
 	iccidInterface, exists := m.deviceIndex.Load(deviceID)
 	if !exists {
-		// 尝试通过遍历设备组修复索引
+		// 最后的后备方案：遍历设备组修复索引
 		var foundGroup *DeviceGroup
 		var foundICCID string
 
@@ -573,7 +629,7 @@ func (m *TCPManager) UpdateHeartbeat(deviceID string) error {
 		return fmt.Errorf("设备 %s 在设备组中不存在", deviceID)
 	}
 
-	// 更新设备心跳信息
+	// 🔧 增强：原子性更新设备心跳信息
 	now := time.Now()
 	device.mutex.Lock()
 	device.LastHeartbeat = now
@@ -1135,4 +1191,160 @@ func (m *TCPManager) GetDeviceListForAPI() ([]map[string]interface{}, error) {
 		return true
 	})
 	return devices, nil
+}
+
+// ===============================
+// 索引管理增强方法
+// ===============================
+
+// ValidateDeviceIndex 验证设备索引一致性
+func (m *TCPManager) ValidateDeviceIndex(deviceID string) (bool, error) {
+	// 检查 deviceIndex 映射
+	iccidInterface, indexExists := m.deviceIndex.Load(deviceID)
+	if !indexExists {
+		return false, fmt.Errorf("设备索引映射不存在: %s", deviceID)
+	}
+
+	iccid := iccidInterface.(string)
+
+	// 检查 deviceGroups 中是否存在对应设备
+	groupInterface, groupExists := m.deviceGroups.Load(iccid)
+	if !groupExists {
+		return false, fmt.Errorf("设备组不存在: ICCID=%s", iccid)
+	}
+
+	group := groupInterface.(*DeviceGroup)
+	group.mutex.RLock()
+	_, deviceExists := group.Devices[deviceID]
+	_, sessionExists := group.Sessions[deviceID]
+	group.mutex.RUnlock()
+
+	if !deviceExists {
+		return false, fmt.Errorf("设备在组中不存在: DeviceID=%s, ICCID=%s", deviceID, iccid)
+	}
+
+	if !sessionExists {
+		return false, fmt.Errorf("设备会话在组中不存在: DeviceID=%s, ICCID=%s", deviceID, iccid)
+	}
+
+	return true, nil
+}
+
+// RepairDeviceIndex 修复设备索引不一致问题
+func (m *TCPManager) RepairDeviceIndex(deviceID string) error {
+	logger.WithField("deviceID", deviceID).Info("🔧 开始修复设备索引")
+
+	// 首先验证当前状态
+	valid, _ := m.ValidateDeviceIndex(deviceID)
+	if valid {
+		logger.WithField("deviceID", deviceID).Debug("设备索引已经一致，无需修复")
+		return nil
+	}
+
+	// 尝试通过遍历设备组找到设备
+	var foundICCID string
+	var foundDevice *Device
+
+	m.deviceGroups.Range(func(key, value interface{}) bool {
+		iccid := key.(string)
+		group := value.(*DeviceGroup)
+		group.mutex.RLock()
+
+		if device, deviceExists := group.Devices[deviceID]; deviceExists {
+			foundICCID = iccid
+			foundDevice = device
+			group.mutex.RUnlock()
+			return false // 找到了，停止遍历
+		}
+
+		group.mutex.RUnlock()
+		return true // 继续遍历
+	})
+
+	if foundDevice == nil {
+		return fmt.Errorf("设备在所有设备组中都不存在: %s", deviceID)
+	}
+
+	// 重建索引映射
+	m.deviceIndex.Store(deviceID, foundICCID)
+
+	logger.WithFields(logrus.Fields{
+		"deviceID": deviceID,
+		"iccid":    foundICCID,
+		"repaired": true,
+	}).Info("🔧 设备索引修复成功")
+
+	// 再次验证
+	if valid, err := m.ValidateDeviceIndex(deviceID); !valid {
+		return fmt.Errorf("索引修复后验证失败: %v", err)
+	}
+
+	return nil
+}
+
+// AtomicDeviceIndexOperation 原子性设备索引操作
+func (m *TCPManager) AtomicDeviceIndexOperation(deviceID, iccid string, operation func() error) error {
+	// 简单的操作原子性保障（可以后续使用分布式锁进一步增强）
+	if operation == nil {
+		return fmt.Errorf("操作函数不能为空")
+	}
+
+	// 执行操作
+	if err := operation(); err != nil {
+		return err
+	}
+
+	// 操作后验证索引一致性
+	if valid, err := m.ValidateDeviceIndex(deviceID); !valid {
+		logger.WithFields(logrus.Fields{
+			"deviceID": deviceID,
+			"iccid":    iccid,
+			"error":    err,
+		}).Warn("原子操作后索引验证失败，尝试修复")
+
+		return m.RepairDeviceIndex(deviceID)
+	}
+
+	return nil
+}
+
+// PeriodicIndexHealthCheck 定期索引健康检查
+func (m *TCPManager) PeriodicIndexHealthCheck() {
+	logger.Info("🔍 开始定期索引健康检查")
+
+	var healthyCount, repairCount, errorCount int
+
+	// 检查所有设备索引
+	m.deviceIndex.Range(func(key, value interface{}) bool {
+		deviceID := key.(string)
+
+		if valid, err := m.ValidateDeviceIndex(deviceID); valid {
+			healthyCount++
+		} else {
+			logger.WithFields(logrus.Fields{
+				"deviceID": deviceID,
+				"error":    err,
+			}).Warn("发现索引不一致，尝试修复")
+
+			if repairErr := m.RepairDeviceIndex(deviceID); repairErr == nil {
+				repairCount++
+				logger.WithField("deviceID", deviceID).Info("索引修复成功")
+			} else {
+				errorCount++
+				logger.WithFields(logrus.Fields{
+					"deviceID": deviceID,
+					"error":    repairErr,
+				}).Error("索引修复失败")
+			}
+		}
+
+		return true
+	})
+
+	logger.WithFields(logrus.Fields{
+		"healthyCount": healthyCount,
+		"repairCount":  repairCount,
+		"errorCount":   errorCount,
+		"totalChecked": healthyCount + repairCount + errorCount,
+	}).Info("🔍 定期索引健康检查完成")
 }

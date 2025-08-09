@@ -153,37 +153,59 @@ func (h *HeartbeatHandler) processHeartbeat(decodedFrame *protocol.DecodedDNYFra
 			logger.WithFields(logrus.Fields{
 				"deviceId": deviceId,
 				"connID":   conn.GetConnID(),
-				"reason":   "设备索引可能异常，尝试重新建立索引",
+				"reason":   "设备索引可能异常，尝试智能修复",
 			}).Warn("设备心跳处理：设备不存在，尝试修复")
 
-			// 🔧 修复：尝试通过连接重新建立设备索引
-			if deviceSession != nil && deviceSession.DeviceID != "" && tcpManager != nil {
-				// 获取ICCID用于重新注册
-				var iccid string
-				if val, err := conn.GetProperty(constants.PropKeyICCID); err == nil && val != nil {
-					iccid = val.(string)
-				}
+			// 🔧 改进：使用新的智能索引修复机制
+			if tcpManager != nil {
+				if repairErr := tcpManager.RepairDeviceIndex(deviceId); repairErr != nil {
+					logger.WithFields(logrus.Fields{
+						"deviceId": deviceId,
+						"connID":   conn.GetConnID(),
+						"error":    repairErr,
+					}).Warn("智能索引修复失败，尝试传统方式修复")
 
-				if iccid != "" {
-					// 尝试重新建立设备索引（直接调用内部方法）
-					if session, exists := tcpManager.GetSessionByConnID(conn.GetConnID()); exists {
-						// 重新建立设备索引映射
-						tcpManager.RebuildDeviceIndex(deviceId, session)
+					// 传统修复方式作为后备
+					if deviceSession != nil && deviceSession.DeviceID != "" {
+						// 获取ICCID用于重新注册
+						var iccid string
+						if val, err := conn.GetProperty(constants.PropKeyICCID); err == nil && val != nil {
+							iccid = val.(string)
+						}
 
-						logger.WithFields(logrus.Fields{
-							"deviceId": deviceId,
-							"connID":   conn.GetConnID(),
-							"iccid":    iccid,
-						}).Info("🔧 设备索引重建成功")
+						if iccid != "" {
+							// 尝试重新建立设备索引（直接调用内部方法）
+							if session, exists := tcpManager.GetSessionByConnID(conn.GetConnID()); exists {
+								// 重新建立设备索引映射
+								tcpManager.RebuildDeviceIndex(deviceId, session)
 
-						// 重新尝试更新心跳
-						if retryErr := tcpManager.UpdateHeartbeat(deviceId); retryErr == nil {
-							logger.WithFields(logrus.Fields{
-								"deviceId": deviceId,
-								"connID":   conn.GetConnID(),
-							}).Info("🔧 设备心跳更新修复成功")
+								logger.WithFields(logrus.Fields{
+									"deviceId": deviceId,
+									"connID":   conn.GetConnID(),
+									"iccid":    iccid,
+								}).Info("🔧 传统设备索引重建成功")
+							}
 						}
 					}
+				} else {
+					logger.WithFields(logrus.Fields{
+						"deviceId": deviceId,
+						"connID":   conn.GetConnID(),
+					}).Info("🔧 智能设备索引修复成功")
+				}
+
+				// 重新尝试更新心跳
+				if retryErr := tcpManager.UpdateHeartbeat(deviceId); retryErr == nil {
+					logger.WithFields(logrus.Fields{
+						"deviceId": deviceId,
+						"connID":   conn.GetConnID(),
+					}).Info("🔧 设备心跳更新修复成功")
+				} else {
+					logger.WithFields(logrus.Fields{
+						"deviceId": deviceId,
+						"connID":   conn.GetConnID(),
+						"error":    retryErr,
+					}).Warn("设备心跳更新重试失败")
 				}
 			}
 			// 继续处理心跳，不返回错误
