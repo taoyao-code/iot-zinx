@@ -585,9 +585,16 @@ func (m *TCPManager) GetSessionByDeviceID(deviceID string) (*ConnectionSession, 
 // 🚀 新架构：专门用于获取设备信息的方法
 // 🔧 增强：支持智能查找，兼容带/不带0x前缀的设备ID格式
 func (m *TCPManager) GetDeviceByID(deviceID string) (*Device, bool) {
+	logger.WithField("deviceID", deviceID).Debug("🔍 GetDeviceByID: 开始查找设备")
+
 	// 首先尝试直接查找（原有逻辑）
 	iccidInterface, exists := m.deviceIndex.Load(deviceID)
 	if exists {
+		logger.WithFields(logrus.Fields{
+			"deviceID": deviceID,
+			"iccid":    iccidInterface.(string),
+		}).Debug("🔍 GetDeviceByID: 在deviceIndex中找到映射")
+
 		iccid := iccidInterface.(string)
 		groupInterface, exists := m.deviceGroups.Load(iccid)
 		if exists {
@@ -596,9 +603,19 @@ func (m *TCPManager) GetDeviceByID(deviceID string) (*Device, bool) {
 			device, exists := group.Devices[deviceID]
 			group.mutex.RUnlock()
 			if exists {
+				logger.WithField("deviceID", deviceID).Debug("🔍 GetDeviceByID: 直接查找成功")
 				return device, true
+			} else {
+				logger.WithField("deviceID", deviceID).Warn("🔍 GetDeviceByID: 在deviceIndex中有映射但在设备组中不存在")
 			}
+		} else {
+			logger.WithFields(logrus.Fields{
+				"deviceID": deviceID,
+				"iccid":    iccid,
+			}).Warn("🔍 GetDeviceByID: 设备组不存在")
 		}
+	} else {
+		logger.WithField("deviceID", deviceID).Debug("🔍 GetDeviceByID: 在deviceIndex中未找到映射")
 	}
 
 	// 🔧 兼容性增强：如果直接查找失败，尝试格式转换
@@ -617,6 +634,11 @@ func (m *TCPManager) GetDeviceByID(deviceID string) (*Device, bool) {
 
 	// 尝试查找替代格式
 	if alternativeID != "" && alternativeID != deviceID {
+		logger.WithFields(logrus.Fields{
+			"originalID":    deviceID,
+			"alternativeID": alternativeID,
+		}).Debug("🔍 GetDeviceByID: 尝试替代格式查找")
+
 		iccidInterface, exists := m.deviceIndex.Load(alternativeID)
 		if exists {
 			iccid := iccidInterface.(string)
@@ -1255,15 +1277,36 @@ func (m *TCPManager) GetDeviceListForAPI() ([]map[string]interface{}, error) {
 		}
 		return t.Format("2006-01-02 15:04:05")
 	}
+
+	// 🔧 添加调试日志
+	groupCount := 0
+	deviceCount := 0
+
 	m.deviceGroups.Range(func(_, value interface{}) bool {
 		group := value.(*DeviceGroup)
+		groupCount++
 		group.mutex.RLock()
+
+		logger.WithFields(logrus.Fields{
+			"iccid":       group.ICCID,
+			"deviceCount": len(group.Devices),
+		}).Debug("🔍 GetDeviceListForAPI: 检查设备组")
+
 		for _, dev := range group.Devices {
+			deviceCount++
 			sessions := group.Sessions
 			var sess *ConnectionSession
 			if s, ok := sessions[dev.DeviceID]; ok {
 				sess = s
 			}
+
+			logger.WithFields(logrus.Fields{
+				"deviceID":   dev.DeviceID,
+				"physicalID": dev.PhysicalID,
+				"iccid":      group.ICCID,
+				"hasSession": sess != nil,
+			}).Debug("🔍 GetDeviceListForAPI: 添加设备到列表")
+
 			entry := map[string]interface{}{
 				"deviceId":      dev.DeviceID,
 				"physicalId":    dev.PhysicalID,
@@ -1288,6 +1331,13 @@ func (m *TCPManager) GetDeviceListForAPI() ([]map[string]interface{}, error) {
 		group.mutex.RUnlock()
 		return true
 	})
+
+	logger.WithFields(logrus.Fields{
+		"groupCount":  groupCount,
+		"deviceCount": deviceCount,
+		"resultCount": len(devices),
+	}).Info("🔍 GetDeviceListForAPI: 查询完成")
+
 	return devices, nil
 }
 
