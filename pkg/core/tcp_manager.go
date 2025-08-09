@@ -432,9 +432,10 @@ func (m *TCPManager) RegisterDevice(conn ziface.IConnection, deviceID, physicalI
 }
 
 // RebuildDeviceIndex 重新建立设备索引
-// 用于修复设备索引丢失的问题
+// 用于修复设备索引丢失的问题 - 增强版本
 func (m *TCPManager) RebuildDeviceIndex(deviceID string, session *ConnectionSession) {
 	if session == nil || deviceID == "" {
+		logger.Warn("RebuildDeviceIndex: 无效的参数")
 		return
 	}
 
@@ -443,23 +444,81 @@ func (m *TCPManager) RebuildDeviceIndex(deviceID string, session *ConnectionSess
 	if session.DeviceID == "" {
 		session.DeviceID = deviceID
 	}
+	iccid := session.ICCID
+	physicalID := session.PhysicalID
 	session.mutex.Unlock()
 
-	// 🚀 新架构：重建设备索引映射 (deviceID → iccid)
-	session.mutex.RLock()
-	iccid := session.ICCID
-	session.mutex.RUnlock()
-
-	if iccid != "" {
-		// 重建 deviceID → iccid 映射
-		m.deviceIndex.Store(deviceID, iccid)
+	if iccid == "" {
+		logger.WithField("deviceID", deviceID).Warn("RebuildDeviceIndex: 会话中缺少ICCID信息")
+		return
 	}
 
 	logger.WithFields(logrus.Fields{
 		"deviceID": deviceID,
 		"connID":   session.ConnID,
 		"iccid":    iccid,
-	}).Debug("设备索引已重建")
+	}).Info("🔧 开始重建设备索引")
+
+	// 🚀 新架构：重建设备索引映射 (deviceID → iccid)
+	m.deviceIndex.Store(deviceID, iccid)
+
+	// 🔧 关键修复：确保设备在DeviceGroup中正确存在
+	if groupInterface, exists := m.deviceGroups.Load(iccid); exists {
+		group := groupInterface.(*DeviceGroup)
+		group.mutex.Lock()
+
+		// 确保设备组数据结构完整性
+		if group.Sessions == nil {
+			group.Sessions = make(map[string]*ConnectionSession)
+		}
+		if group.Devices == nil {
+			group.Devices = make(map[string]*Device)
+		}
+
+		// 更新或创建设备条目
+		group.Sessions[deviceID] = session
+		if _, deviceExists := group.Devices[deviceID]; !deviceExists {
+			group.Devices[deviceID] = &Device{
+				DeviceID:     deviceID,
+				PhysicalID:   physicalID,
+				ICCID:        iccid,
+				Status:       constants.DeviceStatusOnline,
+				State:        constants.StateRegistered,
+				RegisteredAt: time.Now(),
+				LastActivity: time.Now(),
+				Properties:   make(map[string]interface{}),
+			}
+			logger.WithField("deviceID", deviceID).Info("🔧 重建设备组中的设备条目")
+		} else {
+			// 更新现有设备的活动时间
+			group.Devices[deviceID].LastActivity = time.Now()
+			group.Devices[deviceID].Status = constants.DeviceStatusOnline
+		}
+
+		group.LastActivity = time.Now()
+		group.mutex.Unlock()
+
+		logger.WithFields(logrus.Fields{
+			"deviceID": deviceID,
+			"connID":   session.ConnID,
+			"iccid":    iccid,
+		}).Info("🔧 设备索引重建成功")
+
+		// 🔧 验证重建结果
+		if valid, err := m.ValidateDeviceIndex(deviceID); !valid {
+			logger.WithFields(logrus.Fields{
+				"deviceID": deviceID,
+				"error":    err,
+			}).Error("🔧 设备索引重建后验证失败")
+		} else {
+			logger.WithField("deviceID", deviceID).Info("🔧 设备索引重建并验证成功")
+		}
+	} else {
+		logger.WithFields(logrus.Fields{
+			"deviceID": deviceID,
+			"iccid":    iccid,
+		}).Warn("🔧 设备组不存在，无法重建完整索引")
+	}
 }
 
 // GetSessionByDeviceID 通过设备ID获取会话
