@@ -63,8 +63,26 @@ func (w *TCPWriter) WriteWithRetry(conn ziface.IConnection, msgID uint32, data [
 			time.Sleep(delay)
 		}
 
-		// 尝试写入
-		err := conn.SendBuffMsg(msgID, data)
+		// 🚨 重要修复：直接发送原始DNY协议数据，不使用Zinx消息封装
+		// 使用conn.GetTCPConnection().Write()发送已经组装好的完整协议数据
+		tcpConn := conn.GetTCPConnection()
+		if tcpConn == nil {
+			lastErr = fmt.Errorf("获取TCP连接失败")
+			continue
+		}
+
+		// 记录原始数据发送（仅首次尝试记录，避免重试时重复日志）
+		if attempt == 0 {
+			w.logger.WithFields(logrus.Fields{
+				"connID":   conn.GetConnID(),
+				"dataSize": len(data),
+				"dataHex":  fmt.Sprintf("% X", data),
+				"method":   "RAW_TCP_WRITE",
+			}).Info("🔥 直接发送原始DNY协议数据（无Zinx封装）")
+		}
+
+		// 直接写入原始数据到TCP连接
+		_, err := tcpConn.Write(data)
 		if err == nil {
 			// 写入成功
 
@@ -195,8 +213,16 @@ func (w *TCPWriter) SendMsgWithRetry(conn ziface.IConnection, msgID uint32, data
 			time.Sleep(delay)
 		}
 
-		// 尝试发送消息
-		err := conn.SendMsg(msgID, data)
+		// 🚨 重要修复：直接发送原始DNY协议数据，不使用Zinx消息封装
+		// 使用conn.GetTCPConnection().Write()发送已经组装好的完整协议数据
+		tcpConn := conn.GetTCPConnection()
+		if tcpConn == nil {
+			lastErr = fmt.Errorf("获取TCP连接失败")
+			continue
+		}
+
+		// 直接写入原始数据到TCP连接
+		_, err := tcpConn.Write(data)
 		if err == nil {
 			return nil
 		}

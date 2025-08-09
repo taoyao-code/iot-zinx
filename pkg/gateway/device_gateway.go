@@ -178,7 +178,18 @@ func (g *DeviceGateway) SendCommandToDevice(deviceID string, command byte, data 
 	}
 	dnyPacket := builder.BuildDNYPacket(physicalID, 0x0001, command, data)
 
-	// 🚀 Phase 2: 使用TCPWriter发送数据包，支持重试机制
+	// � 详细Hex数据日志 - 用于调试命令发送问题
+	logger.WithFields(logrus.Fields{
+		"deviceID":   deviceID,
+		"physicalID": fmt.Sprintf("0x%08X", physicalID),
+		"command":    fmt.Sprintf("0x%02X", command),
+		"dataLen":    len(data),
+		"dataHex":    fmt.Sprintf("% X", data),
+		"packetHex":  fmt.Sprintf("% X", dnyPacket),
+		"packetLen":  len(dnyPacket),
+	}).Info("📡 发送DNY命令数据包 - 详细Hex记录")
+
+	// �🚀 Phase 2: 使用TCPWriter发送数据包，支持重试机制
 	if err := g.tcpWriter.WriteWithRetry(conn, 0, dnyPacket); err != nil {
 		return fmt.Errorf("发送命令失败: %v", err)
 	}
@@ -190,7 +201,8 @@ func (g *DeviceGateway) SendCommandToDevice(deviceID string, command byte, data 
 		"deviceID": deviceID,
 		"command":  fmt.Sprintf("0x%02X", command),
 		"dataLen":  len(data),
-	}).Info("命令发送成功（含重试机制）")
+		"status":   "SUCCESS",
+	}).Info("✅ 命令发送成功（含重试机制）- TCP写入完成")
 
 	return nil
 }
@@ -235,16 +247,26 @@ func (g *DeviceGateway) SendChargingCommand(deviceID string, port uint8, action 
  */
 func (g *DeviceGateway) SendLocationCommand(deviceID string, locateTime int) error {
 	// 🔧 修复：使用正确的设备定位命令(0x96)，添加定位时间参数
-	// 定位时间：30秒（根据协议，1字节表示执行时长，单位秒）
+	// 定位时间：根据协议，1字节表示执行时长，单位秒
 	locationDuration := byte(locateTime)
+
+	logger.WithFields(logrus.Fields{
+		"deviceID":        deviceID,
+		"requestDuration": locateTime,
+		"actualDuration":  locationDuration,
+		"commandID":       fmt.Sprintf("0x%02X", constants.CmdDeviceLocate),
+	}).Info("🎯 准备发送设备定位命令")
+
 	err := g.SendCommandToDevice(deviceID, constants.CmdDeviceLocate, []byte{locationDuration})
 	if err != nil {
 		return fmt.Errorf("发送定位命令失败: %v", err)
 	}
+
 	logger.WithFields(logrus.Fields{
 		"deviceID": deviceID,
 		"duration": locationDuration,
-	}).Info("设备定位命令发送成功，设备将播放语音并闪灯")
+		"status":   "SENT",
+	}).Info("🔊 设备定位命令发送成功，设备将播放语音并闪灯")
 	return nil
 }
 
