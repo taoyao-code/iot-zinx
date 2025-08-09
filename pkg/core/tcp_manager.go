@@ -1011,64 +1011,35 @@ func (m *TCPManager) UnregisterConnection(connID uint64) error {
 
 // GetDeviceDetail 获取设备详细信息（API专用）
 func (m *TCPManager) GetDeviceDetail(deviceID string) (map[string]interface{}, error) {
-	logger.WithField("deviceID", deviceID).Debug("🔍 GetDeviceDetail: 开始查找设备详细信息")
-	
-	// 🔧 增强：支持不同格式的设备ID查找
-	iccidInterface, exists := m.deviceIndex.Load(deviceID)
+	// 🔧 简化：直接使用已有的智能查找方法
+	device, exists := m.GetDeviceByID(deviceID)
 	if !exists {
-		logger.WithField("deviceID", deviceID).Debug("🔍 GetDeviceDetail: 直接查找失败，尝试格式转换")
-		
-		// 尝试智能格式转换
-		var alternativeDeviceID string
-		if strings.HasPrefix(deviceID, "0x") || strings.HasPrefix(deviceID, "0X") {
-			// 移除0x前缀
-			alternativeDeviceID = strings.ToUpper(deviceID[2:])
-		} else {
-			// 添加0x前缀
-			if physicalID, err := utils.ParseDeviceIDToPhysicalID(deviceID); err == nil {
-				alternativeDeviceID = utils.FormatPhysicalID(physicalID)
-			}
-		}
-
-		if alternativeDeviceID != "" {
-			logger.WithFields(logrus.Fields{
-				"originalID":    deviceID,
-				"alternativeID": alternativeDeviceID,
-			}).Debug("🔍 GetDeviceDetail: 尝试备用格式查找")
-			
-			if altIccidInterface, altExists := m.deviceIndex.Load(alternativeDeviceID); altExists {
-				iccidInterface = altIccidInterface
-				exists = true
-				deviceID = alternativeDeviceID // 使用找到的格式
-				logger.WithField("deviceID", deviceID).Debug("🔍 GetDeviceDetail: 备用格式查找成功")
-			}
-		}
-
-		if !exists {
-			logger.WithField("deviceID", deviceID).Warn("🔍 GetDeviceDetail: 设备不存在于索引中")
-			return nil, fmt.Errorf("设备不存在")
-		}
-	} else {
-		logger.WithField("deviceID", deviceID).Debug("🔍 GetDeviceDetail: 直接查找成功")
-	}
-	iccid := iccidInterface.(string)
-	groupInterface, ok := m.deviceGroups.Load(iccid)
-	if !ok {
 		return nil, fmt.Errorf("设备不存在")
 	}
+
+	// 通过设备索引找到ICCID和设备组
+	iccidInterface, exists := m.deviceIndex.Load(device.DeviceID)
+	if !exists {
+		return nil, fmt.Errorf("设备索引不存在")
+	}
+
+	iccid := iccidInterface.(string)
+	groupInterface, exists := m.deviceGroups.Load(iccid)
+	if !exists {
+		return nil, fmt.Errorf("设备组不存在")
+	}
+
 	group := groupInterface.(*DeviceGroup)
 	group.mutex.RLock()
 	defer group.mutex.RUnlock()
-	device, ok := group.Devices[deviceID]
-	if !ok {
-		return nil, fmt.Errorf("设备不存在")
-	}
-	// 严格在线视图：存在即在线
+
+	// 获取会话信息
 	var session *ConnectionSession
-	if s, ok2 := group.Sessions[deviceID]; ok2 {
+	if s, ok := group.Sessions[device.DeviceID]; ok {
 		session = s
 	}
 
+	// 格式化时间的辅助函数
 	formatTime := func(t time.Time) (string, int64) {
 		if t.IsZero() {
 			return "", 0
@@ -1098,6 +1069,7 @@ func (m *TCPManager) GetDeviceDetail(deviceID string) (map[string]interface{}, e
 		"groupDeviceCount":  len(group.Devices),
 		"groupSessionCount": len(group.Sessions),
 	}
+
 	if session != nil {
 		connAtStr, connAtTs := formatTime(session.ConnectedAt)
 		regAtStr, regAtTs := formatTime(session.RegisteredAt)
@@ -1109,6 +1081,7 @@ func (m *TCPManager) GetDeviceDetail(deviceID string) (map[string]interface{}, e
 		detail["registeredAt"] = regAtStr
 		detail["registeredAtTs"] = regAtTs
 	}
+
 	return detail, nil
 }
 
