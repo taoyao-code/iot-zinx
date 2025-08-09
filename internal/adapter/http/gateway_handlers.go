@@ -216,8 +216,9 @@ func (h *DeviceGatewayHandlers) HandleStopCharging(c *gin.Context) {
 		return
 	}
 
-	// 🚀 新架构：发送停止充电命令（支持订单号参数）
-	err := h.deviceGateway.SendChargingCommand(req.DeviceID, req.Port, 0x00)
+	// 🚀 新架构：发送停止充电命令（使用完整的82指令格式）
+	// 根据AP3000协议，停止充电也需要使用完整的充电控制参数，但充电命令设为0x00
+	err := h.deviceGateway.SendChargingCommandWithParams(req.DeviceID, req.Port, 0x00, req.OrderNo, 0, 0, 0)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"code":    500,

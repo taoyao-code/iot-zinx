@@ -8,6 +8,7 @@ import (
 
 	"github.com/bujia-iot/iot-zinx/pkg/constants"
 	"github.com/bujia-iot/iot-zinx/pkg/protocol"
+	"github.com/bujia-iot/iot-zinx/pkg/utils"
 )
 
 func main() {
@@ -31,9 +32,9 @@ func testDeviceLocate() {
 	deviceID := "04A26CF3"
 	locateTime := uint8(10)
 
-	// 解析PhysicalID
-	var physicalID uint32
-	if _, err := fmt.Sscanf(deviceID, "%x", &physicalID); err != nil {
+	// 解析PhysicalID - 使用统一的解析函数
+	physicalID, err := utils.ParseDeviceIDToPhysicalID(deviceID)
+	if err != nil {
 		log.Printf("解析设备ID失败: %v", err)
 		return
 	}
@@ -78,9 +79,9 @@ func testChargingControl() {
 	value := uint16(60)
 	balance := uint32(1010)
 
-	// 解析PhysicalID
-	var physicalID uint32
-	if _, err := fmt.Sscanf(deviceID, "%x", &physicalID); err != nil {
+	// 解析PhysicalID - 使用统一的解析函数
+	physicalID, err := utils.ParseDeviceIDToPhysicalID(deviceID)
+	if err != nil {
 		log.Printf("解析设备ID失败: %v", err)
 		return
 	}

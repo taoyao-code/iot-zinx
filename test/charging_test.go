@@ -7,6 +7,7 @@ import (
 
 	"github.com/bujia-iot/iot-zinx/pkg/constants"
 	"github.com/bujia-iot/iot-zinx/pkg/protocol"
+	"github.com/bujia-iot/iot-zinx/pkg/utils"
 )
 
 func main2() {
@@ -28,9 +29,9 @@ func main2() {
 	fmt.Printf("时长: %d分钟\n", value)
 	fmt.Printf("订单号: %s\n", orderNo)
 
-	// 解析物理ID
-	var physicalID uint32
-	if _, err := fmt.Sscanf(deviceID, "%x", &physicalID); err != nil {
+	// 解析物理ID - 使用统一的解析函数
+	physicalID, err := utils.ParseDeviceIDToPhysicalID(deviceID)
+	if err != nil {
 		fmt.Printf("解析物理ID失败: %v\n", err)
 		return
 	}
