@@ -54,7 +54,7 @@ func RegisterRouters(server ziface.IServer) {
 
 	// 七、设备管理
 	// ----------------------------------------------------------------------------
-	// server.AddRouter(constants.CmdDeviceLocate, NewDeviceLocateHandler()) // 0x96 声光寻找设备功能 - 已删除
+	server.AddRouter(constants.CmdDeviceLocate, NewDeviceLocateHandler()) // 0x96 声光寻找设备功能 - 🔧 重新启用以处理设备定位响应
 
 	// 七、设备版本信息
 	// ----------------------------------------------------------------------------

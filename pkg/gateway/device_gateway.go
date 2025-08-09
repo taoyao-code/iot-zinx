@@ -184,8 +184,8 @@ func (g *DeviceGateway) SendCommandToDevice(deviceID string, command byte, data 
 		"physicalID": fmt.Sprintf("0x%08X", physicalID),
 		"command":    fmt.Sprintf("0x%02X", command),
 		"dataLen":    len(data),
-		"dataHex":    fmt.Sprintf("% X", data),
-		"packetHex":  fmt.Sprintf("% X", dnyPacket),
+		"dataHex":    fmt.Sprintf("%X", data),
+		"packetHex":  fmt.Sprintf("%X", dnyPacket),
 		"packetLen":  len(dnyPacket),
 	}).Info("📡 发送DNY命令数据包 - 详细Hex记录")
 

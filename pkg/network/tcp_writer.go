@@ -76,7 +76,7 @@ func (w *TCPWriter) WriteWithRetry(conn ziface.IConnection, msgID uint32, data [
 			w.logger.WithFields(logrus.Fields{
 				"connID":   conn.GetConnID(),
 				"dataSize": len(data),
-				"dataHex":  fmt.Sprintf("% X", data),
+				"dataHex":  fmt.Sprintf("%X", data),
 				"method":   "RAW_TCP_WRITE",
 			}).Info("🔥 直接发送原始DNY协议数据（无Zinx封装）")
 		}
