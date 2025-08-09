@@ -28,6 +28,9 @@ type TCPManager struct {
 	running  bool
 	stopChan chan struct{}
 	mutex    sync.RWMutex
+
+	// 内部控制
+	heartbeatWatcherStarted bool
 }
 
 // ConnectionSession 连接会话数据结构
@@ -108,19 +111,22 @@ func (dg *DeviceGroup) Unlock() {
 // Device 设备信息
 // 🚀 新增：独立的设备信息结构，从session中分离
 type Device struct {
-	DeviceID       string                          `json:"device_id"`
-	PhysicalID     string                          `json:"physical_id"`
-	ICCID          string                          `json:"iccid"`
-	DeviceType     uint16                          `json:"device_type"`
-	DeviceVersion  string                          `json:"device_version"`
-	Status         constants.DeviceStatus          `json:"status"`
-	State          constants.DeviceConnectionState `json:"state"`
-	RegisteredAt   time.Time                       `json:"registered_at"`
-	LastActivity   time.Time                       `json:"last_activity"`
-	LastHeartbeat  time.Time                       `json:"last_heartbeat"`
-	HeartbeatCount int64                           `json:"heartbeat_count"`
-	Properties     map[string]interface{}          `json:"properties"`
-	mutex          sync.RWMutex                    `json:"-"`
+	DeviceID        string                          `json:"device_id"`
+	PhysicalID      string                          `json:"physical_id"`
+	ICCID           string                          `json:"iccid"`
+	DeviceType      uint16                          `json:"device_type"`
+	DeviceVersion   string                          `json:"device_version"`
+	Status          constants.DeviceStatus          `json:"status"`
+	State           constants.DeviceConnectionState `json:"state"`
+	RegisteredAt    time.Time                       `json:"registered_at"`
+	LastActivity    time.Time                       `json:"last_activity"`
+	LastHeartbeat   time.Time                       `json:"last_heartbeat"`
+	HeartbeatCount  int64                           `json:"heartbeat_count"`
+	LastCommandAt   time.Time                       `json:"last_command_at"`
+	LastCommandCode byte                            `json:"last_command_code"`
+	LastCommandSize int                             `json:"last_command_size"`
+	Properties      map[string]interface{}          `json:"properties"`
+	mutex           sync.RWMutex                    `json:"-"`
 }
 
 // TCPManagerConfig TCP管理器配置
@@ -284,20 +290,17 @@ func (m *TCPManager) RegisterDevice(conn ziface.IConnection, deviceID, physicalI
 	session := sessionInterface.(*ConnectionSession)
 
 	// 🔧 检查设备是否已注册（避免重复注册导致的索引不一致）
-	if existingSession, alreadyExists := m.GetSessionByDeviceID(deviceID); alreadyExists {
+	alreadyExists := false
+	if existingSession, existsOld := m.GetSessionByDeviceID(deviceID); existsOld {
+		alreadyExists = true
 		if existingSession.ConnID == connID {
-			// 同一连接的重复注册，更新信息
-			logger.WithFields(logrus.Fields{
-				"deviceID": deviceID,
-				"connID":   connID,
-			}).Debug("设备重复注册，更新信息")
+			// 同一连接重复注册
+			logger.WithFields(logrus.Fields{"deviceID": deviceID, "connID": connID}).Debug("[REGISTER] 同一连接重复注册，更新信息")
 		} else {
-			// 不同连接的重复注册，可能是设备重连
-			logger.WithFields(logrus.Fields{
-				"deviceID":  deviceID,
-				"oldConnID": existingSession.ConnID,
-				"newConnID": connID,
-			}).Warn("设备在不同连接上重复注册，更新映射")
+			// 不同连接重连：清理旧连接（严格在线视图）
+			logger.WithFields(logrus.Fields{"deviceID": deviceID, "oldConnID": existingSession.ConnID, "newConnID": connID}).Warn("[REGISTER] 设备跨连接重连，清理旧连接")
+			m.cleanupConnection(existingSession.ConnID, "re-register")
+			alreadyExists = false // 旧连接已清理，当作新设备统计
 		}
 	}
 
@@ -360,12 +363,22 @@ func (m *TCPManager) RegisterDevice(conn ziface.IConnection, deviceID, physicalI
 		m.deviceGroups.Store(iccid, deviceGroup)
 	}
 
-	// 更新统计信息
-	m.stats.mutex.Lock()
-	m.stats.TotalDevices++
-	m.stats.OnlineDevices++
-	m.stats.LastUpdateAt = time.Now()
-	m.stats.mutex.Unlock()
+	// 更新统计信息（仅对新设备或被视为重新接入的设备计数）
+	if !alreadyExists {
+		m.stats.mutex.Lock()
+		m.stats.TotalDevices++
+		m.stats.OnlineDevices++
+		m.stats.LastUpdateAt = time.Now()
+		m.stats.mutex.Unlock()
+	} else {
+		// 已存在情况下确保其被计为在线（若之前误差，可校正 OnlineDevices）
+		m.stats.mutex.Lock()
+		if m.stats.OnlineDevices < m.stats.TotalDevices { // 简单校正
+			m.stats.OnlineDevices = m.stats.TotalDevices
+		}
+		m.stats.LastUpdateAt = time.Now()
+		m.stats.mutex.Unlock()
+	}
 
 	logger.WithFields(logrus.Fields{
 		"deviceID":   deviceID,
@@ -509,18 +522,7 @@ func (m *TCPManager) GetDeviceConnection(deviceID string) (ziface.IConnection, b
 
 	return conn, conn != nil
 } // GetAllSessions 获取所有会话
-func (m *TCPManager) GetAllSessions() map[string]*ConnectionSession {
-	sessions := make(map[string]*ConnectionSession)
-
-	m.deviceIndex.Range(func(key, value interface{}) bool {
-		deviceID := key.(string)
-		session := value.(*ConnectionSession)
-		sessions[deviceID] = session
-		return true
-	})
-
-	return sessions
-}
+// (旧实现已移除，严格在线视图下在文件末尾新增重写版本)
 
 // UpdateHeartbeat 更新设备心跳
 func (m *TCPManager) UpdateHeartbeat(deviceID string) error {
@@ -651,6 +653,12 @@ func (m *TCPManager) Start() error {
 
 	m.running = true
 	logger.Info("TCP管理器启动成功")
+
+	// 启动心跳巡检（严格在线视图：超时即清理）
+	if !m.heartbeatWatcherStarted {
+		m.heartbeatWatcherStarted = true
+		go m.startHeartbeatWatcher()
+	}
 	return nil
 }
 
@@ -746,56 +754,39 @@ func (m *TCPManager) UpdateDeviceStatus(deviceID string, status constants.Device
 	return nil
 }
 
-// GetDeviceListForAPI 为API层提供的设备列表查询
-func (m *TCPManager) GetDeviceListForAPI() ([]map[string]interface{}, error) {
-	sessions := m.GetAllSessions()
-
-	apiDevices := make([]map[string]interface{}, 0, len(sessions))
-	for deviceID, session := range sessions {
-		// 计算在线指标：心跳超时内且状态为online；注册状态也视为“在线候选”
-		timeout := m.config.HeartbeatTimeout
-		isOnline := session.DeviceStatus == constants.DeviceStatusOnline || session.State == constants.StateRegistered
-		if timeout > 0 {
-			if session.LastActivity.IsZero() {
-				isOnline = false
-			} else {
-				isOnline = isOnline && time.Since(session.LastActivity) <= timeout
-			}
-		}
-
-		device := map[string]interface{}{
-			"deviceId":      deviceID,
-			"connId":        session.ConnID,
-			"remoteAddr":    session.RemoteAddr,
-			"physicalId":    session.PhysicalID,
-			"iccid":         session.ICCID,
-			"deviceType":    session.DeviceType,
-			"deviceVersion": session.DeviceVersion,
-			"state":         string(session.State),
-			"status":        string(session.DeviceStatus),
-			"connectedAt":   session.ConnectedAt,
-			"lastActivity":  session.LastActivity,
-			"lastHeartbeat": func() int64 {
-				if session.LastHeartbeat.IsZero() {
-					return 0
-				}
-				return session.LastHeartbeat.Unix()
-			}(),
-			"heartbeatTime": func() string {
-				if session.LastHeartbeat.IsZero() {
-					return ""
-				}
-				return session.LastHeartbeat.Format("2006-01-02 15:04:05")
-			}(),
-			"heartbeatCount": session.HeartbeatCount,
-			"commandCount":   session.CommandCount,
-			"isOnline":       isOnline,
-		}
-		apiDevices = append(apiDevices, device)
+// RecordDeviceCommand 记录设备最近一次下发命令元数据
+func (m *TCPManager) RecordDeviceCommand(deviceID string, cmd byte, size int) {
+	iccidInterface, exists := m.deviceIndex.Load(deviceID)
+	if !exists {
+		return
 	}
-
-	return apiDevices, nil
+	iccid := iccidInterface.(string)
+	groupInterface, exists := m.deviceGroups.Load(iccid)
+	if !exists {
+		return
+	}
+	group := groupInterface.(*DeviceGroup)
+	group.mutex.Lock()
+	if dev, ok := group.Devices[deviceID]; ok {
+		dev.mutex.Lock()
+		dev.LastCommandAt = time.Now()
+		dev.LastCommandCode = cmd
+		dev.LastCommandSize = size
+		dev.LastActivity = time.Now()
+		dev.mutex.Unlock()
+	}
+	if sess, ok := group.Sessions[deviceID]; ok {
+		sess.mutex.Lock()
+		sess.CommandCount++
+		sess.LastActivity = time.Now()
+		sess.mutex.Unlock()
+	}
+	group.LastActivity = time.Now()
+	group.mutex.Unlock()
 }
+
+// GetDeviceListForAPI 为API层提供的设备列表查询
+// (旧实现已移除，严格在线视图下在文件末尾新增重写版本)
 
 // GetSessionByConnID 通过连接ID获取会话（兼容性方法）
 func (m *TCPManager) GetSessionByConnID(connID uint64) (*ConnectionSession, bool) {
@@ -838,107 +829,75 @@ func (m *TCPManager) RegisterDeviceWithDetails(conn ziface.IConnection, deviceID
 
 // UnregisterConnection 注销连接（兼容性方法）
 func (m *TCPManager) UnregisterConnection(connID uint64) error {
-	// 查找并删除连接
-	sessionInterface, exists := m.connections.Load(connID)
-	if !exists {
-		return fmt.Errorf("连接 %d 不存在", connID)
-	}
-
-	session := sessionInterface.(*ConnectionSession)
-
-	// 从设备映射中删除
-	if session.DeviceID != "" {
-		m.deviceIndex.Delete(session.DeviceID)
-	}
-
-	// 从连接映射中删除
-	m.connections.Delete(connID)
-
-	logger.WithFields(logrus.Fields{
-		"connID":   connID,
-		"deviceID": session.DeviceID,
-	}).Info("连接已注销")
-
+	m.cleanupConnection(connID, "unregister")
 	return nil
 }
 
 // GetDeviceDetail 获取设备详细信息（API专用）
 func (m *TCPManager) GetDeviceDetail(deviceID string) (map[string]interface{}, error) {
-	// 🚀 使用新架构：deviceID → iccid → DeviceGroup → Device/Session
 	iccidInterface, exists := m.deviceIndex.Load(deviceID)
 	if !exists {
 		return nil, fmt.Errorf("设备不存在")
 	}
-
 	iccid := iccidInterface.(string)
-	deviceGroupInterface, exists := m.deviceGroups.Load(iccid)
-	if !exists {
-		return nil, fmt.Errorf("设备组不存在")
+	groupInterface, ok := m.deviceGroups.Load(iccid)
+	if !ok {
+		return nil, fmt.Errorf("设备不存在")
 	}
-
-	deviceGroup := deviceGroupInterface.(*DeviceGroup)
-	deviceGroup.mutex.RLock()
-	defer deviceGroup.mutex.RUnlock()
-
-	// 获取设备信息
-	device, deviceExists := deviceGroup.Devices[deviceID]
-	if !deviceExists {
-		return nil, fmt.Errorf("设备信息不存在")
+	group := groupInterface.(*DeviceGroup)
+	group.mutex.RLock()
+	defer group.mutex.RUnlock()
+	device, ok := group.Devices[deviceID]
+	if !ok {
+		return nil, fmt.Errorf("设备不存在")
 	}
-
-	// 获取会话信息（设备组中的第一个会话，或匹配的会话）
+	// 严格在线视图：存在即在线
 	var session *ConnectionSession
-	for _, sess := range deviceGroup.Sessions {
-		if sess.DeviceID == deviceID {
-			session = sess
-			break
+	if s, ok2 := group.Sessions[deviceID]; ok2 {
+		session = s
+	}
+
+	formatTime := func(t time.Time) (string, int64) {
+		if t.IsZero() {
+			return "", 0
 		}
-	}
-	if session == nil && len(deviceGroup.Sessions) > 0 {
-		// 如果没有匹配的会话，使用第一个会话（共享连接模式）
-		for _, sess := range deviceGroup.Sessions {
-			session = sess
-			break
-		}
+		return t.Format("2006-01-02 15:04:05"), t.Unix()
 	}
 
-	// 构建详细信息
-	deviceDetail := map[string]interface{}{
-		// === 基本信息 ===
-		"deviceId":      device.DeviceID,
-		"physicalId":    device.PhysicalID,
-		"iccid":         deviceGroup.ICCID,
-		"deviceType":    device.DeviceType,
-		"deviceVersion": device.DeviceVersion,
+	lastActStr, lastActTs := formatTime(device.LastActivity)
+	lastHbStr, lastHbTs := formatTime(device.LastHeartbeat)
+	lastCmdStr, lastCmdTs := formatTime(device.LastCommandAt)
 
-		// === 连接信息 ===
-		"isOnline":        device.Status == constants.DeviceStatusOnline,
-		"deviceStatus":    device.Status.String(),
-		"connectionState": device.State.String(),
-
-		// === 时间信息 ===
-		"lastActivity":    device.LastActivity.Format("2006-01-02 15:04:05"),
-		"lastHeartbeat":   device.LastHeartbeat.Format("2006-01-02 15:04:05"),
-		"lastActivityTs":  device.LastActivity.Unix(),
-		"lastHeartbeatTs": device.LastHeartbeat.Unix(),
+	detail := map[string]interface{}{
+		"deviceId":          device.DeviceID,
+		"physicalId":        device.PhysicalID,
+		"iccid":             group.ICCID,
+		"deviceType":        device.DeviceType,
+		"deviceVersion":     device.DeviceVersion,
+		"isOnline":          true,
+		"lastActivity":      lastActStr,
+		"lastActivityTs":    lastActTs,
+		"lastHeartbeat":     lastHbStr,
+		"lastHeartbeatTs":   lastHbTs,
+		"lastCommand":       lastCmdStr,
+		"lastCommandTs":     lastCmdTs,
+		"lastCommandCode":   device.LastCommandCode,
+		"lastCommandSize":   device.LastCommandSize,
+		"groupDeviceCount":  len(group.Devices),
+		"groupSessionCount": len(group.Sessions),
 	}
-
-	// 添加会话信息（如果有）
 	if session != nil {
-		deviceDetail["sessionId"] = session.SessionID
-		deviceDetail["connId"] = session.ConnID
-		deviceDetail["remoteAddr"] = session.RemoteAddr
-		deviceDetail["connectedAt"] = session.ConnectedAt.Format("2006-01-02 15:04:05")
-		deviceDetail["registeredAt"] = session.RegisteredAt.Format("2006-01-02 15:04:05")
-		deviceDetail["connectedAtTs"] = session.ConnectedAt.Unix()
-		deviceDetail["registeredAtTs"] = session.RegisteredAt.Unix()
+		connAtStr, connAtTs := formatTime(session.ConnectedAt)
+		regAtStr, regAtTs := formatTime(session.RegisteredAt)
+		detail["sessionId"] = session.SessionID
+		detail["connId"] = session.ConnID
+		detail["remoteAddr"] = session.RemoteAddr
+		detail["connectedAt"] = connAtStr
+		detail["connectedAtTs"] = connAtTs
+		detail["registeredAt"] = regAtStr
+		detail["registeredAtTs"] = regAtTs
 	}
-
-	// 添加设备组统计信息
-	deviceDetail["groupDeviceCount"] = len(deviceGroup.Devices)
-	deviceDetail["groupSessionCount"] = len(deviceGroup.Sessions)
-
-	return deviceDetail, nil
+	return detail, nil
 }
 
 // ===============================
@@ -958,4 +917,222 @@ func (m *TCPManager) GetDeviceGroups() *sync.Map {
 // GetConnections 获取连接映射（connID → *ConnectionSession）
 func (m *TCPManager) GetConnections() *sync.Map {
 	return &m.connections
+}
+
+// ===============================
+// 新增：严格在线视图支撑函数
+// ===============================
+
+// cleanupConnection 清理一个连接及其下所有设备（严格在线视图：直接移除）
+func (m *TCPManager) cleanupConnection(connID uint64, reason string) {
+	// 读取并删除连接会话（先 Load 再判断，防止重复）
+	sessionInterface, exists := m.connections.Load(connID)
+	if !exists {
+		return
+	}
+	session := sessionInterface.(*ConnectionSession)
+
+	// 找到所属设备组
+	iccid := session.ICCID
+	if iccid != "" {
+		if groupInterface, ok := m.deviceGroups.Load(iccid); ok {
+			group := groupInterface.(*DeviceGroup)
+			group.mutex.Lock()
+			// 统计将被移除的在线设备数量
+			removedDevices := 0
+			for deviceID := range group.Devices {
+				// 删除 deviceIndex 映射
+				m.deviceIndex.Delete(deviceID)
+				removedDevices++
+			}
+			// 清空组并删除组
+			group.Devices = map[string]*Device{}
+			group.Sessions = map[string]*ConnectionSession{}
+			group.mutex.Unlock()
+			m.deviceGroups.Delete(iccid)
+
+			// 更新统计
+			m.stats.mutex.Lock()
+			if m.stats.ActiveConnections > 0 {
+				m.stats.ActiveConnections--
+			}
+			if m.stats.OnlineDevices >= int64(removedDevices) {
+				m.stats.OnlineDevices -= int64(removedDevices)
+			} else {
+				m.stats.OnlineDevices = 0
+			}
+			m.stats.LastUpdateAt = time.Now()
+			m.stats.mutex.Unlock()
+
+			logger.WithFields(logrus.Fields{
+				"connID":         connID,
+				"iccid":          iccid,
+				"removedDevices": removedDevices,
+				"reason":         reason,
+			}).Info("[CLEANUP] 连接及其设备已清理")
+		}
+	} else {
+		// 仍需更新连接统计
+		m.stats.mutex.Lock()
+		if m.stats.ActiveConnections > 0 {
+			m.stats.ActiveConnections--
+		}
+		m.stats.LastUpdateAt = time.Now()
+		m.stats.mutex.Unlock()
+	}
+
+	// 最后删除连接映射
+	m.connections.Delete(connID)
+}
+
+// DisconnectByDeviceID 根据设备ID断开并清理
+func (m *TCPManager) DisconnectByDeviceID(deviceID string, reason string) bool {
+	session, ok := m.GetSessionByDeviceID(deviceID)
+	if !ok {
+		return true // 已不存在视为成功
+	}
+	m.cleanupConnection(session.ConnID, reason)
+	if session.Connection != nil {
+		session.Connection.Stop()
+	}
+	return true
+}
+
+// markDeviceOffline 心跳超时处理（严格在线视图=整体清理连接）
+func (m *TCPManager) markDeviceOffline(deviceID string) {
+	session, ok := m.GetSessionByDeviceID(deviceID)
+	if !ok {
+		return
+	}
+	m.cleanupConnection(session.ConnID, "timeout")
+}
+
+// startHeartbeatWatcher 周期检测心跳超时
+func (m *TCPManager) startHeartbeatWatcher() {
+	interval := 30 * time.Second
+	if m.config != nil && m.config.HeartbeatTimeout > 0 {
+		half := m.config.HeartbeatTimeout / 2
+		if half < interval {
+			interval = half
+		}
+		if interval < 5*time.Second {
+			interval = 5 * time.Second
+		}
+	}
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-m.stopChan:
+			return
+		case <-ticker.C:
+			timeout := m.config.HeartbeatTimeout
+			if timeout <= 0 {
+				continue
+			}
+			now := time.Now()
+			// 遍历设备组
+			m.deviceGroups.Range(func(key, value interface{}) bool {
+				group := value.(*DeviceGroup)
+				group.mutex.RLock()
+				for deviceID, dev := range group.Devices {
+					last := dev.LastHeartbeat
+					if last.IsZero() {
+						last = dev.LastActivity
+					}
+					if !last.IsZero() && now.Sub(last) > timeout {
+						group.mutex.RUnlock() // 释放读锁再清理
+						m.markDeviceOffline(deviceID)
+						group.mutex.RLock() // 重新获取读锁继续
+					}
+				}
+				group.mutex.RUnlock()
+				return true
+			})
+		}
+	}
+}
+
+// RecalculateStats 重新计算统计（调试 / 兜底）
+func (m *TCPManager) RecalculateStats() {
+	totalConn := int64(0)
+	m.connections.Range(func(_, _ interface{}) bool { totalConn++; return true })
+	onlineDevices := int64(0)
+	totalDevices := int64(0)
+	m.deviceGroups.Range(func(_, value interface{}) bool {
+		g := value.(*DeviceGroup)
+		g.mutex.RLock()
+		dCount := len(g.Devices)
+		totalDevices += int64(dCount)
+		onlineDevices += int64(dCount) // 严格在线视图：存在即在线
+		g.mutex.RUnlock()
+		return true
+	})
+	m.stats.mutex.Lock()
+	m.stats.ActiveConnections = totalConn
+	m.stats.TotalConnections = totalConn // 保持一致（严格在线视图不保留历史）
+	m.stats.TotalDevices = totalDevices
+	m.stats.OnlineDevices = onlineDevices
+	m.stats.LastUpdateAt = time.Now()
+	m.stats.mutex.Unlock()
+}
+
+// 重写 GetAllSessions （严格在线：遍历现存组）
+func (m *TCPManager) GetAllSessions() map[string]*ConnectionSession {
+	sessions := make(map[string]*ConnectionSession)
+	m.deviceGroups.Range(func(_, value interface{}) bool {
+		group := value.(*DeviceGroup)
+		group.mutex.RLock()
+		for deviceID, sess := range group.Sessions {
+			sessions[deviceID] = sess
+		}
+		group.mutex.RUnlock()
+		return true
+	})
+	return sessions
+}
+
+// 重写 GetDeviceListForAPI （严格在线：存在即在线）
+func (m *TCPManager) GetDeviceListForAPI() ([]map[string]interface{}, error) {
+	devices := []map[string]interface{}{}
+	format := func(t time.Time) string {
+		if t.IsZero() {
+			return ""
+		}
+		return t.Format("2006-01-02 15:04:05")
+	}
+	m.deviceGroups.Range(func(_, value interface{}) bool {
+		group := value.(*DeviceGroup)
+		group.mutex.RLock()
+		for _, dev := range group.Devices {
+			sessions := group.Sessions
+			var sess *ConnectionSession
+			if s, ok := sessions[dev.DeviceID]; ok {
+				sess = s
+			}
+			entry := map[string]interface{}{
+				"deviceId":      dev.DeviceID,
+				"physicalId":    dev.PhysicalID,
+				"iccid":         group.ICCID,
+				"deviceType":    dev.DeviceType,
+				"deviceVersion": dev.DeviceVersion,
+				"isOnline":      true,
+				"lastHeartbeat": func() int64 {
+					if dev.LastHeartbeat.IsZero() {
+						return 0
+					}
+					return dev.LastHeartbeat.Unix()
+				}(),
+				"heartbeatTime": format(dev.LastHeartbeat),
+			}
+			if sess != nil {
+				entry["connId"] = sess.ConnID
+				entry["remoteAddr"] = sess.RemoteAddr
+			}
+			devices = append(devices, entry)
+		}
+		group.mutex.RUnlock()
+		return true
+	})
+	return devices, nil
 }

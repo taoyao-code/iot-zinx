@@ -62,29 +62,9 @@ func (g *DeviceGateway) IsDeviceOnline(deviceID string) bool {
 	if g.tcpManager == nil {
 		return false
 	}
-
-	// 🚀 新架构：通过设备组查询设备状态
-	iccidInterface, exists := g.tcpManager.GetDeviceIndex().Load(deviceID)
-	if !exists {
-		return false
-	}
-
-	iccid := iccidInterface.(string)
-	deviceGroupInterface, exists := g.tcpManager.GetDeviceGroups().Load(iccid)
-	if !exists {
-		return false
-	}
-
-	deviceGroup := deviceGroupInterface.(*core.DeviceGroup)
-	deviceGroup.RLock()
-	defer deviceGroup.RUnlock()
-
-	device, exists := deviceGroup.Devices[deviceID]
-	if !exists {
-		return false
-	}
-
-	return device.Status == constants.DeviceStatusOnline
+	// 严格在线视图：存在即在线
+	_, ok := g.tcpManager.GetDeviceByID(deviceID)
+	return ok
 }
 
 /**
@@ -150,19 +130,11 @@ func (g *DeviceGateway) DisconnectDevice(deviceID string) bool {
 	if g.tcpManager == nil {
 		return false
 	}
-
-	conn, exists := g.tcpManager.GetConnectionByDeviceID(deviceID)
-	if !exists {
-		return true // 设备已经不在线
+	ok := g.tcpManager.DisconnectByDeviceID(deviceID, "manual")
+	if ok {
+		logger.WithFields(logrus.Fields{"deviceID": deviceID}).Info("设备连接已主动断开并清理")
 	}
-
-	conn.Stop()
-
-	logger.WithFields(logrus.Fields{
-		"deviceID": deviceID,
-	}).Info("设备连接已主动断开")
-
-	return true
+	return ok
 }
 
 // ===============================
@@ -198,14 +170,21 @@ func (g *DeviceGateway) SendCommandToDevice(deviceID string, command byte, data 
 
 	// 将设备ID转换为物理ID (假设physicalID存储为十六进制字符串)
 	var physicalID uint32
-	fmt.Sscanf(session.PhysicalID, "%x", &physicalID)
-
+	if session.PhysicalID == "" {
+		return fmt.Errorf("设备 PhysicalID 为空，无法发送命令")
+	}
+	if _, err := fmt.Sscanf(session.PhysicalID, "%x", &physicalID); err != nil {
+		return fmt.Errorf("解析 physicalID 失败: %v", err)
+	}
 	dnyPacket := builder.BuildDNYPacket(physicalID, 0x0001, command, data)
 
 	// 🚀 Phase 2: 使用TCPWriter发送数据包，支持重试机制
 	if err := g.tcpWriter.WriteWithRetry(conn, 0, dnyPacket); err != nil {
 		return fmt.Errorf("发送命令失败: %v", err)
 	}
+
+	// 记录命令元数据
+	g.tcpManager.RecordDeviceCommand(deviceID, command, len(data))
 
 	logger.WithFields(logrus.Fields{
 		"deviceID": deviceID,
@@ -255,16 +234,12 @@ func (g *DeviceGateway) SendChargingCommand(deviceID string, port uint8, action 
  * @return {error}
  */
 func (g *DeviceGateway) SendLocationCommand(deviceID string) error {
-	// 定位命令通常不需要额外数据，使用通用查询命令
-	err := g.SendCommandToDevice(deviceID, 0x90, []byte{}) // 0x90 是通用查询命令
+	// 使用协议中定义的查询参数指令（临时作为定位查询）
+	err := g.SendCommandToDevice(deviceID, constants.CmdQueryParam1, []byte{})
 	if err != nil {
 		return fmt.Errorf("发送定位命令失败: %v", err)
 	}
-
-	logger.WithFields(logrus.Fields{
-		"deviceID": deviceID,
-	}).Info("设备定位命令发送成功")
-
+	logger.WithFields(logrus.Fields{"deviceID": deviceID}).Info("定位命令(查询参数指令)发送成功")
 	return nil
 }
 
@@ -444,6 +419,8 @@ func (g *DeviceGateway) SendGenericCommand(deviceID, command string, data map[st
 	if err := g.tcpWriter.WriteWithRetry(conn, 0x01, []byte(fmt.Sprintf("%v", commandData))); err != nil {
 		return fmt.Errorf("发送命令失败: %v", err)
 	}
+	// 记录命令
+	g.tcpManager.RecordDeviceCommand(deviceID, 0x01, len(commandData))
 
 	logger.WithFields(logrus.Fields{
 		"deviceID": deviceID,
@@ -491,6 +468,8 @@ func (g *DeviceGateway) SendDNYCommand(deviceID, command, data string) error {
 	if err := g.tcpWriter.WriteWithRetry(conn, 0x02, []byte(dnyCommand)); err != nil {
 		return fmt.Errorf("发送DNY命令失败: %v", err)
 	}
+	// 记录命令
+	g.tcpManager.RecordDeviceCommand(deviceID, 0x02, len(dnyCommand))
 
 	logger.WithFields(logrus.Fields{
 		"deviceID": deviceID,
