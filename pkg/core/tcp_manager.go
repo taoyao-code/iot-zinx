@@ -2,12 +2,14 @@ package core
 
 import (
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
 	"github.com/aceld/zinx/ziface"
 	"github.com/bujia-iot/iot-zinx/internal/infrastructure/logger"
 	"github.com/bujia-iot/iot-zinx/pkg/constants"
+	"github.com/bujia-iot/iot-zinx/pkg/utils"
 	"github.com/sirupsen/logrus"
 )
 
@@ -581,24 +583,61 @@ func (m *TCPManager) GetSessionByDeviceID(deviceID string) (*ConnectionSession, 
 
 // GetDeviceByID 通过设备ID获取设备信息
 // 🚀 新架构：专门用于获取设备信息的方法
+// 🔧 增强：支持智能查找，兼容带/不带0x前缀的设备ID格式
 func (m *TCPManager) GetDeviceByID(deviceID string) (*Device, bool) {
+	// 首先尝试直接查找（原有逻辑）
 	iccidInterface, exists := m.deviceIndex.Load(deviceID)
-	if !exists {
-		return nil, false
+	if exists {
+		iccid := iccidInterface.(string)
+		groupInterface, exists := m.deviceGroups.Load(iccid)
+		if exists {
+			group := groupInterface.(*DeviceGroup)
+			group.mutex.RLock()
+			device, exists := group.Devices[deviceID]
+			group.mutex.RUnlock()
+			if exists {
+				return device, true
+			}
+		}
 	}
 
-	iccid := iccidInterface.(string)
-	groupInterface, exists := m.deviceGroups.Load(iccid)
-	if !exists {
-		return nil, false
+	// 🔧 兼容性增强：如果直接查找失败，尝试格式转换
+	var alternativeID string
+	if strings.HasPrefix(strings.ToLower(deviceID), "0x") {
+		// 如果输入带0x前缀，尝试去掉前缀查找
+		alternativeID = strings.TrimPrefix(strings.ToLower(deviceID), "0x")
+		alternativeID = strings.ToUpper(alternativeID)
+	} else {
+		// 如果输入不带前缀，尝试添加0x前缀查找
+		// 先标准化为8位大写十六进制
+		if physicalID, err := utils.ParseDeviceIDToPhysicalID(deviceID); err == nil {
+			alternativeID = utils.FormatPhysicalID(physicalID)
+		}
 	}
 
-	group := groupInterface.(*DeviceGroup)
-	group.mutex.RLock()
-	device, exists := group.Devices[deviceID]
-	group.mutex.RUnlock()
+	// 尝试查找替代格式
+	if alternativeID != "" && alternativeID != deviceID {
+		iccidInterface, exists := m.deviceIndex.Load(alternativeID)
+		if exists {
+			iccid := iccidInterface.(string)
+			groupInterface, exists := m.deviceGroups.Load(iccid)
+			if exists {
+				group := groupInterface.(*DeviceGroup)
+				group.mutex.RLock()
+				device, exists := group.Devices[alternativeID]
+				group.mutex.RUnlock()
+				if exists {
+					logger.WithFields(logrus.Fields{
+						"originalID":    deviceID,
+						"alternativeID": alternativeID,
+					}).Debug("通过格式转换找到设备")
+					return device, true
+				}
+			}
+		}
+	}
 
-	return device, exists
+	return nil, false
 }
 
 // GetDeviceConnection 通过设备ID获取TCP连接
