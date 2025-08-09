@@ -146,10 +146,7 @@ func (h *DeviceGatewayHandlers) HandleDeviceList(c *gin.Context) {
 // @Failure 500 {object} APIResponse "充电启动失败"
 // @Router /api/v1/charging/start [post]
 func (h *DeviceGatewayHandlers) HandleStartCharging(c *gin.Context) {
-	var req struct {
-		DeviceID   string `json:"device_id" binding:"required"`
-		PortNumber uint8  `json:"port_number" binding:"required,min=1,max=255"`
-	}
+	var req ChargingStartParams
 
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{
@@ -169,8 +166,8 @@ func (h *DeviceGatewayHandlers) HandleStartCharging(c *gin.Context) {
 		return
 	}
 
-	// 🚀 新架构：一行代码发送充电命令
-	err := h.deviceGateway.SendChargingCommand(req.DeviceID, req.PortNumber, 0x01)
+	// 🚀 新架构：发送完整参数的充电命令（包含订单号、充电模式、充电值、余额等）
+	err := h.deviceGateway.SendChargingCommandWithParams(req.DeviceID, req.Port, 0x01, req.OrderNo, req.Mode, req.Value, req.Balance)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"code":    500,
@@ -185,7 +182,11 @@ func (h *DeviceGatewayHandlers) HandleStartCharging(c *gin.Context) {
 		"message": "充电启动成功",
 		"data": gin.H{
 			"deviceId":  req.DeviceID,
-			"port":      req.PortNumber,
+			"port":      req.Port,
+			"orderNo":   req.OrderNo,
+			"mode":      req.Mode,
+			"value":     req.Value,
+			"balance":   req.Balance,
 			"action":    "start",
 			"timestamp": time.Now().Unix(),
 		},
@@ -567,30 +568,4 @@ func (h *DeviceGatewayHandlers) HandleRoutes(c *gin.Context) {
 			"note":   "所有API均基于DeviceGateway统一架构",
 		},
 	})
-}
-
-// RegisterDeviceGatewayRoutes 注册基于DeviceGateway的路由
-func RegisterDeviceGatewayRoutes(router *gin.Engine) {
-	handlers := NewDeviceGatewayHandlers()
-
-	// API v2 路由组 - 使用新的DeviceGateway架构
-	v2 := router.Group("/api/v2")
-	{
-		// 设备信息查询
-		v2.GET("/devices", handlers.HandleDeviceList)
-		v2.GET("/devices/:deviceId", handlers.HandleDeviceStatus)
-
-		// 充电控制
-		v2.POST("/charging/start", handlers.HandleStartCharging)
-		v2.POST("/charging/stop", handlers.HandleStopCharging)
-
-		// 统计信息
-		v2.GET("/statistics", handlers.HandleDeviceStatistics)
-
-		// 批量操作
-		v2.POST("/broadcast", handlers.HandleBroadcastCommand)
-
-		// 分组管理
-		v2.GET("/groups/:iccid/devices", handlers.HandleGroupDevices)
-	}
 }

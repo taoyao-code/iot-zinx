@@ -241,6 +241,98 @@ func (g *DeviceGateway) SendChargingCommand(deviceID string, port uint8, action 
 }
 
 /**
+ * @description: 发送完整参数的充电控制命令
+ * @param {string} deviceID 设备ID
+ * @param {uint8} port 端口号(1-255)
+ * @param {uint8} action 操作类型(0x01:开始充电, 0x00:停止充电)
+ * @param {string} orderNo 订单号
+ * @param {uint8} mode 充电模式(0:按时间, 1:按电量)
+ * @param {uint16} value 充电值(时间:分钟, 电量:0.1度)
+ * @param {uint32} balance 余额(分)
+ * @return {error}
+ */
+func (g *DeviceGateway) SendChargingCommandWithParams(deviceID string, port uint8, action uint8, orderNo string, mode uint8, value uint16, balance uint32) error {
+	if port == 0 {
+		return fmt.Errorf("端口号不能为0")
+	}
+
+	// 构建完整的充电控制数据包
+	// 根据DNY协议，充电控制命令格式：
+	// 控制命令(1字节) + 枪号(1字节) + 卡号(20字节) + 订单号(20字节) + 最大功率(4字节) + 最大电量(4字节) + 最大时间(4字节)
+	commandData := make([]byte, 54)
+
+	// 控制命令
+	commandData[0] = action
+
+	// 枪号
+	commandData[1] = port
+
+	// 卡号 (20字节) - 暂时留空
+	// copy(commandData[2:22], []byte(""))
+
+	// 订单号 (20字节)
+	orderBytes := []byte(orderNo)
+	if len(orderBytes) > 20 {
+		orderBytes = orderBytes[:20]
+	}
+	copy(commandData[22:42], orderBytes)
+
+	// 最大功率 (4字节, 小端序) - 根据充电模式设置
+	var maxPower uint32 = 0 // 0表示不限制功率
+	commandData[42] = byte(maxPower)
+	commandData[43] = byte(maxPower >> 8)
+	commandData[44] = byte(maxPower >> 16)
+	commandData[45] = byte(maxPower >> 24)
+
+	// 最大电量 (4字节, 小端序) - 根据充电模式设置
+	var maxEnergy uint32 = 0
+	if mode == 1 { // 按电量充电
+		maxEnergy = uint32(value) // value为0.1度单位
+	}
+	commandData[46] = byte(maxEnergy)
+	commandData[47] = byte(maxEnergy >> 8)
+	commandData[48] = byte(maxEnergy >> 16)
+	commandData[49] = byte(maxEnergy >> 24)
+
+	// 最大时间 (4字节, 小端序) - 根据充电模式设置
+	var maxTime uint32 = 0
+	if mode == 0 { // 按时间充电
+		maxTime = uint32(value) * 60 // value为分钟，转换为秒
+	}
+	commandData[50] = byte(maxTime)
+	commandData[51] = byte(maxTime >> 8)
+	commandData[52] = byte(maxTime >> 16)
+	commandData[53] = byte(maxTime >> 24)
+
+	err := g.SendCommandToDevice(deviceID, constants.CmdChargeControl, commandData)
+	if err != nil {
+		return fmt.Errorf("发送充电控制命令失败: %v", err)
+	}
+
+	actionStr := "停止充电"
+	if action == 0x01 {
+		actionStr = "开始充电"
+	}
+
+	modeStr := "按时间"
+	if mode == 1 {
+		modeStr = "按电量"
+	}
+
+	logger.WithFields(logrus.Fields{
+		"deviceID": deviceID,
+		"port":     port,
+		"action":   actionStr,
+		"orderNo":  orderNo,
+		"mode":     modeStr,
+		"value":    value,
+		"balance":  balance,
+	}).Info("完整参数充电控制命令发送成功")
+
+	return nil
+}
+
+/**
  * @description: 发送设备定位命令
  * @param {string} deviceID
  * @return {error}

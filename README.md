@@ -159,18 +159,18 @@ make build
 系统支持以下命令处理器：
 
 - `DeviceRegisterHandler`：设备注册请求处理器 (0x20)
-- `HeartbeatHandler`：标准心跳包处理器 (0x01)
+- `HeartbeatHandler`：标准心跳包处理器 (0x01/0x21)
 - `MainHeartbeatHandler`：主机心跳包处理器 (0x11)
-- `DeviceStatusHandler`：设备状态处理器 (0x21)
+- `DeviceStatusHandler`：设备状态处理器 (0x81)
 - `GetServerTimeHandler`：获取服务器时间处理器 (0x12/0x22)
-- `SwipeCardHandler`：刷卡请求处理器 (0x02)
 - `ChargeControlHandler`：充电控制处理器 (0x82)
-- `ICCIDHandler`：ICCID 识别处理器
+- `SimCardHandler`：SIM 卡号/ICCID 处理器
 - `LinkHeartbeatHandler`：Link 心跳处理器
 - `NonDNYDataHandler`：非 DNY 协议数据处理器
-- `ParameterSettingHandler`：参数设置处理器
-- `PowerHeartbeatHandler`：电源心跳处理器
-- `SettlementHandler`：结算处理器
+- `ParameterSettingHandler`：参数设置处理器 (0x83)
+- `DeviceLocateHandler`：设备定位处理器 (0x96)
+- `DeviceVersionHandler`：设备版本信息处理器 (0x35)
+- `SettlementHandler`：结算处理器 (0x03)
 
 ### 核心组件
 
