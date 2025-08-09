@@ -1011,9 +1011,32 @@ func (m *TCPManager) UnregisterConnection(connID uint64) error {
 
 // GetDeviceDetail 获取设备详细信息（API专用）
 func (m *TCPManager) GetDeviceDetail(deviceID string) (map[string]interface{}, error) {
+	// 🔧 增强：支持不同格式的设备ID查找
 	iccidInterface, exists := m.deviceIndex.Load(deviceID)
 	if !exists {
-		return nil, fmt.Errorf("设备不存在")
+		// 尝试智能格式转换
+		var alternativeDeviceID string
+		if strings.HasPrefix(deviceID, "0x") || strings.HasPrefix(deviceID, "0X") {
+			// 移除0x前缀
+			alternativeDeviceID = strings.ToUpper(deviceID[2:])
+		} else {
+			// 添加0x前缀
+			if physicalID, err := utils.ParseDeviceIDToPhysicalID(deviceID); err == nil {
+				alternativeDeviceID = utils.FormatPhysicalID(physicalID)
+			}
+		}
+
+		if alternativeDeviceID != "" {
+			if altIccidInterface, altExists := m.deviceIndex.Load(alternativeDeviceID); altExists {
+				iccidInterface = altIccidInterface
+				exists = true
+				deviceID = alternativeDeviceID // 使用找到的格式
+			}
+		}
+
+		if !exists {
+			return nil, fmt.Errorf("设备不存在")
+		}
 	}
 	iccid := iccidInterface.(string)
 	groupInterface, ok := m.deviceGroups.Load(iccid)
