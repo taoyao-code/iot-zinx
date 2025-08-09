@@ -90,11 +90,26 @@ func (h *DeviceGatewayHandlers) HandleDeviceStatus(c *gin.Context) {
 // @Success 200 {object} APIResponse{data=DeviceListResponse} "成功获取设备列表"
 // @Router /api/v1/devices [get]
 func (h *DeviceGatewayHandlers) HandleDeviceList(c *gin.Context) {
-	// 解析分页参数
-	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
-	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "50"))
+	// 解析分页参数 - 修复：确保参数有效
+	pageStr := c.DefaultQuery("page", "1")
+	limitStr := c.DefaultQuery("limit", "50")
 
-	fmt.Printf("🔍 [HandleDeviceList] 分页参数: page=%d, limit=%d\n", page, limit)
+	page, err := strconv.Atoi(pageStr)
+	if err != nil || page <= 0 {
+		page = 1
+	}
+
+	limit, err := strconv.Atoi(limitStr)
+	if err != nil || limit <= 0 {
+		limit = 50
+	}
+
+	// 限制最大分页大小
+	if limit > 100 {
+		limit = 100
+	}
+
+	fmt.Printf("🔍 [HandleDeviceList] 分页参数: page=%d, limit=%d (原始: page=%s, limit=%s)\n", page, limit, pageStr, limitStr)
 
 	// 🚀 新架构：一行代码获取所有在线设备
 	onlineDevices := h.deviceGateway.GetAllOnlineDevices()
