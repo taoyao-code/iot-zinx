@@ -205,10 +205,7 @@ func (h *DeviceGatewayHandlers) HandleStartCharging(c *gin.Context) {
 // @Failure 500 {object} APIResponse "停止充电失败"
 // @Router /api/v1/charging/stop [post]
 func (h *DeviceGatewayHandlers) HandleStopCharging(c *gin.Context) {
-	var req struct {
-		DeviceID   string `json:"device_id" binding:"required"`
-		PortNumber uint8  `json:"port_number" binding:"required,min=1,max=255"`
-	}
+	var req ChargingStopParams
 
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{
@@ -219,8 +216,8 @@ func (h *DeviceGatewayHandlers) HandleStopCharging(c *gin.Context) {
 		return
 	}
 
-	// 🚀 新架构：一行代码发送停止充电命令
-	err := h.deviceGateway.SendChargingCommand(req.DeviceID, req.PortNumber, 0x00)
+	// 🚀 新架构：发送停止充电命令（支持订单号参数）
+	err := h.deviceGateway.SendChargingCommand(req.DeviceID, req.Port, 0x00)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"code":    500,
@@ -235,7 +232,8 @@ func (h *DeviceGatewayHandlers) HandleStopCharging(c *gin.Context) {
 		"message": "充电已停止",
 		"data": gin.H{
 			"deviceId":  req.DeviceID,
-			"port":      req.PortNumber,
+			"port":      req.Port,
+			"orderNo":   req.OrderNo,
 			"action":    "stop",
 			"timestamp": time.Now().Unix(),
 		},
@@ -322,10 +320,7 @@ func (h *DeviceGatewayHandlers) HandleGroupDevices(c *gin.Context) {
 // @Failure 500 {object} APIResponse "发送定位命令失败"
 // @Router /api/v1/device/locate [post]
 func (h *DeviceGatewayHandlers) HandleDeviceLocate(c *gin.Context) {
-	var req struct {
-		DeviceID   string `json:"deviceId" binding:"required"`
-		LocateTime int    `json:"locateTime"` // 定位时间（秒），可选，默认30秒
-	}
+	var req DeviceLocateRequest
 
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{
@@ -335,17 +330,8 @@ func (h *DeviceGatewayHandlers) HandleDeviceLocate(c *gin.Context) {
 		return
 	}
 
-	// 🔧 设置默认定位时间
-	if req.LocateTime <= 0 {
-		req.LocateTime = 30 // 默认30秒
-	}
-	// 限制最大定位时间为255秒（协议限制：1字节）
-	if req.LocateTime > 255 {
-		req.LocateTime = 255
-	}
-
-	// 🚀 新架构：发送定位命令（使用正确的0x96命令）
-	err := h.deviceGateway.SendLocationCommand(req.DeviceID, req.LocateTime)
+	//  新架构：发送定位命令（使用正确的0x96命令）
+	err := h.deviceGateway.SendLocationCommand(req.DeviceID, int(req.LocateTime))
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"code":    500,

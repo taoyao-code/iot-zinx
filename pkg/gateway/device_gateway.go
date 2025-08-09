@@ -221,21 +221,57 @@ func (g *DeviceGateway) SendChargingCommand(deviceID string, port uint8, action 
 
 	commandData := []byte{port, action}
 
+	// 🔧 优化：统一日志字段格式，增加关键业务信息
+	actionStr := "STOP_CHARGING"
+	actionDesc := "停止充电"
+	if action == 0x01 {
+		actionStr = "START_CHARGING"
+		actionDesc = "开始充电"
+	}
+
+	// 🔧 优化：发送前日志记录
+	logFields := logrus.Fields{
+		"deviceID":   deviceID,
+		"command":    "CHARGE_CONTROL",
+		"commandID":  fmt.Sprintf("0x%02X", constants.CmdChargeControl),
+		"port":       port,
+		"action":     actionStr,
+		"actionCode": fmt.Sprintf("0x%02X", action),
+		"actionDesc": actionDesc,
+		"dataLen":    len(commandData),
+		"timestamp":  time.Now().Format("2006-01-02 15:04:05"),
+	}
+
+	logger.WithFields(logFields).Info("🔌 准备发送充电控制命令")
+
 	err := g.SendCommandToDevice(deviceID, constants.CmdChargeControl, commandData)
 	if err != nil {
+		// 🔧 优化：失败日志增加详细信息
+		logger.WithFields(logrus.Fields{
+			"deviceID":   deviceID,
+			"command":    "CHARGE_CONTROL",
+			"commandID":  fmt.Sprintf("0x%02X", constants.CmdChargeControl),
+			"port":       port,
+			"action":     actionStr,
+			"actionCode": fmt.Sprintf("0x%02X", action),
+			"error":      err.Error(),
+			"timestamp":  time.Now().Format("2006-01-02 15:04:05"),
+		}).Error("❌ 充电控制命令发送失败")
 		return fmt.Errorf("发送充电控制命令失败: %v", err)
 	}
 
-	actionStr := "停止充电"
-	if action == 0x01 {
-		actionStr = "开始充电"
-	}
-
+	// 🔧 优化：成功日志增加业务上下文
 	logger.WithFields(logrus.Fields{
-		"deviceID": deviceID,
-		"port":     port,
-		"action":   actionStr,
-	}).Info("充电控制命令发送成功")
+		"deviceID":   deviceID,
+		"command":    "CHARGE_CONTROL",
+		"commandID":  fmt.Sprintf("0x%02X", constants.CmdChargeControl),
+		"port":       port,
+		"action":     actionStr,
+		"actionCode": fmt.Sprintf("0x%02X", action),
+		"actionDesc": actionDesc,
+		"status":     "SENT",
+		"timestamp":  time.Now().Format("2006-01-02 15:04:05"),
+	}).Info("⚡ 充电控制命令发送成功")
 
 	return nil
 }
@@ -342,23 +378,45 @@ func (g *DeviceGateway) SendLocationCommand(deviceID string, locateTime int) err
 	// 定位时间：根据协议，1字节表示执行时长，单位秒
 	locationDuration := byte(locateTime)
 
-	logger.WithFields(logrus.Fields{
-		"deviceID":        deviceID,
-		"requestDuration": locateTime,
-		"actualDuration":  locationDuration,
-		"commandID":       fmt.Sprintf("0x%02X", constants.CmdDeviceLocate),
-	}).Info("🎯 准备发送设备定位命令")
+	// 🔧 优化：统一日志字段格式，增加关键业务信息
+	logFields := logrus.Fields{
+		"deviceID":       deviceID,
+		"command":        "DEVICE_LOCATE",
+		"commandID":      fmt.Sprintf("0x%02X", constants.CmdDeviceLocate),
+		"locateTime":     locateTime,
+		"actualDuration": locationDuration,
+		"action":         "PREPARE_SEND",
+		"timestamp":      time.Now().Format("2006-01-02 15:04:05"),
+	}
+
+	logger.WithFields(logFields).Info("🎯 准备发送设备定位命令")
 
 	err := g.SendCommandToDevice(deviceID, constants.CmdDeviceLocate, []byte{locationDuration})
 	if err != nil {
+		// 🔧 优化：失败日志增加详细信息
+		logger.WithFields(logrus.Fields{
+			"deviceID":   deviceID,
+			"command":    "DEVICE_LOCATE",
+			"commandID":  fmt.Sprintf("0x%02X", constants.CmdDeviceLocate),
+			"locateTime": locateTime,
+			"error":      err.Error(),
+			"action":     "SEND_FAILED",
+			"timestamp":  time.Now().Format("2006-01-02 15:04:05"),
+		}).Error("❌ 设备定位命令发送失败")
 		return fmt.Errorf("发送定位命令失败: %v", err)
 	}
 
+	// 🔧 优化：成功日志增加业务上下文
 	logger.WithFields(logrus.Fields{
-		"deviceID": deviceID,
-		"duration": locationDuration,
-		"status":   "SENT",
-	}).Info("🔊 设备定位命令发送成功，设备将播放语音并闪灯")
+		"deviceID":         deviceID,
+		"command":          "DEVICE_LOCATE",
+		"commandID":        fmt.Sprintf("0x%02X", constants.CmdDeviceLocate),
+		"locateTime":       locateTime,
+		"duration":         locationDuration,
+		"action":           "SEND_SUCCESS",
+		"expectedBehavior": "设备将播放语音并闪灯",
+		"timestamp":        time.Now().Format("2006-01-02 15:04:05"),
+	}).Info("🔊 设备定位命令发送成功")
 	return nil
 }
 
