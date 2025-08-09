@@ -200,38 +200,6 @@ func (h *DeviceGatewayHandlers) HandleStopCharging(c *gin.Context) {
 	})
 }
 
-// HandleDeviceLocation 设备定位 - 使用DeviceGateway简化实现
-func (h *DeviceGatewayHandlers) HandleDeviceLocation(c *gin.Context) {
-	deviceID := c.Param("deviceId")
-	if deviceID == "" {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"code":    400,
-			"message": "设备ID不能为空",
-		})
-		return
-	}
-
-	// 🚀 新架构：一行代码发送定位命令
-	err := h.deviceGateway.SendLocationCommand(deviceID)
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"code":    500,
-			"message": "定位命令发送失败",
-			"error":   err.Error(),
-		})
-		return
-	}
-
-	c.JSON(http.StatusOK, gin.H{
-		"code":    0,
-		"message": "定位命令已发送",
-		"data": gin.H{
-			"deviceId":  deviceID,
-			"timestamp": time.Now().Unix(),
-		},
-	})
-}
-
 // HandleDeviceStatistics 获取设备统计信息 - 使用DeviceGateway简化实现
 func (h *DeviceGatewayHandlers) HandleDeviceStatistics(c *gin.Context) {
 	// 🚀 新架构：一行代码获取完整统计信息
@@ -303,7 +271,8 @@ func (h *DeviceGatewayHandlers) HandleGroupDevices(c *gin.Context) {
 // HandleDeviceLocate 设备定位
 func (h *DeviceGatewayHandlers) HandleDeviceLocate(c *gin.Context) {
 	var req struct {
-		DeviceID string `json:"deviceId" binding:"required"`
+		DeviceID   string `json:"deviceId" binding:"required"`
+		LocateTime int    `json:"locateTime"` // 定位时间（秒），可选，默认30秒
 	}
 
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -314,8 +283,17 @@ func (h *DeviceGatewayHandlers) HandleDeviceLocate(c *gin.Context) {
 		return
 	}
 
-	// 🚀 新架构：一行代码发送定位命令
-	err := h.deviceGateway.SendLocationCommand(req.DeviceID)
+	// 🔧 设置默认定位时间
+	if req.LocateTime <= 0 {
+		req.LocateTime = 30 // 默认30秒
+	}
+	// 限制最大定位时间为255秒（协议限制：1字节）
+	if req.LocateTime > 255 {
+		req.LocateTime = 255
+	}
+
+	// 🚀 新架构：发送定位命令（使用正确的0x96命令）
+	err := h.deviceGateway.SendLocationCommand(req.DeviceID, req.LocateTime)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"code":    500,
@@ -328,8 +306,9 @@ func (h *DeviceGatewayHandlers) HandleDeviceLocate(c *gin.Context) {
 		"code":    0,
 		"message": "定位命令发送成功",
 		"data": gin.H{
-			"deviceId": req.DeviceID,
-			"action":   "locate",
+			"deviceId":   req.DeviceID,
+			"action":     "locate",
+			"locateTime": req.LocateTime,
 		},
 	})
 }
@@ -498,7 +477,6 @@ func RegisterDeviceGatewayRoutes(router *gin.Engine) {
 		// 设备信息查询
 		v2.GET("/devices", handlers.HandleDeviceList)
 		v2.GET("/devices/:deviceId", handlers.HandleDeviceStatus)
-		v2.GET("/devices/:deviceId/location", handlers.HandleDeviceLocation)
 
 		// 充电控制
 		v2.POST("/charging/start", handlers.HandleStartCharging)

@@ -233,13 +233,18 @@ func (g *DeviceGateway) SendChargingCommand(deviceID string, port uint8, action 
  * @param {string} deviceID
  * @return {error}
  */
-func (g *DeviceGateway) SendLocationCommand(deviceID string) error {
-	// 使用协议中定义的查询参数指令（临时作为定位查询）
-	err := g.SendCommandToDevice(deviceID, constants.CmdQueryParam1, []byte{})
+func (g *DeviceGateway) SendLocationCommand(deviceID string, locateTime int) error {
+	// 🔧 修复：使用正确的设备定位命令(0x96)，添加定位时间参数
+	// 定位时间：30秒（根据协议，1字节表示执行时长，单位秒）
+	locationDuration := byte(locateTime)
+	err := g.SendCommandToDevice(deviceID, constants.CmdDeviceLocate, []byte{locationDuration})
 	if err != nil {
 		return fmt.Errorf("发送定位命令失败: %v", err)
 	}
-	logger.WithFields(logrus.Fields{"deviceID": deviceID}).Info("定位命令(查询参数指令)发送成功")
+	logger.WithFields(logrus.Fields{
+		"deviceID": deviceID,
+		"duration": locationDuration,
+	}).Info("设备定位命令发送成功，设备将播放语音并闪灯")
 	return nil
 }
 
