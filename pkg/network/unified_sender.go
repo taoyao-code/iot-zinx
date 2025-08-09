@@ -306,8 +306,13 @@ func (s *UnifiedSender) sendWithConfig(conn ziface.IConnection, data []byte, con
 		// 使用高级重试机制（集成动态超时和健康管理）
 		err = s.sendWithAdvancedRetry(conn, data, config)
 	} else {
-		// 直接发送（不重试）
-		err = conn.SendBuffMsg(0, data)
+		// 🔧 修复：直接发送原始DNY协议数据，避免Zinx二次封装
+		tcpConn := conn.GetTCPConnection()
+		if tcpConn == nil {
+			err = fmt.Errorf("获取TCP连接失败")
+		} else {
+			_, err = tcpConn.Write(data)
+		}
 	}
 
 	// 5. 记录发送结果

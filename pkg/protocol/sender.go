@@ -47,42 +47,6 @@ func SendDNYResponse(conn ziface.IConnection, physicalId uint32, messageId uint1
 	return nil
 }
 
-// SendDNYRequest 发送DNY协议请求（简化版）
-func SendDNYRequest(conn ziface.IConnection, physicalId uint32, messageId uint16, command uint8, data []byte) error {
-	if conn == nil {
-		return fmt.Errorf("连接对象为空")
-	}
-
-	// 构建DNY数据包
-	packet, err := BuildDNYPacket(physicalId, messageId, command, data)
-	if err != nil {
-		return fmt.Errorf("构建DNY数据包失败: %v", err)
-	}
-
-	// 发送数据
-	if err := conn.SendMsg(0, packet); err != nil {
-		logger.WithFields(logrus.Fields{
-			"connID":     conn.GetConnID(),
-			"physicalId": fmt.Sprintf("0x%08X", physicalId),
-			"messageId":  messageId,
-			"command":    fmt.Sprintf("0x%02X", command),
-			"dataLen":    len(data),
-			"error":      err.Error(),
-		}).Error("发送DNY请求失败")
-		return err
-	}
-
-	logger.WithFields(logrus.Fields{
-		"connID":     conn.GetConnID(),
-		"physicalId": fmt.Sprintf("0x%08X", physicalId),
-		"messageId":  messageId,
-		"command":    fmt.Sprintf("0x%02X", command),
-		"dataLen":    len(data),
-	}).Debug("DNY请求发送成功")
-
-	return nil
-}
-
 // BuildDNYPacket 构建DNY数据包
 func BuildDNYPacket(physicalId uint32, messageId uint16, command uint8, data []byte) ([]byte, error) {
 	// 计算数据长度（不包括包头和长度字段）

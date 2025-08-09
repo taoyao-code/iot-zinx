@@ -27,6 +27,17 @@ func NewDeviceGatewayHandlers() *DeviceGatewayHandlers {
 // ===============================
 
 // HandleDeviceStatus 获取设备状态 - 使用DeviceGateway简化实现
+// @Summary 获取设备状态
+// @Description 根据设备ID获取设备的详细状态信息，包括在线状态、连接信息等
+// @Tags device
+// @Accept json
+// @Produce json
+// @Param deviceId path string true "设备ID" example("04ceaa40")
+// @Success 200 {object} APIResponse{data=DeviceInfo} "成功获取设备状态"
+// @Failure 400 {object} APIResponse "设备ID不能为空"
+// @Failure 404 {object} APIResponse "设备不在线"
+// @Failure 500 {object} APIResponse "获取设备信息失败"
+// @Router /api/v1/device/{deviceId}/status [get]
 func (h *DeviceGatewayHandlers) HandleDeviceStatus(c *gin.Context) {
 	deviceID := c.Param("deviceId")
 	if deviceID == "" {
@@ -68,6 +79,15 @@ func (h *DeviceGatewayHandlers) HandleDeviceStatus(c *gin.Context) {
 }
 
 // HandleDeviceList 获取设备列表 - 使用DeviceGateway简化实现
+// @Summary 获取设备列表
+// @Description 获取所有在线设备的列表，支持分页查询
+// @Tags device
+// @Accept json
+// @Produce json
+// @Param page query int false "页码" default(1) minimum(1)
+// @Param limit query int false "每页数量" default(50) minimum(1) maximum(100)
+// @Success 200 {object} APIResponse{data=DeviceListResponse} "成功获取设备列表"
+// @Router /api/v1/devices [get]
 func (h *DeviceGatewayHandlers) HandleDeviceList(c *gin.Context) {
 	// 解析分页参数
 	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
@@ -114,6 +134,17 @@ func (h *DeviceGatewayHandlers) HandleDeviceList(c *gin.Context) {
 }
 
 // HandleStartCharging 开始充电 - 使用DeviceGateway简化实现
+// @Summary 开始充电
+// @Description 向指定设备的指定端口发送开始充电命令
+// @Tags charging
+// @Accept json
+// @Produce json
+// @Param request body ChargingStartParams true "开始充电请求参数"
+// @Success 200 {object} APIResponse{data=object} "充电启动成功"
+// @Failure 400 {object} APIResponse "参数错误"
+// @Failure 404 {object} APIResponse "设备不在线"
+// @Failure 500 {object} APIResponse "充电启动失败"
+// @Router /api/v1/charging/start [post]
 func (h *DeviceGatewayHandlers) HandleStartCharging(c *gin.Context) {
 	var req struct {
 		DeviceID   string `json:"device_id" binding:"required"`
@@ -162,6 +193,16 @@ func (h *DeviceGatewayHandlers) HandleStartCharging(c *gin.Context) {
 }
 
 // HandleStopCharging 停止充电 - 使用DeviceGateway简化实现
+// @Summary 停止充电
+// @Description 向指定设备的指定端口发送停止充电命令
+// @Tags charging
+// @Accept json
+// @Produce json
+// @Param request body ChargingStopParams true "停止充电请求参数"
+// @Success 200 {object} APIResponse{data=object} "充电已停止"
+// @Failure 400 {object} APIResponse "参数错误"
+// @Failure 500 {object} APIResponse "停止充电失败"
+// @Router /api/v1/charging/stop [post]
 func (h *DeviceGatewayHandlers) HandleStopCharging(c *gin.Context) {
 	var req struct {
 		DeviceID   string `json:"device_id" binding:"required"`
@@ -269,6 +310,16 @@ func (h *DeviceGatewayHandlers) HandleGroupDevices(c *gin.Context) {
 }
 
 // HandleDeviceLocate 设备定位
+// @Summary 设备定位
+// @Description 向指定设备发送定位命令，设备将播放语音并闪灯
+// @Tags device
+// @Accept json
+// @Produce json
+// @Param request body DeviceLocateRequest true "设备定位请求参数"
+// @Success 200 {object} APIResponse{data=object} "定位命令发送成功"
+// @Failure 400 {object} APIResponse "参数错误"
+// @Failure 500 {object} APIResponse "发送定位命令失败"
+// @Router /api/v1/device/locate [post]
 func (h *DeviceGatewayHandlers) HandleDeviceLocate(c *gin.Context) {
 	var req struct {
 		DeviceID   string `json:"deviceId" binding:"required"`
@@ -314,6 +365,16 @@ func (h *DeviceGatewayHandlers) HandleDeviceLocate(c *gin.Context) {
 }
 
 // HandleSendCommand 发送通用设备命令
+// @Summary 发送通用设备命令
+// @Description 向指定设备发送通用命令，支持各种设备操作
+// @Tags command
+// @Accept json
+// @Produce json
+// @Param request body SendCommandRequest true "发送命令请求参数"
+// @Success 200 {object} APIResponse{data=object} "命令发送成功"
+// @Failure 400 {object} APIResponse "参数错误"
+// @Failure 500 {object} APIResponse "发送命令失败"
+// @Router /api/v1/device/command [post]
 func (h *DeviceGatewayHandlers) HandleSendCommand(c *gin.Context) {
 	var req struct {
 		DeviceID string                 `json:"deviceId" binding:"required"`
@@ -350,6 +411,16 @@ func (h *DeviceGatewayHandlers) HandleSendCommand(c *gin.Context) {
 }
 
 // HandleSendDNYCommand 发送DNY协议命令
+// @Summary 发送DNY协议命令
+// @Description 向指定设备发送DNY协议格式的命令
+// @Tags command
+// @Accept json
+// @Produce json
+// @Param request body DNYCommandRequest true "DNY命令请求参数"
+// @Success 200 {object} APIResponse{data=object} "DNY命令发送成功"
+// @Failure 400 {object} APIResponse "参数错误"
+// @Failure 500 {object} APIResponse "发送DNY命令失败"
+// @Router /api/v1/command/dny [post]
 func (h *DeviceGatewayHandlers) HandleSendDNYCommand(c *gin.Context) {
 	var req struct {
 		DeviceID string `json:"deviceId" binding:"required"`
@@ -386,6 +457,13 @@ func (h *DeviceGatewayHandlers) HandleSendDNYCommand(c *gin.Context) {
 }
 
 // HandleHealthCheck 健康检查
+// @Summary 健康检查
+// @Description 检查IoT设备网关的运行状态和健康状况
+// @Tags system
+// @Accept json
+// @Produce json
+// @Success 200 {object} APIResponse{data=HealthResponse} "服务运行正常"
+// @Router /api/v1/health [get]
 func (h *DeviceGatewayHandlers) HandleHealthCheck(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{
 		"code":    0,
@@ -401,6 +479,13 @@ func (h *DeviceGatewayHandlers) HandleHealthCheck(c *gin.Context) {
 }
 
 // HandleSystemStats 系统统计信息
+// @Summary 获取系统统计信息
+// @Description 获取设备网关的统计信息，包括设备数量、连接状态等
+// @Tags system
+// @Accept json
+// @Produce json
+// @Success 200 {object} APIResponse{data=object} "获取统计信息成功"
+// @Router /api/v1/stats [get]
 func (h *DeviceGatewayHandlers) HandleSystemStats(c *gin.Context) {
 	// 🚀 新架构：一行代码获取完整统计信息
 	stats := h.deviceGateway.GetDeviceStatistics()
@@ -413,6 +498,16 @@ func (h *DeviceGatewayHandlers) HandleSystemStats(c *gin.Context) {
 }
 
 // HandleQueryDeviceStatus 查询设备状态
+// @Summary 查询设备状态
+// @Description 查询指定设备的详细状态信息
+// @Tags device
+// @Accept json
+// @Produce json
+// @Param deviceId path string true "设备ID" example("04ceaa40")
+// @Success 200 {object} APIResponse{data=object} "获取设备状态成功"
+// @Failure 400 {object} APIResponse "设备ID不能为空"
+// @Failure 404 {object} APIResponse "设备不存在或离线"
+// @Router /api/v1/device/{deviceId}/query [get]
 func (h *DeviceGatewayHandlers) HandleQueryDeviceStatus(c *gin.Context) {
 	deviceID := c.Param("deviceId")
 	if deviceID == "" {
@@ -441,6 +536,13 @@ func (h *DeviceGatewayHandlers) HandleQueryDeviceStatus(c *gin.Context) {
 }
 
 // HandleRoutes 获取所有API路由信息
+// @Summary 获取API路由列表
+// @Description 获取所有可用的API路由信息，用于调试和文档
+// @Tags system
+// @Accept json
+// @Produce json
+// @Success 200 {object} APIResponse{data=RoutesResponse} "获取路由列表成功"
+// @Router /api/v1/routes [get]
 func (h *DeviceGatewayHandlers) HandleRoutes(c *gin.Context) {
 	routes := []gin.H{
 		{"method": "GET", "path": "/api/v1/devices", "description": "获取设备列表"},

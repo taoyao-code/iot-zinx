@@ -50,18 +50,47 @@ func (d *DeviceRegisterData) UnmarshalBinary(data []byte) error {
 
 	// 固件版本 (2字节, 小端序)
 	firmwareVersion := binary.LittleEndian.Uint16(data[0:2])
+	// 🔧 增强验证：固件版本合理性检查
+	if firmwareVersion == 0 || firmwareVersion > 9999 {
+		return fmt.Errorf("invalid firmware version: %d, expected range 1-9999", firmwareVersion)
+	}
 
 	// 端口数量 (1字节)
 	portCount := data[2]
+	// 🔧 增强验证：端口数量合理性检查
+	if portCount == 0 || portCount > 32 {
+		return fmt.Errorf("invalid port count: %d, expected range 1-32", portCount)
+	}
 
 	// 虚拟ID (1字节)
 	virtualID := data[3]
+	// 🔧 增强验证：虚拟ID合理性检查
+	if virtualID > 254 { // 255通常保留作为广播地址
+		return fmt.Errorf("invalid virtual ID: %d, expected range 0-254", virtualID)
+	}
 
 	// 设备类型 (1字节)
-	d.DeviceType = uint16(data[4])
+	deviceType := data[4]
+	// 🔧 增强验证：设备类型合理性检查
+	validDeviceTypes := []uint8{0x01, 0x02, 0x04} // 主机、分机、单机
+	isValidType := false
+	for _, validType := range validDeviceTypes {
+		if deviceType == validType {
+			isValidType = true
+			break
+		}
+	}
+	if !isValidType {
+		return fmt.Errorf("invalid device type: 0x%02X, expected one of: 0x01(主机), 0x02(分机), 0x04(单机)", deviceType)
+	}
+	d.DeviceType = uint16(deviceType)
 
 	// 工作模式 (1字节)
 	workMode := data[5]
+	// 🔧 增强验证：工作模式合理性检查
+	if workMode > 3 { // 假设工作模式范围为0-3
+		return fmt.Errorf("invalid work mode: %d, expected range 0-3", workMode)
+	}
 
 	// 电源板版本号 (2字节, 小端序) - 可选字段
 	var powerBoardVersion uint16
@@ -535,29 +564,75 @@ func (c *ChargeControlData) MarshalBinary() ([]byte, error) {
 
 func (c *ChargeControlData) UnmarshalBinary(data []byte) error {
 	if len(data) < 54 {
-		return fmt.Errorf("insufficient data length: %d", len(data))
+		return fmt.Errorf("insufficient data length: %d, expected at least 54 for charge control", len(data))
 	}
 
 	// 控制命令 (1字节)
-	c.Command = data[0]
+	command := data[0]
+	// 🔧 增强验证：控制命令合理性检查
+	validCommands := []uint8{0x00, 0x01, 0x02, 0x03} // 停止、开始、查询等
+	isValidCommand := false
+	for _, validCmd := range validCommands {
+		if command == validCmd {
+			isValidCommand = true
+			break
+		}
+	}
+	if !isValidCommand {
+		return fmt.Errorf("invalid charge command: 0x%02X, expected one of: 0x00(停止), 0x01(开始), 0x02(暂停), 0x03(查询)", command)
+	}
+	c.Command = command
 
 	// 枪号 (1字节)
-	c.GunNumber = data[1]
+	gunNumber := data[1]
+	// 🔧 增强验证：枪号合理性检查
+	if gunNumber == 0 || (gunNumber > 32 && gunNumber != 255) { // 255为智能选择端口
+		return fmt.Errorf("invalid gun number: %d, expected range 1-32 or 255(auto)", gunNumber)
+	}
+	c.GunNumber = gunNumber
 
 	// 卡号 (20字节)
-	c.CardNumber = string(bytes.TrimRight(data[2:22], "\x00"))
+	cardNumber := string(bytes.TrimRight(data[2:22], "\x00"))
+	// 🔧 增强验证：卡号格式检查
+	if len(cardNumber) > 0 && len(cardNumber) < 4 {
+		return fmt.Errorf("invalid card number length: %d, expected at least 4 characters or empty", len(cardNumber))
+	}
+	c.CardNumber = cardNumber
 
 	// 订单号 (20字节)
-	c.OrderID = string(bytes.TrimRight(data[22:42], "\x00"))
+	orderID := string(bytes.TrimRight(data[22:42], "\x00"))
+	// 🔧 增强验证：订单号格式检查
+	if len(orderID) > 0 && len(orderID) < 6 {
+		return fmt.Errorf("invalid order ID length: %d, expected at least 6 characters or empty", len(orderID))
+	}
+	c.OrderID = orderID
 
 	// 最大功率 (4字节, 小端序)
-	c.MaxPower = binary.LittleEndian.Uint32(data[42:46])
+	maxPower := binary.LittleEndian.Uint32(data[42:46])
+	// 🔧 增强验证：最大功率合理性检查
+	if maxPower > 0 && maxPower < 100 { // 最小100W
+		return fmt.Errorf("invalid max power: %d W, expected at least 100W or 0(unlimited)", maxPower)
+	}
+	if maxPower > 50000 { // 最大50kW
+		return fmt.Errorf("invalid max power: %d W, expected at most 50000W", maxPower)
+	}
+	c.MaxPower = maxPower
 
 	// 最大电量 (4字节, 小端序)
-	c.MaxEnergy = binary.LittleEndian.Uint32(data[46:50])
+	maxEnergy := binary.LittleEndian.Uint32(data[46:50])
+	// 🔧 增强验证：最大电量合理性检查
+	if maxEnergy > 1000000 { // 最大100kWh (单位0.1度，所以是1000000)
+		return fmt.Errorf("invalid max energy: %d (0.1kWh), expected at most 1000000", maxEnergy)
+	}
+	c.MaxEnergy = maxEnergy
 
 	// 最大时间 (4字节, 小端序)
-	c.MaxTime = binary.LittleEndian.Uint32(data[50:54])
+	maxTime := binary.LittleEndian.Uint32(data[50:54])
+	// 🔧 增强验证：最大时间合理性检查
+	if maxTime > 86400 { // 最大24小时 (86400秒)
+		return fmt.Errorf("invalid max time: %d seconds, expected at most 86400 (24 hours)", maxTime)
+	}
+	c.MaxTime = maxTime
 
 	return nil
 }
@@ -649,10 +724,20 @@ func (d *DeviceHeartbeatData) UnmarshalBinary(data []byte) error {
 	}
 
 	// 电压 (2字节，小端序)
-	d.Voltage = binary.LittleEndian.Uint16(data[0:2])
+	voltage := binary.LittleEndian.Uint16(data[0:2])
+	// 🔧 增强验证：电压合理性检查
+	if voltage < 1000 || voltage > 30000 { // 10V-300V范围 (单位0.01V)
+		return fmt.Errorf("invalid voltage: %d (0.01V), expected range 1000-30000 (10V-300V)", voltage)
+	}
+	d.Voltage = voltage
 
 	// 端口数量 (1字节)
-	d.PortCount = data[2]
+	portCount := data[2]
+	// 🔧 增强验证：端口数量合理性检查
+	if portCount == 0 || portCount > 32 {
+		return fmt.Errorf("invalid port count: %d, expected range 1-32", portCount)
+	}
+	d.PortCount = portCount
 
 	// 验证数据长度是否满足端口数量要求
 	minLength := 5 + int(d.PortCount) // 2(电压) + 1(端口数) + n(端口状态) + 1(信号) + 1(温度)
@@ -664,14 +749,30 @@ func (d *DeviceHeartbeatData) UnmarshalBinary(data []byte) error {
 	// 各端口状态 (n字节)
 	d.PortStatuses = make([]uint8, d.PortCount)
 	for i := 0; i < int(d.PortCount); i++ {
-		d.PortStatuses[i] = data[3+i]
+		portStatus := data[3+i]
+		// 🔧 增强验证：端口状态合理性检查
+		// 端口状态位定义：bit0-空闲/充电，bit1-故障，bit2-离线等
+		if portStatus > 0x7F { // 最高位保留，不应该设置
+			return fmt.Errorf("invalid port %d status: 0x%02X, reserved bit set", i+1, portStatus)
+		}
+		d.PortStatuses[i] = portStatus
 	}
 
 	// 信号强度 (1字节)
-	d.SignalStrength = data[3+d.PortCount]
+	signalStrength := data[3+d.PortCount]
+	// 🔧 增强验证：信号强度合理性检查
+	if signalStrength > 31 { // 信号强度通常为0-31
+		return fmt.Errorf("invalid signal strength: %d, expected range 0-31", signalStrength)
+	}
+	d.SignalStrength = signalStrength
 
 	// 当前环境温度 (1字节)
-	d.Temperature = data[4+d.PortCount]
+	temperature := data[4+d.PortCount]
+	// 🔧 增强验证：温度合理性检查
+	if temperature > 150 { // 温度范围-40°C到110°C，偏移40，所以0-150
+		return fmt.Errorf("invalid temperature: %d, expected range 0-150 (-40°C to 110°C)", temperature)
+	}
+	d.Temperature = temperature
 
 	d.Timestamp = time.Now()
 	return nil

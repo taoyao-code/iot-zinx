@@ -38,7 +38,6 @@ var Protocol = struct {
 
 	// 数据发送
 	SendDNYResponse func(conn ziface.IConnection, physicalId uint32, messageId uint16, command uint8, data []byte) error
-	SendDNYRequest  func(conn ziface.IConnection, physicalId uint32, messageId uint16, command uint8, data []byte) error
 
 	// 消息ID管理
 	GetNextMessageID func() uint16
@@ -48,7 +47,6 @@ var Protocol = struct {
 	ParseDNYData:          protocol.ParseDNYData,
 	ParseDNYHexString:     protocol.ParseDNYHexString,
 	SendDNYResponse:       protocol.SendDNYResponse,
-	SendDNYRequest:        protocol.SendDNYRequest,
 	GetNextMessageID: func() uint16 {
 		// 简化的消息ID生成器
 		newValue := atomic.AddUint64(&messageIDCounter, 1)
