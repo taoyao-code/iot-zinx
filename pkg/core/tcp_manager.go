@@ -85,6 +85,26 @@ type DeviceGroup struct {
 	mutex         sync.RWMutex                  `json:"-"`
 }
 
+// RLock 获取读锁
+func (dg *DeviceGroup) RLock() {
+	dg.mutex.RLock()
+}
+
+// RUnlock 释放读锁
+func (dg *DeviceGroup) RUnlock() {
+	dg.mutex.RUnlock()
+}
+
+// Lock 获取写锁
+func (dg *DeviceGroup) Lock() {
+	dg.mutex.Lock()
+}
+
+// Unlock 释放写锁
+func (dg *DeviceGroup) Unlock() {
+	dg.mutex.Unlock()
+}
+
 // Device 设备信息
 // 🚀 新增：独立的设备信息结构，从session中分离
 type Device struct {
@@ -919,4 +939,23 @@ func (m *TCPManager) GetDeviceDetail(deviceID string) (map[string]interface{}, e
 	deviceDetail["groupSessionCount"] = len(deviceGroup.Sessions)
 
 	return deviceDetail, nil
+}
+
+// ===============================
+// 访问器方法（为DeviceGateway提供支持）
+// ===============================
+
+// GetDeviceIndex 获取设备索引映射（deviceID → iccid）
+func (m *TCPManager) GetDeviceIndex() *sync.Map {
+	return &m.deviceIndex
+}
+
+// GetDeviceGroups 获取设备组映射（iccid → *DeviceGroup）
+func (m *TCPManager) GetDeviceGroups() *sync.Map {
+	return &m.deviceGroups
+}
+
+// GetConnections 获取连接映射（connID → *ConnectionSession）
+func (m *TCPManager) GetConnections() *sync.Map {
+	return &m.connections
 }

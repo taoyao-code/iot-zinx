@@ -3,11 +3,11 @@ package protocol
 import (
 	"encoding/binary"
 	"errors"
-	"fmt"
 	"strings"
 
 	"github.com/aceld/zinx/ziface"
 	"github.com/bujia-iot/iot-zinx/pkg/constants"
+	"github.com/bujia-iot/iot-zinx/pkg/utils"
 )
 
 // DNYFrameType 定义了DNY协议帧在解码后被赋予的逻辑类型。
@@ -180,7 +180,7 @@ func formatDeviceID(rawData []byte) string {
 	// 直接将4字节转换为uint32，然后格式化为8位大写十六进制
 	physicalID := binary.LittleEndian.Uint32(rawData)
 
-	return fmt.Sprintf("%08X", physicalID)
+	return utils.FormatPhysicalID(physicalID)
 }
 
 // ParseDNYFrames 批量解析DNY数据帧

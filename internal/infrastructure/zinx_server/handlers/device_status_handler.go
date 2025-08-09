@@ -8,7 +8,6 @@ import (
 	"github.com/bujia-iot/iot-zinx/internal/infrastructure/logger"
 	"github.com/bujia-iot/iot-zinx/pkg/constants"
 	"github.com/bujia-iot/iot-zinx/pkg/core"
-	"github.com/bujia-iot/iot-zinx/pkg/network"
 	"github.com/bujia-iot/iot-zinx/pkg/protocol"
 	"github.com/sirupsen/logrus"
 )
@@ -56,13 +55,16 @@ func (h *DeviceStatusHandler) Handle(request ziface.IRequest) {
 		statusInfo = fmt.Sprintf("设备状态: 0x%02X", decodedFrame.Payload[0])
 	}
 
-	// 🔧 修复：更新自定义心跳管理器的连接活动时间
-	// 这是解决连接超时问题的关键修复
-	network.UpdateConnectionActivity(conn)
-	// 统一：通过TCPManager刷新心跳，保证API一致
-	if tm := core.GetGlobalTCPManager(); tm != nil {
-		if session, ok := tm.GetSessionByConnID(conn.GetConnID()); ok {
-			_ = tm.UpdateHeartbeat(session.DeviceID)
+	// � 统一架构：移除冗余机制，只使用TCPManager统一管理心跳
+	if decodedFrame.DeviceID != "" {
+		if tm := core.GetGlobalTCPManager(); tm != nil {
+			if err := tm.UpdateHeartbeat(decodedFrame.DeviceID); err != nil {
+				logger.WithFields(logrus.Fields{
+					"connID":   conn.GetConnID(),
+					"deviceID": decodedFrame.DeviceID,
+					"error":    err,
+				}).Warn("更新TCPManager心跳失败")
+			}
 		}
 	}
 

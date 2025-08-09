@@ -37,12 +37,12 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/bujia-iot/iot-zinx/internal/app"
 	"github.com/bujia-iot/iot-zinx/internal/infrastructure/config"
 	"github.com/bujia-iot/iot-zinx/internal/infrastructure/logger"
 	"github.com/bujia-iot/iot-zinx/internal/infrastructure/redis"
 	"github.com/bujia-iot/iot-zinx/internal/ports"
 	"github.com/bujia-iot/iot-zinx/pkg/core"
+	"github.com/bujia-iot/iot-zinx/pkg/gateway"
 	"github.com/bujia-iot/iot-zinx/pkg/notification"
 	"github.com/bujia-iot/iot-zinx/pkg/utils"
 )
@@ -83,14 +83,13 @@ func main() {
 	// 设置Zinx框架日志
 	utils.SetupImprovedZinxLogger(improvedLogger)
 
-	// 初始化服务管理器
-	serviceManager := app.GetServiceManager()
-	if err := serviceManager.Init(); err != nil {
-		improvedLogger.Error("初始化服务管理器失败", map[string]interface{}{
-			"error": err.Error(),
-		})
-		os.Exit(1)
-	}
+	// 🚀 新架构：直接初始化DeviceGateway，移除ServiceManager依赖
+	// 初始化全局DeviceGateway
+	gateway.InitializeGlobalDeviceGateway()
+	improvedLogger.Info("DeviceGateway已初始化", map[string]interface{}{
+		"architecture": "unified_gateway",
+		"version":      "2.0.0",
+	})
 
 	// 初始化Redis（非致命错误）
 	if err := redis.InitClient(); err != nil {
@@ -189,12 +188,11 @@ func main() {
 		})
 	}
 
-	// 关闭服务管理器
-	if err := serviceManager.Shutdown(); err != nil {
-		improvedLogger.Error("关闭服务管理器失败", map[string]interface{}{
-			"error": err.Error(),
-		})
-	}
+	// 🚀 新架构：DeviceGateway自动管理资源，无需手动关闭
+	improvedLogger.Info("DeviceGateway资源已清理", map[string]interface{}{
+		"architecture": "unified_gateway",
+		"action":       "cleanup",
+	})
 
 	improvedLogger.Info("充电设备网关已安全关闭", map[string]interface{}{
 		"component": "gateway",

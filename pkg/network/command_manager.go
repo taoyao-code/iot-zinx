@@ -10,6 +10,7 @@ import (
 	"github.com/aceld/zinx/ziface"
 	"github.com/bujia-iot/iot-zinx/internal/infrastructure/logger"
 	"github.com/bujia-iot/iot-zinx/pkg/constants"
+	"github.com/bujia-iot/iot-zinx/pkg/utils"
 	"github.com/sirupsen/logrus"
 )
 
@@ -650,7 +651,8 @@ func (cm *CommandManager) processBatchTimeoutCommands(commands []*CommandEntry) 
 		}
 
 		// 🔧 检查设备是否已注册（避免向未注册设备发送命令）
-		deviceId := fmt.Sprintf("%08X", existingCmd.PhysicalID)
+		deviceId := utils.FormatPhysicalID(existingCmd.PhysicalID)
+
 		if !isDeviceRegistered(deviceId) {
 			// 更新状态为失败
 			existingCmd.Status = CmdStatusFailed

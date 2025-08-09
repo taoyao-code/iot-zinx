@@ -10,9 +10,9 @@ import (
 	"github.com/bujia-iot/iot-zinx/internal/infrastructure/logger"
 	"github.com/bujia-iot/iot-zinx/pkg/constants"
 	"github.com/bujia-iot/iot-zinx/pkg/core"
-	"github.com/bujia-iot/iot-zinx/pkg/network"
 	"github.com/bujia-iot/iot-zinx/pkg/notification"
 	"github.com/bujia-iot/iot-zinx/pkg/protocol"
+	"github.com/bujia-iot/iot-zinx/pkg/utils"
 	"github.com/sirupsen/logrus"
 )
 
@@ -78,7 +78,7 @@ func (h *PortPowerHeartbeatHandler) Handle(request ziface.IRequest) {
 
 	// 4. 检查心跳去重
 	physicalId := binary.LittleEndian.Uint32(decodedFrame.RawPhysicalID)
-	deviceId := fmt.Sprintf("%08X", physicalId)
+	deviceId := utils.FormatPhysicalID(physicalId)
 
 	if h.isDuplicateHeartbeat(deviceId) {
 		logger.WithFields(logrus.Fields{
@@ -86,10 +86,15 @@ func (h *PortPowerHeartbeatHandler) Handle(request ziface.IRequest) {
 			"deviceId": deviceId,
 		}).Debug("端口功率心跳被去重，间隔过短")
 
-		// 心跳被去重，但仍需更新活动时间并同步TCPManager状态
-		network.UpdateConnectionActivity(conn)
+		// 心跳被去重，但仍需更新活动时间 - 🚀 统一架构：只使用TCPManager
 		if tm := core.GetGlobalTCPManager(); tm != nil {
-			_ = tm.UpdateHeartbeat(deviceId)
+			if err := tm.UpdateHeartbeat(deviceId); err != nil {
+				logger.WithFields(logrus.Fields{
+					"connID":   conn.GetConnID(),
+					"deviceID": deviceId,
+					"error":    err,
+				}).Warn("更新TCPManager心跳失败")
+			}
 		}
 		h.updateHeartbeatTime(deviceId)
 		return
@@ -107,7 +112,7 @@ func (h *PortPowerHeartbeatHandler) processPortPowerHeartbeat(decodedFrame *prot
 	data := decodedFrame.Payload
 
 	// 生成设备ID
-	deviceId := fmt.Sprintf("%08X", physicalId)
+	deviceId := utils.FormatPhysicalID(physicalId)
 
 	// 更新心跳时间：统一通过TCPManager并维护本地去重时钟
 	if tm := core.GetGlobalTCPManager(); tm != nil {
@@ -137,10 +142,8 @@ func (h *PortPowerHeartbeatHandler) processPortPowerHeartbeat(decodedFrame *prot
 
 	logger.WithFields(logFields).Info("⚡ 端口功率心跳包处理完成")
 
-	// 更新心跳时间
-
-	// 更新连接活动时间
-	network.UpdateConnectionActivity(conn)
+	// 🚀 统一架构：使用TCPManager统一更新心跳，移除冗余网络调用
+	// 心跳时间已在去重检查或processPowerHeartbeat中通过TCPManager更新
 
 	// 发送端口功率心跳通知
 	h.sendPortPowerHeartbeatNotification(decodedFrame, conn, deviceId, powerInfo)

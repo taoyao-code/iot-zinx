@@ -3,9 +3,9 @@ package ports
 import (
 	_ "github.com/bujia-iot/iot-zinx/docs" // Swagger文档
 	"github.com/bujia-iot/iot-zinx/internal/adapter/http"
-	"github.com/bujia-iot/iot-zinx/internal/app"
 	"github.com/bujia-iot/iot-zinx/internal/infrastructure/config"
 	"github.com/bujia-iot/iot-zinx/internal/infrastructure/logger"
+	"github.com/bujia-iot/iot-zinx/pkg/gateway"
 	"github.com/gin-gonic/gin"
 	swaggerFiles "github.com/swaggo/files"
 	ginSwagger "github.com/swaggo/gin-swagger"
@@ -13,16 +13,9 @@ import (
 
 // StartHTTPServer 启动HTTP API服务器
 func StartHTTPServer() error {
-	// 初始化服务依赖
-	serviceManager := app.GetServiceManager()
-
-	// 创建HTTP处理器上下文，注入设备服务
-	handlerContext := http.NewHandlerContext(serviceManager.DeviceService)
-
-	// 设置全局处理器上下文
-	http.SetGlobalHandlerContext(handlerContext)
-
-	logger.Info("HTTP处理器上下文已初始化，设备服务已注入")
+	// 🚀 新架构：初始化DeviceGateway
+	gateway.InitializeGlobalDeviceGateway()
+	logger.Info("DeviceGateway已初始化，使用统一架构")
 
 	// 设置Gin模式
 	gin.SetMode(gin.ReleaseMode)
@@ -30,11 +23,8 @@ func StartHTTPServer() error {
 	// 创建Gin引擎
 	r := gin.Default()
 
-	// 注册API路由
-	registerHTTPHandlers(r)
-
-	// 注册设备控制相关路由
-	http.RegisterDeviceControlRoutes(r)
+	// 🚀 新架构：注册基于DeviceGateway的API路由
+	registerUnifiedAPIHandlers(r)
 
 	// 启动HTTP服务器
 	addr := config.FormatHTTPAddress()
@@ -42,55 +32,38 @@ func StartHTTPServer() error {
 	return r.Run(addr)
 }
 
-// registerHTTPHandlers 注册HTTP处理器
-func registerHTTPHandlers(r *gin.Engine) {
+// registerUnifiedAPIHandlers 注册统一的API处理器 (基于DeviceGateway)
+func registerUnifiedAPIHandlers(r *gin.Engine) {
+	// 🚀 创建基于DeviceGateway的处理器
+	gatewayHandlers := http.NewDeviceGatewayHandlers()
+
 	// Swagger文档
 	r.GET("/swagger/*any", ginSwagger.WrapHandler(swaggerFiles.Handler))
 
 	// API路由组 v1版本
 	api := r.Group("/api/v1")
 	{
-		// 设备相关API
-		api.GET("/devices", http.HandleDeviceList)
-		api.GET("/device/:deviceId/status", http.HandleDeviceStatus)
-		api.POST("/device/command", http.HandleSendCommand)
-		api.POST("/device/locate", http.HandleDeviceLocate)
+		// 🚀 新架构：设备相关API - 全部使用DeviceGateway
+		api.GET("/devices", gatewayHandlers.HandleDeviceList)
+		api.GET("/device/:deviceId/status", gatewayHandlers.HandleDeviceStatus)
+		api.POST("/device/locate", gatewayHandlers.HandleDeviceLocate)
 
-		// DNY协议命令API
-		api.POST("/command/dny", http.HandleSendDNYCommand)
-		api.GET("/device/:deviceId/query", http.HandleQueryDeviceStatus)
+		// 🚀 新架构：充电控制API - 简化调用
+		api.POST("/charging/start", gatewayHandlers.HandleStartCharging)
+		api.POST("/charging/stop", gatewayHandlers.HandleStopCharging)
 
-		// 充电控制API
-		api.POST("/charging/start", http.HandleStartCharging)
-		api.POST("/charging/stop", http.HandleStopCharging)
+		// 🚀 新架构：设备命令API - 统一接口
+		api.POST("/device/command", gatewayHandlers.HandleSendCommand)
+		api.POST("/command/dny", gatewayHandlers.HandleSendDNYCommand)
+
+		// 🚀 新架构：系统监控API - 通过DeviceGateway获取统计
+		api.GET("/health", gatewayHandlers.HandleHealthCheck)
+		api.GET("/stats", gatewayHandlers.HandleSystemStats)
+
+		// 🚀 新架构：设备查询API
+		api.GET("/device/:deviceId/query", gatewayHandlers.HandleQueryDeviceStatus)
+
+		// 调试API - 显示所有路由
+		api.GET("/routes", gatewayHandlers.HandleRoutes)
 	}
-	// 系统监控（v1 路径）
-	api.GET("/health", http.HandleHealthCheck)
-	api.GET("/stats", http.HandleSystemStats)
-
-	// 调试API - 显示所有路由
-	// @Summary 获取所有路由
-	// @Description 获取系统中所有可用的API路由列表
-	// @Tags system
-	// @Accept json
-	// @Produce json
-	// @Success 200 {object} APIResponse{data=RoutesResponse} "路由列表"
-	// @Router /api/v1/routes [get]
-	api.GET("/routes", func(c *gin.Context) {
-		var routes []http.RouteInfo
-		for _, routeInfo := range r.Routes() {
-			routes = append(routes, http.RouteInfo{
-				Method: routeInfo.Method,
-				Path:   routeInfo.Path,
-			})
-		}
-		c.JSON(200, http.APIResponse{
-			Code:    0,
-			Message: "success",
-			Data: http.RoutesResponse{
-				Routes: routes,
-				Count:  len(routes),
-			},
-		})
-	})
 }

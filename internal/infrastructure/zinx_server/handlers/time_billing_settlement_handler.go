@@ -10,6 +10,7 @@ import (
 	"github.com/bujia-iot/iot-zinx/pkg/constants"
 	"github.com/bujia-iot/iot-zinx/pkg/notification"
 	"github.com/bujia-iot/iot-zinx/pkg/protocol"
+	"github.com/bujia-iot/iot-zinx/pkg/utils"
 	"github.com/sirupsen/logrus"
 )
 
@@ -75,7 +76,7 @@ func (h *TimeBillingSettlementHandler) processTimeBillingSettlement(decodedFrame
 	data := decodedFrame.Payload
 
 	// 生成设备ID
-	deviceId := fmt.Sprintf("%08X", physicalId)
+	deviceId := utils.FormatPhysicalID(physicalId)
 
 	// 解析分时收费结算数据
 	settlementInfo := h.parseTimeBillingSettlementData(data)

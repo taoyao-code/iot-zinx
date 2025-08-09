@@ -9,7 +9,6 @@ import (
 	"github.com/bujia-iot/iot-zinx/internal/infrastructure/logger"
 	"github.com/bujia-iot/iot-zinx/pkg/constants"
 	"github.com/bujia-iot/iot-zinx/pkg/core"
-	"github.com/bujia-iot/iot-zinx/pkg/network"
 	"github.com/bujia-iot/iot-zinx/pkg/protocol"
 	"github.com/sirupsen/logrus"
 )
@@ -78,13 +77,17 @@ func (h *LinkHeartbeatHandler) Handle(request ziface.IRequest) {
 		return
 	}
 
-	// Link心跳信息已通过network.UpdateConnectionActivity处理，无需额外属性
-	// 调用统一的连接活动更新函数
-	network.UpdateConnectionActivity(conn)
-	// 统一：通过TCPManager刷新心跳，保证API一致
-	if tm := core.GetGlobalTCPManager(); tm != nil {
-		if session, ok := tm.GetSessionByConnID(conn.GetConnID()); ok {
-			_ = tm.UpdateHeartbeat(session.DeviceID)
+	// 🚀 统一架构：使用TCPManager统一的心跳更新机制，移除冗余网络调用
+	if decodedFrame.DeviceID != "" {
+		tcpManager := core.GetGlobalTCPManager()
+		if tcpManager != nil {
+			if err := tcpManager.UpdateHeartbeat(decodedFrame.DeviceID); err != nil {
+				logger.WithFields(logrus.Fields{
+					"connID":   conn.GetConnID(),
+					"deviceID": decodedFrame.DeviceID,
+					"error":    err,
+				}).Warn("更新TCPManager心跳失败")
+			}
 		}
 	}
 

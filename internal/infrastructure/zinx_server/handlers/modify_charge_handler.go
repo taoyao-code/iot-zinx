@@ -131,23 +131,28 @@ func (h *ModifyChargeHandler) processModifyChargeResponse(decodedFrame *protocol
 		"success":       response.ResponseCode == 0,
 	}).Info("修改充电时长/电量响应处理完成")
 
-	// 更新连接活动时间
-	h.updateConnectionActivity(conn)
+	// 🚀 统一架构：直接使用TCPManager更新心跳，传入deviceID
+	h.updateConnectionActivity(conn, deviceId)
 
 	// 确认命令完成
 	h.confirmCommand(decodedFrame, conn)
 }
 
-// updateConnectionActivity 更新连接活动时间
-func (h *ModifyChargeHandler) updateConnectionActivity(conn ziface.IConnection) {
+// updateConnectionActivity 更新连接活动时间 - 🚀 统一架构版本
+func (h *ModifyChargeHandler) updateConnectionActivity(conn ziface.IConnection, deviceID string) {
 	now := time.Now()
 	conn.SetProperty(constants.PropKeyLastHeartbeat, now.Unix())
-	network.UpdateConnectionActivity(conn)
 
-	// 统一：通过 TCPManager 刷新设备会话心跳，保持 API 状态一致
-	if tm := core.GetGlobalTCPManager(); tm != nil {
-		if session, ok := tm.GetSessionByConnID(conn.GetConnID()); ok {
-			_ = tm.UpdateHeartbeat(session.DeviceID)
+	// 🚀 统一架构：移除冗余机制，只使用TCPManager统一管理心跳
+	if deviceID != "" {
+		if tm := core.GetGlobalTCPManager(); tm != nil {
+			if err := tm.UpdateHeartbeat(deviceID); err != nil {
+				logger.WithFields(logrus.Fields{
+					"connID":   conn.GetConnID(),
+					"deviceID": deviceID,
+					"error":    err,
+				}).Warn("更新TCPManager心跳失败")
+			}
 		}
 	}
 

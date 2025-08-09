@@ -10,9 +10,9 @@ import (
 	"github.com/bujia-iot/iot-zinx/internal/infrastructure/logger"
 	"github.com/bujia-iot/iot-zinx/pkg/constants"
 	"github.com/bujia-iot/iot-zinx/pkg/core"
-	"github.com/bujia-iot/iot-zinx/pkg/network"
 	"github.com/bujia-iot/iot-zinx/pkg/notification"
 	"github.com/bujia-iot/iot-zinx/pkg/protocol"
+	"github.com/bujia-iot/iot-zinx/pkg/utils"
 	"github.com/sirupsen/logrus"
 )
 
@@ -97,11 +97,19 @@ func (h *PowerHeartbeatHandler) Handle(request ziface.IRequest) {
 
 	// 4. 🔧 修复：心跳去重检查，避免频繁处理
 	physicalId := binary.LittleEndian.Uint32(decodedFrame.RawPhysicalID)
-	deviceID := fmt.Sprintf("%08X", physicalId)
+	deviceID := utils.FormatPhysicalID(physicalId)
 
 	if !h.shouldProcessHeartbeat(deviceID) {
-		// 心跳被去重，但仍需更新活动时间
-		network.UpdateConnectionActivity(conn)
+		// 心跳被去重，但仍需更新活动时间 - 🚀 统一架构：使用TCPManager
+		if tcpManager := core.GetGlobalTCPManager(); tcpManager != nil {
+			if err := tcpManager.UpdateHeartbeat(deviceID); err != nil {
+				logger.WithFields(logrus.Fields{
+					"connID":   conn.GetConnID(),
+					"deviceID": deviceID,
+					"error":    err,
+				}).Warn("更新TCPManager心跳失败")
+			}
+		}
 		return
 	}
 
@@ -128,7 +136,7 @@ func (h *PowerHeartbeatHandler) processPowerHeartbeat(decodedFrame *protocol.Dec
 	}
 
 	// 生成设备ID
-	deviceId := fmt.Sprintf("%08X", physicalId)
+	deviceId := utils.FormatPhysicalID(physicalId)
 
 	// 🔧 重要修复：完整解析功率心跳包数据，包括充电状态
 	// 根据协议文档：端口号(1) + 各端口状态(2) + 充电时长(2) + 累计电量(2) + 启动状态(1) + 实时功率(2) + 最大功率(2) + 最小功率(2) + 平均功率(2) + ...
@@ -233,9 +241,8 @@ func (h *PowerHeartbeatHandler) processPowerHeartbeat(decodedFrame *protocol.Dec
 		}
 	}
 
-	// 🔧 修复：更新自定义心跳管理器的连接活动时间
-	// 这是解决连接超时问题的关键修复
-	network.UpdateConnectionActivity(conn)
+	// � 统一架构：移除冗余机制，只使用TCPManager统一管理心跳
+	// TCPManager已在上面更新过心跳，无需重复调用network.UpdateConnectionActivity
 
 	// 发送功率心跳通知
 	h.sendPowerHeartbeatNotification(decodedFrame, conn, deviceId, logFields, isCharging)

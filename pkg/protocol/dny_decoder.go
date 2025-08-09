@@ -8,6 +8,7 @@ import (
 	"github.com/bujia-iot/iot-zinx/internal/domain/dny_protocol"
 	"github.com/bujia-iot/iot-zinx/internal/infrastructure/logger"
 	"github.com/bujia-iot/iot-zinx/pkg/constants"
+	"github.com/bujia-iot/iot-zinx/pkg/utils"
 	"github.com/sirupsen/logrus"
 )
 
@@ -165,7 +166,8 @@ func (d *DNY_Decoder) Intercept(chain ziface.IChain) ziface.IcResp {
 
 	case "standard":
 		// 记录到通信日志
-		deviceID := fmt.Sprintf("%08X", firstMsg.PhysicalId)
+		deviceID := utils.FormatPhysicalID(firstMsg.PhysicalId)
+
 		logger.LogReceiveData(connID, len(firstMsg.RawData), "DNY_STANDARD", deviceID, uint8(firstMsg.CommandId))
 
 		logger.WithFields(logrus.Fields{

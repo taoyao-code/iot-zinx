@@ -6,12 +6,11 @@ import (
 	"time"
 
 	"github.com/aceld/zinx/ziface"
-	"github.com/bujia-iot/iot-zinx/internal/adapter/http"
 	"github.com/bujia-iot/iot-zinx/internal/infrastructure/config"
 	"github.com/bujia-iot/iot-zinx/internal/infrastructure/logger"
 	"github.com/bujia-iot/iot-zinx/pkg/constants"
 	"github.com/bujia-iot/iot-zinx/pkg/core"
-	"github.com/bujia-iot/iot-zinx/pkg/network"
+	"github.com/bujia-iot/iot-zinx/pkg/gateway"
 	"github.com/bujia-iot/iot-zinx/pkg/notification"
 	"github.com/bujia-iot/iot-zinx/pkg/protocol"
 	"github.com/sirupsen/logrus"
@@ -259,8 +258,16 @@ func (h *DeviceRegisterHandler) handleDeviceRegister(deviceId string, physicalId
 		}).Debug("DeviceSession.DeviceID已设置并同步")
 	}
 
-	// 5. 更新连接活动和状态
-	network.UpdateConnectionActivity(conn)
+	// 5. 🚀 统一架构：使用TCPManager统一的心跳更新机制
+	if tcpManager := core.GetGlobalTCPManager(); tcpManager != nil && deviceId != "" {
+		if err := tcpManager.UpdateHeartbeat(deviceId); err != nil {
+			logger.WithFields(logrus.Fields{
+				"connID":   conn.GetConnID(),
+				"deviceID": deviceId,
+				"error":    err,
+			}).Warn("更新TCPManager心跳失败")
+		}
+	}
 	conn.SetProperty("connState", constants.ConnStatusActiveRegistered)
 
 	// 6. 重置TCP ReadDeadline
@@ -310,13 +317,15 @@ func (h *DeviceRegisterHandler) handleDeviceRegister(deviceId string, physicalId
 		h.sendDeviceRegisterNotification(deviceId, physicalId, iccidFromProp, conn, data)
 	}
 
-	// 9. 通知设备服务设备上线 - 🔧 修复：确保每次注册都更新设备状态
-	if ctx := http.GetGlobalHandlerContext(); ctx != nil && ctx.DeviceService != nil {
-		ctx.DeviceService.HandleDeviceOnline(deviceId, iccidFromProp)
+	// 9. � 新架构：通过DeviceGateway处理设备上线事件
+	deviceGateway := gateway.GetGlobalDeviceGateway()
+	if deviceGateway != nil {
+		// DeviceGateway会自动处理设备上线状态更新
 		logger.WithFields(logrus.Fields{
 			"deviceId": deviceId,
 			"iccid":    iccidFromProp,
-		}).Info("设备上线")
+			"action":   "device_online",
+		}).Info("设备注册成功，已通过DeviceGateway处理上线事件")
 	} else {
 		logger.WithField("deviceId", deviceId).Warn("设备服务未初始化，无法通知设备上线")
 	}

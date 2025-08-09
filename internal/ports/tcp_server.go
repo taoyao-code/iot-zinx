@@ -7,7 +7,6 @@ import (
 	"github.com/aceld/zinx/zconf"
 	"github.com/aceld/zinx/ziface"
 	"github.com/aceld/zinx/znet"
-	"github.com/bujia-iot/iot-zinx/internal/app/service"
 	"github.com/bujia-iot/iot-zinx/internal/infrastructure/config"
 	"github.com/bujia-iot/iot-zinx/internal/infrastructure/logger"
 	"github.com/bujia-iot/iot-zinx/internal/infrastructure/zinx_server/handlers"
@@ -60,11 +59,8 @@ func (s *TCPServer) Start() error {
 		tm.SetHeartbeatTimeout(time.Duration(s.cfg.DeviceConnection.HeartbeatTimeoutSeconds) * time.Second)
 	}
 
-	// 🔧 修复：初始化全局API TCP适配器，确保API层能正确访问TCP管理器
-	service.SetGlobalAPITCPManagerGetter(func() interface{} {
-		return core.GetGlobalTCPManager()
-	})
-	logger.Info("✅ 全局API TCP管理器适配器已初始化")
+	// � 新架构：DeviceGateway统一管理TCP连接，无需单独的API适配器
+	logger.Info("✅ TCP服务器使用DeviceGateway统一架构")
 
 	// 启动服务器
 	return s.startServer()

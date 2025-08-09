@@ -7,6 +7,7 @@ import (
 	"github.com/bujia-iot/iot-zinx/internal/infrastructure/logger"
 	"github.com/bujia-iot/iot-zinx/pkg/core"
 	"github.com/bujia-iot/iot-zinx/pkg/protocol"
+	"github.com/bujia-iot/iot-zinx/pkg/utils"
 	"github.com/sirupsen/logrus"
 )
 
@@ -19,7 +20,7 @@ type ChargeControlHandler struct {
 func (h *ChargeControlHandler) Handle(request ziface.IRequest) {
 	conn := request.GetConnection()
 	data := request.GetData()
-	
+
 	logger.WithFields(logrus.Fields{
 		"connID":     conn.GetConnID(),
 		"remoteAddr": conn.RemoteAddr().String(),
@@ -73,7 +74,7 @@ func (h *ChargeControlHandler) processChargeControl(result *protocol.DNYParseRes
 	}
 
 	// 更新心跳时间
-	deviceID := fmt.Sprintf("%08X", physicalId)
+	deviceID := utils.FormatPhysicalID(physicalId)
 	if err := tcpManager.UpdateHeartbeat(deviceID); err != nil {
 		logger.WithFields(logrus.Fields{
 			"deviceID": deviceID,
@@ -87,8 +88,8 @@ func (h *ChargeControlHandler) processChargeControl(result *protocol.DNYParseRes
 		return
 	}
 
-	port := data[0]      // 端口号
-	action := data[1]    // 操作：0x01开始，0x00停止
+	port := data[0]   // 端口号
+	action := data[1] // 操作：0x01开始，0x00停止
 
 	logger.WithFields(logrus.Fields{
 		"physicalId": fmt.Sprintf("0x%08X", physicalId),

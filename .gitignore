@@ -83,7 +83,7 @@ internal/docs
 # 可执行文件
 /bin/
 /cmd/*/main
-gateway
+./gateway
 gateway.exe
 
 # 二进制文件

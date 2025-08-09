@@ -23,11 +23,6 @@ func GetPhysicalIDFromConnection(conn ziface.IConnection) (uint32, string, error
 	return 0, "", fmt.Errorf("未找到有效的PhysicalID")
 }
 
-// FormatPhysicalID 格式化PhysicalID为8位十六进制字符串
-func FormatPhysicalID(physicalID uint32) string {
-	return fmt.Sprintf("%08X", physicalID)
-}
-
 // ParseDeviceIDToPhysicalID 解析设备ID字符串为物理ID - 统一解析入口
 // 支持16进制和10进制格式的设备ID
 func ParseDeviceIDToPhysicalID(deviceID string) (uint32, error) {
@@ -59,7 +54,7 @@ func ValidateDeviceID(deviceID string) error {
 	return err
 }
 
-// FormatPhysicalIDToDeviceID 格式化物理ID为设备ID字符串
-func FormatPhysicalIDToDeviceID(physicalID uint32) string {
+// FormatPhysicalID 格式化PhysicalID为8位十六进制字符串
+func FormatPhysicalID(physicalID uint32) string {
 	return fmt.Sprintf("%08X", physicalID)
 }

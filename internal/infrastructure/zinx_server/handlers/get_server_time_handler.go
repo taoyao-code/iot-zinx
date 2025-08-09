@@ -10,6 +10,7 @@ import (
 	"github.com/bujia-iot/iot-zinx/pkg/constants"
 	"github.com/bujia-iot/iot-zinx/pkg/core"
 	"github.com/bujia-iot/iot-zinx/pkg/protocol"
+	"github.com/bujia-iot/iot-zinx/pkg/utils"
 	"github.com/sirupsen/logrus"
 )
 
@@ -98,7 +99,7 @@ func (h *GetServerTimeHandler) Handle(request ziface.IRequest) {
 
 	// 4. 🔧 修复：时间同步流控检查，避免频繁处理
 	physicalId := binary.LittleEndian.Uint32(decodedFrame.RawPhysicalID)
-	deviceID := fmt.Sprintf("%08X", physicalId)
+	deviceID := utils.FormatPhysicalID(physicalId)
 
 	if !h.shouldProcessTimeSync(deviceID) {
 		// 时间同步被流控，发送上次缓存的时间或拒绝响应
@@ -119,7 +120,7 @@ func (h *GetServerTimeHandler) processGetServerTime(decodedFrame *protocol.Decod
 	// 从RawPhysicalID提取uint32值
 	physicalId := binary.LittleEndian.Uint32(decodedFrame.RawPhysicalID)
 	messageId := decodedFrame.MessageID
-	deviceId := fmt.Sprintf("%08X", physicalId)
+	deviceId := utils.FormatPhysicalID(physicalId)
 
 	logger.WithFields(logrus.Fields{
 		"connID":     conn.GetConnID(),

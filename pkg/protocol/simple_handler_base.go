@@ -8,6 +8,7 @@ import (
 	"github.com/bujia-iot/iot-zinx/internal/infrastructure/logger"
 	"github.com/bujia-iot/iot-zinx/pkg/constants"
 	"github.com/bujia-iot/iot-zinx/pkg/core"
+	"github.com/bujia-iot/iot-zinx/pkg/utils"
 	"github.com/sirupsen/logrus"
 )
 
@@ -112,7 +113,7 @@ func (h *SimpleHandlerBase) ExtractDecodedFrame(request ziface.IRequest) (*Decod
 	frame := &DecodedDNYFrame{
 		FrameType:       frameType,
 		RawData:         data,
-		DeviceID:        fmt.Sprintf("%08X", result.PhysicalID),
+		DeviceID:        utils.FormatPhysicalID(result.PhysicalID),
 		RawPhysicalID:   make([]byte, 4),
 		MessageID:       result.MessageID,
 		Command:         result.Command,

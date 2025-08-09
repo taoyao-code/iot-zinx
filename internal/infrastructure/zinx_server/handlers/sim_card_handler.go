@@ -10,7 +10,6 @@ import (
 	"github.com/bujia-iot/iot-zinx/internal/infrastructure/logger"
 	"github.com/bujia-iot/iot-zinx/pkg/constants"
 	"github.com/bujia-iot/iot-zinx/pkg/core"
-	"github.com/bujia-iot/iot-zinx/pkg/network"
 	"github.com/sirupsen/logrus"
 )
 
@@ -48,8 +47,24 @@ func (h *SimCardHandler) Handle(request ziface.IRequest) {
 			_ = tm.UpdateConnectionStateByConnID(conn.GetConnID(), constants.StateICCIDReceived)
 		}
 
-		// 更新连接活动
-		network.UpdateConnectionActivity(conn)
+		// 🚀 统一架构：通过TCPManager统一更新心跳，移除冗余网络调用
+		if tm := core.GetGlobalTCPManager(); tm != nil {
+			if session, exists := tm.GetSessionByConnID(conn.GetConnID()); exists {
+				if err := tm.UpdateHeartbeat(session.DeviceID); err != nil {
+					logger.WithFields(logrus.Fields{
+						"connID":   conn.GetConnID(),
+						"deviceID": session.DeviceID,
+						"error":    err,
+					}).Warn("更新TCPManager心跳失败")
+				}
+			} else {
+				// 对于尚未建立设备会话的连接，暂时跳过心跳更新
+				logger.WithFields(logrus.Fields{
+					"connID": conn.GetConnID(),
+					"iccid":  iccidStr,
+				}).Debug("SimCardHandler: 设备会话尚未建立，跳过心跳更新")
+			}
+		}
 
 		// 重置TCP ReadDeadline
 		defaultReadDeadlineSeconds := config.GetConfig().TCPServer.DefaultReadDeadlineSeconds
