@@ -1011,9 +1011,13 @@ func (m *TCPManager) UnregisterConnection(connID uint64) error {
 
 // GetDeviceDetail 获取设备详细信息（API专用）
 func (m *TCPManager) GetDeviceDetail(deviceID string) (map[string]interface{}, error) {
+	logger.WithField("deviceID", deviceID).Debug("🔍 GetDeviceDetail: 开始查找设备详细信息")
+	
 	// 🔧 增强：支持不同格式的设备ID查找
 	iccidInterface, exists := m.deviceIndex.Load(deviceID)
 	if !exists {
+		logger.WithField("deviceID", deviceID).Debug("🔍 GetDeviceDetail: 直接查找失败，尝试格式转换")
+		
 		// 尝试智能格式转换
 		var alternativeDeviceID string
 		if strings.HasPrefix(deviceID, "0x") || strings.HasPrefix(deviceID, "0X") {
@@ -1027,16 +1031,25 @@ func (m *TCPManager) GetDeviceDetail(deviceID string) (map[string]interface{}, e
 		}
 
 		if alternativeDeviceID != "" {
+			logger.WithFields(logrus.Fields{
+				"originalID":    deviceID,
+				"alternativeID": alternativeDeviceID,
+			}).Debug("🔍 GetDeviceDetail: 尝试备用格式查找")
+			
 			if altIccidInterface, altExists := m.deviceIndex.Load(alternativeDeviceID); altExists {
 				iccidInterface = altIccidInterface
 				exists = true
 				deviceID = alternativeDeviceID // 使用找到的格式
+				logger.WithField("deviceID", deviceID).Debug("🔍 GetDeviceDetail: 备用格式查找成功")
 			}
 		}
 
 		if !exists {
+			logger.WithField("deviceID", deviceID).Warn("🔍 GetDeviceDetail: 设备不存在于索引中")
 			return nil, fmt.Errorf("设备不存在")
 		}
+	} else {
+		logger.WithField("deviceID", deviceID).Debug("🔍 GetDeviceDetail: 直接查找成功")
 	}
 	iccid := iccidInterface.(string)
 	groupInterface, ok := m.deviceGroups.Load(iccid)
