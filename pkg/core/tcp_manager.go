@@ -315,22 +315,8 @@ func (m *TCPManager) RegisterDevice(conn ziface.IConnection, deviceID, physicalI
 	session.UpdatedAt = time.Now()
 	session.mutex.Unlock()
 
-	// � 新架构：建立三层映射关系 - 使用原子性操作
-	// 1. deviceID → iccid (快速查找) - 原子性建立索引
-	err := m.AtomicDeviceIndexOperation(deviceID, iccid, func() error {
-		m.deviceIndex.Store(deviceID, iccid)
-		return nil
-	})
-	if err != nil {
-		logger.WithFields(logrus.Fields{
-			"deviceID": deviceID,
-			"iccid":    iccid,
-			"error":    err,
-		}).Error("原子性建立设备索引失败")
-		return fmt.Errorf("建立设备索引失败: %v", err)
-	}
-
-	// 2. 处理设备组 (iccid → DeviceGroup) - 原子性更新
+	// 🔧 修复：先处理设备组，再建立索引（确保验证时设备组已存在）
+	// 1. 处理设备组 (iccid → DeviceGroup) - 原子性更新
 	var deviceGroup *DeviceGroup
 	if group, exists := m.deviceGroups.Load(iccid); exists {
 		deviceGroup = group.(*DeviceGroup)
@@ -386,6 +372,20 @@ func (m *TCPManager) RegisterDevice(conn ziface.IConnection, deviceID, physicalI
 			"iccid":    iccid,
 			"action":   "create_new_group",
 		}).Debug("创建新设备组")
+	}
+
+	// 🔧 修复：设备组创建完成后再建立索引映射（确保验证时设备组已存在）
+	err := m.AtomicDeviceIndexOperation(deviceID, iccid, func() error {
+		m.deviceIndex.Store(deviceID, iccid)
+		return nil
+	})
+	if err != nil {
+		logger.WithFields(logrus.Fields{
+			"deviceID": deviceID,
+			"iccid":    iccid,
+			"error":    err,
+		}).Error("原子性建立设备索引失败")
+		return fmt.Errorf("建立设备索引失败: %v", err)
 	}
 
 	// 更新统计信息（仅对新设备或被视为重新接入的设备计数）
