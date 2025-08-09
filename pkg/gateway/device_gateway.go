@@ -168,12 +168,13 @@ func (g *DeviceGateway) SendCommandToDevice(deviceID string, command byte, data 
 	// 使用统一DNY构建器
 	builder := protocol.NewUnifiedDNYBuilder()
 
-	// 将设备ID转换为物理ID (假设physicalID存储为十六进制字符串)
+	// 将设备ID转换为物理ID (PhysicalID存储为"0x%08X"格式)
 	var physicalID uint32
 	if session.PhysicalID == "" {
 		return fmt.Errorf("设备 PhysicalID 为空，无法发送命令")
 	}
-	if _, err := fmt.Sscanf(session.PhysicalID, "%x", &physicalID); err != nil {
+	// 修复：使用正确的格式解析带"0x"前缀的PhysicalID
+	if _, err := fmt.Sscanf(session.PhysicalID, "0x%08X", &physicalID); err != nil {
 		return fmt.Errorf("解析 physicalID 失败: %v", err)
 	}
 	dnyPacket := builder.BuildDNYPacket(physicalID, 0x0001, command, data)
@@ -292,53 +293,67 @@ func (g *DeviceGateway) SendChargingCommandWithParams(deviceID string, port uint
 		return fmt.Errorf("端口号不能为0")
 	}
 
-	// 构建完整的充电控制数据包
-	// 根据DNY协议，充电控制命令格式：
-	// 控制命令(1字节) + 枪号(1字节) + 卡号(20字节) + 订单号(20字节) + 最大功率(4字节) + 最大电量(4字节) + 最大时间(4字节)
-	commandData := make([]byte, 54)
+	// 🔧 修复：使用正确的AP3000协议82指令格式（37字节）
+	// 根据AP3000协议文档：费率模式 + 余额/有效期 + 端口号 + 充电命令 + 充电时长/电量 + 订单编号 + 其他参数
+	commandData := make([]byte, 37)
 
-	// 控制命令
-	commandData[0] = action
+	// 费率模式(1字节)：0=计时，1=包月，2=计量，3=计次
+	commandData[0] = mode
 
-	// 枪号
-	commandData[1] = port
+	// 余额/有效期(4字节，小端序)
+	commandData[1] = byte(balance)
+	commandData[2] = byte(balance >> 8)
+	commandData[3] = byte(balance >> 16)
+	commandData[4] = byte(balance >> 24)
 
-	// 卡号 (20字节) - 暂时留空
-	// copy(commandData[2:22], []byte(""))
+	// 端口号(1字节)：从0开始，0x00=第1路
+	commandData[5] = port - 1 // API端口号是1-based，协议是0-based
 
-	// 订单号 (20字节)
-	orderBytes := []byte(orderNo)
-	if len(orderBytes) > 20 {
-		orderBytes = orderBytes[:20]
+	// 充电命令(1字节)：0=停止充电，1=开始充电
+	commandData[6] = action
+
+	// 充电时长/电量(2字节，小端序)
+	commandData[7] = byte(value)
+	commandData[8] = byte(value >> 8)
+
+	// 订单编号(16字节)
+	orderBytes := make([]byte, 16)
+	if len(orderNo) > 0 {
+		copy(orderBytes, []byte(orderNo))
 	}
-	copy(commandData[22:42], orderBytes)
+	copy(commandData[9:25], orderBytes)
 
-	// 最大功率 (4字节, 小端序) - 根据充电模式设置
-	var maxPower uint32 = 0 // 0表示不限制功率
-	commandData[42] = byte(maxPower)
-	commandData[43] = byte(maxPower >> 8)
-	commandData[44] = byte(maxPower >> 16)
-	commandData[45] = byte(maxPower >> 24)
+	// 最大充电时长(2字节，小端序)
+	maxChargeDuration := uint16(0) // 0表示不限制
+	commandData[25] = byte(maxChargeDuration)
+	commandData[26] = byte(maxChargeDuration >> 8)
 
-	// 最大电量 (4字节, 小端序) - 根据充电模式设置
-	var maxEnergy uint32 = 0
-	if mode == 1 { // 按电量充电
-		maxEnergy = uint32(value) // value为0.1度单位
-	}
-	commandData[46] = byte(maxEnergy)
-	commandData[47] = byte(maxEnergy >> 8)
-	commandData[48] = byte(maxEnergy >> 16)
-	commandData[49] = byte(maxEnergy >> 24)
+	// 过载功率(2字节，小端序)
+	overloadPower := uint16(0) // 0表示不设置
+	commandData[27] = byte(overloadPower)
+	commandData[28] = byte(overloadPower >> 8)
 
-	// 最大时间 (4字节, 小端序) - 根据充电模式设置
-	var maxTime uint32 = 0
-	if mode == 0 { // 按时间充电
-		maxTime = uint32(value) * 60 // value为分钟，转换为秒
-	}
-	commandData[50] = byte(maxTime)
-	commandData[51] = byte(maxTime >> 8)
-	commandData[52] = byte(maxTime >> 16)
-	commandData[53] = byte(maxTime >> 24)
+	// 二维码灯(1字节)：0=打开，1=关闭
+	commandData[29] = 0
+
+	// 长充模式(1字节)：0=关闭，1=打开
+	commandData[30] = 0
+
+	// 额外浮充时间(2字节，小端序)：0=不开启
+	commandData[31] = 0
+	commandData[32] = 0
+
+	// 是否跳过短路检测(1字节)：2=正常检测短路
+	commandData[33] = 2
+
+	// 不判断用户拔出(1字节)：0=正常判断拔出
+	commandData[34] = 0
+
+	// 强制带充满自停(1字节)：0=正常
+	commandData[35] = 0
+
+	// 充满功率(1字节)：0=关闭充满功率判断
+	commandData[36] = 0
 
 	err := g.SendCommandToDevice(deviceID, constants.CmdChargeControl, commandData)
 	if err != nil {
