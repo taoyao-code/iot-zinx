@@ -585,15 +585,12 @@ func (m *TCPManager) GetSessionByDeviceID(deviceID string) (*ConnectionSession, 
 // 🚀 新架构：专门用于获取设备信息的方法
 // 🔧 增强：支持智能查找，兼容带/不带0x前缀的设备ID格式
 func (m *TCPManager) GetDeviceByID(deviceID string) (*Device, bool) {
-	logger.WithField("deviceID", deviceID).Debug("🔍 GetDeviceByID: 开始查找设备")
+	fmt.Printf("🔍 [TCPManager.GetDeviceByID] 开始查找设备: deviceID=%s\n", deviceID)
 
 	// 首先尝试直接查找（原有逻辑）
 	iccidInterface, exists := m.deviceIndex.Load(deviceID)
 	if exists {
-		logger.WithFields(logrus.Fields{
-			"deviceID": deviceID,
-			"iccid":    iccidInterface.(string),
-		}).Debug("🔍 GetDeviceByID: 在deviceIndex中找到映射")
+		fmt.Printf("✅ [TCPManager.GetDeviceByID] 在deviceIndex中找到映射: deviceID=%s, iccid=%s\n", deviceID, iccidInterface.(string))
 
 		iccid := iccidInterface.(string)
 		groupInterface, exists := m.deviceGroups.Load(iccid)
@@ -601,21 +598,20 @@ func (m *TCPManager) GetDeviceByID(deviceID string) (*Device, bool) {
 			group := groupInterface.(*DeviceGroup)
 			group.mutex.RLock()
 			device, exists := group.Devices[deviceID]
+			fmt.Printf("🔍 [TCPManager.GetDeviceByID] 检查设备组: iccid=%s, 设备数=%d, 目标设备存在=%t\n",
+				iccid, len(group.Devices), exists)
 			group.mutex.RUnlock()
 			if exists {
-				logger.WithField("deviceID", deviceID).Debug("🔍 GetDeviceByID: 直接查找成功")
+				fmt.Printf("✅ [TCPManager.GetDeviceByID] 直接查找成功: deviceID=%s\n", deviceID)
 				return device, true
 			} else {
-				logger.WithField("deviceID", deviceID).Warn("🔍 GetDeviceByID: 在deviceIndex中有映射但在设备组中不存在")
+				fmt.Printf("⚠️ [TCPManager.GetDeviceByID] 在deviceIndex中有映射但在设备组中不存在: deviceID=%s\n", deviceID)
 			}
 		} else {
-			logger.WithFields(logrus.Fields{
-				"deviceID": deviceID,
-				"iccid":    iccid,
-			}).Warn("🔍 GetDeviceByID: 设备组不存在")
+			fmt.Printf("❌ [TCPManager.GetDeviceByID] 设备组不存在: deviceID=%s, iccid=%s\n", deviceID, iccid)
 		}
 	} else {
-		logger.WithField("deviceID", deviceID).Debug("🔍 GetDeviceByID: 在deviceIndex中未找到映射")
+		fmt.Printf("⚠️ [TCPManager.GetDeviceByID] 在deviceIndex中未找到映射: deviceID=%s\n", deviceID)
 	}
 
 	// 🔧 兼容性增强：如果直接查找失败，尝试格式转换
@@ -632,16 +628,17 @@ func (m *TCPManager) GetDeviceByID(deviceID string) (*Device, bool) {
 		}
 	}
 
+	fmt.Printf("🔍 [TCPManager.GetDeviceByID] 生成替代格式: originalID=%s, alternativeID=%s\n", deviceID, alternativeID)
+
 	// 尝试查找替代格式
 	if alternativeID != "" && alternativeID != deviceID {
-		logger.WithFields(logrus.Fields{
-			"originalID":    deviceID,
-			"alternativeID": alternativeID,
-		}).Debug("🔍 GetDeviceByID: 尝试替代格式查找")
+		fmt.Printf("🔍 [TCPManager.GetDeviceByID] 尝试替代格式查找: alternativeID=%s\n", alternativeID)
 
 		iccidInterface, exists := m.deviceIndex.Load(alternativeID)
 		if exists {
 			iccid := iccidInterface.(string)
+			fmt.Printf("✅ [TCPManager.GetDeviceByID] 替代格式在deviceIndex中找到映射: alternativeID=%s, iccid=%s\n", alternativeID, iccid)
+
 			groupInterface, exists := m.deviceGroups.Load(iccid)
 			if exists {
 				group := groupInterface.(*DeviceGroup)
@@ -652,20 +649,29 @@ func (m *TCPManager) GetDeviceByID(deviceID string) (*Device, bool) {
 				if !exists {
 					// 如果alternativeID找不到，尝试原始ID
 					device, exists = group.Devices[deviceID]
+					fmt.Printf("🔍 [TCPManager.GetDeviceByID] alternativeID未找到，尝试originalID: exists=%t\n", exists)
+				} else {
+					fmt.Printf("✅ [TCPManager.GetDeviceByID] 通过alternativeID找到设备\n")
 				}
 
 				group.mutex.RUnlock()
 				if exists {
-					logger.WithFields(logrus.Fields{
-						"originalID":    deviceID,
-						"alternativeID": alternativeID,
-					}).Debug("通过格式转换找到设备")
+					fmt.Printf("✅ [TCPManager.GetDeviceByID] 通过格式转换找到设备: originalID=%s, alternativeID=%s\n", deviceID, alternativeID)
 					return device, true
+				} else {
+					fmt.Printf("❌ [TCPManager.GetDeviceByID] 格式转换后仍未在设备组中找到设备\n")
 				}
+			} else {
+				fmt.Printf("❌ [TCPManager.GetDeviceByID] 替代格式对应的设备组不存在: iccid=%s\n", iccid)
 			}
+		} else {
+			fmt.Printf("⚠️ [TCPManager.GetDeviceByID] 替代格式在deviceIndex中未找到映射: alternativeID=%s\n", alternativeID)
 		}
+	} else {
+		fmt.Printf("⚠️ [TCPManager.GetDeviceByID] 无有效替代格式\n")
 	}
 
+	fmt.Printf("❌ [TCPManager.GetDeviceByID] 设备查找失败: deviceID=%s\n", deviceID)
 	return nil, false
 }
 
@@ -1018,21 +1024,30 @@ func (m *TCPManager) UnregisterConnection(connID uint64) error {
 
 // GetDeviceDetail 获取设备详细信息（API专用）
 func (m *TCPManager) GetDeviceDetail(deviceID string) (map[string]interface{}, error) {
+	fmt.Printf("🔍 [TCPManager.GetDeviceDetail] 开始获取设备详情: deviceID=%s\n", deviceID)
+
 	// 🔧 简化：直接使用已有的智能查找方法
 	device, exists := m.GetDeviceByID(deviceID)
 	if !exists {
+		fmt.Printf("❌ [TCPManager.GetDeviceDetail] 设备不存在: deviceID=%s\n", deviceID)
 		return nil, fmt.Errorf("设备不存在")
 	}
+
+	fmt.Printf("✅ [TCPManager.GetDeviceDetail] 找到设备: deviceID=%s, physicalID=%s\n", device.DeviceID, device.PhysicalID)
 
 	// 通过设备索引找到ICCID和设备组
 	iccidInterface, exists := m.deviceIndex.Load(device.DeviceID)
 	if !exists {
+		fmt.Printf("❌ [TCPManager.GetDeviceDetail] 设备索引不存在: deviceID=%s\n", device.DeviceID)
 		return nil, fmt.Errorf("设备索引不存在")
 	}
 
 	iccid := iccidInterface.(string)
+	fmt.Printf("🔍 [TCPManager.GetDeviceDetail] 找到ICCID: deviceID=%s, iccid=%s\n", device.DeviceID, iccid)
+
 	groupInterface, exists := m.deviceGroups.Load(iccid)
 	if !exists {
+		fmt.Printf("❌ [TCPManager.GetDeviceDetail] 设备组不存在: iccid=%s\n", iccid)
 		return nil, fmt.Errorf("设备组不存在")
 	}
 
@@ -1040,10 +1055,16 @@ func (m *TCPManager) GetDeviceDetail(deviceID string) (map[string]interface{}, e
 	group.mutex.RLock()
 	defer group.mutex.RUnlock()
 
+	fmt.Printf("🔍 [TCPManager.GetDeviceDetail] 设备组信息: iccid=%s, 设备数=%d, 会话数=%d\n",
+		group.ICCID, len(group.Devices), len(group.Sessions))
+
 	// 获取会话信息
 	var session *ConnectionSession
 	if s, ok := group.Sessions[device.DeviceID]; ok {
 		session = s
+		fmt.Printf("✅ [TCPManager.GetDeviceDetail] 找到会话: deviceID=%s, sessionID=%s\n", device.DeviceID, session.SessionID)
+	} else {
+		fmt.Printf("⚠️ [TCPManager.GetDeviceDetail] 未找到会话: deviceID=%s\n", device.DeviceID)
 	}
 
 	// 格式化时间的辅助函数
@@ -1088,6 +1109,8 @@ func (m *TCPManager) GetDeviceDetail(deviceID string) (map[string]interface{}, e
 		detail["registeredAt"] = regAtStr
 		detail["registeredAtTs"] = regAtTs
 	}
+
+	fmt.Printf("✅ [TCPManager.GetDeviceDetail] 设备详情构建完成: deviceID=%s, keys=%d\n", deviceID, len(detail))
 
 	return detail, nil
 }

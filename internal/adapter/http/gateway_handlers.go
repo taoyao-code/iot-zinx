@@ -1,14 +1,13 @@
 package http
 
 import (
+	"fmt"
 	"net/http"
 	"strconv"
 	"time"
 
-	"github.com/bujia-iot/iot-zinx/internal/infrastructure/logger"
 	"github.com/bujia-iot/iot-zinx/pkg/gateway"
 	"github.com/gin-gonic/gin"
-	"github.com/sirupsen/logrus"
 )
 
 // DeviceGatewayHandlers 基于DeviceGateway的简化API处理器
@@ -115,28 +114,25 @@ func (h *DeviceGatewayHandlers) HandleDeviceList(c *gin.Context) {
 		pageDevices = onlineDevices[start:end]
 	}
 
-	// 输出 pageDevices 中的数据
-	logger.WithFields(logrus.Fields{
-		"devices": pageDevices,
-		"total":   total,
-		"page":    page,
-		"limit":   limit,
-	}).Info("🔍 API: 正在获取设备列表")
+	// 🔍 直接打印调试信息到终端
+	fmt.Printf("=== HandleDeviceList 调试信息 ===\n")
+	fmt.Printf("onlineDevices: %v\n", onlineDevices)
+	fmt.Printf("total: %d\n", total)
+	fmt.Printf("pageDevices: %v\n", pageDevices)
 
 	// 构建设备详细信息
 	var deviceList []map[string]interface{}
-	for _, deviceID := range pageDevices {
-		logger.WithField("deviceID", deviceID).Info("🔍 API: 正在获取设备详细信息")
+	for i, deviceID := range pageDevices {
+		fmt.Printf("正在处理设备 %d: %s\n", i, deviceID)
 		if detail, err := h.deviceGateway.GetDeviceDetail(deviceID); err == nil {
-			logger.WithField("deviceID", deviceID).Info("✅ API: 设备详细信息获取成功")
+			fmt.Printf("设备 %s 详细信息获取成功\n", deviceID)
 			deviceList = append(deviceList, detail)
 		} else {
-			logger.WithFields(logrus.Fields{
-				"deviceID": deviceID,
-				"error":    err.Error(),
-			}).Error("❌ API: 设备详细信息获取失败")
+			fmt.Printf("设备 %s 详细信息获取失败: %v\n", deviceID, err)
 		}
 	}
+	fmt.Printf("最终 deviceList 长度: %d\n", len(deviceList))
+	fmt.Printf("=== 调试信息结束 ===\n")
 
 	c.JSON(http.StatusOK, gin.H{
 		"code":    0,

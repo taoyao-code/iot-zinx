@@ -114,11 +114,22 @@ func (g *DeviceGateway) CountOnlineDevices() int {
  * @return {map[string]interface{}, error}
  */
 func (g *DeviceGateway) GetDeviceDetail(deviceID string) (map[string]interface{}, error) {
+	fmt.Printf("🔍 [DeviceGateway.GetDeviceDetail] 开始获取设备详情: deviceID=%s\n", deviceID)
+
 	if g.tcpManager == nil {
+		fmt.Printf("❌ [DeviceGateway.GetDeviceDetail] TCP管理器未初始化\n")
 		return nil, fmt.Errorf("TCP管理器未初始化")
 	}
 
-	return g.tcpManager.GetDeviceDetail(deviceID)
+	fmt.Printf("🔍 [DeviceGateway.GetDeviceDetail] 调用TCPManager.GetDeviceDetail: deviceID=%s\n", deviceID)
+	result, err := g.tcpManager.GetDeviceDetail(deviceID)
+	if err != nil {
+		fmt.Printf("❌ [DeviceGateway.GetDeviceDetail] TCPManager返回错误: deviceID=%s, error=%v\n", deviceID, err)
+		return nil, err
+	}
+
+	fmt.Printf("✅ [DeviceGateway.GetDeviceDetail] TCPManager返回成功: deviceID=%s, keys=%d\n", deviceID, len(result))
+	return result, nil
 }
 
 /**
