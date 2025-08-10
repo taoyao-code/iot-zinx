@@ -106,7 +106,7 @@ func (h *GetServerTimeHandler) Handle(request ziface.IRequest) {
 		logger.WithFields(logrus.Fields{
 			"connID":     conn.GetConnID(),
 			"deviceID":   deviceID,
-			"physicalID": fmt.Sprintf("0x%08X", physicalId),
+			"physicalId": utils.FormatCardNumber(physicalId),
 		}).Debug("时间同步请求被流控，跳过处理")
 		return
 	}
@@ -124,7 +124,7 @@ func (h *GetServerTimeHandler) processGetServerTime(decodedFrame *protocol.Decod
 
 	logger.WithFields(logrus.Fields{
 		"connID":     conn.GetConnID(),
-		"physicalID": fmt.Sprintf("0x%08X", physicalId),
+		"physicalID": utils.FormatPhysicalIDForLog(physicalId),
 		"deviceId":   deviceId,
 		"messageID":  fmt.Sprintf("0x%04X", messageId),
 	}).Info("获取服务器时间处理器：处理请求")
@@ -146,7 +146,7 @@ func (h *GetServerTimeHandler) processGetServerTime(decodedFrame *protocol.Decod
 	if err := protocol.SendDNYResponse(conn, physicalId, messageId, uint8(command), responseData); err != nil {
 		logger.WithFields(logrus.Fields{
 			"connID":     conn.GetConnID(),
-			"physicalId": fmt.Sprintf("0x%08X", physicalId),
+			"physicalId": utils.FormatCardNumber(physicalId),
 			"messageId":  fmt.Sprintf("0x%04X", messageId),
 			"error":      err.Error(),
 		}).Error("发送获取服务器时间响应失败")
@@ -155,7 +155,7 @@ func (h *GetServerTimeHandler) processGetServerTime(decodedFrame *protocol.Decod
 
 	logger.WithFields(logrus.Fields{
 		"connID":      conn.GetConnID(),
-		"physicalId":  fmt.Sprintf("0x%08X", physicalId),
+		"physicalId":  utils.FormatCardNumber(physicalId),
 		"messageId":   fmt.Sprintf("0x%04X", messageId),
 		"currentTime": currentTime,
 		"timeStr":     time.Unix(currentTime, 0).Format(constants.TimeFormatDefault),
@@ -177,7 +177,7 @@ func (h *GetServerTimeHandler) sendRegistrationRequiredResponse(conn ziface.ICon
 	// 这里选择记录日志并不发送响应，让设备超时后重新尝试注册流程
 	logger.WithFields(logrus.Fields{
 		"connID":     conn.GetConnID(),
-		"physicalId": fmt.Sprintf("0x%08X", physicalId),
+		"physicalId": utils.FormatCardNumber(physicalId),
 		"messageId":  fmt.Sprintf("0x%04X", messageId),
 		"command":    fmt.Sprintf("0x%02X", command),
 	}).Info("📋 设备需要先完成注册流程才能获取服务器时间")

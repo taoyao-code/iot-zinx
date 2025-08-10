@@ -10,6 +10,7 @@ import (
 	"github.com/aceld/zinx/ziface"
 	"github.com/bujia-iot/iot-zinx/internal/infrastructure/logger"
 	"github.com/bujia-iot/iot-zinx/pkg/constants"
+	"github.com/bujia-iot/iot-zinx/pkg/utils"
 	"github.com/sirupsen/logrus"
 )
 
@@ -402,7 +403,7 @@ func (s *UnifiedSender) logSendResult(conn ziface.IConnection, sendType SendType
 	}
 
 	if info != nil {
-		fields["physicalID"] = fmt.Sprintf("0x%08X", info.PhysicalID)
+		fields["physicalID"] = utils.FormatPhysicalIDForLog(info.PhysicalID)
 		fields["messageID"] = fmt.Sprintf("0x%04X", info.MessageID)
 		fields["command"] = fmt.Sprintf("0x%02X", info.Command)
 	}

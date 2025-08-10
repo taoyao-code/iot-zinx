@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"fmt"
+	"strconv"
 	"time"
 
 	"github.com/aceld/zinx/ziface"
@@ -9,6 +10,7 @@ import (
 	"github.com/bujia-iot/iot-zinx/pkg/constants"
 	"github.com/bujia-iot/iot-zinx/pkg/core"
 	"github.com/bujia-iot/iot-zinx/pkg/protocol"
+	"github.com/bujia-iot/iot-zinx/pkg/utils"
 	"github.com/sirupsen/logrus"
 )
 
@@ -68,11 +70,22 @@ func (h *DeviceStatusHandler) Handle(request ziface.IRequest) {
 		}
 	}
 
+	//  decodedFrame.DeviceID 字符串转 uint32
+	u, err2 := strconv.ParseUint(decodedFrame.DeviceID, 16, 32)
+	physicalId := uint32(u)
+	if err2 != nil {
+		logger.WithFields(logrus.Fields{
+			"connID":   conn.GetConnID(),
+			"deviceID": decodedFrame.DeviceID,
+			"error":    err2,
+		}).Error("设备ID转换失败")
+		return
+	}
 	// 按照协议规范，服务器不需要对 0x81 查询设备联网状态 进行应答
 	// 记录设备状态查询日志
 	logger.WithFields(logrus.Fields{
 		"connID":     conn.GetConnID(),
-		"physicalId": fmt.Sprintf("0x%08X", decodedFrame.DeviceID),
+		"physicalId": utils.FormatCardNumber(physicalId),
 		"deviceId":   deviceSession.DeviceID,
 		"statusInfo": statusInfo,
 		"remoteAddr": conn.RemoteAddr().String(),

@@ -5,6 +5,8 @@ import (
 	"encoding/binary"
 	"fmt"
 	"time"
+
+	"github.com/bujia-iot/iot-zinx/pkg/utils"
 )
 
 // DeviceRegisterData 设备注册数据 (0x20)
@@ -197,7 +199,7 @@ func (s *SwipeCardRequestData) UnmarshalBinary(data []byte) error {
 
 	// 卡片ID (4字节) - 需要转换为字符串
 	cardID := binary.LittleEndian.Uint32(data[0:4])
-	s.CardNumber = fmt.Sprintf("%08X", cardID) // 转换为8位十六进制字符串
+	s.CardNumber = utils.FormatCardNumber(cardID) // 转换为8位十六进制字符串
 
 	// 卡片类型 (1字节)
 	s.CardType = data[4]
@@ -323,7 +325,7 @@ func (s *SettlementData) UnmarshalBinary(data []byte) error {
 
 	// 卡号/验证码 (4字节)
 	cardID := binary.LittleEndian.Uint32(data[8:12])
-	s.CardNumber = fmt.Sprintf("%08X", cardID) // 转换为8位十六进制字符串
+	s.CardNumber = utils.FormatCardNumber(cardID) // 转换为8位十六进制字符串
 
 	// 停止原因 (1字节)
 	s.StopReason = data[12]

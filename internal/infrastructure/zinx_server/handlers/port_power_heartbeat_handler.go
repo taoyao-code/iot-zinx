@@ -126,7 +126,7 @@ func (h *PortPowerHeartbeatHandler) processPortPowerHeartbeat(decodedFrame *prot
 	// 记录详细的功率心跳信息
 	logFields := logrus.Fields{
 		"connID":     conn.GetConnID(),
-		"physicalId": fmt.Sprintf("0x%08X", physicalId),
+		"physicalId": utils.FormatCardNumber(physicalId),
 		"deviceId":   deviceId,
 		"messageID":  fmt.Sprintf("0x%04X", messageID),
 		"command":    "0x26",

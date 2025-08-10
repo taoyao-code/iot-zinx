@@ -127,7 +127,7 @@ func (h *TimeBillingSettlementHandler) parseTimeBillingSettlementData(data []byt
 	if len(data) >= 5 {
 		// 卡号（4字节）
 		cardNumber := binary.LittleEndian.Uint32(data[1:5])
-		settlementInfo["card_number"] = fmt.Sprintf("%08X", cardNumber)
+		settlementInfo["card_number"] = utils.FormatCardNumber(cardNumber)
 		settlementInfo["card_number_decimal"] = cardNumber
 	}
 

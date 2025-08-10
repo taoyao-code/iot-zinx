@@ -6,6 +6,7 @@ import (
 	"github.com/aceld/zinx/ziface"
 	"github.com/bujia-iot/iot-zinx/pkg/network"
 	"github.com/bujia-iot/iot-zinx/pkg/protocol"
+	"github.com/bujia-iot/iot-zinx/pkg/utils"
 	"github.com/sirupsen/logrus"
 )
 
@@ -100,7 +101,7 @@ func (h *DeviceLocateHandler) Handle(request ziface.IRequest) {
 		logrus.WithFields(logrus.Fields{
 			"connID":     conn.GetConnID(),
 			"deviceID":   decodedFrame.DeviceID,
-			"physicalID": fmt.Sprintf("0x%08X", physicalID),
+			"physicalId": utils.FormatCardNumber(physicalID),
 			"messageID":  fmt.Sprintf("0x%04X", decodedFrame.MessageID),
 			"command":    "0x96",
 			"confirmed":  confirmed,

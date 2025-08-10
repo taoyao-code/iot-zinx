@@ -76,7 +76,7 @@ func (h *SettlementHandler) processSettlement(decodedFrame *protocol.DecodedDNYF
 	if len(data) < 8 {
 		logger.WithFields(logrus.Fields{
 			"connID":     conn.GetConnID(),
-			"physicalId": fmt.Sprintf("0x%08X", physicalId),
+			"physicalId": utils.FormatCardNumber(physicalId),
 			"messageID":  fmt.Sprintf("0x%04X", messageID),
 			"dataLen":    len(data),
 		}).Error("结算数据长度不足")
@@ -88,7 +88,7 @@ func (h *SettlementHandler) processSettlement(decodedFrame *protocol.DecodedDNYF
 	if err := settlementData.UnmarshalBinary(data); err != nil {
 		logger.WithFields(logrus.Fields{
 			"connID":     conn.GetConnID(),
-			"physicalId": fmt.Sprintf("0x%08X", physicalId),
+			"physicalId": utils.FormatCardNumber(physicalId),
 			"messageID":  fmt.Sprintf("0x%04X", messageID),
 			"error":      err.Error(),
 		}).Error("解析结算数据失败")
@@ -102,7 +102,7 @@ func (h *SettlementHandler) processSettlement(decodedFrame *protocol.DecodedDNYF
 		if err := protocol.SendDNYResponse(conn, physicalId, messageID, uint8(command), responseData); err != nil {
 			logger.WithFields(logrus.Fields{
 				"connID":     conn.GetConnID(),
-				"physicalId": fmt.Sprintf("0x%08X", physicalId),
+				"physicalId": utils.FormatCardNumber(physicalId),
 				"messageID":  fmt.Sprintf("0x%04X", messageID),
 				"error":      err.Error(),
 			}).Error("发送结算响应失败")
@@ -113,7 +113,7 @@ func (h *SettlementHandler) processSettlement(decodedFrame *protocol.DecodedDNYF
 	// 记录结算数据详情
 	logger.WithFields(logrus.Fields{
 		"connID":         conn.GetConnID(),
-		"physicalId":     fmt.Sprintf("0x%08X", physicalId),
+		"physicalId":     utils.FormatPhysicalIDForLog(physicalId),
 		"messageID":      fmt.Sprintf("0x%04X", messageID),
 		"deviceId":       deviceId,
 		"orderId":        settlementData.OrderID,
@@ -190,7 +190,7 @@ func (h *SettlementHandler) processSettlement(decodedFrame *protocol.DecodedDNYF
 	if err := protocol.SendDNYResponse(conn, physicalId, messageID, uint8(command), responseData); err != nil {
 		logger.WithFields(logrus.Fields{
 			"connID":     conn.GetConnID(),
-			"physicalId": fmt.Sprintf("0x%08X", physicalId),
+			"physicalId": utils.FormatCardNumber(physicalId),
 			"messageID":  fmt.Sprintf("0x%04X", messageID),
 			"error":      err.Error(),
 		}).Error("发送结算响应失败")
@@ -199,7 +199,7 @@ func (h *SettlementHandler) processSettlement(decodedFrame *protocol.DecodedDNYF
 
 	logger.WithFields(logrus.Fields{
 		"connID":     conn.GetConnID(),
-		"physicalId": fmt.Sprintf("0x%08X", physicalId),
+		"physicalId": utils.FormatCardNumber(physicalId),
 		"messageID":  fmt.Sprintf("0x%04X", messageID),
 		"success":    success,
 	}).Debug("结算响应发送成功")

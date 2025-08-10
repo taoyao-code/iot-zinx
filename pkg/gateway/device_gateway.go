@@ -16,6 +16,7 @@ package gateway
 import (
 	"encoding/hex"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/bujia-iot/iot-zinx/internal/infrastructure/logger"
@@ -23,6 +24,7 @@ import (
 	"github.com/bujia-iot/iot-zinx/pkg/core"
 	"github.com/bujia-iot/iot-zinx/pkg/network"
 	"github.com/bujia-iot/iot-zinx/pkg/protocol"
+	"github.com/bujia-iot/iot-zinx/pkg/utils"
 	"github.com/sirupsen/logrus"
 )
 
@@ -201,21 +203,31 @@ func (g *DeviceGateway) SendCommandToDevice(deviceID string, command byte, data 
 	// 使用统一DNY构建器
 	builder := protocol.NewUnifiedDNYBuilder()
 
-	// 将设备ID转换为物理ID (PhysicalID存储为"0x%08X"格式)
+	// 🔧 统一格式标准：PhysicalID现在存储为不带0x前缀的8位大写十六进制格式
 	var physicalID uint32
 	if session.PhysicalID == "" {
 		return fmt.Errorf("设备 PhysicalID 为空，无法发送命令")
 	}
-	// 修复：使用正确的格式解析带"0x"前缀的PhysicalID
-	if _, err := fmt.Sscanf(session.PhysicalID, "0x%08X", &physicalID); err != nil {
-		return fmt.Errorf("解析 physicalID 失败: %v", err)
+
+	// 🔧 兼容性解析：支持新格式（不带0x前缀）和旧格式（带0x前缀）
+	var parseErr error
+	if strings.HasPrefix(strings.ToLower(session.PhysicalID), "0x") {
+		// 旧格式：带0x前缀
+		_, parseErr = fmt.Sscanf(session.PhysicalID, "0x%08X", &physicalID)
+	} else {
+		// 新格式：不带0x前缀（标准格式）
+		_, parseErr = fmt.Sscanf(session.PhysicalID, "%08X", &physicalID)
+	}
+
+	if parseErr != nil {
+		return fmt.Errorf("解析 physicalID 失败: %v", parseErr)
 	}
 	dnyPacket := builder.BuildDNYPacket(physicalID, 0x0001, command, data)
 
 	// � 详细Hex数据日志 - 用于调试命令发送问题
 	logger.WithFields(logrus.Fields{
 		"deviceID":   deviceID,
-		"physicalID": fmt.Sprintf("0x%08X", physicalID),
+		"physicalID": utils.FormatPhysicalIDForLog(physicalID),
 		"command":    fmt.Sprintf("0x%02X", command),
 		"dataLen":    len(data),
 		"dataHex":    fmt.Sprintf("%X", data),
@@ -230,13 +242,6 @@ func (g *DeviceGateway) SendCommandToDevice(deviceID string, command byte, data 
 
 	// 记录命令元数据
 	g.tcpManager.RecordDeviceCommand(deviceID, command, len(data))
-
-	logger.WithFields(logrus.Fields{
-		"deviceID": deviceID,
-		"command":  fmt.Sprintf("0x%02X", command),
-		"dataLen":  len(data),
-		"status":   "SUCCESS",
-	}).Info("✅ 命令发送成功（含重试机制）- TCP写入完成")
 
 	return nil
 }
@@ -647,11 +652,6 @@ func (g *DeviceGateway) SendGenericCommand(deviceID, command string, data map[st
 	// 记录命令
 	g.tcpManager.RecordDeviceCommand(deviceID, 0x01, len(commandData))
 
-	logger.WithFields(logrus.Fields{
-		"deviceID": deviceID,
-		"command":  command,
-	}).Info("通用设备命令发送成功（含重试机制）")
-
 	return nil
 }
 
@@ -683,6 +683,7 @@ func (g *DeviceGateway) SendDNYCommand(deviceID, command, data string) error {
 		"deviceID": deviceID,
 		"command":  command,
 		"data":     data,
+		"data_hex": hex.EncodeToString([]byte(data)),
 	}).Info("发送DNY协议命令")
 
 	// 这里应该使用DNY协议构造器来构造命令包
@@ -695,13 +696,6 @@ func (g *DeviceGateway) SendDNYCommand(deviceID, command, data string) error {
 	}
 	// 记录命令
 	g.tcpManager.RecordDeviceCommand(deviceID, 0x02, len(dnyCommand))
-
-	logger.WithFields(logrus.Fields{
-		"deviceID": deviceID,
-		"command":  command,
-		"data":     data,
-		"data_hex": hex.EncodeToString([]byte(data)),
-	}).Info("DNY协议命令发送成功（含重试机制）")
 
 	return nil
 }

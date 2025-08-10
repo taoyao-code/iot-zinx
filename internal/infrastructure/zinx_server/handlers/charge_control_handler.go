@@ -60,7 +60,7 @@ func (h *ChargeControlHandler) processChargeControl(result *protocol.DNYParseRes
 
 	logger.WithFields(logrus.Fields{
 		"connID":     conn.GetConnID(),
-		"physicalId": fmt.Sprintf("0x%08X", physicalId),
+		"physicalId": utils.FormatCardNumber(physicalId),
 		"messageID":  messageID,
 		"command":    fmt.Sprintf("0x%02X", command),
 		"dataLen":    len(data),
@@ -92,7 +92,7 @@ func (h *ChargeControlHandler) processChargeControl(result *protocol.DNYParseRes
 	action := data[1] // 操作：0x01开始，0x00停止
 
 	logger.WithFields(logrus.Fields{
-		"physicalId": fmt.Sprintf("0x%08X", physicalId),
+		"physicalId": utils.FormatCardNumber(physicalId),
 		"port":       port,
 		"action":     action,
 	}).Info("执行充电控制")
@@ -103,14 +103,14 @@ func (h *ChargeControlHandler) processChargeControl(result *protocol.DNYParseRes
 		// 开始充电
 		responseData = []byte{port, 0x01} // 成功
 		logger.WithFields(logrus.Fields{
-			"physicalId": fmt.Sprintf("0x%08X", physicalId),
+			"physicalId": utils.FormatCardNumber(physicalId),
 			"port":       port,
 		}).Info("开始充电")
 	} else if action == 0x00 {
 		// 停止充电
 		responseData = []byte{port, 0x01} // 成功
 		logger.WithFields(logrus.Fields{
-			"physicalId": fmt.Sprintf("0x%08X", physicalId),
+			"physicalId": utils.FormatCardNumber(physicalId),
 			"port":       port,
 		}).Info("停止充电")
 	} else {
@@ -124,7 +124,7 @@ func (h *ChargeControlHandler) processChargeControl(result *protocol.DNYParseRes
 	// 发送响应
 	if err := protocol.SendDNYResponse(conn, physicalId, messageID, command, responseData); err != nil {
 		logger.WithFields(logrus.Fields{
-			"physicalId": fmt.Sprintf("0x%08X", physicalId),
+			"physicalId": utils.FormatCardNumber(physicalId),
 			"error":      err.Error(),
 		}).Error("发送充电控制响应失败")
 	}

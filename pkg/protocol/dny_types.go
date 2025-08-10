@@ -170,14 +170,15 @@ func CreateStandardFrame(conn ziface.IConnection, data []byte,
 }
 
 // formatDeviceID 将原始4字节物理ID转换为8位大写十六进制字符串格式
-// 转换规则：小端转大端，格式化为8位大写十六进制字符串（例如："04A228CD"）
+// 转换规则：小端转大端，格式化为8位大写十六进制字符串（例如："04A228CD"，不带0x前缀）
+// 🔧 统一格式标准：使用不带0x前缀的8位大写十六进制作为设备ID标准格式
 func formatDeviceID(rawData []byte) string {
 	if len(rawData) != 4 {
-		return "00000000" // 返回默认的8位十六进制格式
+		return "00000000" // 返回默认的8位十六进制格式（不带0x前缀）
 	}
 
 	// 小端转大端：40 aa ce 04 -> 04 ce aa 40
-	// 直接将4字节转换为uint32，然后格式化为8位大写十六进制
+	// 直接将4字节转换为uint32，然后格式化为8位大写十六进制（不带0x前缀）
 	physicalID := binary.LittleEndian.Uint32(rawData)
 
 	return utils.FormatPhysicalID(physicalID)

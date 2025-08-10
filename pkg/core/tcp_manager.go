@@ -524,39 +524,98 @@ func (m *TCPManager) RebuildDeviceIndex(deviceID string, session *ConnectionSess
 }
 
 // GetSessionByDeviceID 通过设备ID获取会话
+// 🔧 增强：支持格式兼容性，自动处理带/不带0x前缀的deviceID
 func (m *TCPManager) GetSessionByDeviceID(deviceID string) (*ConnectionSession, bool) {
-	// � 新架构：deviceID → iccid → DeviceGroup → Session
+	// 🚀 新架构：deviceID → iccid → DeviceGroup → Session
 	iccidInterface, exists := m.deviceIndex.Load(deviceID)
 	if !exists {
-		// 🔧 后备方案：遍历所有设备组查找设备
-		var foundSession *ConnectionSession
-		var foundICCID string
-
-		m.deviceGroups.Range(func(key, value interface{}) bool {
-			iccid := key.(string)
-			group := value.(*DeviceGroup)
-			group.mutex.RLock()
-			if session, deviceExists := group.Sessions[deviceID]; deviceExists {
-				foundSession = session
-				foundICCID = iccid
-				group.mutex.RUnlock()
-				return false // 找到了，停止遍历
+		// 🔧 格式兼容性增强：如果直接查找失败，尝试格式转换
+		var alternativeID string
+		if strings.HasPrefix(strings.ToLower(deviceID), "0x") {
+			// 如果输入带0x前缀，尝试去掉前缀查找
+			alternativeID = strings.TrimPrefix(strings.ToLower(deviceID), "0x")
+			alternativeID = strings.ToUpper(alternativeID)
+			// 补齐到8位
+			if len(alternativeID) < 8 {
+				alternativeID = fmt.Sprintf("%08s", alternativeID)
 			}
-			group.mutex.RUnlock()
-			return true // 继续遍历
-		})
-
-		if foundSession != nil {
-			// 修复设备索引映射
-			m.deviceIndex.Store(deviceID, foundICCID)
-			logger.WithFields(logrus.Fields{
-				"deviceID": deviceID,
-				"iccid":    foundICCID,
-			}).Debug("🔧 修复设备索引映射")
-			return foundSession, true
+		} else {
+			// 如果输入不带前缀，尝试添加0x前缀查找（向后兼容）
+			if physicalID, err := utils.ParseDeviceIDToPhysicalID(deviceID); err == nil {
+				alternativeID = utils.FormatPhysicalIDForLog(physicalID)
+			}
 		}
 
-		return nil, false
+		// 尝试查找替代格式
+		if alternativeID != "" && alternativeID != deviceID {
+			if altIccidInterface, altExists := m.deviceIndex.Load(alternativeID); altExists {
+				// 找到了，使用替代格式的结果，但更新索引为标准格式
+				iccidInterface = altIccidInterface
+				exists = true
+				// 建立标准格式的索引映射
+				standardID := deviceID
+				if strings.HasPrefix(strings.ToLower(deviceID), "0x") {
+					// 输入是带0x前缀的，标准化为不带前缀
+					if physicalID, err := utils.ParseDeviceIDToPhysicalID(deviceID); err == nil {
+						standardID = utils.FormatPhysicalID(physicalID)
+					}
+				}
+				m.deviceIndex.Store(standardID, iccidInterface)
+				logger.WithFields(logrus.Fields{
+					"originalID":    deviceID,
+					"alternativeID": alternativeID,
+					"standardID":    standardID,
+				}).Debug("🔧 通过格式转换找到设备，建立标准格式索引")
+			}
+		}
+
+		// 如果格式转换也失败，使用后备方案：遍历所有设备组查找设备
+		if !exists {
+			var foundSession *ConnectionSession
+			var foundICCID string
+
+			m.deviceGroups.Range(func(key, value interface{}) bool {
+				iccid := key.(string)
+				group := value.(*DeviceGroup)
+				group.mutex.RLock()
+				// 尝试原始ID和替代ID
+				if session, deviceExists := group.Sessions[deviceID]; deviceExists {
+					foundSession = session
+					foundICCID = iccid
+					group.mutex.RUnlock()
+					return false // 找到了，停止遍历
+				}
+				if alternativeID != "" {
+					if session, deviceExists := group.Sessions[alternativeID]; deviceExists {
+						foundSession = session
+						foundICCID = iccid
+						group.mutex.RUnlock()
+						return false // 找到了，停止遍历
+					}
+				}
+				group.mutex.RUnlock()
+				return true // 继续遍历
+			})
+
+			if foundSession != nil {
+				// 修复设备索引映射，使用标准格式
+				standardID := deviceID
+				if strings.HasPrefix(strings.ToLower(deviceID), "0x") {
+					if physicalID, err := utils.ParseDeviceIDToPhysicalID(deviceID); err == nil {
+						standardID = utils.FormatPhysicalID(physicalID)
+					}
+				}
+				m.deviceIndex.Store(standardID, foundICCID)
+				logger.WithFields(logrus.Fields{
+					"deviceID":   deviceID,
+					"standardID": standardID,
+					"iccid":      foundICCID,
+				}).Debug("🔧 通过遍历找到设备，修复设备索引映射")
+				return foundSession, true
+			}
+
+			return nil, false
+		}
 	}
 
 	iccid := iccidInterface.(string)

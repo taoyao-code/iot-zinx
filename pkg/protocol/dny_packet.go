@@ -152,7 +152,7 @@ func (dp *DNYPacket) packDNYMessage(msg ziface.IMessage) ([]byte, error) {
 	if dp.logHexDump {
 		logger.WithFields(logrus.Fields{
 			"command":    fmt.Sprintf("0x%02X", dnyMsg.GetMsgID()),
-			"physicalID": fmt.Sprintf("0x%08X", dnyMsg.GetPhysicalId()),
+			"physicalID": utils.FormatPhysicalIDForLog(dnyMsg.GetPhysicalId()),
 			"dataLen":    dnyMsg.GetDataLen(),
 			"dataHex":    hex.EncodeToString(packetData),
 		}).Debug("封包完成")

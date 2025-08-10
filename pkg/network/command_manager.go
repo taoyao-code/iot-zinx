@@ -230,7 +230,7 @@ func (cm *CommandManager) RegisterCommand(conn ziface.IConnection, physicalID ui
 
 	logger.WithFields(logrus.Fields{
 		"connID":      connID,
-		"physicalID":  fmt.Sprintf("0x%08X", physicalID),
+		"physicalID":  utils.FormatPhysicalIDForLog(physicalID),
 		"messageID":   fmt.Sprintf("0x%04X (%d)", messageID, messageID),
 		"command":     fmt.Sprintf("0x%02X", command),
 		"commandDesc": GetCommandDescription(command),
@@ -394,7 +394,7 @@ func (cm *CommandManager) ClearPhysicalIDCommands(physicalID uint32) {
 	// 获取物理ID关联的所有命令键
 	cmdKeys, exists := cm.physicalCommands[physicalID]
 	if !exists {
-		logger.WithField("physicalID", fmt.Sprintf("0x%08X", physicalID)).
+		logger.WithField("physicalID", utils.FormatPhysicalIDForLog(physicalID)).
 			Debug("未找到物理ID关联的命令")
 		return
 	}
@@ -408,7 +408,7 @@ func (cm *CommandManager) ClearPhysicalIDCommands(physicalID uint32) {
 	delete(cm.physicalCommands, physicalID)
 
 	logger.WithFields(logrus.Fields{
-		"physicalID":   fmt.Sprintf("0x%08X", physicalID),
+		"physicalID":   utils.FormatPhysicalIDForLog(physicalID),
 		"commandCount": len(cmdKeys),
 	}).Info("已清理物理ID的所有命令")
 }
@@ -521,7 +521,7 @@ func (cm *CommandManager) checkTimeoutCommands() {
 		// 记录详细的过期命令信息
 		for _, cmd := range expiredCommands {
 			logger.WithFields(logrus.Fields{
-				"physicalID":  fmt.Sprintf("0x%08X", cmd.PhysicalID),
+				"physicalID":  utils.FormatPhysicalIDForLog(cmd.PhysicalID),
 				"messageID":   fmt.Sprintf("0x%04X (%d)", cmd.MessageID, cmd.MessageID),
 				"command":     fmt.Sprintf("0x%02X", cmd.Command),
 				"commandDesc": GetCommandDescription(cmd.Command),
@@ -593,7 +593,7 @@ func (cm *CommandManager) processBatchTimeoutCommands(commands []*CommandEntry) 
 		// 日志记录超时情况
 		logger.WithFields(logrus.Fields{
 			"cmdKey":      cmdKey,
-			"physicalID":  fmt.Sprintf("0x%08X", existingCmd.PhysicalID),
+			"physicalID":  utils.FormatPhysicalIDForLog(existingCmd.PhysicalID),
 			"messageID":   fmt.Sprintf("0x%04X (%d)", existingCmd.MessageID, existingCmd.MessageID),
 			"command":     fmt.Sprintf("0x%02X", existingCmd.Command),
 			"commandDesc": GetCommandDescription(existingCmd.Command),
@@ -686,7 +686,7 @@ func (cm *CommandManager) processBatchTimeoutCommands(commands []*CommandEntry) 
 		// 记录重发日志
 		logger.WithFields(logrus.Fields{
 			"cmdKey":      cmdKey,
-			"physicalID":  fmt.Sprintf("0x%08X", existingCmd.PhysicalID),
+			"physicalID":  utils.FormatPhysicalIDForLog(existingCmd.PhysicalID),
 			"messageID":   fmt.Sprintf("0x%04X (%d)", existingCmd.MessageID, existingCmd.MessageID),
 			"command":     fmt.Sprintf("0x%02X", existingCmd.Command),
 			"commandDesc": GetCommandDescription(existingCmd.Command),

@@ -13,6 +13,7 @@ import (
 	"github.com/bujia-iot/iot-zinx/pkg/gateway"
 	"github.com/bujia-iot/iot-zinx/pkg/notification"
 	"github.com/bujia-iot/iot-zinx/pkg/protocol"
+	"github.com/bujia-iot/iot-zinx/pkg/utils"
 	"github.com/sirupsen/logrus"
 )
 
@@ -110,7 +111,7 @@ func (h *DeviceRegisterHandler) processDeviceRegistration(decodedFrame *protocol
 	if len(data) < 1 {
 		logger.WithFields(logrus.Fields{
 			"connID":     conn.GetConnID(),
-			"physicalId": fmt.Sprintf("0x%08X", uint32(physicalId)),
+			"physicalId": utils.FormatCardNumber(physicalId),
 			"messageID":  fmt.Sprintf("0x%04X", messageID),
 			"deviceId":   deviceId,
 			"dataLen":    len(data),
@@ -246,7 +247,8 @@ func (h *DeviceRegisterHandler) handleDeviceRegister(deviceId string, physicalId
 	linkedSession, err := h.GetOrCreateDeviceSession(conn)
 	if err == nil && linkedSession != nil {
 		linkedSession.DeviceID = deviceId
-		linkedSession.PhysicalID = fmt.Sprintf("0x%08X", uint32(physicalId))
+		// 🔧 统一格式标准：使用不带0x前缀的8位大写十六进制格式
+		linkedSession.PhysicalID = utils.FormatPhysicalID(uint32(physicalId))
 		linkedSession.LastActivityAt = time.Now()
 		linkedSession.SyncToConnection(conn)
 
@@ -293,7 +295,7 @@ func (h *DeviceRegisterHandler) handleDeviceRegister(deviceId string, physicalId
 	// 7. 记录设备注册信息
 	logger.WithFields(logrus.Fields{
 		"connID":            conn.GetConnID(),
-		"physicalIdHex":     fmt.Sprintf("0x%08X", physicalId),
+		"physicalIdHex":     utils.FormatPhysicalIDForLog(physicalId),
 		"physicalIdStr":     deviceId,
 		"iccid":             iccidFromProp,
 		"connState":         constants.ConnStatusActiveRegistered,
@@ -307,7 +309,7 @@ func (h *DeviceRegisterHandler) handleDeviceRegister(deviceId string, physicalId
 	if integrator.IsEnabled() {
 		deviceData := map[string]interface{}{
 			"iccid":         iccidFromProp,
-			"physical_id":   fmt.Sprintf("0x%08X", physicalId),
+			"physicalId":    utils.FormatCardNumber(physicalId),
 			"register_time": now.Unix(),
 			"remote_addr":   conn.RemoteAddr().String(),
 		}
@@ -344,7 +346,7 @@ func (h *DeviceRegisterHandler) sendRegisterResponse(deviceId string, physicalId
 	if err := protocol.SendDNYResponse(conn, physicalId, messageID, constants.CmdDeviceRegister, responseData); err != nil {
 		logger.WithFields(logrus.Fields{
 			"connID":     conn.GetConnID(),
-			"physicalId": fmt.Sprintf("0x%08X", physicalId),
+			"physicalId": utils.FormatPhysicalIDForLog(physicalId),
 			"deviceId":   deviceId,
 			"error":      err.Error(),
 		}).Error("发送注册响应失败")
@@ -371,7 +373,7 @@ func (h *DeviceRegisterHandler) sendRegisterErrorResponse(deviceId string, physi
 	// if err := h.SendResponse(conn, responseData); err != nil {
 	// 	logger.WithFields(logrus.Fields{
 	// 		"connID":     conn.GetConnID(),
-	// 		"physicalId": fmt.Sprintf("0x%08X", physicalId),
+	// 		"physicalId": utils.FormatCardNumber(physicalId),
 	// 		"deviceId":   deviceId,
 	// 		"reason":     reason,
 	// 		"error":      err.Error(),
@@ -560,7 +562,7 @@ func (h *DeviceRegisterHandler) sendDeviceRegisterNotification(deviceId string, 
 	// 构建设备注册通知数据
 	registerData := map[string]interface{}{
 		"device_id":           deviceId,
-		"physical_id":         fmt.Sprintf("0x%08X", physicalId),
+		"physical_id":         utils.FormatCardNumber(physicalId),
 		"physical_id_decimal": physicalId,
 		"iccid":               iccid,
 		"conn_id":             conn.GetConnID(),

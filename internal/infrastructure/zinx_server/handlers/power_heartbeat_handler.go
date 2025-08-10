@@ -128,7 +128,7 @@ func (h *PowerHeartbeatHandler) processPowerHeartbeat(decodedFrame *protocol.Dec
 	if len(data) < 8 {
 		logger.WithFields(logrus.Fields{
 			"connID":     conn.GetConnID(),
-			"physicalId": fmt.Sprintf("0x%08X", physicalId),
+			"physicalId": utils.FormatCardNumber(physicalId),
 			"messageID":  fmt.Sprintf("0x%04X", messageID),
 			"dataLen":    len(data),
 		}).Error("功率心跳数据长度不足")
@@ -199,7 +199,7 @@ func (h *PowerHeartbeatHandler) processPowerHeartbeat(decodedFrame *protocol.Dec
 		// 🔧 关键修复：记录充电状态变化
 		logFields = logrus.Fields{
 			"connID":           conn.GetConnID(),
-			"physicalId":       fmt.Sprintf("0x%08X", physicalId),
+			"physicalId":       utils.FormatPhysicalIDForLog(physicalId),
 			"deviceId":         deviceId,
 			"portNumber":       portNumber + 1, // 显示为1号端口、2号端口
 			"portStatus":       portStatus,
