@@ -16,7 +16,6 @@ package gateway
 import (
 	"encoding/hex"
 	"fmt"
-	"strings"
 	"time"
 
 	"github.com/bujia-iot/iot-zinx/internal/infrastructure/logger"
@@ -203,24 +202,15 @@ func (g *DeviceGateway) SendCommandToDevice(deviceID string, command byte, data 
 	// 使用统一DNY构建器
 	builder := protocol.NewUnifiedDNYBuilder()
 
-	// 🔧 统一格式标准：PhysicalID现在存储为不带0x前缀的8位大写十六进制格式
+	// 统一格式标准：PhysicalID存储为8位大写十六进制格式（不带0x前缀）
 	var physicalID uint32
 	if session.PhysicalID == "" {
 		return fmt.Errorf("设备 PhysicalID 为空，无法发送命令")
 	}
 
-	// 🔧 兼容性解析：支持新格式（不带0x前缀）和旧格式（带0x前缀）
-	var parseErr error
-	if strings.HasPrefix(strings.ToLower(session.PhysicalID), "0x") {
-		// 旧格式：带0x前缀
-		_, parseErr = fmt.Sscanf(session.PhysicalID, "0x%08X", &physicalID)
-	} else {
-		// 新格式：不带0x前缀（标准格式）
-		_, parseErr = fmt.Sscanf(session.PhysicalID, "%08X", &physicalID)
-	}
-
-	if parseErr != nil {
-		return fmt.Errorf("解析 physicalID 失败: %v", parseErr)
+	// 统一格式解析：仅支持8位大写十六进制格式（不带0x前缀）
+	if _, err := fmt.Sscanf(session.PhysicalID, "%08X", &physicalID); err != nil {
+		return fmt.Errorf("解析 physicalID 失败，格式必须为8位大写十六进制: %s", session.PhysicalID)
 	}
 	dnyPacket := builder.BuildDNYPacket(physicalID, 0x0001, command, data)
 

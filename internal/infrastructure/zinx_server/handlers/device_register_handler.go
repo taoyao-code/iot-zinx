@@ -191,8 +191,8 @@ func (h *DeviceRegisterHandler) handleDeviceRegister(deviceId string, physicalId
 		return
 	}
 
-	// 🚀 重构：使用统一TCP管理器进行设备注册
-	physicalIdStr := fmt.Sprintf("%d", physicalId)
+	// 🚀 重构：使用统一TCP管理器进行设备注册 - 统一PhysicalID格式
+	physicalIdStr := utils.FormatPhysicalID(uint32(physicalId))
 
 	// 获取统一TCP管理器
 	tcpManager := core.GetGlobalTCPManager()
