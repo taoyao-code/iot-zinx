@@ -4,6 +4,7 @@ import (
 	"encoding/binary"
 	"fmt"
 
+	"github.com/aceld/zinx/ziface"
 	"github.com/bujia-iot/iot-zinx/internal/infrastructure/logger"
 	"github.com/sirupsen/logrus"
 )
@@ -228,4 +229,26 @@ func DisableDNYBuilderDebug() {
 // GetDNYPacketInfo 获取DNY数据包信息（调试用）
 func GetDNYPacketInfo(packet []byte) map[string]interface{} {
 	return globalDNYBuilder.GetPacketInfo(packet)
+}
+
+// ===== 向后兼容的发送函数 =====
+
+// SendDNYResponse 发送DNY协议响应（向后兼容函数）
+// 这个函数提供给Handler使用，内部会调用统一发送器
+// 注意：这是一个桥接函数，实际发送逻辑在export.go中的globalUnifiedSender
+func SendDNYResponse(conn ziface.IConnection, physicalId uint32, messageId uint16, command uint8, data []byte) error {
+	// 为了避免循环导入，这里需要通过接口调用
+	// 实际的实现会在init时注册
+	if globalSendDNYResponseFunc != nil {
+		return globalSendDNYResponseFunc(conn, physicalId, messageId, command, data)
+	}
+	return fmt.Errorf("统一发送器未初始化")
+}
+
+// 全局发送函数变量（避免循环导入）
+var globalSendDNYResponseFunc func(conn ziface.IConnection, physicalId uint32, messageId uint16, command uint8, data []byte) error
+
+// RegisterGlobalSendDNYResponse 注册全局发送函数（由export.go调用）
+func RegisterGlobalSendDNYResponse(sendFunc func(conn ziface.IConnection, physicalId uint32, messageId uint16, command uint8, data []byte) error) {
+	globalSendDNYResponseFunc = sendFunc
 }

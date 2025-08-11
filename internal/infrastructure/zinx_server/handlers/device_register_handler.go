@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"encoding/hex"
 	"fmt"
 	"net"
 	"time"
@@ -360,6 +361,7 @@ func (h *DeviceRegisterHandler) sendRegisterResponse(deviceId string, physicalId
 		"deviceId":   deviceId,
 		"remoteAddr": conn.RemoteAddr().String(),
 		"timestamp":  time.Now().Format(constants.TimeFormatDefault),
+		"dataHex":    hex.EncodeToString(responseData),
 	}).Info("设备注册响应已发送")
 }
 

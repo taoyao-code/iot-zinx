@@ -2,6 +2,7 @@ package pkg
 
 import (
 	"sync/atomic"
+	"time"
 
 	"github.com/aceld/zinx/ziface"
 	"github.com/bujia-iot/iot-zinx/pkg/core"
@@ -13,6 +14,24 @@ import (
 
 // 简化的消息ID计数器
 var messageIDCounter uint64
+
+// 全局统一发送器实例
+var globalUnifiedSender *network.UnifiedSender
+
+// 初始化全局实例
+func init() {
+	globalUnifiedSender = network.NewUnifiedSender()
+	// 启动统一发送器
+	if err := globalUnifiedSender.Start(); err != nil {
+		// 如果启动失败，记录但不阻止程序运行
+		// logger会在later阶段处理错误
+	}
+
+	// 注册发送函数到protocol包（避免循环导入）
+	protocol.RegisterGlobalSendDNYResponse(func(conn ziface.IConnection, physicalId uint32, messageId uint16, command uint8, data []byte) error {
+		return globalUnifiedSender.SendDNYResponse(conn, physicalId, messageId, command, data)
+	})
+}
 
 // === 核心导出接口 ===
 
@@ -46,7 +65,10 @@ var Protocol = struct {
 	NewDNYDecoder:         protocol.NewDNYDecoder,
 	ParseDNYData:          protocol.ParseDNYData,
 	ParseDNYHexString:     protocol.ParseDNYHexString,
-	SendDNYResponse:       protocol.SendDNYResponse,
+	SendDNYResponse: func(conn ziface.IConnection, physicalId uint32, messageId uint16, command uint8, data []byte) error {
+		// 🔧 重构：使用统一发送器替代废弃的sender.go
+		return globalUnifiedSender.SendDNYResponse(conn, physicalId, messageId, command, data)
+	},
 	GetNextMessageID: func() uint16 {
 		// 简化的消息ID生成器
 		newValue := atomic.AddUint64(&messageIDCounter, 1)
@@ -86,4 +108,40 @@ func CleanupBasicArchitecture() {
 	if tcpManager != nil {
 		tcpManager.Stop()
 	}
+
+	// 停止统一发送器
+	if globalUnifiedSender != nil {
+		globalUnifiedSender.Stop()
+	}
+}
+
+// === 向后兼容的发送函数（替代废弃的sender.go）===
+
+// SendHeartbeatResponse 发送心跳响应
+func SendHeartbeatResponse(conn ziface.IConnection, physicalId uint32, messageId uint16) error {
+	return globalUnifiedSender.SendDNYResponse(conn, physicalId, messageId, 0x06, nil)
+}
+
+// SendRegistrationResponse 发送注册响应
+func SendRegistrationResponse(conn ziface.IConnection, physicalId uint32, messageId uint16, success bool) error {
+	var data []byte
+	if success {
+		data = []byte{0x01} // 成功
+	} else {
+		data = []byte{0x00} // 失败
+	}
+	return globalUnifiedSender.SendDNYResponse(conn, physicalId, messageId, 0x20, data)
+}
+
+// SendTimeResponse 发送时间响应
+func SendTimeResponse(conn ziface.IConnection, physicalId uint32, messageId uint16) error {
+	// 获取当前时间戳（4字节，大端序）
+	timestamp := uint32(time.Now().Unix())
+	data := []byte{
+		byte(timestamp >> 24),
+		byte(timestamp >> 16),
+		byte(timestamp >> 8),
+		byte(timestamp & 0xFF),
+	}
+	return globalUnifiedSender.SendDNYResponse(conn, physicalId, messageId, 0x22, data)
 }

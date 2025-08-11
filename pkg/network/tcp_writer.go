@@ -1,6 +1,7 @@
 package network
 
 import (
+	"encoding/hex"
 	"fmt"
 	"strings"
 	"time"
@@ -76,10 +77,18 @@ func (w *TCPWriter) WriteWithRetry(conn ziface.IConnection, msgID uint32, data [
 			w.logger.WithFields(logrus.Fields{
 				"connID":   conn.GetConnID(),
 				"dataSize": len(data),
-				"dataHex":  fmt.Sprintf("%X", data),
+				"dataHex":  hex.EncodeToString(data),
 				"method":   "RAW_TCP_WRITE",
 			}).Info("🔥 直接发送原始DNY协议数据（无Zinx封装）")
 		}
+
+		w.logger.WithFields(logrus.Fields{
+			"connID":   conn.GetConnID(),
+			"dataSize": len(data),
+			"dataHex":  hex.EncodeToString(data),
+			"msgID":    msgID,
+			"data":     fmt.Sprintf("%X", data),
+		}).Info("发送DNY协议命令（自动封装）")
 
 		// 直接写入原始数据到TCP连接
 		_, err := tcpConn.Write(data)
@@ -194,46 +203,4 @@ func (w *TCPWriter) shouldRetry(err error, attempt, maxRetries int) bool {
 	}
 
 	return true
-}
-
-// SendBuffMsgWithRetry 发送缓冲消息（带重试）
-func (w *TCPWriter) SendBuffMsgWithRetry(conn ziface.IConnection, msgID uint32, data []byte) error {
-	return w.WriteWithRetry(conn, msgID, data)
-}
-
-// SendMsgWithRetry 发送消息（带重试）
-func (w *TCPWriter) SendMsgWithRetry(conn ziface.IConnection, msgID uint32, data []byte) error {
-	var lastErr error
-	maxRetries := w.getMaxRetriesForError(nil)
-
-	for attempt := 0; attempt <= maxRetries; attempt++ {
-		if attempt > 0 {
-			delay := w.calculateDelay(attempt)
-
-			time.Sleep(delay)
-		}
-
-		// 🚨 重要修复：直接发送原始DNY协议数据，不使用Zinx消息封装
-		// 使用conn.GetTCPConnection().Write()发送已经组装好的完整协议数据
-		tcpConn := conn.GetTCPConnection()
-		if tcpConn == nil {
-			lastErr = fmt.Errorf("获取TCP连接失败")
-			continue
-		}
-
-		// 直接写入原始数据到TCP连接
-		_, err := tcpConn.Write(data)
-		if err == nil {
-			return nil
-		}
-
-		lastErr = err
-		maxRetries = w.getMaxRetriesForError(err)
-
-		if !w.shouldRetry(err, attempt, maxRetries) {
-			break
-		}
-	}
-
-	return fmt.Errorf("TCP发送消息失败，已重试%d次: %w", maxRetries, lastErr)
 }

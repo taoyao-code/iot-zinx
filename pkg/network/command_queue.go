@@ -230,8 +230,8 @@ func (cq *CommandQueue) processCommand(workerID int, cmd *QueuedCommand) {
 		return
 	}
 
-	// 执行命令 - 统一使用 UnifiedSender
-	err := SendRaw(cmd.Connection, cmd.Data)
+	// 执行命令 - 使用 TCPWriter 的 WriteWithRetry 方法
+	err := cq.writer.WriteWithRetry(cmd.Connection, cmd.MsgID, cmd.Data)
 
 	duration := time.Since(startTime)
 
