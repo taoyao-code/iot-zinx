@@ -983,7 +983,8 @@ func (m *TCPManager) GetDeviceDetail(deviceID string) (map[string]interface{}, e
 
 	detail := map[string]interface{}{
 		"deviceId":          device.DeviceID,
-		"physicalId":        device.PhysicalID,
+		"physicalId":        device.PhysicalID,                                   // 保留原有格式 (77753587)
+		"deviceNumber":      utils.FormatPhysicalIDForDisplay(device.PhysicalID), // 新增用户友好格式 (10644723)
 		"iccid":             group.ICCID,
 		"deviceType":        device.DeviceType,
 		"deviceVersion":     device.DeviceVersion,
@@ -1250,7 +1251,8 @@ func (m *TCPManager) GetDeviceListForAPI() ([]map[string]interface{}, error) {
 
 			entry := map[string]interface{}{
 				"deviceId":      dev.DeviceID,
-				"physicalId":    dev.PhysicalID,
+				"physicalId":    dev.PhysicalID,                                   // 保留原有格式 (77753587)
+				"deviceNumber":  utils.FormatPhysicalIDForDisplay(dev.PhysicalID), // 新增用户友好格式 (10644723)
 				"iccid":         group.ICCID,
 				"deviceType":    dev.DeviceType,
 				"deviceVersion": dev.DeviceVersion,
