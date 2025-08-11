@@ -7,6 +7,7 @@ import (
 	"github.com/aceld/zinx/ziface"
 	"github.com/aceld/zinx/znet"
 	"github.com/bujia-iot/iot-zinx/internal/infrastructure/logger"
+	"github.com/bujia-iot/iot-zinx/pkg/constants"
 	"github.com/bujia-iot/iot-zinx/pkg/core"
 	"github.com/sirupsen/logrus"
 )
@@ -44,11 +45,13 @@ func (h *NonDNYDataHandler) Handle(request ziface.IRequest) {
 
 	// 为防止连接被意外关闭，更新心跳时间
 	// 🚀 重构：使用统一TCP管理器更新心跳时间
+	// 🔧 修复：从连接属性获取设备ID并更新心跳
 	tcpManager := core.GetGlobalTCPManager()
 	if tcpManager != nil {
-		// 获取设备ID并更新心跳
-		if session, exists := tcpManager.GetSessionByConnID(conn.GetConnID()); exists {
-			tcpManager.UpdateHeartbeat(session.DeviceID)
+		if deviceIDProp, err := conn.GetProperty(constants.PropKeyDeviceId); err == nil && deviceIDProp != nil {
+			if deviceId, ok := deviceIDProp.(string); ok && deviceId != "" {
+				tcpManager.UpdateHeartbeat(deviceId)
+			}
 		}
 	}
 }

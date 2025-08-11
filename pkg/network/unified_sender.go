@@ -256,25 +256,6 @@ func (s *UnifiedSender) SendDNYResponse(conn ziface.IConnection, physicalID uint
 	return s.sendWithConfig(conn, packet, config, sendInfo)
 }
 
-// SendDNYCommand 发送DNY协议命令（自动封装）
-// 用于：充电控制命令、设备查询命令等
-func (s *UnifiedSender) SendDNYCommand(conn ziface.IConnection, physicalID uint32, messageID uint16, command uint8, commandData []byte) error {
-	// 🔧 重构：使用统一DNY构建器替代内部构建函数
-	packet := protocol.BuildUnifiedDNYPacket(physicalID, messageID, command, commandData)
-
-	config := DefaultSendConfig
-	config.Type = SendTypeDNYCommand
-
-	sendInfo := &SendInfo{
-		PhysicalID: physicalID,
-		MessageID:  messageID,
-		Command:    command,
-		DataLen:    len(commandData),
-	}
-
-	return s.sendWithConfig(conn, packet, config, sendInfo)
-}
-
 // SendInfo 发送信息
 type SendInfo struct {
 	PhysicalID uint32

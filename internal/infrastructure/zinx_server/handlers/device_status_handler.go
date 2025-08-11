@@ -86,7 +86,7 @@ func (h *DeviceStatusHandler) Handle(request ziface.IRequest) {
 	logger.WithFields(logrus.Fields{
 		"connID":     conn.GetConnID(),
 		"physicalId": utils.FormatCardNumber(physicalId),
-		"deviceId":   deviceSession.DeviceID,
+		"deviceId":   decodedFrame.DeviceID, // 🔧 修复：直接使用decodedFrame中的DeviceID
 		"statusInfo": statusInfo,
 		"remoteAddr": conn.RemoteAddr().String(),
 		"timestamp":  time.Now().Format(constants.TimeFormatDefault),

@@ -20,11 +20,23 @@ func (p *DeviceIDProcessor) ConvertDecimalToDeviceID(decimalID uint32, deviceTyp
 		typePrefix = deviceType[0]
 	}
 
+	// 🔧 修复：严格验证十进制ID范围，确保转换正确性
+	if decimalID > 0xFFFFFF { // 6位十六进制最大值
+		return fmt.Sprintf("04%06X", 0xFFFFFF) // 防止溢出
+	}
+
 	// 将十进制转换为6位十六进制（设备编号部分）
 	deviceNum := fmt.Sprintf("%06X", decimalID)
 
 	// 组合完整的8位DeviceID
-	return fmt.Sprintf("%02X%s", typePrefix, deviceNum)
+	result := fmt.Sprintf("%02X%s", typePrefix, deviceNum)
+
+	// 🔧 验证转换结果的正确性
+	if len(result) != 8 {
+		return "04000000" // 返回安全的默认值
+	}
+
+	return result
 }
 
 // ParseDeviceID 解析DeviceID，返回设备类型和设备编号

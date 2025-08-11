@@ -116,7 +116,7 @@ func (h *GetServerTimeHandler) Handle(request ziface.IRequest) {
 }
 
 // processGetServerTime 处理获取服务器时间业务逻辑
-func (h *GetServerTimeHandler) processGetServerTime(decodedFrame *protocol.DecodedDNYFrame, conn ziface.IConnection, deviceSession *protocol.DeviceSession) {
+func (h *GetServerTimeHandler) processGetServerTime(decodedFrame *protocol.DecodedDNYFrame, conn ziface.IConnection, deviceSession *core.ConnectionSession) {
 	// 从RawPhysicalID提取uint32值
 	physicalId := binary.LittleEndian.Uint32(decodedFrame.RawPhysicalID)
 	messageId := decodedFrame.MessageID
@@ -163,11 +163,9 @@ func (h *GetServerTimeHandler) processGetServerTime(decodedFrame *protocol.Decod
 
 	// 🚀 重构：通过统一TCP管理器更新心跳时间，不再直接调用监控器
 	tcpManager := core.GetGlobalTCPManager()
-	if tcpManager != nil {
-		// 获取设备ID并更新心跳
-		if session, exists := tcpManager.GetSessionByConnID(conn.GetConnID()); exists {
-			tcpManager.UpdateHeartbeat(session.DeviceID)
-		}
+	if tcpManager != nil && decodedFrame.DeviceID != "" {
+		// 🔧 修复：直接使用decodedFrame中的DeviceID更新心跳
+		tcpManager.UpdateHeartbeat(decodedFrame.DeviceID)
 	}
 }
 

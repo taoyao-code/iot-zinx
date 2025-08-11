@@ -63,10 +63,13 @@ func (h *HeartbeatManager) UpdateConnectionActivity(conn ziface.IConnection) {
 			deviceSession = session
 		}
 	}
-	if deviceSession != nil {
-		// 简化：通过TCP管理器更新心跳
-		if tcpManager != nil {
-			tcpManager.UpdateHeartbeat(deviceSession.DeviceID)
+	// 🔧 修复：从连接属性获取设备ID进行心跳更新
+	if deviceSession != nil && tcpManager != nil {
+		// 从连接属性获取设备ID
+		if deviceIDProp, err := conn.GetProperty(constants.PropKeyDeviceId); err == nil && deviceIDProp != nil {
+			if deviceId, ok := deviceIDProp.(string); ok && deviceId != "" {
+				tcpManager.UpdateHeartbeat(deviceId)
+			}
 		}
 	}
 

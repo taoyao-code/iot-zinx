@@ -52,18 +52,11 @@ func registerUnifiedAPIHandlers(r *gin.Engine) {
 		api.POST("/charging/start", gatewayHandlers.HandleStartCharging)
 		api.POST("/charging/stop", gatewayHandlers.HandleStopCharging)
 
-		// 🚀 新架构：设备命令API - 统一接口
-		api.POST("/device/command", gatewayHandlers.HandleSendCommand)
-		api.POST("/command/dny", gatewayHandlers.HandleSendDNYCommand)
-
 		// 🚀 新架构：系统监控API - 通过DeviceGateway获取统计
 		api.GET("/health", gatewayHandlers.HandleHealthCheck)
 		api.GET("/stats", gatewayHandlers.HandleSystemStats)
 
 		// 🚀 新架构：设备查询API
 		api.GET("/device/:deviceId/query", gatewayHandlers.HandleQueryDeviceStatus)
-
-		// 调试API - 显示所有路由
-		api.GET("/routes", gatewayHandlers.HandleRoutes)
 	}
 }

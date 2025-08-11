@@ -40,7 +40,7 @@ func ParseDeviceIDToPhysicalID(deviceID string) (uint32, error) {
 		return 0, fmt.Errorf("设备ID长度错误，必须为8位: %s", deviceID)
 	}
 
-	// 检查每个字符是否为有效的大写十六进制字符
+	// 检查每个字符是否为有效的大上十六进制字符
 	for i, char := range deviceID {
 		if !((char >= '0' && char <= '9') || (char >= 'A' && char <= 'F')) {
 			return 0, fmt.Errorf("设备ID格式错误，第%d位字符'%c'不是有效的大写十六进制字符: %s", i+1, char, deviceID)
@@ -51,6 +51,12 @@ func ParseDeviceIDToPhysicalID(deviceID string) (uint32, error) {
 	_, err := fmt.Sscanf(deviceID, "%08X", &physicalID)
 	if err != nil {
 		return 0, fmt.Errorf("设备ID解析失败: %s", deviceID)
+	}
+
+	// 🔧 修复：验证双向转换一致性
+	reverseDeviceID := FormatPhysicalID(physicalID)
+	if reverseDeviceID != deviceID {
+		return 0, fmt.Errorf("设备ID双向转换不一致: 输入=%s, 转换后=%s", deviceID, reverseDeviceID)
 	}
 
 	return physicalID, nil

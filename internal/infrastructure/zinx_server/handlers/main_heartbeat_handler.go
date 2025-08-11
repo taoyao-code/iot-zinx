@@ -74,7 +74,7 @@ func (h *MainHeartbeatHandler) ValidateFrame(decodedFrame *protocol.DecodedDNYFr
 }
 
 // processMainHeartbeat 处理主机心跳业务逻辑
-func (h *MainHeartbeatHandler) processMainHeartbeat(decodedFrame *protocol.DecodedDNYFrame, conn ziface.IConnection, deviceSession *protocol.DeviceSession) {
+func (h *MainHeartbeatHandler) processMainHeartbeat(decodedFrame *protocol.DecodedDNYFrame, conn ziface.IConnection, deviceSession *core.ConnectionSession) {
 	// 从解码帧获取设备信息
 	deviceId := decodedFrame.DeviceID
 	data := decodedFrame.Payload
@@ -110,7 +110,7 @@ func (h *MainHeartbeatHandler) processMainHeartbeat(decodedFrame *protocol.Decod
 	logger.WithFields(logrus.Fields{
 		"connID":        conn.GetConnID(),
 		"deviceId":      deviceId,
-		"sessionId":     deviceSession.DeviceID,
+		"sessionId":     deviceSession.SessionID, // 🔧 修复：使用SessionID而不是DeviceID
 		"heartbeatInfo": heartbeatInfo,
 		"remoteAddr":    conn.RemoteAddr().String(),
 		"timestamp":     time.Now().Format(constants.TimeFormatDefault),
@@ -118,26 +118,25 @@ func (h *MainHeartbeatHandler) processMainHeartbeat(decodedFrame *protocol.Decod
 }
 
 // updateMainHeartbeatTime 更新主机心跳时间
-func (h *MainHeartbeatHandler) updateMainHeartbeatTime(conn ziface.IConnection, deviceSession *protocol.DeviceSession) {
-	// 通过DeviceSession管理心跳时间
+func (h *MainHeartbeatHandler) updateMainHeartbeatTime(conn ziface.IConnection, deviceSession *core.ConnectionSession) {
+	// 🔧 修复：只更新ConnectionSession的连接级别信息
 	if deviceSession != nil {
-		deviceSession.UpdateHeartbeat()
-		deviceSession.UpdateStatus(constants.DeviceStatusOnline)
-		// 主机心跳时间已通过UpdateHeartbeat记录
-		deviceSession.SyncToConnection(conn)
+		deviceSession.LastActivity = time.Now()
 	}
 
 	// 🚀 统一架构：使用TCPManager统一的心跳更新机制
-	// 获取设备ID并更新心跳时间
-	if deviceSession != nil && deviceSession.DeviceID != "" {
-		tcpManager := core.GetGlobalTCPManager()
-		if tcpManager != nil {
-			if err := tcpManager.UpdateHeartbeat(deviceSession.DeviceID); err != nil {
-				logger.WithFields(logrus.Fields{
-					"connID":   conn.GetConnID(),
-					"deviceID": deviceSession.DeviceID,
-					"error":    err,
-				}).Warn("更新TCPManager心跳失败")
+	// 🔧 修复：从连接属性获取设备ID并更新心跳时间
+	tcpManager := core.GetGlobalTCPManager()
+	if tcpManager != nil {
+		if deviceIDProp, err := conn.GetProperty(constants.PropKeyDeviceId); err == nil && deviceIDProp != nil {
+			if deviceId, ok := deviceIDProp.(string); ok && deviceId != "" {
+				if err := tcpManager.UpdateHeartbeat(deviceId); err != nil {
+					logger.WithFields(logrus.Fields{
+						"connID":   conn.GetConnID(),
+						"deviceID": deviceId,
+						"error":    err,
+					}).Warn("更新TCPManager心跳失败")
+				}
 			}
 		}
 	}

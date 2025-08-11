@@ -118,7 +118,7 @@ func (h *PowerHeartbeatHandler) Handle(request ziface.IRequest) {
 }
 
 // processPowerHeartbeat 处理功率心跳业务逻辑
-func (h *PowerHeartbeatHandler) processPowerHeartbeat(decodedFrame *protocol.DecodedDNYFrame, conn ziface.IConnection, deviceSession *protocol.DeviceSession) {
+func (h *PowerHeartbeatHandler) processPowerHeartbeat(decodedFrame *protocol.DecodedDNYFrame, conn ziface.IConnection, deviceSession *core.ConnectionSession) {
 	// 从RawPhysicalID提取uint32值
 	physicalId := binary.LittleEndian.Uint32(decodedFrame.RawPhysicalID)
 	messageID := decodedFrame.MessageID
@@ -234,10 +234,13 @@ func (h *PowerHeartbeatHandler) processPowerHeartbeat(decodedFrame *protocol.Dec
 
 	// 更新心跳时间
 	// 简化：使用简化的TCP管理器更新心跳时间
+	// 🔧 修复：从连接属性获取设备ID并更新心跳
 	tcpManager := core.GetGlobalTCPManager()
 	if tcpManager != nil {
-		if session, exists := tcpManager.GetSessionByConnID(conn.GetConnID()); exists {
-			tcpManager.UpdateHeartbeat(session.DeviceID)
+		if deviceIDProp, err := conn.GetProperty(constants.PropKeyDeviceId); err == nil && deviceIDProp != nil {
+			if deviceId, ok := deviceIDProp.(string); ok && deviceId != "" {
+				tcpManager.UpdateHeartbeat(deviceId)
+			}
 		}
 	}
 

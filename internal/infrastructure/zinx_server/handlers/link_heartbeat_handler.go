@@ -117,13 +117,10 @@ func (h *LinkHeartbeatHandler) Handle(request ziface.IRequest) {
 		logger.WithField("connID", conn.GetConnID()).Warn("LinkHeartbeatHandler: 无法获取TCP连接以设置ReadDeadline")
 	}
 
-	// 获取设备ID信息用于日志记录
-	deviceID := deviceSession.DeviceID
-	if deviceID == "" {
-		// 向后兼容：从连接属性获取
-		if val, err := conn.GetProperty(constants.PropKeyDeviceId); err == nil && val != nil {
-			deviceID = val.(string)
-		}
+	// 🔧 修复：从连接属性获取设备ID信息用于日志记录
+	var deviceID string
+	if val, err := conn.GetProperty(constants.PropKeyDeviceId); err == nil && val != nil {
+		deviceID = val.(string)
 	}
 
 	logger.WithFields(logrus.Fields{

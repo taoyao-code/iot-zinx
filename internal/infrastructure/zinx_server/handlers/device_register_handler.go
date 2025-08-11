@@ -242,22 +242,17 @@ func (h *DeviceRegisterHandler) handleDeviceRegister(deviceId string, physicalId
 		return
 	}
 
-	// 🔧 使用统一架构：设备状态由统一架构自动管理
-	// 设备注册成功后，状态自动设置为在线
-	// 4. 设置Zinx框架层的session - 统一PhysicalID存储
+	// 🔧 修复：更新连接会话活动时间，设备信息存储在Device中
 	linkedSession, err := h.GetOrCreateDeviceSession(conn)
 	if err == nil && linkedSession != nil {
-		linkedSession.DeviceID = deviceId
-		linkedSession.PhysicalID = uint32(physicalId) // 统一：直接存储uint32
-		linkedSession.LastActivityAt = time.Now()
-		linkedSession.SyncToConnection(conn)
+		linkedSession.LastActivity = time.Now()
 
+		// 🔧 修复：设备信息现在存储在Device结构中，不在ConnectionSession中
 		logger.WithFields(logrus.Fields{
-			"connID":            conn.GetConnID(),
-			"deviceId":          deviceId,
-			"sessionDeviceID":   linkedSession.DeviceID,
-			"sessionPhysicalID": linkedSession.PhysicalID,
-		}).Debug("DeviceSession.DeviceID已设置并同步")
+			"connID":   conn.GetConnID(),
+			"deviceId": deviceId,
+			"note":     "设备信息存储在Device中，ConnectionSession只管理连接级别数据",
+		}).Debug("ConnectionSession活动时间已更新")
 	}
 
 	// 5. 🚀 统一架构：使用TCPManager统一的心跳更新机制
@@ -512,19 +507,25 @@ func (h *DeviceRegisterHandler) GetRegistrationStats(deviceId string) map[string
 		return nil
 	}
 
-	session, exists := tcpManager.GetSessionByDeviceID(deviceId)
-	if !exists {
+	// 🔧 修复：从Device和ConnectionSession分别获取信息
+	device, deviceExists := tcpManager.GetDeviceByID(deviceId)
+	if !deviceExists {
+		return nil
+	}
+
+	session, sessionExists := tcpManager.GetSessionByDeviceID(deviceId)
+	if !sessionExists {
 		return nil
 	}
 
 	return map[string]interface{}{
-		"device_id":      session.DeviceID,
+		"device_id":      device.DeviceID,
 		"conn_id":        session.ConnID,
-		"physical_id":    session.PhysicalID,
-		"iccid":          session.ICCID,
-		"device_status":  session.DeviceStatus,
+		"physical_id":    device.PhysicalID,
+		"iccid":          device.ICCID,
+		"device_status":  device.Status,
 		"last_activity":  session.LastActivity,
-		"last_heartbeat": session.LastHeartbeat,
+		"last_heartbeat": device.LastHeartbeat,
 		"remote_addr":    session.RemoteAddr,
 	}
 }

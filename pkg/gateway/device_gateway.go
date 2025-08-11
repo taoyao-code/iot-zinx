@@ -7,26 +7,12 @@
  *
  * 【重要！！！重要！！！重要！！！】
  * 这里是IoT设备网关的核心组件库！
- * 借鉴WebSocket网关的简洁设计理念，提供统一的设备管理接口	// 🔧 详细Hex数据日志 - 用于调试命令发送问题
-	logger.WithFields(logrus.Fields{
-		"deviceID":         deviceID,
-		"physicalID":       utils.FormatPhysicalID(physicalID),
-		"command":          fmt.Sprintf("0x%02X", command),
-		"commandName":      g.getCommandName(command),
-		"dataLen":          len(data),
-		"dataHex":          fmt.Sprintf("%X", data),
-		"packetHex":        fmt.Sprintf("%X", dnyPacket),
-		"packetLen":        len(dnyPacket),
-		"packetStructure":  g.analyzePacketStructure(dnyPacket, physicalID, command),
-		"byteOrder":        "小端序(Little-Endian)",
-		"action":           "SEND_DNY_PACKET",
-	}).Info("📡 发送DNY命令数据包 - 详细Hex记录")，除非你知道这意味着什么！
-*/
+ * 借鉴WebSocket网关的简洁设计理念，提供统一的设备管理接口，除非你知道这意味着什么！
+ */
 
 package gateway
 
 import (
-	"encoding/hex"
 	"fmt"
 	"time"
 
@@ -204,8 +190,8 @@ func (g *DeviceGateway) SendCommandToDevice(deviceID string, command byte, data 
 		return fmt.Errorf("设备 %s 不在线", deviceID)
 	}
 
-	// 构建DNY协议数据包
-	session, sessionExists := g.tcpManager.GetSessionByDeviceID(deviceID)
+	// 🔧 修复：验证设备连接存在
+	_, sessionExists := g.tcpManager.GetSessionByDeviceID(deviceID)
 	if !sessionExists {
 		return fmt.Errorf("设备会话不存在")
 	}
@@ -216,20 +202,40 @@ func (g *DeviceGateway) SendCommandToDevice(deviceID string, command byte, data 
 		return fmt.Errorf("设备ID格式错误: %v", err)
 	}
 
-	sessionPhysicalID := session.PhysicalID
+	// 🔧 修复：从设备信息中获取PhysicalID，而不是从ConnectionSession
+	device, deviceExists := g.tcpManager.GetDeviceByID(deviceID)
+	if !deviceExists {
+		return fmt.Errorf("设备 %s 不存在", deviceID)
+	}
 
-	// 验证一致性 - 这是防止设备索引数据不一致的关键检查
+	sessionPhysicalID := device.PhysicalID
+
+	// 🔧 修复：验证一致性，如果不匹配则修复Device的PhysicalID
 	if expectedPhysicalID != sessionPhysicalID {
 		logger.WithFields(logrus.Fields{
 			"deviceID":           deviceID,
 			"expectedPhysicalID": utils.FormatPhysicalID(expectedPhysicalID),
-			"sessionPhysicalID":  utils.FormatPhysicalID(sessionPhysicalID),
-			"sessionDeviceID":    session.DeviceID,
-			"action":             "DEVICE_ID_MISMATCH_DETECTED",
-		}).Error("🚨 设备ID与Session物理ID不匹配，数据一致性错误")
+			"devicePhysicalID":   utils.FormatPhysicalID(sessionPhysicalID),
+			"action":             "FIXING_PHYSICAL_ID_MISMATCH",
+		}).Warn("🔧 检测到PhysicalID不匹配，正在修复Device数据")
 
-		return fmt.Errorf("设备索引数据不一致: API请求设备%s(期望物理ID=%s)，但Session映射到物理ID(%s)",
-			deviceID, utils.FormatPhysicalID(expectedPhysicalID), utils.FormatPhysicalID(sessionPhysicalID))
+		// 🔧 修复：使用Device的mutex保护并发更新
+		device.Lock()
+		device.PhysicalID = expectedPhysicalID
+		device.Unlock()
+
+		// 同时修复设备组中的Device数据
+		if err := g.fixDeviceGroupPhysicalID(deviceID, expectedPhysicalID); err != nil {
+			logger.WithFields(logrus.Fields{
+				"deviceID": deviceID,
+				"error":    err,
+			}).Error("修复设备组PhysicalID失败")
+		}
+
+		logger.WithFields(logrus.Fields{
+			"deviceID":            deviceID,
+			"correctedPhysicalID": utils.FormatPhysicalID(expectedPhysicalID),
+		}).Info("✅ PhysicalID不匹配已修复")
 	}
 
 	// 使用API请求的正确PhysicalID，而不是Session中可能错误的值
@@ -261,6 +267,38 @@ func (g *DeviceGateway) SendCommandToDevice(deviceID string, command byte, data 
 
 	// 记录命令元数据
 	g.tcpManager.RecordDeviceCommand(deviceID, command, len(data))
+
+	return nil
+}
+
+// fixDeviceGroupPhysicalID 修复设备组中Device的PhysicalID
+func (g *DeviceGateway) fixDeviceGroupPhysicalID(deviceID string, correctPhysicalID uint32) error {
+	if g.tcpManager == nil {
+		return fmt.Errorf("TCP管理器未初始化")
+	}
+
+	// 通过设备索引找到ICCID和设备组
+	iccidInterface, exists := g.tcpManager.GetDeviceIndex().Load(deviceID)
+	if !exists {
+		return fmt.Errorf("设备索引不存在")
+	}
+
+	iccid := iccidInterface.(string)
+	groupInterface, exists := g.tcpManager.GetDeviceGroups().Load(iccid)
+	if !exists {
+		return fmt.Errorf("设备组不存在")
+	}
+
+	group := groupInterface.(*core.DeviceGroup)
+	group.Lock()
+	defer group.Unlock()
+
+	// 修复Device的PhysicalID
+	if device, ok := group.Devices[deviceID]; ok {
+		device.Lock()
+		device.PhysicalID = correctPhysicalID
+		device.Unlock()
+	}
 
 	return nil
 }
@@ -625,98 +663,6 @@ func (g *DeviceGateway) GetDeviceStatus(deviceID string) (string, bool) {
 	}
 
 	return device.Status.String(), true
-}
-
-/**
- * @description: 发送通用设备命令
- * @param {string} deviceID 设备ID
- * @param {string} command 命令类型
- * @param {map[string]interface{}} data 命令数据
- * @return {error}
- */
-func (g *DeviceGateway) SendGenericCommand(deviceID, command string, data map[string]interface{}) error {
-	if g.tcpManager == nil {
-		return fmt.Errorf("TCP管理器未初始化")
-	}
-
-	// 检查设备是否在线
-	if !g.IsDeviceOnline(deviceID) {
-		return fmt.Errorf("设备 %s 不在线", deviceID)
-	}
-
-	// 获取设备连接
-	conn, exists := g.tcpManager.GetDeviceConnection(deviceID)
-	if !exists {
-		return fmt.Errorf("无法获取设备 %s 的连接", deviceID)
-	}
-
-	// 记录日志
-	logger.WithFields(logrus.Fields{
-		"deviceID": deviceID,
-		"command":  command,
-		"data":     data,
-	}).Info("发送通用设备命令")
-
-	// 这里应该根据具体的协议来构造命令包
-	// 暂时使用简单的方式，实际项目中需要根据协议规范实现
-	commandData := map[string]interface{}{
-		"command": command,
-		"data":    data,
-	}
-
-	// 🚀 Phase 2: 使用TCPWriter发送命令，支持重试机制
-	if err := g.tcpWriter.WriteWithRetry(conn, 0x01, []byte(fmt.Sprintf("%v", commandData))); err != nil {
-		return fmt.Errorf("发送命令失败: %v", err)
-	}
-	// 记录命令
-	g.tcpManager.RecordDeviceCommand(deviceID, 0x01, len(commandData))
-
-	return nil
-}
-
-/**
- * @description: 发送DNY协议命令
- * @param {string} deviceID 设备ID
- * @param {string} command 命令类型
- * @param {string} data 命令数据
- * @return {error}
- */
-func (g *DeviceGateway) SendDNYCommand(deviceID, command, data string) error {
-	if g.tcpManager == nil {
-		return fmt.Errorf("TCP管理器未初始化")
-	}
-
-	// 检查设备是否在线
-	if !g.IsDeviceOnline(deviceID) {
-		return fmt.Errorf("设备 %s 不在线", deviceID)
-	}
-
-	// 获取设备连接
-	conn, exists := g.tcpManager.GetDeviceConnection(deviceID)
-	if !exists {
-		return fmt.Errorf("无法获取设备 %s 的连接", deviceID)
-	}
-
-	// 记录日志
-	logger.WithFields(logrus.Fields{
-		"deviceID": deviceID,
-		"command":  command,
-		"data":     data,
-		"data_hex": hex.EncodeToString([]byte(data)),
-	}).Info("发送DNY协议命令")
-
-	// 这里应该使用DNY协议构造器来构造命令包
-	// 暂时使用简单的方式，实际项目中需要使用protocol包中的DNY构造器
-	dnyCommand := fmt.Sprintf("DNY:%s:%s", command, data)
-
-	// 🚀 Phase 2: 使用TCPWriter发送DNY命令，支持重试机制
-	if err := g.tcpWriter.WriteWithRetry(conn, 0x02, []byte(dnyCommand)); err != nil {
-		return fmt.Errorf("发送DNY命令失败: %v", err)
-	}
-	// 记录命令
-	g.tcpManager.RecordDeviceCommand(deviceID, 0x02, len(dnyCommand))
-
-	return nil
 }
 
 /**

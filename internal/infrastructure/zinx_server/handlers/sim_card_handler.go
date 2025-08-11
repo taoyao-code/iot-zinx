@@ -48,14 +48,17 @@ func (h *SimCardHandler) Handle(request ziface.IRequest) {
 		}
 
 		// 🚀 统一架构：通过TCPManager统一更新心跳，移除冗余网络调用
+		// 🔧 修复：从连接属性获取设备ID进行心跳更新
 		if tm := core.GetGlobalTCPManager(); tm != nil {
-			if session, exists := tm.GetSessionByConnID(conn.GetConnID()); exists {
-				if err := tm.UpdateHeartbeat(session.DeviceID); err != nil {
-					logger.WithFields(logrus.Fields{
-						"connID":   conn.GetConnID(),
-						"deviceID": session.DeviceID,
-						"error":    err,
-					}).Warn("更新TCPManager心跳失败")
+			if deviceIDProp, err := conn.GetProperty(constants.PropKeyDeviceId); err == nil && deviceIDProp != nil {
+				if deviceId, ok := deviceIDProp.(string); ok && deviceId != "" {
+					if err := tm.UpdateHeartbeat(deviceId); err != nil {
+						logger.WithFields(logrus.Fields{
+							"connID":   conn.GetConnID(),
+							"deviceID": deviceId, // 🔧 修复：使用本地变量deviceId
+							"error":    err,
+						}).Warn("更新TCPManager心跳失败")
+					}
 				}
 			} else {
 				// 对于尚未建立设备会话的连接，暂时跳过心跳更新

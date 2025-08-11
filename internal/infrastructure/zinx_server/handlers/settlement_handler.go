@@ -64,7 +64,7 @@ func (h *SettlementHandler) Handle(request ziface.IRequest) {
 }
 
 // processSettlement 处理结算业务逻辑
-func (h *SettlementHandler) processSettlement(decodedFrame *protocol.DecodedDNYFrame, conn ziface.IConnection, deviceSession *protocol.DeviceSession) {
+func (h *SettlementHandler) processSettlement(decodedFrame *protocol.DecodedDNYFrame, conn ziface.IConnection, deviceSession *core.ConnectionSession) {
 	// 从RawPhysicalID提取uint32值
 	physicalId := binary.LittleEndian.Uint32(decodedFrame.RawPhysicalID)
 	messageID := decodedFrame.MessageID
@@ -205,9 +205,8 @@ func (h *SettlementHandler) processSettlement(decodedFrame *protocol.DecodedDNYF
 	}).Debug("结算响应发送成功")
 
 	// 更新心跳时间并标记在线，保持API状态一致
+	// 🔧 修复：直接使用设备ID更新心跳，不需要获取session
 	if tcpManager := core.GetGlobalTCPManager(); tcpManager != nil {
-		if session, exists := tcpManager.GetSessionByConnID(conn.GetConnID()); exists {
-			_ = tcpManager.UpdateHeartbeat(session.DeviceID)
-		}
+		_ = tcpManager.UpdateHeartbeat(decodedFrame.DeviceID)
 	}
 }

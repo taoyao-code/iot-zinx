@@ -2,7 +2,6 @@ package protocol
 
 import (
 	"fmt"
-	"time"
 
 	"github.com/aceld/zinx/ziface"
 	"github.com/bujia-iot/iot-zinx/internal/infrastructure/logger"
@@ -14,38 +13,8 @@ import (
 
 // 注意：DecodedDNYFrame已在dny_types.go中定义，这里不重复定义
 
-// DeviceSession 设备会话（兼容性结构）
-type DeviceSession struct {
-	ConnID         uint64    `json:"conn_id"`
-	DeviceID       string    `json:"device_id"`
-	PhysicalID     uint32    `json:"physical_id"`
-	ICCID          string    `json:"iccid"`
-	DeviceType     uint16    `json:"device_type"`
-	RemoteAddr     string    `json:"remote_addr"`
-	ConnectedAt    time.Time `json:"connected_at"`
-	LastActivity   time.Time `json:"last_activity"`
-	LastActivityAt time.Time `json:"last_activity_at"` // 兼容性字段
-}
-
-// SyncToConnection 同步到连接（兼容性方法）
-func (ds *DeviceSession) SyncToConnection(conn ziface.IConnection) {
-	// 简化实现：更新最后活动时间
-	ds.LastActivity = time.Now()
-	ds.LastActivityAt = time.Now()
-}
-
-// UpdateHeartbeat 更新心跳（兼容性方法）
-func (ds *DeviceSession) UpdateHeartbeat() {
-	ds.LastActivity = time.Now()
-	ds.LastActivityAt = time.Now()
-}
-
-// UpdateStatus 更新状态（兼容性方法）
-func (ds *DeviceSession) UpdateStatus(status interface{}) {
-	// 简化实现：更新最后活动时间
-	ds.LastActivity = time.Now()
-	ds.LastActivityAt = time.Now()
-}
+// 🗑️ DeviceSession相关代码已删除 - 已被ConnectionSession替代
+// 删除原因：兼容性结构，无外部依赖，增加代码复杂性
 
 // SimpleHandlerBase 简化的处理器基类
 // 提供基本的接口实现和常用方法，保持与原有DNYFrameHandlerBase的兼容性
@@ -131,52 +100,25 @@ func (h *SimpleHandlerBase) ExtractDecodedFrame(request ziface.IRequest) (*Decod
 }
 
 // GetOrCreateDeviceSession 获取或创建设备会话（兼容性方法）
-func (h *SimpleHandlerBase) GetOrCreateDeviceSession(conn ziface.IConnection) (*DeviceSession, error) {
+// � 修复：返回ConnectionSession而不是DeviceSession，保持API兼容性
+func (h *SimpleHandlerBase) GetOrCreateDeviceSession(conn ziface.IConnection) (*core.ConnectionSession, error) {
 	tcpManager := core.GetGlobalTCPManager()
 	if tcpManager == nil {
 		return nil, fmt.Errorf("TCP管理器未初始化")
 	}
 
-	// 尝试通过连接获取会话（先注册连接，再查找设备）
+	// 直接返回ConnectionSession
 	session, err := tcpManager.RegisterConnection(conn)
-	if err == nil && session != nil {
-		// 转换为DeviceSession格式
-		deviceSession := &DeviceSession{
-			ConnID:       session.ConnID,
-			DeviceID:     session.DeviceID,
-			PhysicalID:   session.PhysicalID,
-			ICCID:        session.ICCID,
-			DeviceType:   session.DeviceType,
-			RemoteAddr:   session.RemoteAddr,
-			ConnectedAt:  session.ConnectedAt,
-			LastActivity: session.LastActivity,
-		}
-		return deviceSession, nil
-	}
-
-	// 如果会话不存在，创建一个新的连接会话
-	session, err = tcpManager.RegisterConnection(conn)
 	if err != nil {
 		return nil, fmt.Errorf("注册连接失败: %v", err)
 	}
 
-	// 转换为DeviceSession格式
-	deviceSession := &DeviceSession{
-		ConnID:       session.ConnID,
-		DeviceID:     session.DeviceID,
-		PhysicalID:   session.PhysicalID,
-		ICCID:        session.ICCID,
-		DeviceType:   session.DeviceType,
-		RemoteAddr:   session.RemoteAddr,
-		ConnectedAt:  session.ConnectedAt,
-		LastActivity: session.LastActivity,
-	}
-
-	return deviceSession, nil
+	return session, nil
 }
 
 // UpdateDeviceSessionFromFrame 从帧数据更新设备会话（兼容性方法）
-func (h *SimpleHandlerBase) UpdateDeviceSessionFromFrame(deviceSession *DeviceSession, decodedFrame *DecodedDNYFrame) error {
+// 🔧 修复：接受ConnectionSession参数，保持API兼容性
+func (h *SimpleHandlerBase) UpdateDeviceSessionFromFrame(session *core.ConnectionSession, decodedFrame *DecodedDNYFrame) error {
 	tcpManager := core.GetGlobalTCPManager()
 	if tcpManager == nil {
 		return fmt.Errorf("TCP管理器未初始化")

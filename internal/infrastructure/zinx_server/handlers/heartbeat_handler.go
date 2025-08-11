@@ -59,7 +59,7 @@ func (h *HeartbeatHandler) Handle(request ziface.IRequest) {
 }
 
 // processHeartbeat 处理心跳业务逻辑
-func (h *HeartbeatHandler) processHeartbeat(decodedFrame *protocol.DecodedDNYFrame, conn ziface.IConnection, deviceSession *protocol.DeviceSession) {
+func (h *HeartbeatHandler) processHeartbeat(decodedFrame *protocol.DecodedDNYFrame, conn ziface.IConnection, deviceSession *core.ConnectionSession) {
 	// 从解码帧获取设备信息
 	deviceId := decodedFrame.DeviceID
 	data := decodedFrame.Payload
@@ -103,7 +103,7 @@ func (h *HeartbeatHandler) processHeartbeat(decodedFrame *protocol.DecodedDNYFra
 		logger.WithFields(logrus.Fields{
 			"connID":     conn.GetConnID(),
 			"deviceId":   deviceId,
-			"sessionId":  deviceSession.DeviceID,
+			"sessionId":  deviceSession.SessionID, // 🔧 修复：使用SessionID而不是DeviceID
 			"remoteAddr": conn.RemoteAddr().String(),
 			"timestamp":  time.Now().Format(constants.TimeFormatDefault),
 			"reason":     "心跳数据长度不足",
@@ -130,19 +130,30 @@ func (h *HeartbeatHandler) processHeartbeat(decodedFrame *protocol.DecodedDNYFra
 	}
 
 	// 🔧 调试：添加详细调试信息
+	// 🔧 修复：从Device获取设备ID进行匹配检查
+	tcpManager := core.GetGlobalTCPManager()
+	var sessionDeviceId string
+	var isRegistered bool
+	if tcpManager != nil {
+		if device, exists := tcpManager.GetDeviceByID(deviceId); exists {
+			sessionDeviceId = device.DeviceID
+			isRegistered = true
+		}
+	}
+
 	logger.WithFields(logrus.Fields{
 		"connID":            conn.GetConnID(),
-		"heartbeatDeviceId": deviceId,               // 从心跳包解析的设备ID
-		"sessionDeviceId":   deviceSession.DeviceID, // 从session获取的设备ID
-		"match":             deviceId == deviceSession.DeviceID,
-		"isRegistered":      deviceSession.DeviceID != "",
+		"heartbeatDeviceId": deviceId,        // 从心跳包解析的设备ID
+		"sessionDeviceId":   sessionDeviceId, // 🔧 修复：从Device获取的设备ID
+		"match":             deviceId == sessionDeviceId,
+		"isRegistered":      isRegistered,
 	}).Debug("🔧 心跳设备ID匹配检查")
 
 	// 🔧 修复：设备组心跳处理 - 如果设备组不存在，记录但不中断处理
 	// 简化：移除对统一系统的依赖
 	// unifiedSystem := pkg.GetUnifiedSystem()
 	// 简化：使用TCP管理器处理心跳
-	tcpManager := core.GetGlobalTCPManager()
+	// tcpManager已在上面定义，这里不需要重新定义
 	var heartbeatErr error
 	if tcpManager != nil {
 		heartbeatErr = tcpManager.UpdateHeartbeat(deviceId)
@@ -165,8 +176,8 @@ func (h *HeartbeatHandler) processHeartbeat(decodedFrame *protocol.DecodedDNYFra
 						"error":    repairErr,
 					}).Warn("智能索引修复失败，尝试传统方式修复")
 
-					// 传统修复方式作为后备
-					if deviceSession != nil && deviceSession.DeviceID != "" {
+					// 🔧 修复：传统修复方式作为后备，检查设备是否已注册
+					if deviceSession != nil && isRegistered {
 						// 获取ICCID用于重新注册
 						var iccid string
 						if val, err := conn.GetProperty(constants.PropKeyICCID); err == nil && val != nil {
@@ -235,13 +246,14 @@ func (h *HeartbeatHandler) processHeartbeat(decodedFrame *protocol.DecodedDNYFra
 
 // updateHeartbeatTime 更新心跳时间 - 使用统一架构
 func (h *HeartbeatHandler) updateHeartbeatTime(conn ziface.IConnection, _ interface{}) {
-	// 简化：使用TCP管理器更新心跳时间
+	// 🔧 修复：从连接属性获取设备ID，然后更新心跳
 	tcpManager := core.GetGlobalTCPManager()
 	if tcpManager != nil {
-		// 通过连接ID查找设备并更新心跳
-		connID := conn.GetConnID()
-		if session, exists := tcpManager.GetSessionByConnID(connID); exists {
-			tcpManager.UpdateHeartbeat(session.DeviceID)
+		// 尝试从连接属性获取设备ID
+		if deviceIDProp, err := conn.GetProperty(constants.PropKeyDeviceId); err == nil && deviceIDProp != nil {
+			if deviceId, ok := deviceIDProp.(string); ok && deviceId != "" {
+				tcpManager.UpdateHeartbeat(deviceId)
+			}
 		}
 	}
 
@@ -253,7 +265,7 @@ func (h *HeartbeatHandler) updateHeartbeatTime(conn ziface.IConnection, _ interf
 
 // parseSimplifiedHeartbeatPortStatus 解析0x21简化心跳包中的端口状态
 // 数据格式：电压(2字节) + 端口数量(1字节) + 各端口状态(n字节)
-func (h *HeartbeatHandler) parseSimplifiedHeartbeatPortStatus(data []byte, deviceId string, conn ziface.IConnection, deviceSession *protocol.DeviceSession) {
+func (h *HeartbeatHandler) parseSimplifiedHeartbeatPortStatus(data []byte, deviceId string, conn ziface.IConnection, deviceSession *core.ConnectionSession) {
 	if len(data) < 4 {
 		logger.WithFields(logrus.Fields{
 			"connID":   conn.GetConnID(),
@@ -305,7 +317,7 @@ func (h *HeartbeatHandler) parseSimplifiedHeartbeatPortStatus(data []byte, devic
 }
 
 // monitorChargingStatusChanges 监控充电状态变化
-func (h *HeartbeatHandler) monitorChargingStatusChanges(deviceId string, portStatuses []uint8, conn ziface.IConnection, deviceSession *protocol.DeviceSession) {
+func (h *HeartbeatHandler) monitorChargingStatusChanges(deviceId string, portStatuses []uint8, conn ziface.IConnection, deviceSession *core.ConnectionSession) {
 	for portIndex, status := range portStatuses {
 		portNumber := portIndex + 1
 

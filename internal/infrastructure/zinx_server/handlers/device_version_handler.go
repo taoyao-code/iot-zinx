@@ -92,11 +92,12 @@ func (h *DeviceVersionHandler) processDeviceVersion(frame *protocol.DecodedDNYFr
 	// 更新TCP管理器中的设备信息
 	tcpManager := core.GetGlobalTCPManager()
 	if tcpManager != nil {
-		session, exists := tcpManager.GetSessionByDeviceID(deviceID)
+		// 🔧 修复：从Device获取和更新设备类型和版本信息
+		device, exists := tcpManager.GetDeviceByID(deviceID)
 		if exists {
 			// 更新设备类型和版本信息
-			session.DeviceType = deviceType
-			session.DeviceVersion = deviceVersion
+			device.DeviceType = deviceType
+			device.DeviceVersion = deviceVersion
 
 			logger.WithFields(logrus.Fields{
 				"deviceID":      deviceID,
