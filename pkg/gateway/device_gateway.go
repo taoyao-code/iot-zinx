@@ -198,22 +198,48 @@ func (g *DeviceGateway) SendCommandToDevice(deviceID string, command byte, data 
 		return fmt.Errorf("设备会话不存在")
 	}
 
-	// 统一：直接使用uint32格式的PhysicalID
-	physicalID := session.PhysicalID
+	// 🔧 修复：验证设备ID与Session中的PhysicalID是否匹配
+	expectedPhysicalID, err := utils.ParseDeviceIDToPhysicalID(deviceID)
+	if err != nil {
+		return fmt.Errorf("设备ID格式错误: %v", err)
+	}
 
-	// 使用统一DNY构建器
+	sessionPhysicalID := session.PhysicalID
+
+	// 验证一致性 - 这是防止设备索引数据不一致的关键检查
+	if expectedPhysicalID != sessionPhysicalID {
+		logger.WithFields(logrus.Fields{
+			"deviceID":           deviceID,
+			"expectedPhysicalID": fmt.Sprintf("0x%08X", expectedPhysicalID),
+			"sessionPhysicalID":  fmt.Sprintf("0x%08X", sessionPhysicalID),
+			"sessionDeviceID":    session.DeviceID,
+			"action":             "DEVICE_ID_MISMATCH_DETECTED",
+		}).Error("🚨 设备ID与Session物理ID不匹配，数据一致性错误")
+
+		return fmt.Errorf("设备索引数据不一致: API请求设备%s(期望物理ID=0x%08X)，但Session映射到物理ID(0x%08X)",
+			deviceID, expectedPhysicalID, sessionPhysicalID)
+	}
+
+	// 使用API请求的正确PhysicalID，而不是Session中可能错误的值
+	physicalID := expectedPhysicalID
+
+	// 使用统一DNY构建器，确保使用小端序（符合AP3000协议规范）
 	builder := protocol.NewUnifiedDNYBuilder()
 	dnyPacket := builder.BuildDNYPacket(physicalID, 0x0001, command, data)
 
-	// � 详细Hex数据日志 - 用于调试命令发送问题
+	// 🔧 详细Hex数据日志 - 用于调试命令发送问题
 	logger.WithFields(logrus.Fields{
-		"deviceID":   deviceID,
-		"physicalID": utils.FormatPhysicalIDForLog(physicalID),
-		"command":    fmt.Sprintf("0x%02X", command),
-		"dataLen":    len(data),
-		"dataHex":    fmt.Sprintf("%X", data),
-		"packetHex":  fmt.Sprintf("%X", dnyPacket),
-		"packetLen":  len(dnyPacket),
+		"deviceID":        deviceID,
+		"physicalID":      utils.FormatPhysicalIDForLog(physicalID),
+		"command":         fmt.Sprintf("0x%02X", command),
+		"commandName":     g.getCommandName(command),
+		"dataLen":         len(data),
+		"dataHex":         fmt.Sprintf("%X", data),
+		"packetHex":       fmt.Sprintf("%X", dnyPacket),
+		"packetLen":       len(dnyPacket),
+		"packetStructure": g.analyzePacketStructure(dnyPacket, physicalID, command),
+		"byteOrder":       "小端序(Little-Endian)",
+		"action":          "SEND_DNY_PACKET",
 	}).Info("📡 发送DNY命令数据包 - 详细Hex记录")
 
 	// �🚀 Phase 2: 使用TCPWriter发送数据包，支持重试机制
@@ -779,4 +805,32 @@ func GetGlobalDeviceGateway() *DeviceGateway {
 func InitializeGlobalDeviceGateway() {
 	globalDeviceGateway = NewDeviceGateway()
 	logger.Info("全局设备网关初始化完成")
+}
+
+// ===============================
+// 调试和日志辅助方法
+// ===============================
+
+// getCommandName 获取命令名称（用于日志记录）
+func (g *DeviceGateway) getCommandName(command byte) string {
+	switch command {
+	case 0x96:
+		return "CmdDeviceLocate(声光寻找设备)"
+	case 0x82:
+		return "CmdChargeControl(充电控制)"
+	case 0x81:
+		return "CmdQueryDeviceStatus(查询设备状态)"
+	default:
+		return fmt.Sprintf("Unknown(0x%02X)", command)
+	}
+}
+
+// analyzePacketStructure 分析数据包结构（用于调试）
+func (g *DeviceGateway) analyzePacketStructure(packet []byte, physicalID uint32, command byte) string {
+	if len(packet) < 12 {
+		return "数据包长度不足"
+	}
+
+	return fmt.Sprintf("Header=DNY, Length=%d, PhysicalID=0x%08X, MessageID=0x0001, Command=0x%02X",
+		len(packet)-5, physicalID, command)
 }
