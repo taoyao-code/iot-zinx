@@ -422,9 +422,13 @@ func (g *DeviceGateway) SendChargingCommandWithParams(deviceID string, port uint
 	// 充电命令(1字节)：0=停止充电，1=开始充电
 	commandData[6] = action
 
+	// 🔧 修复：API传入的value已经是正确的单位（按时间=秒，按电量=0.1度）
+	// 不需要进行单位转换，直接使用
+	actualValue := value
+
 	// 充电时长/电量(2字节，小端序)
-	commandData[7] = byte(value)
-	commandData[8] = byte(value >> 8)
+	commandData[7] = byte(actualValue)
+	commandData[8] = byte(actualValue >> 8)
 
 	// 订单编号(16字节)
 	orderBytes := make([]byte, 16)
@@ -433,8 +437,20 @@ func (g *DeviceGateway) SendChargingCommandWithParams(deviceID string, port uint
 	}
 	copy(commandData[9:25], orderBytes)
 
-	// 最大充电时长(2字节，小端序)
-	maxChargeDuration := uint16(0) // 0表示不限制
+	// 🔧 修复：最大充电时长设置逻辑
+	// 根据协议文档：如果参数为0表示不修改，会使用设备的设置值，默认10小时
+	var maxChargeDuration uint16
+	if mode == 0 && actualValue > 0 { // 按时间充电且有具体时长
+		// 设置为充电时长的1.5倍，确保不会因为最大时长限制而提前停止
+		maxChargeDuration = actualValue + (actualValue / 2)
+		// 但不超过10小时（36000秒）
+		if maxChargeDuration > 36000 {
+			maxChargeDuration = 36000
+		}
+	} else {
+		// 其他情况使用设备默认值
+		maxChargeDuration = 0
+	}
 	commandData[25] = byte(maxChargeDuration)
 	commandData[26] = byte(maxChargeDuration >> 8)
 
@@ -481,16 +497,26 @@ func (g *DeviceGateway) SendChargingCommandWithParams(deviceID string, port uint
 	}
 
 	logger.WithFields(logrus.Fields{
-		"deviceID": deviceID,
-		"port":     port,
-		"action":   actionStr,
-		"orderNo":  orderNo,
-		"mode":     modeStr,
-		"value":    value,
-		"balance":  balance,
-	}).Info("完整参数充电控制命令发送成功")
+		"deviceID":          deviceID,
+		"port":              port,
+		"action":            actionStr,
+		"orderNo":           orderNo,
+		"mode":              modeStr,
+		"value":             actualValue,
+		"maxChargeDuration": maxChargeDuration,
+		"balance":           balance,
+		"unit":              getValueUnit(mode),
+	}).Info("🔧 修复最大充电时长后的完整参数充电控制命令发送成功")
 
 	return nil
+}
+
+// getValueUnit 获取value字段的单位描述
+func getValueUnit(mode uint8) string {
+	if mode == 0 {
+		return "秒"
+	}
+	return "0.1度"
 }
 
 /**
