@@ -12,22 +12,24 @@ import (
 
 // RetryConfig 重试配置
 type RetryConfig struct {
-	MaxRetries     int           // 最大重试次数
-	InitialDelay   time.Duration // 初始延迟
-	MaxDelay       time.Duration // 最大延迟
-	BackoffFactor  float64       // 退避因子
-	TimeoutRetries int           // 超时重试次数
-	GeneralRetries int           // 一般错误重试次数
+	TimeoutRetries int           `json:"timeout_retries"` // 超时错误重试次数
+	NetworkRetries int           `json:"network_retries"` // 网络错误重试次数
+	GeneralRetries int           `json:"general_retries"` // 一般错误重试次数
+	InitialDelay   time.Duration `json:"initial_delay"`   // 初始延迟时间
+	MaxDelay       time.Duration `json:"max_delay"`       // 最大延迟时间
+	BackoffFactor  float64       `json:"backoff_factor"`  // 退避因子
+	WriteTimeout   time.Duration `json:"write_timeout"`   // TCP写入超时时间
 }
 
-// DefaultRetryConfig 默认重试配置
+// 默认重试配置
 var DefaultRetryConfig = RetryConfig{
-	MaxRetries:     3,
-	InitialDelay:   100 * time.Millisecond,
-	MaxDelay:       5 * time.Second,
-	BackoffFactor:  2.0,
 	TimeoutRetries: 2, // 超时错误重试2次
+	NetworkRetries: 1, // 网络错误重试1次
 	GeneralRetries: 1, // 一般错误重试1次
+	InitialDelay:   200 * time.Millisecond,
+	MaxDelay:       2 * time.Second,
+	BackoffFactor:  2.0,
+	WriteTimeout:   90 * time.Second, // 默认90秒写超时
 }
 
 // TCPWriter TCP写入器，支持重试机制
@@ -70,6 +72,26 @@ func (w *TCPWriter) WriteWithRetry(conn ziface.IConnection, msgID uint32, data [
 		if tcpConn == nil {
 			lastErr = fmt.Errorf("获取TCP连接失败")
 			continue
+		}
+
+		// 🔧 关键修复：设置TCP写入超时，解决 i/o timeout 问题
+		if w.config.WriteTimeout > 0 {
+			writeDeadline := time.Now().Add(w.config.WriteTimeout)
+			if err := tcpConn.SetWriteDeadline(writeDeadline); err != nil {
+				w.logger.WithFields(logrus.Fields{
+					"connID":        conn.GetConnID(),
+					"writeTimeout":  w.config.WriteTimeout,
+					"writeDeadline": writeDeadline.Format("2006-01-02 15:04:05"),
+					"error":         err.Error(),
+				}).Warn("设置TCP写入超时失败")
+			} else if attempt == 0 {
+				// 只在第一次尝试时记录超时设置
+				w.logger.WithFields(logrus.Fields{
+					"connID":        conn.GetConnID(),
+					"writeTimeout":  w.config.WriteTimeout,
+					"writeDeadline": writeDeadline.Format("2006-01-02 15:04:05"),
+				}).Debug("✅ TCP写入超时已设置")
+			}
 		}
 
 		// 记录原始数据发送（仅首次尝试记录，避免重试时重复日志）
@@ -172,7 +194,7 @@ func (w *TCPWriter) isNetworkError(err error) bool {
 // getMaxRetriesForError 根据错误类型获取最大重试次数
 func (w *TCPWriter) getMaxRetriesForError(err error) int {
 	if err == nil {
-		return w.config.MaxRetries
+		return w.config.GeneralRetries // 默认使用一般错误重试次数
 	}
 
 	if w.isTimeoutError(err) {
@@ -180,7 +202,7 @@ func (w *TCPWriter) getMaxRetriesForError(err error) int {
 	}
 
 	if w.isNetworkError(err) {
-		return w.config.GeneralRetries
+		return w.config.NetworkRetries
 	}
 
 	return w.config.GeneralRetries

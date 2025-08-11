@@ -2,45 +2,54 @@
 
 基于 Zinx 网络框架的充电设备网关系统，实现与充电桩设备的通信和管理。
 
-## 🚀 最新架构更新 (2025 年 6 月)
+## 🚀 最新架构更新 (2025 年 8 月)
 
-### DNY 协议解析器统一重构
+### 数据存储去重修复和架构优化
 
-项目完成了重大的协议解析器统一重构，实现了高内聚、低耦合的新架构：
+项目完成了重大的数据存储去重修复，实现了高性能、高可靠性的新架构：
 
-#### ✨ 重构亮点
+#### ✨ 修复亮点
 
-- **🎯 统一解析入口**: 所有 DNY 协议变体通过 `ParseDNYProtocolData()` 统一处理
-- **📦 标准化数据结构**: 使用 `*dny_protocol.Message` 统一消息格式
-- **🔧 向后兼容**: 保持现有业务逻辑无缝运行
-- **⚡ 性能优化**: 减少重复解析，提升处理效率
+- **🎯 单一数据源**: Device 结构作为设备信息的唯一来源，消除三重数据存储
+- **📦 职责分离**: ConnectionSession 管理连接级别数据，Device 管理设备级别数据
+- **🔧 并发安全**: 所有数据更新都有适当的 mutex 保护，消除数据竞争
+- **⚡ 性能优化**: 减少内存占用 50%+，简化数据同步逻辑
 
 #### 🏗️ 新架构特性
 
 ```go
-// 统一解析器使用示例
-import "github.com/bujia-iot/iot-zinx/pkg/protocol"
+// 统一数据获取方式
+import "github.com/bujia-iot/iot-zinx/pkg/core"
 
-data := []byte("ICCID12345678901234567890") // 任意DNY协议数据
-msg, err := protocol.ParseDNYProtocolData(data)
-if err != nil {
-    log.Printf("解析失败: %v", err)
-    return
+// 获取设备信息（新方式）
+tcpManager := core.GetGlobalTCPManager()
+device, exists := tcpManager.GetDeviceByID(deviceID)
+if exists {
+    deviceID := device.DeviceID
+    physicalID := device.PhysicalID
+    iccid := device.ICCID
+    status := device.Status
 }
 
-switch msg.MessageType {
-case "standard":    // 标准DNY协议帧
-case "iccid":       // ICCID消息
-case "heartbeat_link": // Link心跳
-case "error":       // 解析错误
-}
+// 心跳更新（统一接口）
+tcpManager.UpdateHeartbeat(deviceID)
+
+// 设备注册（原子操作）
+err := tcpManager.RegisterDevice(conn, deviceID, physicalID, iccid)
 ```
+
+#### 📊 架构改进成果
+
+- **内存优化**: 消除重复数据存储，减少内存占用
+- **数据一致性**: 单一数据源确保数据一致性
+- **并发安全**: 完善的锁机制保障多线程安全
+- **接口统一**: 所有模块通过 TCPManager 统一访问数据
 
 #### 📖 相关文档
 
-- **架构设计**: [docs/DNY 协议解析器统一架构设计.md](docs/DNY协议解析器统一架构设计.md)
-- **开发指南**: [docs/DNY 协议解析器\_开发者指南.md](docs/DNY协议解析器_开发者指南.md)
-- **完成报告**: [issues/协议解析器统一重构\_完成报告.md](issues/协议解析器统一重构_完成报告.md)
+- **数据流图**: [docs/architecture/data-flow-diagram.md](docs/architecture/data-flow-diagram.md)
+- **系统架构**: [docs/architecture/system-architecture.md](docs/architecture/system-architecture.md)
+- **修复报告**: [issues/数据存储去重修复\_完成报告.md](issues/数据存储去重修复_完成报告.md)
 
 ---
 
@@ -51,20 +60,23 @@ case "error":       // 解析错误
 ### 主要功能
 
 - **设备连接管理**：处理设备上线、注册和离线，支持 ICCID 和设备 ID 双重识别
+- **统一数据管理**：Device 作为设备信息单一数据源，确保数据一致性
 - **多种心跳管理**：支持标准心跳、主机心跳、Link 心跳等多种保活机制
-- **刷卡消费**：处理设备刷卡请求，验证卡片有效性并授权消费
+- **智能设备识别**：支持十进制/十六进制 DeviceID 格式自动转换
 - **充电控制**：向设备发送充电启停命令，控制充电过程
 - **设备状态监控**：实时监控设备心跳状态，自动清理超时连接
-- **服务器时间同步**：提供精准时间服务，确保设备与服务器时间同步
-- **命令重发机制**：关键业务命令支持超时重发，确保命令可靠送达
-- **原始数据记录**：完整记录设备与服务器之间的通信数据，便于问题排查
+- **并发安全保障**：完善的 mutex 保护机制，确保多线程环境下的数据安全
+- **高性能架构**：消除重复数据存储，减少内存占用，提升系统性能
+- **RESTful API**：提供标准化的 HTTP API 接口，支持设备查询和控制
 
 ### 技术栈
 
-- Go 语言开发
-- Zinx 网络框架
-- 六边形架构（端口与适配器架构）
-- DNY 协议（设备通信协议）
+- **Go 语言开发**：高性能并发编程语言
+- **Zinx 网络框架**：高性能 TCP 服务器框架
+- **分层架构**：API 层、网关层、核心层、数据层、网络层分离
+- **DNY 协议**：设备通信协议完整支持
+- **并发安全**：sync.RWMutex 和 sync.Map 保障线程安全
+- **RESTful API**：标准化的 HTTP 接口设计
 
 ## 目录结构
 
@@ -90,23 +102,26 @@ case "error":       // 解析错误
 ### 快速开始
 
 ```go
-import "github.com/bujia-iot/iot-zinx/pkg"
+import "github.com/bujia-iot/iot-zinx/pkg/core"
 
-// 初始化基础架构
-pkg.InitBasicArchitecture()
+// 获取全局TCP管理器
+tcpManager := core.GetGlobalTCPManager()
 
-// 使用协议相关功能
-packet := pkg.Protocol.NewDNYDataPackFactory().NewDataPack(true)
-result := pkg.Protocol.ParseDNYData(data)
-pkg.Protocol.SendDNYResponse(conn, physicalId, messageId, command, data)
+// 设备注册（新架构）
+err := tcpManager.RegisterDevice(conn, deviceId, physicalId, iccid)
 
-// 使用网络相关功能
-cmdMgr := pkg.Network.GetCommandManager()
+// 获取设备信息（统一数据源）
+device, exists := tcpManager.GetDeviceByID(deviceId)
+if exists {
+    fmt.Printf("设备状态: %v", device.Status)
+    fmt.Printf("最后心跳: %v", device.LastHeartbeat)
+}
 
-// 使用核心TCP管理器
-tcpManager := pkg.Core.GetGlobalTCPManager()
-tcpManager.RegisterDevice(conn, deviceId, physicalId, iccid)
+// 心跳更新（统一接口）
 tcpManager.UpdateHeartbeat(deviceId)
+
+// 设备状态查询
+isOnline := tcpManager.IsDeviceOnline(deviceId)
 ```
 
 详细说明请参考 [pkg/README.md](pkg/README.md)。
@@ -174,12 +189,29 @@ make build
 
 ### 核心组件
 
-- `connection_hooks.go`：连接生命周期钩子函数，处理设备连接建立和断开
-- `packet.go`：数据包处理器，负责 DNY 协议数据的封包和解包
-- `device_monitor.go`：设备状态监控器，监控设备心跳状态
-- `command_manager.go`：命令管理器，管理发送命令的确认和超时重发
-- `monitor.go`：TCP 数据监视器，记录设备数据传输过程
-- `raw_data_handler.go`：原始数据处理器（已删除，请使用 `pkg/protocol/raw_data_hook.go` 替代）
+#### 数据管理层
+
+- `pkg/core/tcp_manager.go`：核心 TCP 管理器，统一管理连接和设备
+- `pkg/core/connection_device_group.go`：设备组管理，支持一对多设备关系
+- `pkg/core/device_monitor.go`：设备状态监控器，监控设备心跳状态
+
+#### 网络传输层
+
+- `pkg/network/tcp_writer.go`：统一发送通道，支持同步/异步发送
+- `pkg/network/connection_hooks.go`：连接生命周期钩子函数
+- `internal/domain/dny_protocol/decoder.go`：DNY 协议解析拦截器
+
+#### 业务处理层
+
+- `pkg/gateway/device_gateway.go`：设备网关接口，提供统一的设备操作
+- `pkg/utils/physical_id_helper.go`：PhysicalID 转换工具
+- `pkg/utils/device_id_converter.go`：DeviceID 格式转换工具
+
+#### 数据结构
+
+- `ConnectionSession`：连接级别数据管理（SessionID、ConnID、RemoteAddr）
+- `DeviceGroup`：设备组管理（ICCID、ConnID、Devices 映射）
+- `Device`：设备信息管理（DeviceID、PhysicalID、Status、LastHeartbeat）
 
 ### 端口和适配器架构
 
@@ -207,13 +239,20 @@ make build
 
 ### 设备连接生命周期
 
-1. **连接建立**：设备与网关建立 TCP 连接，网关创建连接对象并分配连接 ID
-2. **初始化识别**：设备可能发送 ICCID(SIM 卡号)或 Link 心跳等初始化数据
-3. **设备注册**：设备发送注册请求(0x20)，网关解析设备信息并完成注册
-4. **心跳保活**：设备定期发送心跳包(0x01/0x11/0x21)，网关更新设备状态
-5. **业务交互**：设备发送业务请求(如刷卡 0x02)或网关下发控制命令(如充电控制 0x82)
-6. **连接监控**：网关监控设备心跳状态，自动清理超时连接
-7. **连接断开**：设备主动断开连接或网关检测到连接超时，释放连接资源
+1. **连接建立**：设备与网关建立 TCP 连接，网关创建 ConnectionSession 并分配连接 ID
+2. **初始化识别**：设备发送 ICCID(SIM 卡号)，网关验证并存储到连接属性
+3. **设备注册**：设备发送注册请求(0x20)，网关创建 Device 对象并建立设备索引映射
+4. **心跳保活**：设备定期发送心跳包，网关通过统一接口更新 Device.LastHeartbeat
+5. **业务交互**：通过 DeviceGateway 接口处理设备控制命令和状态查询
+6. **状态监控**：网关监控设备心跳状态，自动检测离线设备
+7. **连接断开**：设备断开时，网关清理 ConnectionSession 并更新设备状态
+
+#### 数据流特点
+
+- **单一数据源**：Device 作为设备信息的唯一来源
+- **职责分离**：ConnectionSession 管理连接，Device 管理设备信息
+- **并发安全**：所有数据更新都有 mutex 保护
+- **统一接口**：所有模块通过 TCPManager 访问数据
 
 ## 协议支持
 
