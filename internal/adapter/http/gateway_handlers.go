@@ -50,21 +50,34 @@ func (h *DeviceGatewayHandlers) HandleDeviceStatus(c *gin.Context) {
 		return
 	}
 
-	// 🚀 新架构：一行代码检查设备状态
-	if !h.deviceGateway.IsDeviceOnline(deviceID) {
+	// � 修复：添加智能DeviceID处理，支持路径参数中的十进制格式
+	processor := &utils.DeviceIDProcessor{}
+	standardDeviceID, err := processor.SmartConvertDeviceID(deviceID)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"code":    400,
+			"message": "DeviceID格式错误: " + err.Error(),
+			"hint":    "支持格式: 十进制(10644723)、6位十六进制(A26CF3)、8位十六进制(04A26CF3)",
+		})
+		return
+	}
+
+	// �🚀 新架构：一行代码检查设备状态
+	if !h.deviceGateway.IsDeviceOnline(standardDeviceID) {
 		c.JSON(http.StatusNotFound, gin.H{
 			"code":    404,
 			"message": "设备不在线",
 			"data": gin.H{
-				"deviceId": deviceID,
-				"isOnline": false,
+				"deviceId":   deviceID,         // 用户输入的原始格式
+				"standardId": standardDeviceID, // 标准化后的8位十六进制格式
+				"isOnline":   false,
 			},
 		})
 		return
 	}
 
 	// 🚀 新架构：一行代码获取详细信息
-	deviceDetail, err := h.deviceGateway.GetDeviceDetail(deviceID)
+	deviceDetail, err := h.deviceGateway.GetDeviceDetail(standardDeviceID)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"code":    500,
@@ -269,9 +282,21 @@ func (h *DeviceGatewayHandlers) HandleStopCharging(c *gin.Context) {
 		return
 	}
 
-	// 🚀 新架构：发送停止充电命令（使用完整的82指令格式）
+	// � 修复：添加智能DeviceID处理，与开始充电API保持一致
+	processor := &utils.DeviceIDProcessor{}
+	standardDeviceID, err := processor.SmartConvertDeviceID(req.DeviceID)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"code":    400,
+			"message": "DeviceID格式错误: " + err.Error(),
+			"hint":    "支持格式: 十进制(10644723)、6位十六进制(A26CF3)、8位十六进制(04A26CF3)",
+		})
+		return
+	}
+
+	// �🚀 新架构：发送停止充电命令（使用完整的82指令格式）
 	// 根据AP3000协议，停止充电也需要使用完整的充电控制参数，但充电命令设为0x00
-	err := h.deviceGateway.SendChargingCommandWithParams(req.DeviceID, req.Port, 0x00, req.OrderNo, 0, 0, 0)
+	err = h.deviceGateway.SendChargingCommandWithParams(standardDeviceID, req.Port, 0x00, req.OrderNo, 0, 0, 0)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"code":    500,
@@ -285,11 +310,12 @@ func (h *DeviceGatewayHandlers) HandleStopCharging(c *gin.Context) {
 		"code":    0,
 		"message": "充电已停止",
 		"data": gin.H{
-			"deviceId":  req.DeviceID,
-			"port":      req.Port,
-			"orderNo":   req.OrderNo,
-			"action":    "stop",
-			"timestamp": time.Now().Unix(),
+			"deviceId":   req.DeviceID,     // 用户输入的原始格式
+			"standardId": standardDeviceID, // 标准化后的8位十六进制格式
+			"port":       req.Port,
+			"orderNo":    req.OrderNo,
+			"action":     "stop",
+			"timestamp":  time.Now().Unix(),
 		},
 	})
 }
@@ -444,8 +470,20 @@ func (h *DeviceGatewayHandlers) HandleSendCommand(c *gin.Context) {
 		return
 	}
 
-	// 🚀 新架构：使用统一的命令发送接口
-	err := h.deviceGateway.SendGenericCommand(req.DeviceID, req.Command, req.Data)
+	// � 修复：添加智能DeviceID处理
+	processor := &utils.DeviceIDProcessor{}
+	standardDeviceID, err := processor.SmartConvertDeviceID(req.DeviceID)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"code":    400,
+			"message": "DeviceID格式错误: " + err.Error(),
+			"hint":    "支持格式: 十进制(10644723)、6位十六进制(A26CF3)、8位十六进制(04A26CF3)",
+		})
+		return
+	}
+
+	// �🚀 新架构：使用统一的命令发送接口
+	err = h.deviceGateway.SendGenericCommand(standardDeviceID, req.Command, req.Data)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"code":    500,
@@ -458,8 +496,9 @@ func (h *DeviceGatewayHandlers) HandleSendCommand(c *gin.Context) {
 		"code":    0,
 		"message": "命令发送成功",
 		"data": gin.H{
-			"deviceId": req.DeviceID,
-			"command":  req.Command,
+			"deviceId":   req.DeviceID,     // 用户输入的原始格式
+			"standardId": standardDeviceID, // 标准化后的8位十六进制格式
+			"command":    req.Command,
 		},
 	})
 }
@@ -490,8 +529,20 @@ func (h *DeviceGatewayHandlers) HandleSendDNYCommand(c *gin.Context) {
 		return
 	}
 
-	// 🚀 新架构：发送DNY协议命令
-	err := h.deviceGateway.SendDNYCommand(req.DeviceID, req.Command, req.Data)
+	// � 修复：添加智能DeviceID处理
+	processor := &utils.DeviceIDProcessor{}
+	standardDeviceID, err := processor.SmartConvertDeviceID(req.DeviceID)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"code":    400,
+			"message": "DeviceID格式错误: " + err.Error(),
+			"hint":    "支持格式: 十进制(10644723)、6位十六进制(A26CF3)、8位十六进制(04A26CF3)",
+		})
+		return
+	}
+
+	// �🚀 新架构：发送DNY协议命令
+	err = h.deviceGateway.SendDNYCommand(standardDeviceID, req.Command, req.Data)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"code":    500,
@@ -504,8 +555,10 @@ func (h *DeviceGatewayHandlers) HandleSendDNYCommand(c *gin.Context) {
 		"code":    0,
 		"message": "DNY命令发送成功",
 		"data": gin.H{
-			"deviceId": req.DeviceID,
-			"command":  req.Command,
+			"deviceId":   req.DeviceID,     // 用户输入的原始格式
+			"standardId": standardDeviceID, // 标准化后的8位十六进制格式
+			"command":    req.Command,
+			"data":       req.Data,
 		},
 	})
 }
@@ -572,8 +625,20 @@ func (h *DeviceGatewayHandlers) HandleQueryDeviceStatus(c *gin.Context) {
 		return
 	}
 
-	// 🚀 新架构：查询设备详细状态
-	detail, err := h.deviceGateway.GetDeviceDetail(deviceID)
+	// � 修复：添加智能DeviceID处理，支持路径参数中的十进制格式
+	processor := &utils.DeviceIDProcessor{}
+	standardDeviceID, err := processor.SmartConvertDeviceID(deviceID)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"code":    400,
+			"message": "DeviceID格式错误: " + err.Error(),
+			"hint":    "支持格式: 十进制(10644723)、6位十六进制(A26CF3)、8位十六进制(04A26CF3)",
+		})
+		return
+	}
+
+	// �🚀 新架构：查询设备详细状态
+	detail, err := h.deviceGateway.GetDeviceDetail(standardDeviceID)
 	if err != nil {
 		c.JSON(http.StatusNotFound, gin.H{
 			"code":    404,

@@ -84,11 +84,24 @@ func (p *DeviceIDProcessor) SmartConvertDeviceID(input string) (string, error) {
 
 	// 如果已经是8位十六进制，直接验证并返回
 	if len(input) == 8 {
-		// 验证格式
-		if _, _, err := p.ParseDeviceID(input); err != nil {
-			return "", err
+		// 🔧 修复：验证是否为真正的十六进制字符串（包含A-F字符）
+		// 只有包含十六进制字符的才被当作十六进制处理，纯数字的交给十进制处理
+		hasHexChars := false
+		for _, char := range input {
+			if char >= 'A' && char <= 'F' {
+				hasHexChars = true
+				break
+			}
 		}
-		return input, nil
+
+		if hasHexChars {
+			// 验证格式
+			if _, _, err := p.ParseDeviceID(input); err != nil {
+				return "", err
+			}
+			return input, nil
+		}
+		// 如果是纯数字，继续下面的十进制处理逻辑
 	}
 
 	// 如果是6位十六进制，添加04前缀
