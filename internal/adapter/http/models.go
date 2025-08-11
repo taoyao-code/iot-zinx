@@ -114,7 +114,7 @@ type ChargingStartParams struct {
 	DeviceID string `json:"deviceId" binding:"required" example:"04ceaa40" swaggertype:"string" description:"设备ID"`
 	Port     byte   `json:"port" binding:"required" example:"1" minimum:"1" maximum:"8" swaggertype:"integer" description:"充电端口号(1-8)"`
 	Mode     byte   `json:"mode" example:"0" enum:"0,1" swaggertype:"integer" description:"充电模式: 0=按时间 1=按电量"`
-	Value    uint16 `json:"value" binding:"required" example:"60" minimum:"1" swaggertype:"integer" description:"充电值: 时间(分钟)/电量(0.1度)"`
+	Value    uint16 `json:"value" binding:"required" example:"60" minimum:"1" swaggertype:"integer" description:"充电值: 时间(秒)/电量(0.1度)"`
 	OrderNo  string `json:"orderNo" binding:"required" example:"ORDER_20250619001" swaggertype:"string" description:"订单号"`
 	Balance  uint32 `json:"balance" example:"1000" swaggertype:"integer" description:"余额(分)，可选"`
 }
