@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/aceld/zinx/ziface"
 	"github.com/bujia-iot/iot-zinx/internal/infrastructure/logger"
@@ -12,8 +13,68 @@ import (
 )
 
 // ChargeControlHandler 处理充电控制命令 (命令ID: 0x82)
+// 处理设备发送给服务器的充电控制响应数据
 type ChargeControlHandler struct {
 	// 简化：移除复杂的依赖
+}
+
+// 充电控制响应状态码定义 - 基于AP3000协议文档
+const (
+	ChargeStatusSuccess          = 0x00 // 执行成功（启动或停止充电）
+	ChargeStatusNoCharger        = 0x01 // 端口未插充电器（不执行）
+	ChargeStatusSameState        = 0x02 // 端口状态和充电命令相同（不执行）
+	ChargeStatusPortFault        = 0x03 // 端口故障（执行）
+	ChargeStatusInvalidPort      = 0x04 // 无此端口号（不执行）
+	ChargeStatusMultiplePorts    = 0x05 // 有多个待充端口（不执行）
+	ChargeStatusPowerOverload    = 0x06 // 多路设备功率超标（不执行）
+	ChargeStatusStorageCorrupted = 0x07 // 存储器损坏
+	ChargeStatusRelayFault       = 0x08 // 预检-继电器坏或保险丝断
+	ChargeStatusRelayStuck       = 0x09 // 预检-继电器粘连（执行给充电）
+	ChargeStatusShortCircuit     = 0x0A // 预检-负载短路
+	ChargeStatusSmokeAlarm       = 0x0B // 烟感报警
+	ChargeStatusOverVoltage      = 0x0C // 过压（2024-08-07新增）
+	ChargeStatusUnderVoltage     = 0x0D // 欠压（2024-08-07新增）
+	ChargeStatusNoResponse       = 0x0E // 未响应（2024-08-07新增）
+)
+
+// getChargeStatusDescription 获取状态码描述
+func getChargeStatusDescription(status uint8) (string, bool, string) {
+	switch status {
+	case ChargeStatusSuccess:
+		return "执行成功", true, "INFO"
+	case ChargeStatusNoCharger:
+		return "端口未插充电器", false, "WARN"
+	case ChargeStatusSameState:
+		return "端口状态和充电命令相同", false, "INFO"
+	case ChargeStatusPortFault:
+		return "端口故障", true, "ERROR"
+	case ChargeStatusInvalidPort:
+		return "无此端口号", false, "ERROR"
+	case ChargeStatusMultiplePorts:
+		return "有多个待充端口", false, "WARN"
+	case ChargeStatusPowerOverload:
+		return "多路设备功率超标", false, "ERROR"
+	case ChargeStatusStorageCorrupted:
+		return "存储器损坏", false, "CRITICAL"
+	case ChargeStatusRelayFault:
+		return "预检-继电器坏或保险丝断", false, "ERROR"
+	case ChargeStatusRelayStuck:
+		return "预检-继电器粘连", true, "WARN"
+	case ChargeStatusShortCircuit:
+		return "预检-负载短路", false, "ERROR"
+	case ChargeStatusSmokeAlarm:
+		return "烟感报警", false, "CRITICAL"
+	case ChargeStatusOverVoltage:
+		return "过压", false, "ERROR"
+	case ChargeStatusUnderVoltage:
+		return "欠压", false, "ERROR"
+	case ChargeStatusNoResponse:
+		return "未响应", false, "ERROR"
+	case 79: // 0x4F - 特殊处理日志中出现的未知状态码
+		return "设备内部错误码79(可能是参数验证失败)", false, "ERROR"
+	default:
+		return fmt.Sprintf("未知状态码(0x%02X)", status), false, "ERROR"
+	}
 }
 
 // Handle 处理充电控制
@@ -52,29 +113,29 @@ func (h *ChargeControlHandler) PostHandle(request ziface.IRequest) {
 }
 
 // processChargeControl 处理充电控制业务逻辑
+// 处理设备发送给服务器的充电控制响应数据
 func (h *ChargeControlHandler) processChargeControl(result *protocol.DNYParseResult, conn ziface.IConnection) {
-	physicalId := result.PhysicalID
+	physicalID := result.PhysicalID
 	messageID := result.MessageID
-	command := result.Command
 	data := result.Data
 
 	logger.WithFields(logrus.Fields{
 		"connID":     conn.GetConnID(),
-		"physicalId": utils.FormatCardNumber(physicalId),
+		"physicalId": utils.FormatCardNumber(physicalID),
 		"messageID":  messageID,
-		"command":    fmt.Sprintf("0x%02X", command),
+		"command":    fmt.Sprintf("0x%02X", result.Command),
 		"dataLen":    len(data),
-	}).Info("处理充电控制请求")
+		"dataHex":    fmt.Sprintf("%X", data),
+	}).Info("📥 收到充电控制响应")
 
-	// 获取设备会话
+	// 获取设备会话并更新心跳
 	tcpManager := core.GetGlobalTCPManager()
 	if tcpManager == nil {
 		logger.Error("TCP管理器未初始化")
 		return
 	}
 
-	// 更新心跳时间
-	deviceID := utils.FormatPhysicalID(physicalId)
+	deviceID := utils.FormatPhysicalID(physicalID)
 	if err := tcpManager.UpdateHeartbeat(deviceID); err != nil {
 		logger.WithFields(logrus.Fields{
 			"deviceID": deviceID,
@@ -82,50 +143,99 @@ func (h *ChargeControlHandler) processChargeControl(result *protocol.DNYParseRes
 		}).Warn("更新设备心跳失败")
 	}
 
-	// 解析充电控制数据
+	// 解析充电控制响应数据
 	if len(data) < 2 {
-		logger.Error("充电控制数据长度不足")
+		logger.WithFields(logrus.Fields{
+			"physicalId": utils.FormatCardNumber(physicalID),
+			"dataLen":    len(data),
+		}).Error("充电控制响应数据长度不足，至少需要2字节")
 		return
 	}
 
-	port := data[0]   // 端口号
-	action := data[1] // 操作：0x01开始，0x00停止
+	// 解析响应数据（支持2字节简化格式和20字节完整格式）
+	var status uint8
+	var portNumber uint8
+	var orderNumber string
+	var waitingPorts uint16
 
-	logger.WithFields(logrus.Fields{
-		"physicalId": utils.FormatCardNumber(physicalId),
-		"port":       port,
-		"action":     action,
-	}).Info("执行充电控制")
+	if len(data) >= 20 {
+		// 完整的20字节响应格式：状态码(1) + 订单号(16) + 端口号(1) + 待充端口(2)
+		status = data[0]
+		orderNumber = string(data[1:17])
+		// 移除字符串末尾的空字节
+		if idx := strings.Index(orderNumber, "\x00"); idx >= 0 {
+			orderNumber = orderNumber[:idx]
+		}
+		portNumber = data[17]
+		waitingPorts = uint16(data[18]) | (uint16(data[19]) << 8) // 小端序
 
-	// 构造响应数据
-	var responseData []byte
-	if action == 0x01 {
-		// 开始充电
-		responseData = []byte{port, 0x01} // 成功
 		logger.WithFields(logrus.Fields{
-			"physicalId": utils.FormatCardNumber(physicalId),
-			"port":       port,
-		}).Info("开始充电")
-	} else if action == 0x00 {
-		// 停止充电
-		responseData = []byte{port, 0x01} // 成功
-		logger.WithFields(logrus.Fields{
-			"physicalId": utils.FormatCardNumber(physicalId),
-			"port":       port,
-		}).Info("停止充电")
+			"physicalId":   utils.FormatCardNumber(physicalID),
+			"format":       "完整格式(20字节)",
+			"status":       fmt.Sprintf("0x%02X", status),
+			"orderNumber":  orderNumber,
+			"portNumber":   portNumber,
+			"waitingPorts": fmt.Sprintf("0x%04X", waitingPorts),
+		}).Info("解析完整充电控制响应")
 	} else {
-		// 未知操作
-		responseData = []byte{port, 0x00} // 失败
+		// 简化的2字节响应格式：端口号(1) + 状态码(1)
+		portNumber = data[0]
+		status = data[1]
+
 		logger.WithFields(logrus.Fields{
-			"action": action,
-		}).Warn("未知的充电控制操作")
+			"physicalId": utils.FormatCardNumber(physicalID),
+			"format":     "简化格式(2字节)",
+			"portNumber": portNumber,
+			"status":     fmt.Sprintf("0x%02X", status),
+		}).Info("解析简化充电控制响应")
 	}
 
-	// 发送响应
-	if err := protocol.SendDNYResponse(conn, physicalId, messageID, command, responseData); err != nil {
+	// 端口号转换：协议0-based转显示1-based
+	displayPort := portNumber
+	if portNumber != 0xFF { // 0xFF表示智能选择，保持不变
+		displayPort = portNumber + 1
+	}
+
+	// 获取状态码描述
+	description, isExecuted, severity := getChargeStatusDescription(status)
+
+	// 记录详细的响应信息
+	logFields := logrus.Fields{
+		"physicalId":   utils.FormatCardNumber(physicalID),
+		"deviceId":     fmt.Sprintf("%08X", physicalID),
+		"portNumber":   displayPort,
+		"protocolPort": portNumber,
+		"status":       fmt.Sprintf("0x%02X", status),
+		"statusDesc":   description,
+		"isExecuted":   isExecuted,
+		"severity":     severity,
+		"orderNumber":  orderNumber,
+		"waitingPorts": fmt.Sprintf("0x%04X", waitingPorts),
+		"messageID":    messageID,
+	}
+
+	// 根据严重程度记录日志
+	switch severity {
+	case "CRITICAL":
+		logger.WithFields(logFields).Error("🚨 充电控制严重错误")
+	case "ERROR":
+		logger.WithFields(logFields).Error("❌ 充电控制错误")
+	case "WARN":
+		logger.WithFields(logFields).Warn("⚠️ 充电控制警告")
+	case "INFO":
+		if isExecuted {
+			logger.WithFields(logFields).Info("✅ 充电控制执行成功")
+		} else {
+			logger.WithFields(logFields).Info("ℹ️ 充电控制未执行")
+		}
+	}
+
+	// 发送确认响应（简化的2字节格式）
+	responseData := []byte{portNumber, 0x01} // 确认收到
+	if err := protocol.SendDNYResponse(conn, physicalID, messageID, result.Command, responseData); err != nil {
 		logger.WithFields(logrus.Fields{
-			"physicalId": utils.FormatCardNumber(physicalId),
+			"physicalId": utils.FormatCardNumber(physicalID),
 			"error":      err.Error(),
-		}).Error("发送充电控制响应失败")
+		}).Error("发送充电控制确认响应失败")
 	}
 }
