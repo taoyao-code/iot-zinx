@@ -11,7 +11,7 @@ import (
 type UnifiedDeviceInfo struct {
 	// === 核心标识 ===
 	DeviceID   string `json:"deviceId" mapstructure:"device_id"`     // 设备ID（主键）
-	PhysicalID string `json:"physicalId" mapstructure:"physical_id"` // 物理ID
+	PhysicalID uint32 `json:"physicalId" mapstructure:"physical_id"` // 物理ID - 统一uint32格式
 	ICCID      string `json:"iccid" mapstructure:"iccid"`            // SIM卡号
 
 	// === 连接信息 ===
@@ -52,7 +52,7 @@ type UnifiedMessageInfo struct {
 	// === 协议信息 ===
 	Command     uint8  `json:"command" mapstructure:"command"`          // 命令字
 	CommandName string `json:"commandName" mapstructure:"command_name"` // 命令名称
-	PhysicalID  string `json:"physicalId" mapstructure:"physical_id"`   // 物理ID
+	PhysicalID  uint32 `json:"physicalId" mapstructure:"physical_id"`   // 物理ID
 
 	// === 数据信息 ===
 	DataHex string `json:"dataHex" mapstructure:"data_hex"` // 数据十六进制

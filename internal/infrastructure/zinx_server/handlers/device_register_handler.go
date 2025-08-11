@@ -243,12 +243,11 @@ func (h *DeviceRegisterHandler) handleDeviceRegister(deviceId string, physicalId
 
 	// 🔧 使用统一架构：设备状态由统一架构自动管理
 	// 设备注册成功后，状态自动设置为在线
-	// 4. 设置Zinx框架层的session
+	// 4. 设置Zinx框架层的session - 统一PhysicalID存储
 	linkedSession, err := h.GetOrCreateDeviceSession(conn)
 	if err == nil && linkedSession != nil {
 		linkedSession.DeviceID = deviceId
-		// 🔧 统一格式标准：使用不带0x前缀的8位大写十六进制格式
-		linkedSession.PhysicalID = utils.FormatPhysicalID(uint32(physicalId))
+		linkedSession.PhysicalID = uint32(physicalId) // 统一：直接存储uint32
 		linkedSession.LastActivityAt = time.Now()
 		linkedSession.SyncToConnection(conn)
 

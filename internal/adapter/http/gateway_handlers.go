@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/bujia-iot/iot-zinx/pkg/gateway"
+	"github.com/bujia-iot/iot-zinx/pkg/utils"
 	"github.com/gin-gonic/gin"
 )
 
@@ -196,8 +197,20 @@ func (h *DeviceGatewayHandlers) HandleStartCharging(c *gin.Context) {
 		return
 	}
 
-	// 🚀 新架构：一行代码检查设备在线状态
-	if !h.deviceGateway.IsDeviceOnline(req.DeviceID) {
+	// � 智能DeviceID处理：支持十进制、6位十六进制、8位十六进制
+	processor := &utils.DeviceIDProcessor{}
+	standardDeviceID, err := processor.SmartConvertDeviceID(req.DeviceID)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"code":    400,
+			"message": "DeviceID格式错误: " + err.Error(),
+			"hint":    "支持格式: 十进制(10644723)、6位十六进制(A26CF3)、8位十六进制(04A26CF3)",
+		})
+		return
+	}
+
+	// �🚀 新架构：一行代码检查设备在线状态
+	if !h.deviceGateway.IsDeviceOnline(standardDeviceID) {
 		c.JSON(http.StatusNotFound, gin.H{
 			"code":    404,
 			"message": "设备不在线",
@@ -206,7 +219,7 @@ func (h *DeviceGatewayHandlers) HandleStartCharging(c *gin.Context) {
 	}
 
 	// 🚀 新架构：发送完整参数的充电命令（包含订单号、充电模式、充电值、余额等）
-	err := h.deviceGateway.SendChargingCommandWithParams(req.DeviceID, req.Port, 0x01, req.OrderNo, req.Mode, req.Value, req.Balance)
+	err = h.deviceGateway.SendChargingCommandWithParams(standardDeviceID, req.Port, 0x01, req.OrderNo, req.Mode, req.Value, req.Balance)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"code":    500,
@@ -220,14 +233,15 @@ func (h *DeviceGatewayHandlers) HandleStartCharging(c *gin.Context) {
 		"code":    0,
 		"message": "充电启动成功",
 		"data": gin.H{
-			"deviceId":  req.DeviceID,
-			"port":      req.Port,
-			"orderNo":   req.OrderNo,
-			"mode":      req.Mode,
-			"value":     req.Value,
-			"balance":   req.Balance,
-			"action":    "start",
-			"timestamp": time.Now().Unix(),
+			"deviceId":   req.DeviceID,     // 用户输入的原始格式
+			"standardId": standardDeviceID, // 标准化后的8位十六进制格式
+			"port":       req.Port,
+			"orderNo":    req.OrderNo,
+			"mode":       req.Mode,
+			"value":      req.Value,
+			"balance":    req.Balance,
+			"action":     "start",
+			"timestamp":  time.Now().Unix(),
 		},
 	})
 }
@@ -370,8 +384,20 @@ func (h *DeviceGatewayHandlers) HandleDeviceLocate(c *gin.Context) {
 		return
 	}
 
+	// 🔧 智能DeviceID处理：支持十进制、6位十六进制、8位十六进制
+	processor := &utils.DeviceIDProcessor{}
+	standardDeviceID, err := processor.SmartConvertDeviceID(req.DeviceID)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"code":    400,
+			"message": "DeviceID格式错误: " + err.Error(),
+			"hint":    "支持格式: 十进制(10644723)、6位十六进制(A26CF3)、8位十六进制(04A26CF3)",
+		})
+		return
+	}
+
 	//  新架构：发送定位命令（使用正确的0x96命令）
-	err := h.deviceGateway.SendLocationCommand(req.DeviceID, int(req.LocateTime))
+	err = h.deviceGateway.SendLocationCommand(standardDeviceID, int(req.LocateTime))
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"code":    500,
@@ -384,7 +410,8 @@ func (h *DeviceGatewayHandlers) HandleDeviceLocate(c *gin.Context) {
 		"code":    0,
 		"message": "定位命令发送成功",
 		"data": gin.H{
-			"deviceId":   req.DeviceID,
+			"deviceId":   req.DeviceID,     // 用户输入的原始格式
+			"standardId": standardDeviceID, // 标准化后的8位十六进制格式
 			"action":     "locate",
 			"locateTime": req.LocateTime,
 		},

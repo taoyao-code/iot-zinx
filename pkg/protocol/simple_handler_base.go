@@ -18,7 +18,7 @@ import (
 type DeviceSession struct {
 	ConnID         uint64    `json:"conn_id"`
 	DeviceID       string    `json:"device_id"`
-	PhysicalID     string    `json:"physical_id"`
+	PhysicalID     uint32    `json:"physical_id"`
 	ICCID          string    `json:"iccid"`
 	DeviceType     uint16    `json:"device_type"`
 	RemoteAddr     string    `json:"remote_addr"`

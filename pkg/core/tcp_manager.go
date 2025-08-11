@@ -45,7 +45,7 @@ type ConnectionSession struct {
 
 	// === 设备信息 ===
 	DeviceID      string `json:"device_id"`
-	PhysicalID    string `json:"physical_id"`
+	PhysicalID    uint32 `json:"physical_id"` // 统一格式：直接存储uint32
 	ICCID         string `json:"iccid"`
 	DeviceType    uint16 `json:"device_type"`
 	DeviceVersion string `json:"device_version"`
@@ -114,7 +114,7 @@ func (dg *DeviceGroup) Unlock() {
 // 🚀 新增：独立的设备信息结构，从session中分离
 type Device struct {
 	DeviceID        string                          `json:"device_id"`
-	PhysicalID      string                          `json:"physical_id"`
+	PhysicalID      uint32                          `json:"physical_id"`
 	ICCID           string                          `json:"iccid"`
 	DeviceType      uint16                          `json:"device_type"`
 	DeviceVersion   string                          `json:"device_version"`
@@ -309,7 +309,7 @@ func (m *TCPManager) RegisterDevice(conn ziface.IConnection, deviceID, physicalI
 	// 更新会话信息
 	session.mutex.Lock()
 	session.DeviceID = deviceID
-	session.PhysicalID = physicalID
+	session.PhysicalID, _ = utils.ParseDeviceIDToPhysicalID(physicalID) // 转换为uint32
 	session.ICCID = iccid
 	session.RegisteredAt = time.Now()
 	session.DeviceStatus = constants.DeviceStatusOnline
@@ -334,9 +334,10 @@ func (m *TCPManager) RegisterDevice(conn ziface.IConnection, deviceID, physicalI
 
 		// 更新设备组信息
 		deviceGroup.Sessions[deviceID] = session
+		physicalIDNum, _ := utils.ParseDeviceIDToPhysicalID(physicalID)
 		deviceGroup.Devices[deviceID] = &Device{
 			DeviceID:     deviceID,
-			PhysicalID:   physicalID,
+			PhysicalID:   physicalIDNum,
 			ICCID:        iccid,
 			Status:       constants.DeviceStatusOnline,
 			State:        constants.StateRegistered,
@@ -356,9 +357,10 @@ func (m *TCPManager) RegisterDevice(conn ziface.IConnection, deviceID, physicalI
 		// 创建新设备组 - 确保原子性
 		deviceGroup = NewDeviceGroup(conn, iccid)
 		deviceGroup.Sessions[deviceID] = session
+		physicalIDNum, _ := utils.ParseDeviceIDToPhysicalID(physicalID)
 		deviceGroup.Devices[deviceID] = &Device{
 			DeviceID:     deviceID,
-			PhysicalID:   physicalID,
+			PhysicalID:   physicalIDNum,
 			ICCID:        iccid,
 			Status:       constants.DeviceStatusOnline,
 			State:        constants.StateRegistered,

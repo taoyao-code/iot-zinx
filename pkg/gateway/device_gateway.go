@@ -193,25 +193,16 @@ func (g *DeviceGateway) SendCommandToDevice(deviceID string, command byte, data 
 	}
 
 	// 构建DNY协议数据包
-	// 需要将deviceID转换为physicalID
 	session, sessionExists := g.tcpManager.GetSessionByDeviceID(deviceID)
 	if !sessionExists {
 		return fmt.Errorf("设备会话不存在")
 	}
 
+	// 统一：直接使用uint32格式的PhysicalID
+	physicalID := session.PhysicalID
+
 	// 使用统一DNY构建器
 	builder := protocol.NewUnifiedDNYBuilder()
-
-	// 统一格式标准：PhysicalID存储为8位大写十六进制格式（不带0x前缀）
-	var physicalID uint32
-	if session.PhysicalID == "" {
-		return fmt.Errorf("设备 PhysicalID 为空，无法发送命令")
-	}
-
-	// 统一格式解析：仅支持8位大写十六进制格式（不带0x前缀）
-	if _, err := fmt.Sscanf(session.PhysicalID, "%08X", &physicalID); err != nil {
-		return fmt.Errorf("解析 physicalID 失败，格式必须为8位大写十六进制: %s", session.PhysicalID)
-	}
 	dnyPacket := builder.BuildDNYPacket(physicalID, 0x0001, command, data)
 
 	// � 详细Hex数据日志 - 用于调试命令发送问题
