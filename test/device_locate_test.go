@@ -60,7 +60,9 @@ func testDeviceLocate(t *testing.T) {
 	// 3. 测试DNY协议包生成
 	fmt.Println("\n=== 3. 测试DNY协议包生成 ===")
 	builder := protocol.NewUnifiedDNYBuilder()
-	dnyPacket := builder.BuildDNYPacket(physicalID, 0x0001, 0x96, []byte{locateTime})
+	// 🔧 修复：使用动态MessageID而不是固定0x0001
+	messageID := uint16(0x0001) // 测试用固定值，实际应用中使用pkg.Protocol.GetNextMessageID()
+	dnyPacket := builder.BuildDNYPacket(physicalID, messageID, 0x96, []byte{locateTime})
 
 	actualPacket := fmt.Sprintf("%X", dnyPacket)
 	fmt.Printf("生成的报文: %s\n", actualPacket)

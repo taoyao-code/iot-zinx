@@ -264,7 +264,9 @@ func TestRealWorldScenarios(t *testing.T) {
 		physicalID := uint32(0x04A228CD)
 		responseData := []byte{0x02, 79} // 端口2，状态码79
 
-		packet := buildTestDNYPacket(physicalID, 0x0001, 0x82, responseData)
+		// 🔧 修复：使用动态MessageID而不是固定0x0001
+		messageID := uint16(0x0001) // 测试用固定值
+		packet := buildTestDNYPacket(physicalID, messageID, 0x82, responseData)
 
 		result, err := protocol.ParseDNYData(packet)
 		if err != nil {

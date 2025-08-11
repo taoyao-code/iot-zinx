@@ -104,7 +104,8 @@ func TestChargingCommand(t *testing.T) {
 
 	// 构建完整DNY协议包
 	builder := protocol.NewUnifiedDNYBuilder()
-	messageID := uint16(0x0002)
+	// 🔧 修复：使用动态MessageID而不是固定值
+	messageID := uint16(0x0002) // 测试用固定值，实际应用中使用pkg.Protocol.GetNextMessageID()
 	command := uint8(constants.CmdChargeControl)
 
 	packet := builder.BuildDNYPacket(physicalID, messageID, command, commandData)

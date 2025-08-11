@@ -18,6 +18,7 @@ import (
 
 	"github.com/bujia-iot/iot-zinx/internal/infrastructure/config"
 	"github.com/bujia-iot/iot-zinx/internal/infrastructure/logger"
+	"github.com/bujia-iot/iot-zinx/pkg"
 	"github.com/bujia-iot/iot-zinx/pkg/constants"
 	"github.com/bujia-iot/iot-zinx/pkg/core"
 	"github.com/bujia-iot/iot-zinx/pkg/network"
@@ -257,20 +258,24 @@ func (g *DeviceGateway) SendCommandToDevice(deviceID string, command byte, data 
 	physicalID := expectedPhysicalID
 
 	// 使用统一DNY构建器，确保使用小端序（符合AP3000协议规范）
+	// 🔧 修复：使用动态MessageID避免重复，防止设备混乱
+	messageID := pkg.Protocol.GetNextMessageID()
 	builder := protocol.NewUnifiedDNYBuilder()
-	dnyPacket := builder.BuildDNYPacket(physicalID, 0x0001, command, data)
+	dnyPacket := builder.BuildDNYPacket(physicalID, messageID, command, data)
 
 	// 🔧 详细Hex数据日志 - 用于调试命令发送问题
 	logger.WithFields(logrus.Fields{
 		"deviceID":        deviceID,
 		"physicalID":      utils.FormatPhysicalID(physicalID),
+		"messageID":       fmt.Sprintf("0x%04X", messageID),
 		"command":         fmt.Sprintf("0x%02X", command),
 		"commandName":     g.getCommandName(command),
 		"dataLen":         len(data),
 		"dataHex":         fmt.Sprintf("%X", data),
 		"packetHex":       fmt.Sprintf("%X", dnyPacket),
 		"packetLen":       len(dnyPacket),
-		"packetStructure": g.analyzePacketStructure(dnyPacket, physicalID, command),
+		"msgID":           messageID,
+		"packetStructure": g.analyzePacketStructure(dnyPacket, physicalID, command, messageID),
 		"byteOrder":       "小端序(Little-Endian)",
 		"action":          "SEND_DNY_PACKET",
 	}).Info("📡 发送DNY命令数据包 - 详细Hex记录")
@@ -399,8 +404,38 @@ func (g *DeviceGateway) SendChargingCommand(deviceID string, port uint8, action 
  * @return {error}
  */
 func (g *DeviceGateway) SendChargingCommandWithParams(deviceID string, port uint8, action uint8, orderNo string, mode uint8, value uint16, balance uint32) error {
+	// 🔧 增强参数验证
+	if deviceID == "" {
+		return fmt.Errorf("设备ID不能为空")
+	}
 	if port == 0 {
 		return fmt.Errorf("端口号不能为0")
+	}
+
+	// 订单号长度验证 - 协议限制16字节
+	if len(orderNo) > 16 {
+		return fmt.Errorf("订单号长度超过限制：当前%d字节，最大16字节，订单号：%s", len(orderNo), orderNo)
+	}
+
+	// 充电参数验证
+	if mode == 0 && value == 0 {
+		return fmt.Errorf("按时间充电时，充电时长不能为0秒")
+	}
+	if mode == 1 && value == 0 {
+		return fmt.Errorf("按电量充电时，充电电量不能为0")
+	}
+	if mode > 1 {
+		return fmt.Errorf("充电模式无效：%d，有效值：0(按时间)或1(按电量)", mode)
+	}
+	if action > 1 {
+		return fmt.Errorf("充电动作无效：%d，有效值：0(停止)或1(开始)", action)
+	}
+
+	if balance == 0 {
+		return fmt.Errorf("余额不能为0")
+	}
+	if value == 0 {
+		return fmt.Errorf("充电值不能为0")
 	}
 
 	// 🔧 修复：使用正确的AP3000协议82指令格式（37字节）
@@ -430,7 +465,7 @@ func (g *DeviceGateway) SendChargingCommandWithParams(deviceID string, port uint
 	commandData[7] = byte(actualValue)
 	commandData[8] = byte(actualValue >> 8)
 
-	// 订单编号(16字节)
+	// 订单编号(16字节) - 🔧 修复：处理订单号长度超限问题
 	orderBytes := make([]byte, 16)
 	if len(orderNo) > 0 {
 		copy(orderBytes, []byte(orderNo))
@@ -825,11 +860,11 @@ func (g *DeviceGateway) getCommandName(command byte) string {
 }
 
 // analyzePacketStructure 分析数据包结构（用于调试）
-func (g *DeviceGateway) analyzePacketStructure(packet []byte, physicalID uint32, command byte) string {
+func (g *DeviceGateway) analyzePacketStructure(packet []byte, physicalID uint32, command byte, messageID uint16) string {
 	if len(packet) < 12 {
 		return "数据包长度不足"
 	}
 
-	return fmt.Sprintf("Header=DNY, Length=%d, PhysicalID=0x%08X, MessageID=0x0001, Command=0x%02X",
-		len(packet)-5, physicalID, command)
+	return fmt.Sprintf("Header=DNY, Length=%d, PhysicalID=0x%08X, MessageID=, Command=0x%02X",
+		len(packet)-5, physicalID, messageID, command)
 }
