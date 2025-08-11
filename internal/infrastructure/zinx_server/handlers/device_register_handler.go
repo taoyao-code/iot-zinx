@@ -295,7 +295,7 @@ func (h *DeviceRegisterHandler) handleDeviceRegister(deviceId string, physicalId
 	// 7. 记录设备注册信息
 	logger.WithFields(logrus.Fields{
 		"connID":            conn.GetConnID(),
-		"physicalIdHex":     utils.FormatPhysicalIDForLog(physicalId),
+		"physicalIdHex":     utils.FormatPhysicalID(physicalId),
 		"physicalIdStr":     deviceId,
 		"iccid":             iccidFromProp,
 		"connState":         constants.ConnStatusActiveRegistered,
@@ -346,7 +346,7 @@ func (h *DeviceRegisterHandler) sendRegisterResponse(deviceId string, physicalId
 	if err := protocol.SendDNYResponse(conn, physicalId, messageID, constants.CmdDeviceRegister, responseData); err != nil {
 		logger.WithFields(logrus.Fields{
 			"connID":     conn.GetConnID(),
-			"physicalId": utils.FormatPhysicalIDForLog(physicalId),
+			"physicalId": utils.FormatPhysicalID(physicalId),
 			"deviceId":   deviceId,
 			"error":      err.Error(),
 		}).Error("发送注册响应失败")

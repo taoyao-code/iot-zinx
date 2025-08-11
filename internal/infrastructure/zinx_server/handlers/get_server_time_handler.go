@@ -124,7 +124,7 @@ func (h *GetServerTimeHandler) processGetServerTime(decodedFrame *protocol.Decod
 
 	logger.WithFields(logrus.Fields{
 		"connID":     conn.GetConnID(),
-		"physicalID": utils.FormatPhysicalIDForLog(physicalId),
+		"physicalID": utils.FormatPhysicalID(physicalId),
 		"deviceId":   deviceId,
 		"messageID":  fmt.Sprintf("0x%04X", messageId),
 	}).Info("获取服务器时间处理器：处理请求")

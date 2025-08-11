@@ -62,11 +62,11 @@ func ValidateDeviceID(deviceID string) error {
 	return err
 }
 
-// FormatPhysicalID 格式化PhysicalID为8位十六进制字符串（不带0x前缀）
-// 统一设备ID格式标准：使用8位大写十六进制字符串，如 "04A228CD"
-// 用于内部数据处理和存储
+// FormatPhysicalID 格式化PhysicalID为8位十六进制字符串（统一格式）
+// 统一格式标准：使用8位大写十六进制字符串，如 "04A228CD"
+// 用于所有场景：内部数据处理、存储、日志记录
 func FormatPhysicalID(physicalID uint32) string {
-	return FormatCardNumber(physicalID)
+	return fmt.Sprintf("%08X", physicalID)
 }
 
 // FormatPhysicalIDForDisplay 格式化PhysicalID为用户显示格式（十进制）
@@ -74,7 +74,7 @@ func FormatPhysicalID(physicalID uint32) string {
 // 用于用户界面显示和API响应
 func FormatPhysicalIDForDisplay(physicalID uint32) string {
 	// 先格式化为标准的8位十六进制字符串
-	hexStr := FormatCardNumber(physicalID)
+	hexStr := FormatPhysicalID(physicalID)
 
 	// 检查是否以04开头（这是设备ID的标准前缀）
 	if len(hexStr) >= 2 && hexStr[:2] == "04" {
@@ -90,15 +90,7 @@ func FormatPhysicalIDForDisplay(physicalID uint32) string {
 	return fmt.Sprintf("%d", physicalID)
 }
 
-// FormatCardNumber 统一卡号格式化为8位十六进制字符串（不带0x前缀）
-// 统一卡号格式标准：使用8位大写十六进制字符串，如 "12345678"
+// FormatCardNumber 统一卡号格式化（与FormatPhysicalID相同）
 func FormatCardNumber(cardID uint32) string {
-	return fmt.Sprintf("%08X", cardID)
-}
-
-// FormatPhysicalIDForLog 格式化PhysicalID为日志记录格式（带0x前缀的8位十六进制）
-// 统一日志格式标准：使用带0x前缀的8位大写十六进制字符串，如 "0x04A228CD"
-// 用于日志记录、调试输出和错误信息
-func FormatPhysicalIDForLog(physicalID uint32) string {
-	return FormatCardNumber(physicalID)
+	return FormatPhysicalID(cardID)
 }

@@ -7,9 +7,21 @@
  *
  * 【重要！！！重要！！！重要！！！】
  * 这里是IoT设备网关的核心组件库！
- * 借鉴WebSocket网关的简洁设计理念，提供统一的设备管理接口
- * 请谨慎修改此处的代码，除非你知道这意味着什么！
- */
+ * 借鉴WebSocket网关的简洁设计理念，提供统一的设备管理接口	// 🔧 详细Hex数据日志 - 用于调试命令发送问题
+	logger.WithFields(logrus.Fields{
+		"deviceID":         deviceID,
+		"physicalID":       utils.FormatPhysicalID(physicalID),
+		"command":          fmt.Sprintf("0x%02X", command),
+		"commandName":      g.getCommandName(command),
+		"dataLen":          len(data),
+		"dataHex":          fmt.Sprintf("%X", data),
+		"packetHex":        fmt.Sprintf("%X", dnyPacket),
+		"packetLen":        len(dnyPacket),
+		"packetStructure":  g.analyzePacketStructure(dnyPacket, physicalID, command),
+		"byteOrder":        "小端序(Little-Endian)",
+		"action":           "SEND_DNY_PACKET",
+	}).Info("📡 发送DNY命令数据包 - 详细Hex记录")，除非你知道这意味着什么！
+*/
 
 package gateway
 
@@ -210,14 +222,14 @@ func (g *DeviceGateway) SendCommandToDevice(deviceID string, command byte, data 
 	if expectedPhysicalID != sessionPhysicalID {
 		logger.WithFields(logrus.Fields{
 			"deviceID":           deviceID,
-			"expectedPhysicalID": fmt.Sprintf("0x%08X", expectedPhysicalID),
-			"sessionPhysicalID":  fmt.Sprintf("0x%08X", sessionPhysicalID),
+			"expectedPhysicalID": utils.FormatPhysicalID(expectedPhysicalID),
+			"sessionPhysicalID":  utils.FormatPhysicalID(sessionPhysicalID),
 			"sessionDeviceID":    session.DeviceID,
 			"action":             "DEVICE_ID_MISMATCH_DETECTED",
 		}).Error("🚨 设备ID与Session物理ID不匹配，数据一致性错误")
 
-		return fmt.Errorf("设备索引数据不一致: API请求设备%s(期望物理ID=0x%08X)，但Session映射到物理ID(0x%08X)",
-			deviceID, expectedPhysicalID, sessionPhysicalID)
+		return fmt.Errorf("设备索引数据不一致: API请求设备%s(期望物理ID=%s)，但Session映射到物理ID(%s)",
+			deviceID, utils.FormatPhysicalID(expectedPhysicalID), utils.FormatPhysicalID(sessionPhysicalID))
 	}
 
 	// 使用API请求的正确PhysicalID，而不是Session中可能错误的值
@@ -230,7 +242,7 @@ func (g *DeviceGateway) SendCommandToDevice(deviceID string, command byte, data 
 	// 🔧 详细Hex数据日志 - 用于调试命令发送问题
 	logger.WithFields(logrus.Fields{
 		"deviceID":        deviceID,
-		"physicalID":      utils.FormatPhysicalIDForLog(physicalID),
+		"physicalID":      utils.FormatPhysicalID(physicalID),
 		"command":         fmt.Sprintf("0x%02X", command),
 		"commandName":     g.getCommandName(command),
 		"dataLen":         len(data),

@@ -2,7 +2,6 @@ package core
 
 import (
 	"fmt"
-	"strings"
 	"sync"
 	"time"
 
@@ -526,98 +525,11 @@ func (m *TCPManager) RebuildDeviceIndex(deviceID string, session *ConnectionSess
 }
 
 // GetSessionByDeviceID 通过设备ID获取会话
-// 🔧 增强：支持格式兼容性，自动处理带/不带0x前缀的deviceID
+// 🔧 简化：直接查找，不进行格式转换
 func (m *TCPManager) GetSessionByDeviceID(deviceID string) (*ConnectionSession, bool) {
-	// 🚀 新架构：deviceID → iccid → DeviceGroup → Session
 	iccidInterface, exists := m.deviceIndex.Load(deviceID)
 	if !exists {
-		// 🔧 格式兼容性增强：如果直接查找失败，尝试格式转换
-		var alternativeID string
-		if strings.HasPrefix(strings.ToLower(deviceID), "0x") {
-			// 如果输入带0x前缀，尝试去掉前缀查找
-			alternativeID = strings.TrimPrefix(strings.ToLower(deviceID), "0x")
-			alternativeID = strings.ToUpper(alternativeID)
-			// 补齐到8位
-			if len(alternativeID) < 8 {
-				alternativeID = fmt.Sprintf("%08s", alternativeID)
-			}
-		} else {
-			// 如果输入不带前缀，尝试添加0x前缀查找（向后兼容）
-			if physicalID, err := utils.ParseDeviceIDToPhysicalID(deviceID); err == nil {
-				alternativeID = utils.FormatPhysicalIDForLog(physicalID)
-			}
-		}
-
-		// 尝试查找替代格式
-		if alternativeID != "" && alternativeID != deviceID {
-			if altIccidInterface, altExists := m.deviceIndex.Load(alternativeID); altExists {
-				// 找到了，使用替代格式的结果，但更新索引为标准格式
-				iccidInterface = altIccidInterface
-				exists = true
-				// 建立标准格式的索引映射
-				standardID := deviceID
-				if strings.HasPrefix(strings.ToLower(deviceID), "0x") {
-					// 输入是带0x前缀的，标准化为不带前缀
-					if physicalID, err := utils.ParseDeviceIDToPhysicalID(deviceID); err == nil {
-						standardID = utils.FormatPhysicalID(physicalID)
-					}
-				}
-				m.deviceIndex.Store(standardID, iccidInterface)
-				logger.WithFields(logrus.Fields{
-					"originalID":    deviceID,
-					"alternativeID": alternativeID,
-					"standardID":    standardID,
-				}).Debug("🔧 通过格式转换找到设备，建立标准格式索引")
-			}
-		}
-
-		// 如果格式转换也失败，使用后备方案：遍历所有设备组查找设备
-		if !exists {
-			var foundSession *ConnectionSession
-			var foundICCID string
-
-			m.deviceGroups.Range(func(key, value interface{}) bool {
-				iccid := key.(string)
-				group := value.(*DeviceGroup)
-				group.mutex.RLock()
-				// 尝试原始ID和替代ID
-				if session, deviceExists := group.Sessions[deviceID]; deviceExists {
-					foundSession = session
-					foundICCID = iccid
-					group.mutex.RUnlock()
-					return false // 找到了，停止遍历
-				}
-				if alternativeID != "" {
-					if session, deviceExists := group.Sessions[alternativeID]; deviceExists {
-						foundSession = session
-						foundICCID = iccid
-						group.mutex.RUnlock()
-						return false // 找到了，停止遍历
-					}
-				}
-				group.mutex.RUnlock()
-				return true // 继续遍历
-			})
-
-			if foundSession != nil {
-				// 修复设备索引映射，使用标准格式
-				standardID := deviceID
-				if strings.HasPrefix(strings.ToLower(deviceID), "0x") {
-					if physicalID, err := utils.ParseDeviceIDToPhysicalID(deviceID); err == nil {
-						standardID = utils.FormatPhysicalID(physicalID)
-					}
-				}
-				m.deviceIndex.Store(standardID, foundICCID)
-				logger.WithFields(logrus.Fields{
-					"deviceID":   deviceID,
-					"standardID": standardID,
-					"iccid":      foundICCID,
-				}).Debug("🔧 通过遍历找到设备，修复设备索引映射")
-				return foundSession, true
-			}
-
-			return nil, false
-		}
+		return nil, false
 	}
 
 	iccid := iccidInterface.(string)
@@ -644,96 +556,25 @@ func (m *TCPManager) GetSessionByDeviceID(deviceID string) (*ConnectionSession, 
 
 // GetDeviceByID 通过设备ID获取设备信息
 // 🚀 新架构：专门用于获取设备信息的方法
-// 🔧 增强：支持智能查找，兼容带/不带0x前缀的设备ID格式
+// 🔧 简化：直接查找，不进行格式转换
 func (m *TCPManager) GetDeviceByID(deviceID string) (*Device, bool) {
-	fmt.Printf("🔍 [TCPManager.GetDeviceByID] 开始查找设备: deviceID=%s\n", deviceID)
-
-	// 首先尝试直接查找（原有逻辑）
 	iccidInterface, exists := m.deviceIndex.Load(deviceID)
-	if exists {
-		fmt.Printf("✅ [TCPManager.GetDeviceByID] 在deviceIndex中找到映射: deviceID=%s, iccid=%s\n", deviceID, iccidInterface.(string))
-
-		iccid := iccidInterface.(string)
-		groupInterface, exists := m.deviceGroups.Load(iccid)
-		if exists {
-			group := groupInterface.(*DeviceGroup)
-			group.mutex.RLock()
-			device, exists := group.Devices[deviceID]
-			fmt.Printf("🔍 [TCPManager.GetDeviceByID] 检查设备组: iccid=%s, 设备数=%d, 目标设备存在=%t\n",
-				iccid, len(group.Devices), exists)
-			group.mutex.RUnlock()
-			if exists {
-				fmt.Printf("✅ [TCPManager.GetDeviceByID] 直接查找成功: deviceID=%s\n", deviceID)
-				return device, true
-			} else {
-				fmt.Printf("⚠️ [TCPManager.GetDeviceByID] 在deviceIndex中有映射但在设备组中不存在: deviceID=%s\n", deviceID)
-			}
-		} else {
-			fmt.Printf("❌ [TCPManager.GetDeviceByID] 设备组不存在: deviceID=%s, iccid=%s\n", deviceID, iccid)
-		}
-	} else {
-		fmt.Printf("⚠️ [TCPManager.GetDeviceByID] 在deviceIndex中未找到映射: deviceID=%s\n", deviceID)
+	if !exists {
+		return nil, false
 	}
 
-	// 🔧 兼容性增强：如果直接查找失败，尝试格式转换
-	var alternativeID string
-	if strings.HasPrefix(strings.ToLower(deviceID), "0x") {
-		// 如果输入带0x前缀，尝试去掉前缀查找
-		alternativeID = strings.TrimPrefix(strings.ToLower(deviceID), "0x")
-		alternativeID = strings.ToUpper(alternativeID)
-	} else {
-		// 如果输入不带前缀，尝试添加0x前缀查找
-		// 先标准化为8位大写十六进制
-		if physicalID, err := utils.ParseDeviceIDToPhysicalID(deviceID); err == nil {
-			alternativeID = utils.FormatPhysicalID(physicalID)
-		}
+	iccid := iccidInterface.(string)
+	groupInterface, exists := m.deviceGroups.Load(iccid)
+	if !exists {
+		return nil, false
 	}
 
-	fmt.Printf("🔍 [TCPManager.GetDeviceByID] 生成替代格式: originalID=%s, alternativeID=%s\n", deviceID, alternativeID)
+	group := groupInterface.(*DeviceGroup)
+	group.mutex.RLock()
+	device, exists := group.Devices[deviceID]
+	group.mutex.RUnlock()
 
-	// 尝试查找替代格式
-	if alternativeID != "" && alternativeID != deviceID {
-		fmt.Printf("🔍 [TCPManager.GetDeviceByID] 尝试替代格式查找: alternativeID=%s\n", alternativeID)
-
-		iccidInterface, exists := m.deviceIndex.Load(alternativeID)
-		if exists {
-			iccid := iccidInterface.(string)
-			fmt.Printf("✅ [TCPManager.GetDeviceByID] 替代格式在deviceIndex中找到映射: alternativeID=%s, iccid=%s\n", alternativeID, iccid)
-
-			groupInterface, exists := m.deviceGroups.Load(iccid)
-			if exists {
-				group := groupInterface.(*DeviceGroup)
-				group.mutex.RLock()
-
-				// 🔧 修复：先尝试alternativeID，如果失败再尝试originalID
-				device, exists := group.Devices[alternativeID]
-				if !exists {
-					// 如果alternativeID找不到，尝试原始ID
-					device, exists = group.Devices[deviceID]
-					fmt.Printf("🔍 [TCPManager.GetDeviceByID] alternativeID未找到，尝试originalID: exists=%t\n", exists)
-				} else {
-					fmt.Printf("✅ [TCPManager.GetDeviceByID] 通过alternativeID找到设备\n")
-				}
-
-				group.mutex.RUnlock()
-				if exists {
-					fmt.Printf("✅ [TCPManager.GetDeviceByID] 通过格式转换找到设备: originalID=%s, alternativeID=%s\n", deviceID, alternativeID)
-					return device, true
-				} else {
-					fmt.Printf("❌ [TCPManager.GetDeviceByID] 格式转换后仍未在设备组中找到设备\n")
-				}
-			} else {
-				fmt.Printf("❌ [TCPManager.GetDeviceByID] 替代格式对应的设备组不存在: iccid=%s\n", iccid)
-			}
-		} else {
-			fmt.Printf("⚠️ [TCPManager.GetDeviceByID] 替代格式在deviceIndex中未找到映射: alternativeID=%s\n", alternativeID)
-		}
-	} else {
-		fmt.Printf("⚠️ [TCPManager.GetDeviceByID] 无有效替代格式\n")
-	}
-
-	fmt.Printf("❌ [TCPManager.GetDeviceByID] 设备查找失败: deviceID=%s\n", deviceID)
-	return nil, false
+	return device, exists
 }
 
 // GetDeviceConnection 通过设备ID获取TCP连接

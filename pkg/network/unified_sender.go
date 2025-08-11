@@ -404,7 +404,7 @@ func (s *UnifiedSender) logSendResult(conn ziface.IConnection, sendType SendType
 	}
 
 	if info != nil {
-		fields["physicalID"] = utils.FormatPhysicalIDForLog(info.PhysicalID)
+		fields["physicalID"] = utils.FormatPhysicalID(info.PhysicalID)
 		fields["messageID"] = fmt.Sprintf("0x%04X", info.MessageID)
 		fields["command"] = fmt.Sprintf("0x%02X", info.Command)
 	}

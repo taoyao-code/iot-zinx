@@ -113,7 +113,7 @@ func (h *SettlementHandler) processSettlement(decodedFrame *protocol.DecodedDNYF
 	// 记录结算数据详情
 	logger.WithFields(logrus.Fields{
 		"connID":         conn.GetConnID(),
-		"physicalId":     utils.FormatPhysicalIDForLog(physicalId),
+		"physicalId":     utils.FormatPhysicalID(physicalId),
 		"messageID":      fmt.Sprintf("0x%04X", messageID),
 		"deviceId":       deviceId,
 		"orderId":        settlementData.OrderID,

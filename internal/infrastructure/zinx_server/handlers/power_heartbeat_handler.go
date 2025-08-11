@@ -199,7 +199,7 @@ func (h *PowerHeartbeatHandler) processPowerHeartbeat(decodedFrame *protocol.Dec
 		// 🔧 关键修复：记录充电状态变化
 		logFields = logrus.Fields{
 			"connID":           conn.GetConnID(),
-			"physicalId":       utils.FormatPhysicalIDForLog(physicalId),
+			"physicalId":       utils.FormatPhysicalID(physicalId),
 			"deviceId":         deviceId,
 			"portNumber":       portNumber + 1, // 显示为1号端口、2号端口
 			"portStatus":       portStatus,
