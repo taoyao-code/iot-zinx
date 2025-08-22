@@ -230,12 +230,13 @@ func (h *ChargeControlHandler) processChargeControl(result *protocol.DNYParseRes
 		}
 	}
 
-	// 发送确认响应（简化的2字节格式）
-	responseData := []byte{portNumber, 0x01} // 确认收到
-	if err := protocol.SendDNYResponse(conn, physicalID, messageID, result.Command, responseData); err != nil {
-		logger.WithFields(logrus.Fields{
-			"physicalId": utils.FormatCardNumber(physicalID),
-			"error":      err.Error(),
-		}).Error("发送充电控制确认响应失败")
-	}
+	// 协议验证：AP3000 文档中 0x82 为服务器下发控制，设备上报应答后服务器无需再对 0x82 回包。
+	// 为避免部分固件将回包误判为新的控制导致“服务器控制停止(7)”并立即结算，此处不回发 0x82 确认包。
+	logger.WithFields(logrus.Fields{
+		"deviceId":  fmt.Sprintf("%08X", physicalID),
+		"messageID": fmt.Sprintf("0x%04X", messageID),
+		"command":   "0x82",
+		"ack":       false,
+		"reason":    "per protocol, no server ack for 0x82 to avoid mis-trigger stop",
+	}).Debug("ChargeControlHandler: skip sending 0x82 ack")
 }

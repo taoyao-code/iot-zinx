@@ -1,14 +1,15 @@
 package http
 
 import (
-	"fmt"
 	"net/http"
 	"strconv"
+	"sync"
 	"time"
 
 	"github.com/bujia-iot/iot-zinx/pkg/gateway"
 	"github.com/bujia-iot/iot-zinx/pkg/utils"
 	"github.com/gin-gonic/gin"
+	"github.com/sirupsen/logrus"
 )
 
 // DeviceGatewayHandlers 基于DeviceGateway的简化API处理器
@@ -23,6 +24,36 @@ func NewDeviceGatewayHandlers() *DeviceGatewayHandlers {
 		deviceGateway: gateway.GetGlobalDeviceGateway(),
 	}
 }
+
+// orderGuard 提供订单号幂等保护（短期拒绝重复提交）
+type orderGuard struct {
+	mu  sync.Mutex
+	ttl time.Duration
+	m   map[string]time.Time
+}
+
+func newOrderGuard(ttl time.Duration) *orderGuard {
+	return &orderGuard{ttl: ttl, m: make(map[string]time.Time)}
+}
+
+func (g *orderGuard) tryLock(key string) bool {
+	now := time.Now()
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	// 清理过期
+	for k, t := range g.m {
+		if now.Sub(t) > g.ttl {
+			delete(g.m, k)
+		}
+	}
+	if t, ok := g.m[key]; ok && now.Sub(t) <= g.ttl {
+		return false
+	}
+	g.m[key] = now
+	return true
+}
+
+var globalOrderGuard = newOrderGuard(60 * time.Second)
 
 // ===============================
 // 简化的API接口实现
@@ -123,7 +154,7 @@ func (h *DeviceGatewayHandlers) HandleDeviceList(c *gin.Context) {
 		limit = 100
 	}
 
-	fmt.Printf("🔍 [HandleDeviceList] 分页参数: page=%d, limit=%d (原始: page=%s, limit=%s)\n", page, limit, pageStr, limitStr)
+	logrus.WithFields(logrus.Fields{"page": page, "limit": limit, "pageStr": pageStr, "limitStr": limitStr}).Debug("HandleDeviceList: 分页参数")
 
 	// 🚀 新架构：一行代码获取所有在线设备
 	onlineDevices := h.deviceGateway.GetAllOnlineDevices()
@@ -133,46 +164,40 @@ func (h *DeviceGatewayHandlers) HandleDeviceList(c *gin.Context) {
 	start := (page - 1) * limit
 	end := start + limit
 
-	fmt.Printf("🔍 [HandleDeviceList] 分页计算: total=%d, start=%d, end=%d\n", total, start, end)
+	logrus.WithFields(logrus.Fields{"total": total, "start": start, "end": end}).Debug("HandleDeviceList: 分页计算")
 
 	if start >= total {
-		fmt.Printf("⚠️ [HandleDeviceList] start >= total, 重置为0\n")
+		logrus.Warn("HandleDeviceList: start >= total, 重置为0")
 		start = 0
 		end = 0
 	} else if end > total {
-		fmt.Printf("🔍 [HandleDeviceList] end > total, 调整end为total\n")
+		logrus.Debug("HandleDeviceList: end > total, 调整end为total")
 		end = total
 	}
 
-	fmt.Printf("🔍 [HandleDeviceList] 最终分页: start=%d, end=%d\n", start, end)
+	logrus.WithFields(logrus.Fields{"start": start, "end": end}).Debug("HandleDeviceList: 最终分页")
 
 	var pageDevices []string
 	if start < end {
 		pageDevices = onlineDevices[start:end]
-		fmt.Printf("✅ [HandleDeviceList] 分页成功: pageDevices=%v\n", pageDevices)
+		logrus.WithField("pageDevices", pageDevices).Debug("HandleDeviceList: 分页成功")
 	} else {
-		fmt.Printf("❌ [HandleDeviceList] 分页失败: start >= end\n")
+		logrus.Debug("HandleDeviceList: 分页失败: start >= end")
 	}
 
-	// 🔍 直接打印调试信息到终端
-	fmt.Printf("=== HandleDeviceList 调试信息 ===\n")
-	fmt.Printf("onlineDevices: %v\n", onlineDevices)
-	fmt.Printf("total: %d\n", total)
-	fmt.Printf("pageDevices: %v\n", pageDevices)
+	logrus.WithFields(logrus.Fields{"onlineDevices": onlineDevices, "total": total, "pageDevices": pageDevices}).Trace("HandleDeviceList 调试信息")
 
 	// 构建设备详细信息
 	var deviceList []map[string]interface{}
 	for i, deviceID := range pageDevices {
-		fmt.Printf("正在处理设备 %d: %s\n", i, deviceID)
+		_ = i
 		if detail, err := h.deviceGateway.GetDeviceDetail(deviceID); err == nil {
-			fmt.Printf("设备 %s 详细信息获取成功\n", deviceID)
 			deviceList = append(deviceList, detail)
 		} else {
-			fmt.Printf("设备 %s 详细信息获取失败: %v\n", deviceID, err)
+			logrus.WithFields(logrus.Fields{"deviceID": deviceID, "error": err}).Debug("获取设备详情失败")
 		}
 	}
-	fmt.Printf("最终 deviceList 长度: %d\n", len(deviceList))
-	fmt.Printf("=== 调试信息结束 ===\n")
+	logrus.WithField("len", len(deviceList)).Debug("HandleDeviceList: 设备列表构建完成")
 
 	c.JSON(http.StatusOK, gin.H{
 		"code":    0,
@@ -229,6 +254,18 @@ func (h *DeviceGatewayHandlers) HandleStartCharging(c *gin.Context) {
 			"message": "设备不在线",
 		})
 		return
+	}
+
+	// 幂等：短期内相同(deviceId, orderNo) 拒绝
+	if req.OrderNo != "" {
+		key := standardDeviceID + "|" + req.OrderNo
+		if !globalOrderGuard.tryLock(key) {
+			c.JSON(http.StatusConflict, gin.H{
+				"code":    409,
+				"message": "重复订单(短期内已提交)",
+			})
+			return
+		}
 	}
 
 	// 🚀 新架构：发送完整参数的充电命令（包含订单号、充电模式、充电值、余额等）
@@ -294,7 +331,19 @@ func (h *DeviceGatewayHandlers) HandleStopCharging(c *gin.Context) {
 		return
 	}
 
-	// �🚀 新架构：发送停止充电命令（使用完整的82指令格式）
+	// 幂等：按订单号优先做短期拒绝（若提供）
+	if req.OrderNo != "" {
+		key := standardDeviceID + "|" + req.OrderNo + "|stop"
+		if !globalOrderGuard.tryLock(key) {
+			c.JSON(http.StatusConflict, gin.H{
+				"code":    409,
+				"message": "重复停止请求(短期内已提交)",
+			})
+			return
+		}
+	}
+
+	// 🚀 新架构：发送停止充电命令（使用完整的82指令格式）
 	// 根据AP3000协议，停止充电也需要使用完整的充电控制参数，但充电命令设为0x00
 	err = h.deviceGateway.SendChargingCommandWithParams(standardDeviceID, req.Port, 0x00, req.OrderNo, 0, 0, 0)
 	if err != nil {

@@ -321,7 +321,7 @@
               </td>
               <td class="muted">{{ d.lastHeartbeat || '-' }}</td>
               <td>
-                <button class="btn secondary" @click="loadDetail(d.deviceId)">详情</button>
+                <button class="btn secondary" @click="selectDevice(d.deviceId)">详情</button>
               </td>
             </tr>
           </tbody>
@@ -532,6 +532,14 @@
           }
         }
 
+        function selectDevice(deviceId) {
+          queryId.value = deviceId;
+          useQueryIdFor('start');
+          useQueryIdFor('stop');
+          useQueryIdFor('locate');
+          loadDetail(deviceId);
+        }
+
         async function refreshDevices() {
           try { loading.value = true; lastError.value = ''; await fetchDevices(); }
           catch (e) { lastError.value = e?.response?.data?.message || e.message; }
@@ -627,7 +635,7 @@
           startForm.value.value = seconds;
         }
 
-        return { loading, devices, stats, statsOnline, statsTotal, health, detail, detailLoading, filter, queryId, lastError, latency, filteredDevices, format, loadDetail, refreshDevices, refreshAll, autoRefresh, startForm, stopForm, locateForm, startSubmitting, stopSubmitting, locateSubmitting, startResp, stopResp, locateResp, submitStart, submitStop, submitLocate, useQueryIdFor, presetStart };
+        return { loading, devices, stats, statsOnline, statsTotal, health, detail, detailLoading, filter, queryId, lastError, latency, filteredDevices, format, loadDetail, refreshDevices, refreshAll, autoRefresh, startForm, stopForm, locateForm, startSubmitting, stopSubmitting, locateSubmitting, startResp, stopResp, locateResp, submitStart, submitStop, submitLocate, useQueryIdFor, presetStart, selectDevice };
       }
     }).mount('#app');
   </script>
