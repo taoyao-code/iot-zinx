@@ -1,5 +1,6 @@
 <!DOCTYPE html>
 <html lang="zh-CN">
+
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
@@ -22,54 +23,247 @@
       --border: #1f2937;
       --tableRow: #0d1526;
     }
-    * { box-sizing: border-box; }
-    html, body { margin: 0; height: 100%; }
-    body { font-family: Inter, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, "PingFang SC", "Microsoft YaHei", sans-serif; background: linear-gradient(180deg, var(--bg), #070b14); color: var(--text); }
-    a { color: var(--primary); text-decoration: none; }
 
-    .container { max-width: 1200px; margin: 0 auto; padding: 24px; }
-    .header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 16px; }
-    .title { font-size: 20px; font-weight: 600; letter-spacing: 0.2px; }
+    * {
+      box-sizing: border-box;
+    }
 
-    .topbar { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-bottom: 16px; }
-    .kpi { background: linear-gradient(180deg, var(--panel), var(--panel-2)); border: 1px solid var(--border); border-radius: 12px; padding: 14px; }
-    .kpi .label { font-size: 12px; color: var(--muted); }
-    .kpi .value { font-size: 22px; font-weight: 700; margin-top: 6px; }
+    html,
+    body {
+      margin: 0;
+      height: 100%;
+    }
 
-    .grid { display: grid; grid-template-columns: 1.2fr 1fr; gap: 16px; }
-    .card { background: linear-gradient(180deg, var(--panel), var(--card)); border: 1px solid var(--border); border-radius: 12px; padding: 16px; }
-    .card h3 { margin: 0 0 10px; font-size: 14px; font-weight: 600; color: #cbd5e1; }
+    body {
+      font-family: Inter, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, "PingFang SC", "Microsoft YaHei", sans-serif;
+      background: linear-gradient(180deg, var(--bg), #070b14);
+      color: var(--text);
+    }
 
-    .toolbar { display: flex; gap: 8px; align-items: center; margin-bottom: 10px; }
-    .input { background: #0b1323; color: var(--text); border: 1px solid var(--border); padding: 8px 10px; border-radius: 8px; outline: none; width: 220px; }
-    .btn { background: linear-gradient(180deg, #2563eb, #1d4ed8); border: 1px solid #1e40af; color: white; padding: 8px 12px; border-radius: 8px; cursor: pointer; font-weight: 600; }
-    .btn.secondary { background: linear-gradient(180deg, #0ea5e9, #0284c7); border-color: #0369a1; }
-    .btn.ghost { background: transparent; border-color: var(--border); color: var(--text); }
-    .btn:disabled { opacity: .6; cursor: not-allowed; }
+    a {
+      color: var(--primary);
+      text-decoration: none;
+    }
 
-    table { width: 100%; border-collapse: collapse; }
-    th, td { padding: 10px 12px; text-align: left; border-bottom: 1px solid var(--border); font-size: 13px; }
-    tbody tr:hover { background: var(--tableRow); }
-    .muted { color: var(--muted); font-size: 12px; }
+    .container {
+      max-width: 1200px;
+      margin: 0 auto;
+      padding: 24px;
+    }
 
-    .status-dot { display: inline-block; width: 8px; height: 8px; border-radius: 999px; margin-right: 6px; }
-    .online { background: var(--success); }
-    .offline { background: var(--danger); }
+    .header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 16px;
+    }
 
-    .code { background: #0b1323; border: 1px solid var(--border); border-radius: 8px; padding: 10px; overflow: auto; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; font-size: 12px; }
+    .title {
+      font-size: 20px;
+      font-weight: 600;
+      letter-spacing: 0.2px;
+    }
+
+    .topbar {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 12px;
+      margin-bottom: 16px;
+    }
+
+    .kpi {
+      background: linear-gradient(180deg, var(--panel), var(--panel-2));
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 14px;
+    }
+
+    .kpi .label {
+      font-size: 12px;
+      color: var(--muted);
+    }
+
+    .kpi .value {
+      font-size: 22px;
+      font-weight: 700;
+      margin-top: 6px;
+    }
+
+    .grid {
+      display: grid;
+      grid-template-columns: 1.2fr 1fr;
+      gap: 16px;
+    }
+
+    .card {
+      background: linear-gradient(180deg, var(--panel), var(--card));
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 16px;
+    }
+
+    .card h3 {
+      margin: 0 0 10px;
+      font-size: 14px;
+      font-weight: 600;
+      color: #cbd5e1;
+    }
+
+    .subgrid {
+      display: grid;
+      grid-template-columns: 1fr;
+      gap: 12px;
+    }
+
+    .form-row {
+      display: grid;
+      grid-template-columns: 110px 1fr;
+      gap: 8px;
+      align-items: center;
+    }
+
+    .form-row label {
+      color: var(--muted);
+      font-size: 12px;
+    }
+
+    .form-row .input {
+      width: 100%;
+    }
+
+    .hint {
+      color: var(--muted);
+      font-size: 12px;
+      margin-top: 6px;
+    }
+
+    .switch {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .switch input {
+      width: 16px;
+      height: 16px;
+    }
+
+    .toolbar {
+      display: flex;
+      gap: 8px;
+      align-items: center;
+      margin-bottom: 10px;
+    }
+
+    .input {
+      background: #0b1323;
+      color: var(--text);
+      border: 1px solid var(--border);
+      padding: 8px 10px;
+      border-radius: 8px;
+      outline: none;
+      width: 220px;
+    }
+
+    .btn {
+      background: linear-gradient(180deg, #2563eb, #1d4ed8);
+      border: 1px solid #1e40af;
+      color: white;
+      padding: 8px 12px;
+      border-radius: 8px;
+      cursor: pointer;
+      font-weight: 600;
+    }
+
+    .btn.secondary {
+      background: linear-gradient(180deg, #0ea5e9, #0284c7);
+      border-color: #0369a1;
+    }
+
+    .btn.ghost {
+      background: transparent;
+      border-color: var(--border);
+      color: var(--text);
+    }
+
+    .btn:disabled {
+      opacity: .6;
+      cursor: not-allowed;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+    }
+
+    th,
+    td {
+      padding: 10px 12px;
+      text-align: left;
+      border-bottom: 1px solid var(--border);
+      font-size: 13px;
+    }
+
+    tbody tr:hover {
+      background: var(--tableRow);
+    }
+
+    .muted {
+      color: var(--muted);
+      font-size: 12px;
+    }
+
+    .status-dot {
+      display: inline-block;
+      width: 8px;
+      height: 8px;
+      border-radius: 999px;
+      margin-right: 6px;
+    }
+
+    .online {
+      background: var(--success);
+    }
+
+    .offline {
+      background: var(--danger);
+    }
+
+    .code {
+      background: #0b1323;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 10px;
+      overflow: auto;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+      font-size: 12px;
+    }
 
     @media (max-width: 980px) {
-      .grid { grid-template-columns: 1fr; }
-      .topbar { grid-template-columns: repeat(2, 1fr); }
+      .grid {
+        grid-template-columns: 1fr;
+      }
+
+      .topbar {
+        grid-template-columns: repeat(2, 1fr);
+      }
     }
   </style>
 </head>
+
 <body>
   <div id="app" class="container">
     <div class="header">
       <div class="title">IoT 设备网关 · 调试面板</div>
       <div>
-        <button class="btn ghost" @click="refreshAll" :disabled="loading">刷新</button>
+        <span class="switch"><input type="checkbox" v-model="autoRefresh.enabled" /> 自动刷新</span>
+        <select class="input" style="width:120px" v-model.number="autoRefresh.interval">
+          <option :value="5">5s</option>
+          <option :value="10">10s</option>
+          <option :value="30">30s</option>
+          <option :value="60">60s</option>
+        </select>
+        <button class="btn ghost" @click="refreshAll" :disabled="loading">立即刷新</button>
       </div>
     </div>
 
@@ -84,8 +278,8 @@
       </div>
       <div class="kpi">
         <div class="label">在线设备数</div>
-        <div class="value">{{ stats.onlineDevices || 0 }}</div>
-        <div class="muted">总数: {{ stats.totalDevices || 0 }}</div>
+        <div class="value">{{ statsOnline }}</div>
+        <div class="muted">总数: {{ statsTotal }}</div>
       </div>
       <div class="kpi">
         <div class="label">请求耗时</div>
@@ -144,7 +338,104 @@
         <div v-else-if="!detail">
           <div class="muted">选择列表中的设备或输入设备ID查询</div>
         </div>
-        <div v-else class="code"><pre>{{ format(detail) }}</pre></div>
+        <div v-else class="code">
+          <pre>{{ format(detail) }}</pre>
+        </div>
+      </div>
+    </div>
+
+    <div class="grid" style="margin-top:16px;">
+      <div class="card">
+        <h3>操作 · 开始充电</h3>
+        <div class="subgrid">
+          <div class="form-row">
+            <label>deviceId</label>
+            <input class="input" v-model.trim="startForm.deviceId" placeholder="示例: 10644723 或 04A26CF3" />
+          </div>
+          <div class="form-row">
+            <label>port</label>
+            <input class="input" type="number" min="1" max="8" v-model.number="startForm.port" />
+          </div>
+          <div class="form-row">
+            <label>mode</label>
+            <select class="input" v-model.number="startForm.mode">
+              <option :value="0">0 - 按时间(秒)</option>
+              <option :value="1">1 - 按电量(0.1度)</option>
+            </select>
+          </div>
+          <div class="form-row">
+            <label>value</label>
+            <input class="input" type="number" v-model.number="startForm.value" />
+          </div>
+          <div class="form-row">
+            <label>orderNo</label>
+            <input class="input" v-model.trim="startForm.orderNo" />
+          </div>
+          <div class="form-row">
+            <label>balance</label>
+            <input class="input" type="number" v-model.number="startForm.balance" placeholder="单位: 分，可选" />
+          </div>
+          <div class="toolbar">
+            <button class="btn" @click="submitStart" :disabled="startSubmitting">发起充电</button>
+            <button class="btn ghost" @click="useQueryIdFor('start')">用上方设备ID</button>
+            <button class="btn ghost" @click="presetStart(1800)">预设 30 分钟</button>
+            <button class="btn ghost" @click="presetStart(3600)">预设 60 分钟</button>
+            <span class="hint">请求: POST /api/v1/charging/start</span>
+          </div>
+          <div v-if="startResp" class="code">
+            <pre>{{ format(startResp) }}</pre>
+          </div>
+        </div>
+      </div>
+
+      <div class="card">
+        <h3>操作 · 停止充电</h3>
+        <div class="subgrid">
+          <div class="form-row">
+            <label>deviceId</label>
+            <input class="input" v-model.trim="stopForm.deviceId" placeholder="示例: 10644723 或 04A26CF3" />
+          </div>
+          <div class="form-row">
+            <label>port</label>
+            <input class="input" type="number" min="1" max="255" v-model.number="stopForm.port" />
+          </div>
+          <div class="form-row">
+            <label>orderNo</label>
+            <input class="input" v-model.trim="stopForm.orderNo" placeholder="可选" />
+          </div>
+          <div class="toolbar">
+            <button class="btn" @click="submitStop" :disabled="stopSubmitting">停止充电</button>
+            <button class="btn ghost" @click="useQueryIdFor('stop')">用上方设备ID</button>
+            <span class="hint">请求: POST /api/v1/charging/stop</span>
+          </div>
+          <div v-if="stopResp" class="code">
+            <pre>{{ format(stopResp) }}</pre>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="grid" style="margin-top:16px;">
+      <div class="card">
+        <h3>操作 · 设备定位</h3>
+        <div class="subgrid">
+          <div class="form-row">
+            <label>deviceId</label>
+            <input class="input" v-model.trim="locateForm.deviceId" placeholder="示例: 10644723 或 04A26CF3" />
+          </div>
+          <div class="form-row">
+            <label>locateTime</label>
+            <input class="input" type="number" min="1" max="255" v-model.number="locateForm.locateTime" />
+          </div>
+          <div class="toolbar">
+            <button class="btn secondary" @click="submitLocate" :disabled="locateSubmitting">定位设备</button>
+            <button class="btn ghost" @click="useQueryIdFor('locate')">用上方设备ID</button>
+            <span class="hint">请求: POST /api/v1/device/locate</span>
+          </div>
+          <div v-if="locateResp" class="code">
+            <pre>{{ format(locateResp) }}</pre>
+          </div>
+        </div>
       </div>
     </div>
   </div>
@@ -152,7 +443,7 @@
   <script src="https://cdn.jsdelivr.net/npm/vue@3.4.38/dist/vue.global.prod.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/axios@1.7.8/dist/axios.min.js"></script>
   <script>
-    const { createApp, ref, computed, onMounted } = Vue;
+    const { createApp, ref, computed, onMounted, watchEffect } = Vue;
 
     const api = axios.create({ baseURL: '' }); // 同域
 
@@ -168,10 +459,37 @@
         const queryId = ref('');
         const lastError = ref('');
         const latency = ref(0);
+        const autoRefresh = ref({ enabled: false, interval: 10, timer: null });
+
+        // 操作表单
+        const startForm = ref({
+          balance: 1010,
+          deviceId: '',
+          mode: 0,
+          orderNo: `ORDER_${new Date().toISOString().slice(0, 10).replace(/-/g, '')}_${Math.floor(Math.random() * 1000)}`,
+          port: 1,
+          value: 60,
+        });
+        const stopForm = ref({ deviceId: '', port: 255, orderNo: '' });
+        const locateForm = ref({ deviceId: '', locateTime: 10 });
+        const startSubmitting = ref(false);
+        const stopSubmitting = ref(false);
+        const locateSubmitting = ref(false);
+        const startResp = ref(null);
+        const stopResp = ref(null);
+        const locateResp = ref(null);
 
         const filteredDevices = computed(() => {
           if (!filter.value) return devices.value;
           return devices.value.filter(d => String(d.deviceId).includes(filter.value));
+        });
+        const statsOnline = computed(() => {
+          const s = stats.value || {};
+          return s.onlineDeviceCount ?? (Array.isArray(s.onlineDevices) ? s.onlineDevices.length : undefined) ?? s.online ?? 0;
+        });
+        const statsTotal = computed(() => {
+          const s = stats.value || {};
+          return s.totalDeviceCount ?? s.total ?? 0;
         });
 
         function format(obj) {
@@ -215,22 +533,104 @@
         }
 
         async function refreshDevices() {
-          try { loading.value = true; lastError.value=''; await fetchDevices(); }
-          catch(e){ lastError.value = e?.response?.data?.message || e.message; }
+          try { loading.value = true; lastError.value = ''; await fetchDevices(); }
+          catch (e) { lastError.value = e?.response?.data?.message || e.message; }
           finally { loading.value = false; }
         }
 
         async function refreshAll() {
-          try { loading.value = true; lastError.value=''; await Promise.all([fetchHealth(), fetchStats(), fetchDevices()]); }
-          catch(e){ lastError.value = e?.response?.data?.message || e.message; }
+          try { loading.value = true; lastError.value = ''; await Promise.all([fetchHealth(), fetchStats(), fetchDevices()]); await refreshDetailIfSelected(); }
+          catch (e) { lastError.value = e?.response?.data?.message || e.message; }
           finally { loading.value = false; }
         }
 
-        onMounted(() => { refreshAll(); });
+        async function refreshDetailIfSelected() {
+          if (!queryId.value) return;
+          try {
+            const res = await api.get(`/api/v1/device/${encodeURIComponent(queryId.value)}/status`);
+            detail.value = res.data?.data || res.data;
+          } catch { }
+        }
 
-        return { loading, devices, stats, health, detail, detailLoading, filter, queryId, lastError, latency, filteredDevices, format, loadDetail, refreshDevices, refreshAll };
+        // 自动刷新控制
+        function setupAutoRefresh() {
+          if (autoRefresh.value.timer) {
+            clearInterval(autoRefresh.value.timer);
+            autoRefresh.value.timer = null;
+          }
+          if (autoRefresh.value.enabled) {
+            autoRefresh.value.timer = setInterval(() => {
+              refreshAll();
+            }, autoRefresh.value.interval * 1000);
+          }
+        }
+
+        // 观察开关/间隔变化
+        watchEffect(() => { setupAutoRefresh(); });
+
+        // 表单提交：开始充电
+        async function submitStart() {
+          startSubmitting.value = true; startResp.value = null; lastError.value = '';
+          try {
+            const payload = { ...startForm.value };
+            const res = await api.post('/api/v1/charging/start', payload);
+            startResp.value = res.data;
+          } catch (e) {
+            startResp.value = e?.response?.data || { error: e.message };
+            lastError.value = e?.response?.data?.message || e.message;
+          } finally {
+            startSubmitting.value = false;
+          }
+        }
+
+        // 表单提交：停止充电
+        async function submitStop() {
+          stopSubmitting.value = true; stopResp.value = null; lastError.value = '';
+          try {
+            const payload = { ...stopForm.value };
+            const res = await api.post('/api/v1/charging/stop', payload);
+            stopResp.value = res.data;
+          } catch (e) {
+            stopResp.value = e?.response?.data || { error: e.message };
+            lastError.value = e?.response?.data?.message || e.message;
+          } finally {
+            stopSubmitting.value = false;
+          }
+        }
+
+        // 表单提交：设备定位
+        async function submitLocate() {
+          locateSubmitting.value = true; locateResp.value = null; lastError.value = '';
+          try {
+            const payload = { ...locateForm.value };
+            const res = await api.post('/api/v1/device/locate', payload);
+            locateResp.value = res.data;
+          } catch (e) {
+            locateResp.value = e?.response?.data || { error: e.message };
+            lastError.value = e?.response?.data?.message || e.message;
+          } finally {
+            locateSubmitting.value = false;
+          }
+        }
+
+        onMounted(() => { refreshAll(); setupAutoRefresh(); });
+
+        // 便捷操作
+        function useQueryIdFor(which) {
+          if (!queryId.value) return;
+          if (which === 'start') startForm.value.deviceId = queryId.value;
+          if (which === 'stop') stopForm.value.deviceId = queryId.value;
+          if (which === 'locate') locateForm.value.deviceId = queryId.value;
+        }
+        function presetStart(seconds) {
+          startForm.value.mode = 0; // 按时间
+          startForm.value.value = seconds;
+        }
+
+        return { loading, devices, stats, statsOnline, statsTotal, health, detail, detailLoading, filter, queryId, lastError, latency, filteredDevices, format, loadDetail, refreshDevices, refreshAll, autoRefresh, startForm, stopForm, locateForm, startSubmitting, stopSubmitting, locateSubmitting, startResp, stopResp, locateResp, submitStart, submitStop, submitLocate, useQueryIdFor, presetStart };
       }
     }).mount('#app');
   </script>
 </body>
+
 </html>
