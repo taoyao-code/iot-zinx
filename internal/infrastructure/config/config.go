@@ -63,10 +63,17 @@ type ZinxConfig struct {
 
 // HTTPAPIServerConfig HTTP API服务器配置
 type HTTPAPIServerConfig struct {
-	Host           string     `mapstructure:"host"`
-	Port           int        `mapstructure:"port"`
-	Auth           AuthConfig `mapstructure:"auth"`
-	TimeoutSeconds int        `mapstructure:"timeoutSeconds"`
+	Host           string            `mapstructure:"host"`
+	Port           int               `mapstructure:"port"`
+	Auth           AuthConfig        `mapstructure:"auth"`
+	TimeoutSeconds int               `mapstructure:"timeoutSeconds"`
+	Idempotency    IdempotencyConfig `mapstructure:"idempotency"`
+}
+
+// IdempotencyConfig 幂等配置
+type IdempotencyConfig struct {
+	Enabled    bool `mapstructure:"enabled"`    // 启用订单号幂等保护
+	TTLSeconds int  `mapstructure:"ttlSeconds"` // 幂等窗口时间（秒）
 }
 
 // AuthConfig 认证配置

@@ -46,6 +46,11 @@ httpApiServer:
     allowedIPs: ["127.0.0.1", "localhost"] # 允许访问的IP列表
   timeoutSeconds: 30 # 请求超时时间
 
+  # 幂等配置
+  idempotency:
+    enabled: true # 启用订单号幂等保护
+    ttlSeconds: 60 # 幂等窗口时间（秒），在此时间内重复订单号将被拒绝
+
 # Redis配置
 redis:
   address: "172.18.0.9:6379" # Redis服务器地址

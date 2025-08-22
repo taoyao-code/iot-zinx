@@ -6,6 +6,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/bujia-iot/iot-zinx/internal/infrastructure/config"
 	"github.com/bujia-iot/iot-zinx/pkg/gateway"
 	"github.com/bujia-iot/iot-zinx/pkg/utils"
 	"github.com/gin-gonic/gin"
@@ -53,7 +54,18 @@ func (g *orderGuard) tryLock(key string) bool {
 	return true
 }
 
-var globalOrderGuard = newOrderGuard(60 * time.Second)
+var globalOrderGuard *orderGuard
+
+func init() {
+	cfg := config.GetConfig()
+	if cfg.HTTPAPIServer.Idempotency.Enabled {
+		ttl := time.Duration(cfg.HTTPAPIServer.Idempotency.TTLSeconds) * time.Second
+		if ttl <= 0 {
+			ttl = 60 * time.Second // 默认60秒
+		}
+		globalOrderGuard = newOrderGuard(ttl)
+	}
+}
 
 // ===============================
 // 简化的API接口实现
@@ -257,7 +269,7 @@ func (h *DeviceGatewayHandlers) HandleStartCharging(c *gin.Context) {
 	}
 
 	// 幂等：短期内相同(deviceId, orderNo) 拒绝
-	if req.OrderNo != "" {
+	if globalOrderGuard != nil && req.OrderNo != "" {
 		key := standardDeviceID + "|" + req.OrderNo
 		if !globalOrderGuard.tryLock(key) {
 			c.JSON(http.StatusConflict, gin.H{
@@ -332,7 +344,7 @@ func (h *DeviceGatewayHandlers) HandleStopCharging(c *gin.Context) {
 	}
 
 	// 幂等：按订单号优先做短期拒绝（若提供）
-	if req.OrderNo != "" {
+	if globalOrderGuard != nil && req.OrderNo != "" {
 		key := standardDeviceID + "|" + req.OrderNo + "|stop"
 		if !globalOrderGuard.tryLock(key) {
 			c.JSON(http.StatusConflict, gin.H{
