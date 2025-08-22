@@ -7,7 +7,7 @@ tmp_dir = "tmp"
 [build]
   # 构建应用的主命令
   # 我们将编译 cmd/gateway/main.go 并将可执行文件输出到 tmp/main
-  cmd = "go build -o ./tmp/main ./cmd/gateway"
+  cmd = "go build -o ./tmp/main ."
   # air 将运行这个编译后的二进制文件
   bin = "tmp/main"
   # 监听这些后缀的文件变化
