@@ -1,0 +1,236 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>IoT 设备网关 · 调试面板</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --bg: #0b1220;
+      --panel: #121a2b;
+      --panel-2: #0f172a;
+      --card: #0e1627;
+      --primary: #59a9ff;
+      --accent: #22d3ee;
+      --success: #34d399;
+      --danger: #f87171;
+      --text: #e5e7eb;
+      --muted: #94a3b8;
+      --border: #1f2937;
+      --tableRow: #0d1526;
+    }
+    * { box-sizing: border-box; }
+    html, body { margin: 0; height: 100%; }
+    body { font-family: Inter, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, "PingFang SC", "Microsoft YaHei", sans-serif; background: linear-gradient(180deg, var(--bg), #070b14); color: var(--text); }
+    a { color: var(--primary); text-decoration: none; }
+
+    .container { max-width: 1200px; margin: 0 auto; padding: 24px; }
+    .header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 16px; }
+    .title { font-size: 20px; font-weight: 600; letter-spacing: 0.2px; }
+
+    .topbar { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-bottom: 16px; }
+    .kpi { background: linear-gradient(180deg, var(--panel), var(--panel-2)); border: 1px solid var(--border); border-radius: 12px; padding: 14px; }
+    .kpi .label { font-size: 12px; color: var(--muted); }
+    .kpi .value { font-size: 22px; font-weight: 700; margin-top: 6px; }
+
+    .grid { display: grid; grid-template-columns: 1.2fr 1fr; gap: 16px; }
+    .card { background: linear-gradient(180deg, var(--panel), var(--card)); border: 1px solid var(--border); border-radius: 12px; padding: 16px; }
+    .card h3 { margin: 0 0 10px; font-size: 14px; font-weight: 600; color: #cbd5e1; }
+
+    .toolbar { display: flex; gap: 8px; align-items: center; margin-bottom: 10px; }
+    .input { background: #0b1323; color: var(--text); border: 1px solid var(--border); padding: 8px 10px; border-radius: 8px; outline: none; width: 220px; }
+    .btn { background: linear-gradient(180deg, #2563eb, #1d4ed8); border: 1px solid #1e40af; color: white; padding: 8px 12px; border-radius: 8px; cursor: pointer; font-weight: 600; }
+    .btn.secondary { background: linear-gradient(180deg, #0ea5e9, #0284c7); border-color: #0369a1; }
+    .btn.ghost { background: transparent; border-color: var(--border); color: var(--text); }
+    .btn:disabled { opacity: .6; cursor: not-allowed; }
+
+    table { width: 100%; border-collapse: collapse; }
+    th, td { padding: 10px 12px; text-align: left; border-bottom: 1px solid var(--border); font-size: 13px; }
+    tbody tr:hover { background: var(--tableRow); }
+    .muted { color: var(--muted); font-size: 12px; }
+
+    .status-dot { display: inline-block; width: 8px; height: 8px; border-radius: 999px; margin-right: 6px; }
+    .online { background: var(--success); }
+    .offline { background: var(--danger); }
+
+    .code { background: #0b1323; border: 1px solid var(--border); border-radius: 8px; padding: 10px; overflow: auto; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; font-size: 12px; }
+
+    @media (max-width: 980px) {
+      .grid { grid-template-columns: 1fr; }
+      .topbar { grid-template-columns: repeat(2, 1fr); }
+    }
+  </style>
+</head>
+<body>
+  <div id="app" class="container">
+    <div class="header">
+      <div class="title">IoT 设备网关 · 调试面板</div>
+      <div>
+        <button class="btn ghost" @click="refreshAll" :disabled="loading">刷新</button>
+      </div>
+    </div>
+
+    <div class="topbar">
+      <div class="kpi">
+        <div class="label">系统状态</div>
+        <div class="value">
+          <span :class="['status-dot', health.status==='ok' ? 'online':'offline']"></span>
+          {{ health.status || 'unknown' }}
+        </div>
+        <div class="muted">version: {{ health.version || '-' }}</div>
+      </div>
+      <div class="kpi">
+        <div class="label">在线设备数</div>
+        <div class="value">{{ stats.onlineDevices || 0 }}</div>
+        <div class="muted">总数: {{ stats.totalDevices || 0 }}</div>
+      </div>
+      <div class="kpi">
+        <div class="label">请求耗时</div>
+        <div class="value">{{ latency }} ms</div>
+        <div class="muted">最近一次刷新</div>
+      </div>
+      <div class="kpi">
+        <div class="label">错误</div>
+        <div class="value" :style="{color: lastError? '#f87171':'#34d399'}">{{ lastError? '有':'无' }}</div>
+        <div class="muted">{{ lastError || '正常' }}</div>
+      </div>
+    </div>
+
+    <div class="grid">
+      <div class="card">
+        <h3>设备列表</h3>
+        <div class="toolbar">
+          <input class="input" placeholder="按设备ID过滤（包含匹配）" v-model.trim="filter" />
+          <button class="btn" @click="refreshDevices" :disabled="loading">刷新列表</button>
+        </div>
+        <div class="muted" v-if="devices.length===0">暂无在线设备</div>
+        <table v-else>
+          <thead>
+            <tr>
+              <th>#</th>
+              <th>设备ID</th>
+              <th>连接</th>
+              <th>最近心跳</th>
+              <th>操作</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-for="(d, idx) in filteredDevices" :key="d.deviceId">
+              <td>{{ idx + 1 }}</td>
+              <td>{{ d.deviceId }}</td>
+              <td>
+                <span class="status-dot online"></span>
+                <span class="muted">online</span>
+              </td>
+              <td class="muted">{{ d.lastHeartbeat || '-' }}</td>
+              <td>
+                <button class="btn secondary" @click="loadDetail(d.deviceId)">详情</button>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="card">
+        <h3>设备详情</h3>
+        <div class="toolbar">
+          <input class="input" placeholder="输入设备ID，例如 04ceaa40" v-model.trim="queryId" />
+          <button class="btn" @click="loadDetail(queryId)" :disabled="!queryId || loading">查询</button>
+        </div>
+        <div v-if="detailLoading" class="muted">加载中…</div>
+        <div v-else-if="!detail">
+          <div class="muted">选择列表中的设备或输入设备ID查询</div>
+        </div>
+        <div v-else class="code"><pre>{{ format(detail) }}</pre></div>
+      </div>
+    </div>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/vue@3.4.38/dist/vue.global.prod.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/axios@1.7.8/dist/axios.min.js"></script>
+  <script>
+    const { createApp, ref, computed, onMounted } = Vue;
+
+    const api = axios.create({ baseURL: '' }); // 同域
+
+    createApp({
+      setup() {
+        const loading = ref(false);
+        const devices = ref([]);
+        const stats = ref({});
+        const health = ref({});
+        const detail = ref(null);
+        const detailLoading = ref(false);
+        const filter = ref('');
+        const queryId = ref('');
+        const lastError = ref('');
+        const latency = ref(0);
+
+        const filteredDevices = computed(() => {
+          if (!filter.value) return devices.value;
+          return devices.value.filter(d => String(d.deviceId).includes(filter.value));
+        });
+
+        function format(obj) {
+          try { return JSON.stringify(obj, null, 2); } catch { return String(obj); }
+        }
+
+        async function fetchHealth() {
+          const t0 = performance.now();
+          const res = await api.get('/api/v1/health');
+          health.value = res.data?.data || { status: 'ok' };
+          latency.value = Math.round(performance.now() - t0);
+        }
+
+        async function fetchStats() {
+          const res = await api.get('/api/v1/stats');
+          stats.value = res.data?.data || {};
+        }
+
+        async function fetchDevices() {
+          const res = await api.get('/api/v1/devices');
+          const list = res.data?.data?.devices || [];
+          // 兼容后端字段：如果没有标准字段，保持最少展示
+          devices.value = list.map((it) => ({
+            deviceId: it.deviceId || it.id || it.device_id || it.deviceID || it.standardId || it.standardID || it.sn || it.mac || '-'.padStart(8, '0'),
+            lastHeartbeat: it.lastHeartbeat || it.last_heartbeat || it.lastSeen || it.last_seen || '',
+          }));
+        }
+
+        async function loadDetail(deviceId) {
+          if (!deviceId) return;
+          detailLoading.value = true; lastError.value = '';
+          try {
+            const res = await api.get(`/api/v1/device/${encodeURIComponent(deviceId)}/status`);
+            detail.value = res.data?.data || res.data;
+          } catch (e) {
+            lastError.value = e?.response?.data?.message || e.message || '请求失败';
+            detail.value = null;
+          } finally {
+            detailLoading.value = false;
+          }
+        }
+
+        async function refreshDevices() {
+          try { loading.value = true; lastError.value=''; await fetchDevices(); }
+          catch(e){ lastError.value = e?.response?.data?.message || e.message; }
+          finally { loading.value = false; }
+        }
+
+        async function refreshAll() {
+          try { loading.value = true; lastError.value=''; await Promise.all([fetchHealth(), fetchStats(), fetchDevices()]); }
+          catch(e){ lastError.value = e?.response?.data?.message || e.message; }
+          finally { loading.value = false; }
+        }
+
+        onMounted(() => { refreshAll(); });
+
+        return { loading, devices, stats, health, detail, detailLoading, filter, queryId, lastError, latency, filteredDevices, format, loadDetail, refreshDevices, refreshAll };
+      }
+    }).mount('#app');
+  </script>
+</body>
+</html>

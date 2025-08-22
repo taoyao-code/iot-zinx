@@ -40,6 +40,12 @@ func registerUnifiedAPIHandlers(r *gin.Engine) {
 	// Swagger文档
 	r.GET("/swagger/*any", ginSwagger.WrapHandler(swaggerFiles.Handler))
 
+	// 内置静态测试页
+	r.Static("/web", "./web")
+	r.GET("/", func(c *gin.Context) {
+		c.File("web/index.html")
+	})
+
 	// API路由组 v1版本
 	api := r.Group("/api/v1")
 	{

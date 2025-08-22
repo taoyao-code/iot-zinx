@@ -131,6 +131,11 @@ func main() {
 			"action":    "starting",
 		})
 
+		// 提示静态测试页启用
+		improvedLogger.Info("Web静态测试页已启用: / -> web/index.html, /web/*", map[string]interface{}{
+			"web_root": "./web",
+		})
+
 		if err := ports.StartHTTPServer(); err != nil {
 			improvedLogger.Warn("HTTP API服务器启动失败", map[string]interface{}{
 				"error": err.Error(),
