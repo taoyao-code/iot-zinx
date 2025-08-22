@@ -77,8 +77,7 @@ type CommandManager struct {
 	maxRetry             int
 }
 
-// 确保CommandManager实现了ICommandManager接口
-var _ ICommandManager = (*CommandManager)(nil)
+// 兼容性检查移除：不再依赖接口文件，直接对外暴露具体类型
 
 // 创建全局命令管理器实例
 var (

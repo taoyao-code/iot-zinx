@@ -52,9 +52,6 @@ func NewDNYPacket(logHexDump bool) ziface.IDataPack {
 // GetHeadLen 获取消息头长度
 // 🔧 关键修复：由于我们需要处理不同格式的数据（DNY协议、ICCID等），返回0表示一次性读取所有可用数据
 func (dp *DNYPacket) GetHeadLen() uint32 {
-	// 🔧 强制控制台输出
-	fmt.Printf("🔧 DNYPacket.GetHeadLen() 被调用，返回0以接收所有数据\n")
-
 	// 记录到日志
 	logger.WithFields(logrus.Fields{
 		"headLen": 0,
@@ -110,8 +107,8 @@ func (dp *DNYPacket) packDNYMessage(msg ziface.IMessage) ([]byte, error) {
 		return nil, err
 	}
 
-	// 写入消息ID (2字节，小端序) - 目前设为0
-	if err := binary.Write(dataBuff, binary.LittleEndian, uint16(0)); err != nil {
+	// 写入消息ID (2字节，小端序) - 🔧 修复：使用消息真实的 MessageId
+	if err := binary.Write(dataBuff, binary.LittleEndian, dnyMsg.MessageId); err != nil {
 		return nil, err
 	}
 
@@ -136,7 +133,11 @@ func (dp *DNYPacket) packDNYMessage(msg ziface.IMessage) ([]byte, error) {
 		// 在实际应用中，这里应该有更健壮的错误处理
 		// 例如，返回一个错误或记录严重日志
 		// 为了保持函数签名不变，我们暂时打印错误并返回一个空的校验和
-		fmt.Printf("Error calculating checksum: %v\n", err)
+		logger.WithFields(logrus.Fields{
+			"component": "DNYPacket",
+			"stage":     "Pack",
+			"error":     err.Error(),
+		}).Warn("CalculatePacketChecksumInternal 失败，使用0兜底")
 		checksum = 0
 	}
 

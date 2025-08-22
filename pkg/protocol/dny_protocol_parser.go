@@ -277,7 +277,11 @@ func FormatDNYCommandData(commandID byte, data []byte, direction string, physica
 func LogDNYMessage(msg *dny_protocol.Message, direction string, connectionID uint64) {
 	if msg == nil {
 		// log.Debug(fmt.Sprintf("[%s] ConnID: %d, Received nil DNY message", direction, connectionID)) // 依赖 log
-		fmt.Printf("[%s] ConnID: %d, Received nil DNY message\n", direction, connectionID) // 使用标准库打印
+		// fmt.Printf("[%s] ConnID: %d, Received nil DNY message\n", direction, connectionID) // 使用标准库打印
+		logger.WithFields(logrus.Fields{
+			"direction":    direction,
+			"connectionID": connectionID,
+		}).Debug("Received nil DNY message")
 		return
 	}
 
@@ -318,7 +322,12 @@ func LogDNYMessage(msg *dny_protocol.Message, direction string, connectionID uin
 	}
 
 	// log.Debug(logMsg.String()) // 依赖 log
-	fmt.Println(logMsg.String()) // 使用标准库打印
+	// fmt.Println(logMsg.String()) // 使用标准库打印
+	logger.WithFields(logrus.Fields{
+		"direction":    direction,
+		"connectionID": connectionID,
+		"message":      logMsg.String(),
+	}).Debug("DNY message")
 }
 
 // IsSpecialMessage 检查是否为特殊消息类型（ICCID, link等）

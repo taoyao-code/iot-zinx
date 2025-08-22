@@ -209,44 +209,45 @@ func BuildChargeControlPacket(
 }
 
 // buildDNYPacket 构建DNY协议数据包的通用实现 (临时保留)
-// 🔧 重构：此函数应该与统一构建器保持一致
+// 🔧 与协议保持一致：长度字段包含校验；小端序；校验为包头至数据的累加和
 func buildDNYPacket(physicalID uint32, messageID uint16, command uint8, data []byte) []byte {
-	// 🔧 修复：使用正确的协议规范，长度字段包含校验和
-	contentLen := 4 + 2 + 1 + len(data) + 2 // PhysicalID(4) + MessageID(2) + Command(1) + Data + Checksum(2)
+	// 计算内容长度：PhysicalID(4) + MessageID(2) + Command(1) + Data(N) + Checksum(2)
+	contentLen := 4 + 2 + 1 + len(data) + 2
 
-	// 创建包缓冲区
-	packet := make([]byte, 0, 3+2+contentLen+2) // Header(3) + Length(2) + Content + Checksum(2)
+	// 预分配缓冲
+	packet := make([]byte, 0, 3+2+contentLen)
 
 	// 包头 "DNY"
 	packet = append(packet, 'D', 'N', 'Y')
 
-	// 数据长度 (2字节，小端序)
+	// 长度字段（小端）
 	packet = append(packet, byte(contentLen), byte(contentLen>>8))
 
-	// 物理ID (4字节，小端序)
+	// 物理ID（小端）
 	packet = append(packet,
 		byte(physicalID),
 		byte(physicalID>>8),
 		byte(physicalID>>16),
 		byte(physicalID>>24))
 
-	// 消息ID (2字节，小端序)
+	// 消息ID（小端）
 	packet = append(packet, byte(messageID), byte(messageID>>8))
 
-	// 命令 (1字节)
+	// 命令
 	packet = append(packet, command)
 
 	// 数据
-	packet = append(packet, data...)
+	if len(data) > 0 {
+		packet = append(packet, data...)
+	}
 
-	// 🔧 修复：计算校验和 (从包头"DNY"开始的所有字节，不包括校验和本身)
-	// 根据协议文档和用户验证，校验和计算从包头开始到数据结束
+	// 校验和：从包头到当前位置的简单累加（不含校验本身）
 	var checksum uint16
-	for i := 0; i < len(packet); i++ { // 从包头"DNY"开始计算到数据结束
+	for i := 0; i < len(packet); i++ {
 		checksum += uint16(packet[i])
 	}
 
-	// 校验和 (2字节，小端序)
+	// 写入校验（小端）
 	packet = append(packet, byte(checksum), byte(checksum>>8))
 
 	return packet

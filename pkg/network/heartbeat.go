@@ -322,10 +322,7 @@ func InitHeartbeatService(monitorAdapter interface {
 		return nil
 	}
 
-	// 设置全局连接管理器到心跳包
-	if SetGlobalConnectionMonitorFunc != nil {
-		SetGlobalConnectionMonitorFunc(monitorAdapter)
-	}
+	// 直接通过 listenerFactory 传入 monitorAdapter，取消全局注入依赖
 
 	// 创建心跳服务实例
 	heartbeatService := HeartbeatServiceFactory()

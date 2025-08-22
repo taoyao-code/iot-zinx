@@ -14,6 +14,7 @@ package gateway
 
 import (
 	"fmt"
+	"sync"
 	"time"
 
 	"github.com/bujia-iot/iot-zinx/internal/infrastructure/config"
@@ -40,6 +41,9 @@ import (
 type DeviceGateway struct {
 	tcpManager *core.TCPManager
 	tcpWriter  *network.TCPWriter // 🚀 Phase 2: 添加TCPWriter支持重试机制
+	// AP3000 节流：同设备命令间隔≥0.5秒
+	throttleMu       sync.Mutex
+	lastSendByDevice map[string]time.Time
 }
 
 // NewDeviceGateway 创建设备网关实例
@@ -59,8 +63,9 @@ func NewDeviceGateway() *DeviceGateway {
 	}
 
 	return &DeviceGateway{
-		tcpManager: core.GetGlobalTCPManager(),
-		tcpWriter:  network.NewTCPWriter(retryConfig, logger.GetLogger()),
+		tcpManager:       core.GetGlobalTCPManager(),
+		tcpWriter:        network.NewTCPWriter(retryConfig, logger.GetLogger()),
+		lastSendByDevice: make(map[string]time.Time),
 	}
 }
 
@@ -211,6 +216,18 @@ func (g *DeviceGateway) SendCommandToDevice(deviceID string, command byte, data 
 		return fmt.Errorf("TCP管理器未初始化")
 	}
 
+	// AP3000 发送节流：同设备命令间隔≥0.5秒
+	g.throttleMu.Lock()
+	if last, ok := g.lastSendByDevice[deviceID]; ok {
+		if wait := 500*time.Millisecond - time.Since(last); wait > 0 {
+			g.throttleMu.Unlock()
+			time.Sleep(wait)
+			g.throttleMu.Lock()
+		}
+	}
+	g.lastSendByDevice[deviceID] = time.Now()
+	g.throttleMu.Unlock()
+
 	conn, exists := g.tcpManager.GetConnectionByDeviceID(deviceID)
 	if !exists {
 		return fmt.Errorf("设备 %s 不在线", deviceID)
@@ -290,7 +307,7 @@ func (g *DeviceGateway) SendCommandToDevice(deviceID string, command byte, data 
 		"action":          "SEND_DNY_PACKET",
 	}).Info("📡 发送DNY命令数据包 - 详细Hex记录")
 
-	// �🚀 Phase 2: 使用TCPWriter发送数据包，支持重试机制
+	// 🚀 Phase 2: 使用TCPWriter发送数据包，支持重试机制
 	if err := g.tcpWriter.WriteWithRetry(conn, 0, dnyPacket); err != nil {
 		return fmt.Errorf("发送命令失败: %v", err)
 	}

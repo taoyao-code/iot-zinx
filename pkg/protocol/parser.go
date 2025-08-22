@@ -5,7 +5,9 @@ import (
 	"encoding/hex"
 	"fmt"
 
+	"github.com/bujia-iot/iot-zinx/internal/infrastructure/logger"
 	"github.com/bujia-iot/iot-zinx/pkg/constants"
+	"github.com/sirupsen/logrus"
 )
 
 // DNYParseResult DNY协议解析结果
@@ -39,14 +41,20 @@ func ParseManualData(hexData, description string) {
 	// 解码十六进制字符串
 	data, err := hex.DecodeString(string(cleanHex))
 	if err != nil {
-		fmt.Printf("❌ [%s] 十六进制解析失败: %v\n", description, err)
+		logger.WithFields(logrus.Fields{
+			"description": description,
+			"error":       err.Error(),
+		}).Error("ParseManualData: 十六进制解析失败")
 		return
 	}
 
 	// 使用统一解析器解析二进制数据
 	dnyMsg, err := ParseDNYProtocolData(data)
 	if err != nil {
-		fmt.Printf("❌ [%s] DNY协议解析失败: %v\n", description, err)
+		logger.WithFields(logrus.Fields{
+			"description": description,
+			"error":       err.Error(),
+		}).Error("ParseManualData: DNY协议解析失败")
 		return
 	}
 
@@ -61,7 +69,10 @@ func ParseManualData(hexData, description string) {
 		ChecksumValid: true, // 简化处理
 	}
 
-	fmt.Printf("✅ [%s] %s\n", description, result.String())
+	logger.WithFields(logrus.Fields{
+		"description": description,
+		"result":      result.String(),
+	}).Debug("ParseManualData: 成功解析并格式化结果")
 }
 
 // ParseDNYData 统一的DNY协议解析函数
