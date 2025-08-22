@@ -1,0 +1,13 @@
+---
+globs: docs/architecture/*.md
+---
+# 架构文档维护约定
+
+- 文档必须体现 AP3000 指令映射（API → 协议），标注关键命令：`0x82`（充电/停电）、`0x96`（定位）、`0x21/0x06`（心跳/功率心跳）等。
+- 以 `core.TCPManager` 为单一数据源，展示三层映射（connections/deviceGroups/deviceIndex）。
+- Mermaid 图需标出：HTTP API → DeviceGateway → TCPWriter → DNY 构包 → 设备。
+- 新增或修改业务功能，必须附：
+  - API 契约（请求/响应示例、字段校验）
+  - 协议字段对齐（字节序、单位、取值范围、默认值）
+  - 时序/链路图（含超时与重试策略）
+- 协议文档引用：[AP3000-设备与服务器通信协议.md](mdc:docs/协议/AP3000-设备与服务器通信协议.md)

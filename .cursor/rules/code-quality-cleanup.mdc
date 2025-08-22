@@ -1,0 +1,25 @@
+---
+globs: **/*.go
+---
+# 代码规范与无效代码清理
+
+- 日志与调试
+  - 禁止使用 `fmt.Printf` 在生产路径打印；统一使用 `internal/infrastructure/logger`（logrus）
+  - 发送命令必须记录结构化日志（含 deviceID/physicalID/msgID/cmd/dataHex/packetHex）
+- 协议一致性
+  - 统一通过 `pkg/protocol/dny_packet.go` 构包（小端、校验等）；禁止重复实现封包/校验
+  - 消息ID使用 `pkg.Protocol.GetNextMessageID()`，避免重复
+  - DeviceID 输入统一走 `utils.DeviceIDProcessor.SmartConvertDeviceID`
+- 并发与数据一致性
+  - 设备状态仅来源于 `core.TCPManager`；修改 `Device` 字段需持有锁
+  - 不从连接会话派生业务事实，优先读 `Device`
+- 无效代码识别与处理
+  - 移除重复的协议解析/校验方法（已集中到拦截器与 `DNYPacket`）
+  - 删除未使用的常量/函数/类型；删除注释掉的大块旧实现
+  - 将散落在各处的十六进制处理函数收敛到 `pkg/utils`
+- 发送节流
+  - 在同一设备连接上发送命令需间隔≥0.5秒（AP3000 约束）；如未实现，请在 `TCPWriter` 或 `DeviceGateway` 层引入 per-device 节流
+- 参考文件
+  - `pkg/gateway/device_gateway.go`
+  - `pkg/protocol/dny_packet.go`
+  - `internal/adapter/http/gateway_handlers.go`

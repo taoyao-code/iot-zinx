@@ -87,12 +87,12 @@ func (g *DeviceGateway) IsDeviceOnline(deviceID string) bool {
  * @return {[]string}
  */
 func (g *DeviceGateway) GetAllOnlineDevices() []string {
-	fmt.Printf("🔍 [DeviceGateway.GetAllOnlineDevices] 开始获取在线设备列表\n")
+	logger.WithFields(logrus.Fields{"action": "GetAllOnlineDevices"}).Debug("start")
 
 	var onlineDevices []string
 
 	if g.tcpManager == nil {
-		fmt.Printf("❌ [DeviceGateway.GetAllOnlineDevices] TCP管理器未初始化\n")
+		logger.WithFields(logrus.Fields{"action": "GetAllOnlineDevices", "error": "tcpManager nil"}).Debug("skip")
 		return onlineDevices
 	}
 
@@ -102,23 +102,20 @@ func (g *DeviceGateway) GetAllOnlineDevices() []string {
 	// 遍历所有设备组
 	g.tcpManager.GetDeviceGroups().Range(func(key, value interface{}) bool {
 		groupCount++
-		iccid := key.(string)
+		_ = key.(string)
 		deviceGroup := value.(*core.DeviceGroup)
 		deviceGroup.RLock()
 
-		fmt.Printf("🔍 [DeviceGateway.GetAllOnlineDevices] 检查设备组 %d: iccid=%s, 设备数=%d\n",
-			groupCount, iccid, len(deviceGroup.Devices))
+		// logger.WithFields(logrus.Fields{"action":"GetAllOnlineDevices","iccid":iccid,"deviceCount":len(deviceGroup.Devices)}).Trace("scan group")
 
 		deviceInGroup := 0
 		for deviceID, device := range deviceGroup.Devices {
 			totalDevices++
 			deviceInGroup++
-			fmt.Printf("🔍 [DeviceGateway.GetAllOnlineDevices] 设备 %d: deviceID=%s, status=%s, isOnline=%t\n",
-				deviceInGroup, deviceID, device.Status.String(), device.Status == constants.DeviceStatusOnline)
+			// logger.WithFields(logrus.Fields{"action":"GetAllOnlineDevices","deviceID":deviceID,"status":device.Status.String()}).Trace("scan device")
 
 			if device.Status == constants.DeviceStatusOnline {
 				onlineDevices = append(onlineDevices, deviceID)
-				fmt.Printf("✅ [DeviceGateway.GetAllOnlineDevices] 添加在线设备: deviceID=%s\n", deviceID)
 			}
 		}
 
@@ -126,12 +123,11 @@ func (g *DeviceGateway) GetAllOnlineDevices() []string {
 		return true
 	})
 
-	fmt.Printf("✅ [DeviceGateway.GetAllOnlineDevices] 扫描完成: 设备组数=%d, 总设备数=%d, 在线设备数=%d\n",
-		groupCount, totalDevices, len(onlineDevices))
-	fmt.Printf("✅ [DeviceGateway.GetAllOnlineDevices] 在线设备列表: %v\n", onlineDevices)
-
 	logger.WithFields(logrus.Fields{
-		"onlineCount": len(onlineDevices),
+		"action":       "GetAllOnlineDevices",
+		"groupCount":   groupCount,
+		"totalDevices": totalDevices,
+		"onlineCount":  len(onlineDevices),
 	}).Debug("获取所有在线设备列表")
 
 	return onlineDevices
@@ -151,17 +147,31 @@ func (g *DeviceGateway) CountOnlineDevices() int {
  * @return {map[string]interface{}, error}
  */
 func (g *DeviceGateway) GetDeviceDetail(deviceID string) (map[string]interface{}, error) {
-	fmt.Printf("🔍 [DeviceGateway.GetDeviceDetail] 开始获取设备详情: deviceID=%s\n", deviceID)
+	logger.WithFields(logrus.Fields{
+		"action":   "GetDeviceDetail",
+		"deviceID": deviceID,
+	}).Debug("开始获取设备详情")
 
 	if g.tcpManager == nil {
-		fmt.Printf("❌ [DeviceGateway.GetDeviceDetail] TCP管理器未初始化\n")
+		logger.WithFields(logrus.Fields{
+			"action": "GetDeviceDetail",
+			"error":  "TCP管理器未初始化",
+		}).Error("获取设备详情失败")
 		return nil, fmt.Errorf("TCP管理器未初始化")
 	}
 
-	fmt.Printf("🔍 [DeviceGateway.GetDeviceDetail] 调用TCPManager.GetDeviceDetail: deviceID=%s\n", deviceID)
+	logger.WithFields(logrus.Fields{
+		"action":   "GetDeviceDetail",
+		"deviceID": deviceID,
+	}).Debug("调用TCPManager.GetDeviceDetail")
+
 	result, err := g.tcpManager.GetDeviceDetail(deviceID)
 	if err != nil {
-		fmt.Printf("❌ [DeviceGateway.GetDeviceDetail] TCPManager返回错误: deviceID=%s, error=%v\n", deviceID, err)
+		logger.WithFields(logrus.Fields{
+			"action":   "GetDeviceDetail",
+			"deviceID": deviceID,
+			"error":    err,
+		}).Error("TCPManager返回错误")
 		return nil, err
 	}
 

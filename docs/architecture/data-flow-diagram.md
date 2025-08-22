@@ -1,4 +1,4 @@
-# IoT-Zinx 数据流图
+# IoT-Zinx 数据流图（AP3000 对齐版）
 
 本文档描述了IoT-Zinx系统修复后的完整数据流，展示了从TCP连接建立到API响应的完整链路。
 
@@ -11,7 +11,7 @@ IoT-Zinx采用分层架构设计，实现了设备连接管理、协议解析、
 - **并发安全**：所有数据更新都有适当的mutex保护
 - **统一接口**：所有模块通过TCPManager访问数据
 
-## 完整数据链路流程
+## 完整数据链路流程（涵盖 AP3000 要点）
 
 ### 1. TCP连接管理链路
 
@@ -114,8 +114,9 @@ API请求 → 智能DeviceID处理 → tcpManager.GetDeviceByID()
 **API端点**：
 - `GET /api/v1/device/{id}/status` - 设备状态查询
 - `GET /api/v1/device/{id}/detail` - 设备详情查询
-- `POST /api/v1/device/command` - 设备控制命令
-- `POST /api/v1/device/locate` - 设备定位命令
+- `POST /api/v1/charging/start` - 开始充电 → 指令 0x82
+- `POST /api/v1/charging/stop` - 停止充电 → 指令 0x82
+- `POST /api/v1/device/locate` - 设备定位 → 指令 0x96
 
 ### 6. 充电控制链路
 
@@ -125,9 +126,9 @@ API请求 → 智能DeviceID处理 → tcpManager.GetDeviceByID()
 ```
 
 **关键组件**：
-- `pkg/gateway/device_gateway.go` - 设备网关接口
-- `pkg/network/tcp_writer.go` - 统一发送通道
-- `pkg/protocol/dny_packet.go` - DNY协议构建
+- `pkg/gateway/device_gateway.go` - 设备网关接口（含 0x82/0x96 构包）
+- `pkg/network/tcp_writer.go` - 统一发送通道（重试/写超时）
+- `pkg/protocol/dny_packet.go` - DNY协议构建（小端、校验）
 
 ## 数据存储架构
 

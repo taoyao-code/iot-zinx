@@ -1,0 +1,23 @@
+---
+alwaysApply: true
+---
+# AP3000 协议遵循规则
+
+- 本项目严格遵循 `AP3000-设备与服务器通信协议`。
+- 关键约束：
+  - 包头: "DNY" (0x44 0x4E 0x59)
+  - 长度字段: 2 字节，小端；长度=物理ID+消息ID+命令+数据+校验
+  - 校验: 整包字节累加和的低 2 字节（不含校验本身）
+  - 字节序: 默认小端
+  - 消息ID: 每条命令唯一（重发保持一致），超时 15 秒
+  - 发送节流: 对同一设备的命令间隔 ≥ 0.5 秒
+  - 物理ID: 小端→大端后首字节为识别码，后 3 字节为编号
+- 参考协议文档：[AP3000-设备与服务器通信协议.md](mdc:docs/协议/AP3000-设备与服务器通信协议.md)
+- 统一构包：使用 `pkg/protocol/dny_packet.go` 的构包逻辑与统一 Builder；严禁自定义偏移或非小端写入。
+- 设备ID处理：所有对外 API 必须通过 `utils.DeviceIDProcessor.SmartConvertDeviceID` 进行标准化（十进制/6位/8位十六进制均可）。
+- 日志规范：关键命令与数据帧必须输出结构化日志（含 deviceID、physicalID、msgID、cmd、dataHex、packetHex）。
+
+相关实现入口：
+- 发送：`pkg/gateway/device_gateway.go` → `SendCommandToDevice` / `SendChargingCommandWithParams`
+- 写出：`pkg/network/tcp_writer.go`
+- 构包：`pkg/protocol/dny_packet.go`
