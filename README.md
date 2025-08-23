@@ -126,6 +126,26 @@ isOnline := tcpManager.IsDeviceOnline(deviceId)
 
 详细说明请参考 [pkg/README.md](pkg/README.md)。
 
+### 智能降功率（可选）
+
+开启 `configs/gateway.yaml`：
+
+```yaml
+smartCharging:
+  enabled: true
+  stepPercent: 0.1
+  stepIntervalSeconds: 180
+  peakHoldSeconds: 300
+  minPowerW: 80
+  changeThresholdW: 30
+  stabilizeWindowSeconds: 300
+  sampleRate: 1
+```
+
+工作方式：系统依据 0x06/0x26 心跳的实时功率与状态，周期性通过 0x82 更新“过载功率”（单位瓦），逐步下调，直至达到 `minPowerW` 或设备判满。
+
+重要：0x8A 仅用于“修改时长/电量”；0x85 为设备持久上限。动态功率控制必须通过 0x82 的“过载功率”字段实现。
+
 ## 开发指南
 
 ### 环境要求

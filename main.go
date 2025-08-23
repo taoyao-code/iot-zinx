@@ -124,6 +124,9 @@ func main() {
 		}
 	}
 
+	// 初始化智能降功率控制器（按配置开关）
+	gateway.InitDynamicPowerController()
+
 	// 启动HTTP API服务器
 	go func() {
 		improvedLogger.Info("正在启动HTTP API服务器...", map[string]interface{}{

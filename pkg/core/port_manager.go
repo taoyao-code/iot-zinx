@@ -32,12 +32,14 @@ type PortManager struct {
 
 // PortState 端口状态
 type PortState struct {
-	PortNumber   int    `json:"port_number"`   // 端口号(0-based)
-	Status       string `json:"status"`        // 端口状态
-	DeviceID     string `json:"device_id"`     // 关联设备ID
-	OrderNumber  string `json:"order_number"`  // 当前订单号
-	IsCharging   bool   `json:"is_charging"`   // 是否正在充电
-	LastActivity int64  `json:"last_activity"` // 最后活动时间
+	PortNumber         int    `json:"port_number"`           // 端口号(0-based)
+	Status             string `json:"status"`                // 端口状态
+	DeviceID           string `json:"device_id"`             // 关联设备ID
+	OrderNumber        string `json:"order_number"`          // 当前订单号
+	LastRealtimePowerW int    `json:"last_realtime_power_w"` // 最近一次实时功率(瓦，取0x06/0x26)
+	LastUpdateAt       int64  `json:"last_update_at"`        // 最近一次更新(秒)
+	IsCharging         bool   `json:"is_charging"`           // 是否正在充电
+	LastActivity       int64  `json:"last_activity"`         // 最后活动时间
 }
 
 // 端口状态常量 - 根据AP3000协议文档定义

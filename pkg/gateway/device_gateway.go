@@ -908,3 +908,66 @@ func (g *DeviceGateway) analyzePacketStructure(packet []byte, physicalID uint32,
 func (g *DeviceGateway) SendStopChargingCommand(deviceID string, port uint8, orderNo string) error {
 	return g.SendChargingCommandWithParams(deviceID, port, 0x00, orderNo, 0, 0, 0)
 }
+
+// UpdateChargingOverloadPower 在不改变当前订单其它参数的前提下，仅更新过载功率/最大充电时长
+// 注意：
+// - 需保持充电命令=1、订单号不变、端口号为协议0基(对外1基需减1)
+// - 若不想调整最大充电时长，请传 maxChargeDurationSeconds=0 表示不修改
+// - overloadPowerW 单位为瓦，对应0x82中的过载功率(2字节小端，单位为瓦)
+func (g *DeviceGateway) UpdateChargingOverloadPower(deviceID string, port uint8, orderNo string, overloadPowerW uint16, maxChargeDurationSeconds uint16) error {
+	if deviceID == "" {
+		return fmt.Errorf("设备ID不能为空")
+	}
+	if port == 0 {
+		return fmt.Errorf("端口号不能为0")
+	}
+	if len(orderNo) > 16 {
+		return fmt.Errorf("订单号长度超过限制：%d", len(orderNo))
+	}
+
+	if g.tcpManager == nil {
+		return fmt.Errorf("TCP管理器未初始化")
+	}
+	if !g.IsDeviceOnline(deviceID) {
+		return fmt.Errorf("设备不在线")
+	}
+
+	payload := make([]byte, 37)
+	payload[0] = 0                                              // 费率模式(保守0)
+	payload[1], payload[2], payload[3], payload[4] = 0, 0, 0, 0 // 余额/有效期
+	payload[5] = port - 1                                       // 端口(协议0基)
+	payload[6] = 0x01                                           // 充电命令=1(保持充电)
+	payload[7], payload[8] = 0, 0                               // 充电时长/电量(保守不修改语义，若固件不兼容需改为回填原值)
+
+	orderBytes := make([]byte, 16)
+	copy(orderBytes, []byte(orderNo))
+	copy(payload[9:25], orderBytes)
+
+	payload[25] = byte(maxChargeDurationSeconds)
+	payload[26] = byte(maxChargeDurationSeconds >> 8)
+
+	payload[27] = byte(overloadPowerW)
+	payload[28] = byte(overloadPowerW >> 8)
+
+	payload[29] = 0                 // 二维码灯
+	payload[30] = 0                 // 长充模式
+	payload[31], payload[32] = 0, 0 // 额外浮充时间
+	payload[33] = 2                 // 是否跳过短路检测=2正常
+	payload[34] = 0                 // 不判断用户拔出
+	payload[35] = 0                 // 强制带充满自停
+	payload[36] = 0                 // 充满功率(单位1W)，此处关闭
+
+	if err := g.SendCommandToDevice(deviceID, constants.CmdChargeControl, payload); err != nil {
+		return err
+	}
+
+	logger.WithFields(logrus.Fields{
+		"deviceID":                 deviceID,
+		"port":                     port,
+		"orderNo":                  orderNo,
+		"overloadPowerW":           overloadPowerW,
+		"maxChargeDurationSeconds": maxChargeDurationSeconds,
+	}).Info("已下发0x82仅更新过载功率/最大时长")
+
+	return nil
+}

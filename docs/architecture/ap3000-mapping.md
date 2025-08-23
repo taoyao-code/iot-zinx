@@ -86,3 +86,36 @@ sequenceDiagram
 - 配置：`configs/gateway.yaml`
 - 发送：`pkg/gateway/device_gateway.go`、`pkg/network/tcp_writer.go`
 - 构包：`pkg/protocol/dny_packet.go`
+
+## 10. 智能降功率（基于 0x82 过载功率）
+
+- 目标：在充电中动态下调本次订单的功率上限，保护被充设备与电网负载。
+- 原理：重复下发 0x82，保持 `充电命令=1` 与 `订单号` 不变，仅更新“过载功率(2B，小端，单位瓦)”并可选“最大充电时长(2B，小端，0=不修改)”。
+- 区分：
+  - 0x82：本次订单动态参数（含过载功率）
+  - 0x8A：仅修改“时长/电量”，不涉及功率
+  - 0x85：设备持久化上限，非本次订单动态调功
+
+### 配置
+`configs/gateway.yaml::smartCharging`
+- `enabled`: 是否启用
+- `stepPercent`: 每次下调比例（0-1，建议0.1）
+- `stepIntervalSeconds`: 下调间隔秒数（建议180s）
+- `peakHoldSeconds`: 峰值保持时长秒（建议300s）
+- `minPowerW`: 收尾最低功率（建议≈50-80W）
+- `changeThresholdW`: 变化阈值，低于该值不下发（防抖，建议≥30W）
+- `stabilizeWindowSeconds`: 低功率稳定窗口（可用于停机策略扩展）
+- `sampleRate`: 心跳采样率，1=全量
+
+### 代码落点
+- 控制器：`pkg/gateway/dynamic_power_controller.go`
+- 心跳接入：
+  - `internal/infrastructure/zinx_server/handlers/power_heartbeat_handler.go`
+  - `internal/infrastructure/zinx_server/handlers/port_power_heartbeat_handler.go`
+- 网关方法：`pkg/gateway/device_gateway.go::UpdateChargingOverloadPower`
+- 启动：`main.go` 调用 `gateway.InitDynamicPowerController()`
+
+### 注意事项
+- 同设备命令间隔≥0.5秒；消息ID唯一，超时15秒最多重发2次。
+- 端口号协议0起，外部1起；`订单号`必须与当前订单一致。
+- 幂等与观测：结构化日志、失败重试、第三方推送按原有规范执行。

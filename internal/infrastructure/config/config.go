@@ -18,6 +18,7 @@ type Config struct {
 	HealthCheck      HealthCheckConfig      `mapstructure:"healthCheck"`
 	Retry            RetryConfig            `mapstructure:"retry"`
 	Notification     NotificationConfig     `mapstructure:"notification"`
+	SmartCharging    SmartChargingConfig    `mapstructure:"smartCharging"`
 }
 
 // TCPServerConfig TCP服务器配置
@@ -227,6 +228,18 @@ type NotificationRetryConfig struct {
 	InitialInterval string  `mapstructure:"initial_interval"`
 	MaxInterval     string  `mapstructure:"max_interval"`
 	Multiplier      float64 `mapstructure:"multiplier"`
+}
+
+// SmartChargingConfig 智能降功率配置
+type SmartChargingConfig struct {
+	Enabled                bool    `mapstructure:"enabled"`                // 是否启用
+	StepPercent            float64 `mapstructure:"stepPercent"`            // 每次下降比例(0.0-1.0)
+	StepIntervalSeconds    int     `mapstructure:"stepIntervalSeconds"`    // 每次调整间隔(秒)
+	PeakHoldSeconds        int     `mapstructure:"peakHoldSeconds"`        // 初期保持满功率时长(秒)
+	MinPowerW              int     `mapstructure:"minPowerW"`              // 收尾最低功率阈值(瓦)
+	ChangeThresholdW       int     `mapstructure:"changeThresholdW"`       // 触发下发的最小变化阈值(瓦)
+	StabilizeWindowSeconds int     `mapstructure:"stabilizeWindowSeconds"` // 低功率稳定窗口(秒)
+	SampleRate             int     `mapstructure:"sampleRate"`             // 心跳采样率(1表示每条)
 }
 
 // FormatHTTPAddress 格式化HTTP服务器地址为host:port格式

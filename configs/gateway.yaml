@@ -208,3 +208,14 @@ notification:
     initial_interval: "1s"
     max_interval: "30s"
     multiplier: 2.0
+
+# 智能降功率配置
+smartCharging:
+  enabled: false # 是否启用智能降功率
+  stepPercent: 0.1 # 每次下降10%
+  stepIntervalSeconds: 180 # 每180秒评估并下发一次
+  peakHoldSeconds: 300 # 前300秒保持初期功率
+  minPowerW: 80 # 收尾最低功率阈值(瓦)
+  changeThresholdW: 30 # 变化小于30W不下发，防抖
+  stabilizeWindowSeconds: 300 # 低功率稳定判定窗口
+  sampleRate: 1 # 心跳采样率(1表示每条都处理)

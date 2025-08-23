@@ -10,6 +10,7 @@ import (
 	"github.com/bujia-iot/iot-zinx/internal/infrastructure/logger"
 	"github.com/bujia-iot/iot-zinx/pkg/constants"
 	"github.com/bujia-iot/iot-zinx/pkg/core"
+	"github.com/bujia-iot/iot-zinx/pkg/gateway"
 	"github.com/bujia-iot/iot-zinx/pkg/notification"
 	"github.com/bujia-iot/iot-zinx/pkg/protocol"
 	"github.com/bujia-iot/iot-zinx/pkg/utils"
@@ -266,5 +267,15 @@ func (h *PortPowerHeartbeatHandler) sendPortPowerHeartbeatNotification(decodedFr
 
 		// 发送充电功率通知
 		integrator.NotifyPowerHeartbeat(deviceId, portNumber, chargingPowerData)
+
+		// 智能降功率：回调控制器
+		if raw, ok := powerInfo["realtime_power_raw"].(uint16); ok {
+			orderNo := ""
+			if v, ok2 := powerInfo["order_number"].(string); ok2 {
+				orderNo = v
+			}
+			realtimeW := int(notification.FormatPower(raw))
+			gateway.GetDynamicPowerController().OnPowerHeartbeat(deviceId, portNumber, orderNo, realtimeW, true, time.Now())
+		}
 	}
 }
