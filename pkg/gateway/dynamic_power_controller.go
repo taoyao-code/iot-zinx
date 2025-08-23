@@ -155,7 +155,7 @@ func (d *DynamicPowerController) OnPowerHeartbeat(deviceID string, port1Based in
 	}).Info("智能降功率：已更新过载功率")
 
 	// 简易对账：若宽限时间后观测功率仍显著高于目标，则重发一次
-	go func(dev string, p1 int, ord string, tgt int, issuedAt time.Time) {
+	go func(dev string, p1 int, ord string, tgt int, _ time.Time) {
 		grace := time.Duration(d.cfg.StepIntervalSeconds/2)*time.Second + 10*time.Second
 		timer := time.NewTimer(grace)
 		defer timer.Stop()
