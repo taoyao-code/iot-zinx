@@ -92,12 +92,9 @@ func (b *UnifiedDNYBuilder) BuildDNYPacket(physicalID uint32, messageID uint16, 
 }
 
 // calculateChecksum 计算DNY协议校验和（内部方法）
-// 根据协议文档：从包头"DNY"开始到校验和前的所有字节进行简单累加
+// 统一委托给 CalculatePacketChecksumInternal，避免重复实现
 func (b *UnifiedDNYBuilder) calculateChecksum(dataFrame []byte) uint16 {
-	var sum uint16
-	for _, b := range dataFrame {
-		sum += uint16(b)
-	}
+	sum, _ := CalculatePacketChecksumInternal(dataFrame)
 	return sum
 }
 
@@ -209,46 +206,24 @@ func ValidateUnifiedDNYPacket(packet []byte) error {
 	return globalDNYBuilder.ValidatePacket(packet)
 }
 
-// ===== 向后兼容的包装函数 =====
-// 注意：这些函数将在现有文件中定义，避免重复声明
-
-// ===== 调试和监控函数 =====
-
-// EnableDNYBuilderDebug 启用DNY构建器调试日志
-func EnableDNYBuilderDebug() {
-	globalDNYBuilder.SetDebugLog(true)
-	logger.Info("统一DNY构建器调试日志已启用")
-}
-
-// DisableDNYBuilderDebug 禁用DNY构建器调试日志
-func DisableDNYBuilderDebug() {
-	globalDNYBuilder.SetDebugLog(false)
-	logger.Info("统一DNY构建器调试日志已禁用")
-}
-
-// GetDNYPacketInfo 获取DNY数据包信息（调试用）
-func GetDNYPacketInfo(packet []byte) map[string]interface{} {
-	return globalDNYBuilder.GetPacketInfo(packet)
-}
-
 // ===== 向后兼容的发送函数 =====
 
 // SendDNYResponse 发送DNY协议响应（向后兼容函数）
 // 这个函数提供给Handler使用，内部会调用统一发送器
 // 注意：这是一个桥接函数，实际发送逻辑在export.go中的globalUnifiedSender
-func SendDNYResponse(conn ziface.IConnection, physicalId uint32, messageId uint16, command uint8, data []byte) error {
+func SendDNYResponse(conn ziface.IConnection, physicalID uint32, messageID uint16, command uint8, data []byte) error {
 	// 为了避免循环导入，这里需要通过接口调用
 	// 实际的实现会在init时注册
 	if globalSendDNYResponseFunc != nil {
-		return globalSendDNYResponseFunc(conn, physicalId, messageId, command, data)
+		return globalSendDNYResponseFunc(conn, physicalID, messageID, command, data)
 	}
 	return fmt.Errorf("统一发送器未初始化")
 }
 
 // 全局发送函数变量（避免循环导入）
-var globalSendDNYResponseFunc func(conn ziface.IConnection, physicalId uint32, messageId uint16, command uint8, data []byte) error
+var globalSendDNYResponseFunc func(conn ziface.IConnection, physicalID uint32, messageID uint16, command uint8, data []byte) error
 
 // RegisterGlobalSendDNYResponse 注册全局发送函数（由export.go调用）
-func RegisterGlobalSendDNYResponse(sendFunc func(conn ziface.IConnection, physicalId uint32, messageId uint16, command uint8, data []byte) error) {
+func RegisterGlobalSendDNYResponse(sendFunc func(conn ziface.IConnection, physicalID uint32, messageID uint16, command uint8, data []byte) error) {
 	globalSendDNYResponseFunc = sendFunc
 }

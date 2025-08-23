@@ -168,7 +168,7 @@ func (dp *DNYPacket) Unpack(binaryData []byte) (ziface.IMessage, error) {
 	// 记录接收到的原始数据
 	logger.WithFields(logrus.Fields{
 		"dataLen": len(binaryData),
-		"dataHex": hex.EncodeToString(binaryData[:min(len(binaryData), 100)]), // 仅记录前100个字节，避免日志过大
+		"dataHex": hex.EncodeToString(binaryData[:minInt(len(binaryData), 100)]), // 仅记录前100个字节，避免日志过大
 		"time":    time.Now().Format(constants.TimeFormatDefault),
 	}).Debug("收到数据包")
 
@@ -204,7 +204,7 @@ func (dp *DNYPacket) Unpack(binaryData []byte) (ziface.IMessage, error) {
 			}).Debug("十六进制解码成功")
 
 			// 检查解码后的数据是否为DNY协议
-			if len(decoded) >= 3 && bytes.HasPrefix(decoded, []byte("DNY")) {
+			if len(decoded) >= 3 && bytes.HasPrefix(decoded, []byte(constants.ProtocolHeader)) {
 				logger.Debug("解码后发现DNY协议数据")
 				return dp.handleDNYProtocolBasic(decoded)
 			}
@@ -225,7 +225,7 @@ func (dp *DNYPacket) Unpack(binaryData []byte) (ziface.IMessage, error) {
 	}
 
 	// 🔧 检查是否为DNY协议格式数据
-	if len(binaryData) >= 3 && bytes.HasPrefix(binaryData, []byte("DNY")) {
+	if len(binaryData) >= 3 && bytes.HasPrefix(binaryData, []byte(constants.ProtocolHeader)) {
 		// 对于DNY协议数据，只做基础的完整性检查，不进行完整解析
 		return dp.handleDNYProtocolBasic(binaryData)
 	}
@@ -298,7 +298,7 @@ func (dp *DNYPacket) handleDNYProtocolBasic(data []byte) (ziface.IMessage, error
 }
 
 // 辅助函数，返回两个数的较小值
-func min(a, b int) int {
+func minInt(a, b int) int {
 	if a < b {
 		return a
 	}

@@ -58,15 +58,28 @@ func ParseManualData(hexData, description string) {
 		return
 	}
 
-	// 创建兼容性结果并输出
+	// 创建兼容性结果并输出（按真实规则计算校验）
 	result := &DNYParseResult{
-		PacketHeader:  "DNY",
-		PhysicalID:    dnyMsg.GetPhysicalId(),
-		Command:       uint8(dnyMsg.GetMsgID()),
-		Data:          dnyMsg.GetData(),
-		RawData:       dnyMsg.GetRawData(),
-		CommandName:   GetCommandName(uint8(dnyMsg.GetMsgID())),
-		ChecksumValid: true, // 简化处理
+		PacketHeader: "DNY",
+		PhysicalID:   dnyMsg.GetPhysicalId(),
+		Command:      uint8(dnyMsg.GetMsgID()),
+		Data:         dnyMsg.GetData(),
+		RawData:      dnyMsg.GetRawData(),
+		CommandName:  GetCommandName(uint8(dnyMsg.GetMsgID())),
+	}
+
+	if len(result.RawData) >= 11 {
+		// 解析长度与消息ID
+		result.Length = binary.LittleEndian.Uint16(result.RawData[3:5])
+		result.MessageID = binary.LittleEndian.Uint16(result.RawData[9:11])
+		// 计算校验
+		dataEnd := 5 + int(result.Length) - 2
+		if dataEnd >= 0 && dataEnd+2 <= len(result.RawData) {
+			if checksum, err := CalculatePacketChecksumInternal(result.RawData[:dataEnd]); err == nil {
+				result.Checksum = binary.LittleEndian.Uint16(result.RawData[dataEnd : dataEnd+2])
+				result.ChecksumValid = (checksum == result.Checksum)
+			}
+		}
 	}
 
 	logger.WithFields(logrus.Fields{

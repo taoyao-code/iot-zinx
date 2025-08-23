@@ -1,7 +1,6 @@
 package protocol
 
 import (
-	"encoding/binary"
 	"fmt"
 
 	"github.com/aceld/zinx/ziface"
@@ -289,47 +288,7 @@ func (d *DNY_Decoder) tryParseLinkHeartbeatDirect(data []byte, connID uint64) []
 	return nil
 }
 
-// tryParseDNYFrameDirect 直接解析DNY标准协议帧
-// 🔧 修复：根据实际测试数据，修正DNY协议长度字段的解析逻辑
-func (d *DNY_Decoder) tryParseDNYFrameDirect(data []byte, connID uint64) []byte {
-	if len(data) < DNY_MIN_HEADER_SIZE {
-		return nil
-	}
-
-	// 检查DNY包头
-	if string(data[:DNY_HEADER_LENGTH]) != constants.ProtocolHeader {
-		return nil
-	}
-
-	// 🔧 修复：使用正确的小端序解析长度字段
-	contentLength := binary.LittleEndian.Uint16(data[3:5])
-
-	// 🔧 修复：根据真实设备数据，长度字段包含校验和
-	// 总长度 = 包头(3) + 长度字段(2) + 内容长度(包含校验和)
-	totalFrameLen := 3 + 2 + int(contentLength) // DNY(3) + Length(2) + Content(包含校验和)
-
-	// 检查数据长度是否匹配
-	if len(data) != totalFrameLen {
-		logger.WithFields(logrus.Fields{
-			"connID":        connID,
-			"dataLen":       len(data),
-			"contentLength": contentLength,
-			"expectedTotal": totalFrameLen,
-			"dataHex":       fmt.Sprintf("%x", data),
-		}).Debug("DNY帧长度不匹配")
-		return nil
-	}
-
-	// 🔧 修复：验证校验和
-	if !d.validateDNYChecksum(data) {
-		logger.WithFields(logrus.Fields{
-			"connID":  connID,
-			"dataHex": fmt.Sprintf("%x", data),
-		}).Warn("DNY帧校验和验证失败，但继续处理以提高兼容性")
-	}
-
-	return data
-}
+// （移除）tryParseDNYFrameDirect：统一由 SplitPacketsFromBuffer + ParseDNYProtocolData 处理
 
 // isValidICCIDBytes 验证ICCID字节格式
 // 🔧 修复：支持真实ICCID格式，十六进制字符(0-9,A-F)，以"89"开头
@@ -359,12 +318,7 @@ func (d *DNY_Decoder) isValidICCIDBytes(data []byte) bool {
 	return true
 }
 
-// isValidICCIDStrict 严格验证ICCID格式（统一标准）
-// 🔧 统一：符合ITU-T E.118标准，20位十六进制字符，以"89"开头
-func (d *DNY_Decoder) isValidICCIDStrict(data []byte) bool {
-	// 直接调用统一的验证方法
-	return d.isValidICCIDBytes(data)
-}
+// （移除）isValidICCIDStrict：请使用 isValidICCIDBytes 或上层统一校验
 
 // getConnection 从链中获取连接
 func (d *DNY_Decoder) getConnection(chain ziface.IChain) ziface.IConnection {
@@ -415,26 +369,7 @@ func (d *DNY_Decoder) safeStringConvert(data []byte) string {
 	return string(result)
 }
 
-// validateDNYChecksum 验证DNY协议校验和
-// 🔧 修复：根据真实设备数据，校验和计算从包头开始到消息ID结束
-func (d *DNY_Decoder) validateDNYChecksum(data []byte) bool {
-	if len(data) < DNY_MIN_HEADER_SIZE+2 { // 至少需要包头+长度+校验和
-		return false
-	}
-
-	// 校验和位置：最后2字节
-	checksumPos := len(data) - 2
-	expectedChecksum := binary.LittleEndian.Uint16(data[checksumPos:])
-
-	// 🔧 修复：根据真实设备验证，校验和计算从包头"DNY"开始到校验和前的所有字节
-	dataForChecksum := data[0:checksumPos] // 从"DNY"开始到校验和前
-	actualChecksum, err := CalculatePacketChecksumInternal(dataForChecksum)
-	if err != nil {
-		return false
-	}
-
-	return actualChecksum == expectedChecksum
-}
+// （移除）validateDNYChecksum：统一使用 protocol.CalculatePacketChecksumInternal
 
 // TestICCIDParsing 测试ICCID解析功能
 func (d *DNY_Decoder) TestICCIDParsing(data []byte) bool {

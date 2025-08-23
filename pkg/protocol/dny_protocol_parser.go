@@ -196,9 +196,6 @@ func CalculatePacketChecksumInternal(dataFrame []byte) (uint16, error) {
 func BuildDNYResponsePacketUnified(msg *dny_protocol.Message) ([]byte, error) {
 	// 根据协议，“长度”字段的值应为 PhysicalID(4) + MessageID(2) + 命令(1) + 数据(n) + 校验(2) 的总和
 	contentLen := uint16(PhysicalIDLength + MessageIDLength + CommandLength + len(msg.Data) + ChecksumLength)
-	if contentLen > 256 {
-		return nil, errors.New("payload too large for DNY packet (max content length 256 bytes)")
-	}
 
 	packet := new(bytes.Buffer)
 
