@@ -203,6 +203,8 @@ type NotificationConfig struct {
 	PortStatusSync PortStatusSyncConfig    `mapstructure:"port_status_sync"`
 	Endpoints      []NotificationEndpoint  `mapstructure:"endpoints"`
 	Retry          NotificationRetryConfig `mapstructure:"retry"`
+	Sampling       map[string]int          `mapstructure:"sampling"`
+	Throttle       map[string]string       `mapstructure:"throttle"`
 }
 
 // PortStatusSyncConfig 端口状态同步配置

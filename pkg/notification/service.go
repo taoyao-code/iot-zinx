@@ -24,7 +24,7 @@ type NotificationService struct {
 
 	// 队列和工作协程
 	eventQueue chan *NotificationEvent
-	retryQueue chan *NotificationEvent
+	retryQueue chan retryPayload
 
 	// 生命周期
 	running bool
@@ -38,6 +38,19 @@ type NotificationService struct {
 	// 统计信息
 	stats   *NotificationStats
 	statsMu sync.RWMutex
+
+	// 采样配置
+	sampling map[string]int
+
+	// 节流：key(event_type|device_id|port) → 下一次允许发送时间
+	throttleMu sync.Mutex
+	nextAllow  map[string]time.Time
+}
+
+// retryPayload 表示一次端点级重试任务
+type retryPayload struct {
+	Event    *NotificationEvent   `json:"event"`
+	Endpoint NotificationEndpoint `json:"endpoint"`
 }
 
 // NewNotificationService 创建通知服务
@@ -72,9 +85,11 @@ func NewNotificationService(config *NotificationConfig) (*NotificationService, e
 		config:      config,
 		httpClient:  httpClient,
 		eventQueue:  make(chan *NotificationEvent, config.QueueSize),
-		retryQueue:  make(chan *NotificationEvent, config.QueueSize),
+		retryQueue:  make(chan retryPayload, config.QueueSize),
 		redisClient: infraredis.GetClient(), // 复用现有Redis连接
 		stats:       stats,
+		sampling:    config.Sampling,
+		nextAllow:   make(map[string]time.Time),
 	}
 
 	return service, nil
@@ -256,11 +271,12 @@ func (s *NotificationService) retryWorker() {
 
 	for {
 		select {
-		case event, ok := <-s.retryQueue:
+		case payload, ok := <-s.retryQueue:
 			if !ok {
 				return
 			}
-			s.processEvent(event)
+			// 直接针对端点发送
+			s.sendToEndpoint(payload.Event, payload.Endpoint)
 		case <-ticker.C:
 			// 从Redis加载重试事件
 			s.loadRetryEvents()
@@ -279,6 +295,41 @@ func (s *NotificationService) processEvent(event *NotificationEvent) {
 		return
 	}
 
+	// 事件采样
+	if s.sampling != nil {
+		if rate, ok := s.sampling[event.EventType]; ok && rate > 1 {
+			if (time.Now().UnixNano()/1e6)%int64(rate) != 0 {
+				// 采样丢弃计数
+				s.statsMu.Lock()
+				s.stats.DroppedBySampling++
+				s.stats.LastUpdateTime = time.Now()
+				s.statsMu.Unlock()
+				return
+			}
+		}
+	}
+
+	// 端点级节流（按事件类型/设备/端口）
+	if s.config.Throttle != nil {
+		key := event.EventType + "|" + event.DeviceID + "|" + fmt.Sprintf("%d", event.PortNumber)
+		if d, ok := s.config.Throttle[event.EventType]; ok && d > 0 {
+			s.throttleMu.Lock()
+			until := s.nextAllow[key]
+			now := time.Now()
+			if now.Before(until) {
+				s.throttleMu.Unlock()
+				// 节流丢弃计数
+				s.statsMu.Lock()
+				s.stats.DroppedByThrottle++
+				s.stats.LastUpdateTime = time.Now()
+				s.statsMu.Unlock()
+				return
+			}
+			s.nextAllow[key] = now.Add(d)
+			s.throttleMu.Unlock()
+		}
+	}
+
 	// 向每个端点发送通知
 	for _, endpoint := range endpoints {
 		s.sendToEndpoint(event, endpoint)
@@ -288,6 +339,12 @@ func (s *NotificationService) processEvent(event *NotificationEvent) {
 // sendToEndpoint 向端点发送通知
 func (s *NotificationService) sendToEndpoint(event *NotificationEvent, endpoint NotificationEndpoint) {
 	startTime := time.Now()
+
+	// 初始化端点级计数
+	if event.EndpointAttempts == nil {
+		event.EndpointAttempts = make(map[string]int)
+	}
+	attemptForEndpoint := event.EndpointAttempts[endpoint.Name]
 
 	// 构建请求载荷
 	payload := map[string]interface{}{
@@ -312,8 +369,12 @@ func (s *NotificationService) sendToEndpoint(event *NotificationEvent, endpoint 
 		return
 	}
 
+	// 以端点超时创建请求级上下文
+	ctx, cancel := context.WithTimeout(s.ctx, endpoint.Timeout)
+	defer cancel()
+
 	// 创建HTTP请求
-	req, err := http.NewRequestWithContext(s.ctx, "POST", endpoint.URL, bytes.NewBuffer(jsonData))
+	req, err := http.NewRequestWithContext(ctx, "POST", endpoint.URL, bytes.NewBuffer(jsonData))
 	if err != nil {
 		logger.WithFields(logrus.Fields{
 			"component":  "notification",
@@ -346,14 +407,11 @@ func (s *NotificationService) sendToEndpoint(event *NotificationEvent, endpoint 
 		"method":        "POST",
 		"payload_size":  len(jsonData),
 		"timeout":       endpoint.Timeout.String(),
-		"attempt_count": event.AttemptCount + 1,
+		"attempt_count": attemptForEndpoint + 1,
 	}).Info("📤 发送通知推送")
 
-	// 设置超时
-	client := &http.Client{Timeout: endpoint.Timeout}
-
-	// 发送请求
-	resp, err := client.Do(req)
+	// 发送请求（复用共享客户端）
+	resp, err := s.httpClient.Do(req)
 	responseTime := time.Since(startTime)
 
 	if err != nil {
@@ -365,12 +423,12 @@ func (s *NotificationService) sendToEndpoint(event *NotificationEvent, endpoint 
 			"endpoint":      endpoint.Name,
 			"url":           endpoint.URL,
 			"response_time": responseTime.String(),
-			"attempt_count": event.AttemptCount + 1,
+			"attempt_count": attemptForEndpoint + 1,
 			"error":         err.Error(),
 		}).Error("📤 通知推送失败 - 网络错误")
 
-		// 增加重试计数
-		event.AttemptCount++
+		// 端点级重试计数
+		event.EndpointAttempts[endpoint.Name] = attemptForEndpoint + 1
 		// 加入重试队列
 		s.scheduleRetry(event, endpoint)
 		return
@@ -397,54 +455,61 @@ func (s *NotificationService) sendToEndpoint(event *NotificationEvent, endpoint 
 			"status_code":   resp.StatusCode,
 			"response_time": responseTime.String(),
 			"response_size": len(respBody),
-			"attempt_count": event.AttemptCount + 1,
+			"attempt_count": attemptForEndpoint + 1,
 			"final_attempt": true,
 		}).Info("📤 通知推送成功")
 
 		// 更新成功统计
 		s.updateStats(endpoint.Name, true, responseTime)
-	} else {
-		logger.WithFields(logrus.Fields{
-			"component":     "notification",
-			"action":        "send_failed",
-			"event_id":      event.EventID,
-			"event_type":    event.EventType,
-			"endpoint":      endpoint.Name,
-			"url":           endpoint.URL,
-			"status_code":   resp.StatusCode,
-			"response_time": responseTime.String(),
-			"response_body": string(respBody),
-			"attempt_count": event.AttemptCount + 1,
-		}).Error("📤 通知推送失败 - HTTP错误状态")
-
-		// 更新失败统计
-		s.updateStats(endpoint.Name, false, responseTime)
-
-		// 增加重试计数
-		event.AttemptCount++
-		// 加入重试队列
-		s.scheduleRetry(event, endpoint)
+		return
 	}
+
+	logger.WithFields(logrus.Fields{
+		"component":     "notification",
+		"action":        "send_failed",
+		"event_id":      event.EventID,
+		"event_type":    event.EventType,
+		"endpoint":      endpoint.Name,
+		"url":           endpoint.URL,
+		"status_code":   resp.StatusCode,
+		"response_time": responseTime.String(),
+		"response_body": string(respBody),
+		"attempt_count": attemptForEndpoint + 1,
+	}).Error("📤 通知推送失败 - HTTP错误状态")
+
+	// 更新失败统计
+	s.updateStats(endpoint.Name, false, responseTime)
+
+	// 端点级重试计数
+	event.EndpointAttempts[endpoint.Name] = attemptForEndpoint + 1
+	// 加入重试队列
+	s.scheduleRetry(event, endpoint)
 }
 
 // scheduleRetry 安排重试
 func (s *NotificationService) scheduleRetry(event *NotificationEvent, endpoint NotificationEndpoint) {
+	// 使用端点级计数
+	if event.EndpointAttempts == nil {
+		event.EndpointAttempts = make(map[string]int)
+	}
+	attemptForEndpoint := event.EndpointAttempts[endpoint.Name]
+
 	// 检查是否超过最大重试次数
-	if event.AttemptCount >= s.config.Retry.MaxAttempts {
+	if attemptForEndpoint >= s.config.Retry.MaxAttempts {
 		logger.WithFields(logrus.Fields{
 			"component":     "notification",
 			"action":        "retry_exhausted",
 			"event_id":      event.EventID,
 			"event_type":    event.EventType,
 			"endpoint":      endpoint.Name,
-			"attempt_count": event.AttemptCount,
+			"attempt_count": attemptForEndpoint,
 			"max_attempts":  s.config.Retry.MaxAttempts,
 		}).Error("📤 通知推送失败 - 重试次数已用尽")
 		return
 	}
 
 	// 计算重试延迟
-	delay := s.calculateRetryDelay(event.AttemptCount)
+	delay := s.calculateRetryDelay(attemptForEndpoint)
 
 	logger.WithFields(logrus.Fields{
 		"component":     "notification",
@@ -452,8 +517,8 @@ func (s *NotificationService) scheduleRetry(event *NotificationEvent, endpoint N
 		"event_id":      event.EventID,
 		"event_type":    event.EventType,
 		"endpoint":      endpoint.Name,
-		"attempt_count": event.AttemptCount,
-		"next_attempt":  event.AttemptCount + 1,
+		"attempt_count": attemptForEndpoint,
+		"next_attempt":  attemptForEndpoint + 1,
 		"retry_delay":   delay.String(),
 	}).Warn("📤 通知推送安排重试")
 
@@ -462,30 +527,44 @@ func (s *NotificationService) scheduleRetry(event *NotificationEvent, endpoint N
 		// 使用ZSET，score为到期时间戳
 		key := "notify:retry:" + endpoint.Name
 		readyAt := time.Now().Add(delay).Unix()
-		payload := map[string]interface{}{
-			"event":    event,
-			"endpoint": endpoint,
-		}
+		payload := retryPayload{Event: event, Endpoint: endpoint}
 		b, err := json.Marshal(payload)
 		if err == nil {
-			_ = client.ZAdd(s.ctx, key, redisv9.Z{Score: float64(readyAt), Member: string(b)}).Err()
-			return
+			if err := client.ZAdd(s.ctx, key, redisv9.Z{Score: float64(readyAt), Member: string(b)}).Err(); err == nil {
+				// 记录一次重试统计
+				s.statsMu.Lock()
+				s.stats.TotalRetried++
+				s.stats.LastUpdateTime = time.Now()
+				s.statsMu.Unlock()
+				return
+			}
 		}
 	}
 
-	// 回退：加入内存重试队列
-	select {
-	case s.retryQueue <- event:
-		// 重试队列加入成功
-	default:
-		logger.WithFields(logrus.Fields{
-			"component":  "notification",
-			"action":     "retry_queue_full",
-			"event_id":   event.EventID,
-			"event_type": event.EventType,
-			"endpoint":   endpoint.Name,
-		}).Error("📤 通知推送失败 - 重试队列已满，丢弃事件")
-	}
+	// 回退：在内存中延迟重试
+	go func() {
+		select {
+		case <-time.After(delay):
+			select {
+			case s.retryQueue <- retryPayload{Event: event, Endpoint: endpoint}:
+				// 重试队列加入成功 → 统计一次重试
+				s.statsMu.Lock()
+				s.stats.TotalRetried++
+				s.stats.LastUpdateTime = time.Now()
+				s.statsMu.Unlock()
+			default:
+				logger.WithFields(logrus.Fields{
+					"component":  "notification",
+					"action":     "retry_queue_full",
+					"event_id":   event.EventID,
+					"event_type": event.EventType,
+					"endpoint":   endpoint.Name,
+				}).Error("📤 通知推送失败 - 重试队列已满，丢弃事件")
+			}
+		case <-s.ctx.Done():
+			return
+		}
+	}()
 }
 
 // calculateRetryDelay 计算重试延迟
@@ -576,25 +655,33 @@ func (s *NotificationService) loadRetryEvents() {
 			continue
 		}
 
-		// 移除这些成员（防止重复消费）
-		_, _ = client.ZRemRangeByScore(s.ctx, key, "-inf", fmt.Sprintf("%d", now)).Result()
-
 		for _, z := range members {
 			str, ok := z.Member.(string)
 			if !ok {
 				continue
 			}
-			var payload struct {
-				Event    *NotificationEvent   `json:"event"`
-				Endpoint NotificationEndpoint `json:"endpoint"`
-			}
+			var payload retryPayload
 			if err := json.Unmarshal([]byte(str), &payload); err != nil {
 				continue
 			}
-			// 直接处理（再次进入发送流程）
-			s.processEvent(payload.Event)
+			// 精确删除当前成员
+			_, _ = client.ZRem(s.ctx, key, str).Result()
+			// 直接针对端点发送
+			s.sendToEndpoint(payload.Event, payload.Endpoint)
+			// 计为一次重试实际执行
+			s.statsMu.Lock()
+			s.stats.TotalRetried++
+			s.stats.LastUpdateTime = time.Now()
+			s.statsMu.Unlock()
 		}
 	}
+}
+
+// GetStats 对外暴露统计数据（线程安全快照）
+func (s *NotificationService) GetStats() NotificationStats {
+	s.statsMu.RLock()
+	defer s.statsMu.RUnlock()
+	return *s.stats
 }
 
 // GetQueueLength 获取队列长度

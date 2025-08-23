@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/aceld/zinx/ziface"
+	"github.com/bujia-iot/iot-zinx/internal/infrastructure/config"
 	"github.com/bujia-iot/iot-zinx/pkg/core"
 	"github.com/bujia-iot/iot-zinx/pkg/network"
 	"github.com/bujia-iot/iot-zinx/pkg/protocol"
@@ -21,15 +22,30 @@ var globalUnifiedSender *network.UnifiedSender
 // 初始化全局实例
 func init() {
 	globalUnifiedSender = network.NewUnifiedSender()
+
+	// 从配置应用写超时与退避参数
 	// 启动统一发送器
 	if err := globalUnifiedSender.Start(); err != nil {
 		// 如果启动失败，记录但不阻止程序运行
 		// logger会在later阶段处理错误
 	}
 
+	cfg := config.GetConfig()
+	writeTimeout := time.Duration(cfg.TCPServer.TCPWriteTimeoutSeconds) * time.Second
+	initial := time.Duration(cfg.Retry.InitialDelayMs) * time.Millisecond
+	maxDelay := time.Duration(cfg.Retry.MaxDelayMs) * time.Millisecond
+	backoff := cfg.Retry.BackoffFactor
+	globalUnifiedSender.ApplyConfig(writeTimeout, initial, maxDelay, backoff, cfg.Retry.MaxRetries)
+
 	// 注册发送函数到protocol包（避免循环导入）
 	protocol.RegisterGlobalSendDNYResponse(func(conn ziface.IConnection, physicalId uint32, messageId uint16, command uint8, data []byte) error {
 		return globalUnifiedSender.SendDNYResponse(conn, physicalId, messageId, command, data)
+	})
+
+	// 绑定 CommandManager 的重发发送函数：使用原始 messageID 构包并经 UnifiedSender 下发
+	network.SetSendCommandFunc(func(conn ziface.IConnection, physicalId uint32, messageId uint16, command uint8, data []byte) error {
+		packet := protocol.BuildUnifiedDNYPacket(physicalId, messageId, command, data)
+		return globalUnifiedSender.SendDNYPacket(conn, packet)
 	})
 }
 
@@ -57,6 +73,7 @@ var Protocol = struct {
 
 	// 数据发送
 	SendDNYResponse func(conn ziface.IConnection, physicalId uint32, messageId uint16, command uint8, data []byte) error
+	SendDNYPacket   func(conn ziface.IConnection, packet []byte) error
 
 	// 消息ID管理
 	GetNextMessageID func() uint16
@@ -68,6 +85,9 @@ var Protocol = struct {
 	SendDNYResponse: func(conn ziface.IConnection, physicalId uint32, messageId uint16, command uint8, data []byte) error {
 		// 🔧 重构：使用统一发送器替代废弃的sender.go
 		return globalUnifiedSender.SendDNYResponse(conn, physicalId, messageId, command, data)
+	},
+	SendDNYPacket: func(conn ziface.IConnection, packet []byte) error {
+		return globalUnifiedSender.SendDNYPacket(conn, packet)
 	},
 	GetNextMessageID: func() uint16 {
 		// 简化的消息ID生成器

@@ -8,6 +8,7 @@ import (
 
 	"github.com/bujia-iot/iot-zinx/internal/infrastructure/config"
 	"github.com/bujia-iot/iot-zinx/pkg/gateway"
+	"github.com/bujia-iot/iot-zinx/pkg/notification"
 	"github.com/bujia-iot/iot-zinx/pkg/utils"
 	"github.com/gin-gonic/gin"
 	"github.com/sirupsen/logrus"
@@ -539,6 +540,35 @@ func (h *DeviceGatewayHandlers) HandleSystemStats(c *gin.Context) {
 	// 🚀 新架构：一行代码获取完整统计信息
 	stats := h.deviceGateway.GetDeviceStatistics()
 
+	// 合并通知系统统计（若启用）并做字段兼容
+	notif := notification.GetGlobalNotificationIntegrator()
+	if notif != nil && notif.IsEnabled() {
+		if svcStats, ok := notif.GetStats(); ok {
+			// 嵌入原始统计
+			stats["notification"] = map[string]interface{}{
+				"total_sent":          svcStats.TotalSent,
+				"total_success":       svcStats.TotalSuccess,
+				"total_failed":        svcStats.TotalFailed,
+				"total_retried":       svcStats.TotalRetried,
+				"avg_response_time":   svcStats.AvgResponseTime.String(),
+				"queue_length":        notif.GetQueueLength(),
+				"retry_queue_length":  notif.GetRetryQueueLength(),
+				"dropped_by_sampling": svcStats.DroppedBySampling,
+				"dropped_by_throttle": svcStats.DroppedByThrottle,
+			}
+			// 顶层兼容字段（前端已有兼容访问器）
+			stats["total_sent"] = svcStats.TotalSent
+			stats["total_success"] = svcStats.TotalSuccess
+			stats["total_failed"] = svcStats.TotalFailed
+			stats["total_retried"] = svcStats.TotalRetried
+			stats["avg_response_time"] = svcStats.AvgResponseTime.String()
+			stats["queue_length"] = notif.GetQueueLength()
+			stats["retry_queue_length"] = notif.GetRetryQueueLength()
+			stats["dropped_by_sampling"] = svcStats.DroppedBySampling
+			stats["dropped_by_throttle"] = svcStats.DroppedByThrottle
+		}
+	}
+
 	c.JSON(http.StatusOK, gin.H{
 		"code":    0,
 		"message": "获取统计信息成功",
@@ -594,4 +624,50 @@ func (h *DeviceGatewayHandlers) HandleQueryDeviceStatus(c *gin.Context) {
 		"message": "获取设备状态成功",
 		"data":    detail,
 	})
+}
+
+// HandleUpdateChargingPower 调整过载功率/最大时长（0x82重复下发，保持订单）
+// @Summary 调整过载功率/最大充电时长
+// @Description 对正在进行的订单仅调整本次订单动态参数：过载功率(必填)与最大充电时长(可选)。
+// @Tags charging
+// @Accept json
+// @Produce json
+// @Param request body UpdateChargingPowerParams true "调整过载功率请求参数"
+// @Success 200 {object} APIResponse{data=object} "更新成功"
+// @Failure 400 {object} APIResponse "参数错误"
+// @Failure 404 {object} APIResponse "设备不在线"
+// @Failure 500 {object} APIResponse "更新失败"
+// @Router /api/v1/charging/update_power [post]
+func (h *DeviceGatewayHandlers) HandleUpdateChargingPower(c *gin.Context) {
+	var req UpdateChargingPowerParams
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"code": 400, "message": "参数错误", "error": err.Error()})
+		return
+	}
+
+	processor := &utils.DeviceIDProcessor{}
+	standardDeviceID, err := processor.SmartConvertDeviceID(req.DeviceID)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"code": 400, "message": "DeviceID格式错误: " + err.Error()})
+		return
+	}
+
+	if !h.deviceGateway.IsDeviceOnline(standardDeviceID) {
+		c.JSON(http.StatusNotFound, gin.H{"code": 404, "message": "设备不在线"})
+		return
+	}
+
+	if err := h.deviceGateway.UpdateChargingOverloadPower(standardDeviceID, req.Port, req.OrderNo, req.OverloadPowerW, req.MaxChargeDurationSeconds); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"code": 500, "message": "更新失败", "error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"code": 0, "message": "更新成功", "data": gin.H{
+		"deviceId":                 req.DeviceID,
+		"standardId":               standardDeviceID,
+		"port":                     req.Port,
+		"orderNo":                  req.OrderNo,
+		"overloadPowerW":           req.OverloadPowerW,
+		"maxChargeDurationSeconds": req.MaxChargeDurationSeconds,
+	}})
 }

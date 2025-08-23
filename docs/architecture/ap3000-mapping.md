@@ -119,3 +119,27 @@ sequenceDiagram
 - 同设备命令间隔≥0.5秒；消息ID唯一，超时15秒最多重发2次。
 - 端口号协议0起，外部1起；`订单号`必须与当前订单一致。
 - 幂等与观测：结构化日志、失败重试、第三方推送按原有规范执行。
+
+## 11. 事件契约（推送给第三方的字段）
+
+所有事件统一字段：
+- `event_id`(string)：UUID；亦作为 `Idempotency-Key`
+- `event_type`(string)：见 `pkg/notification/types.go`
+- `device_id`(string)：8位十六进制（物理ID标准化）
+- `port_number`(int)：对外1-based；无端口事件为0或省略
+- `timestamp`(int64)：秒
+- `data`(object)：事件特定负载
+
+关键事件负载：
+- charging_power：
+  - `realtime_power`(float, 单位W)；`realtime_power_raw`(uint16, 0.1W)
+  - `order_number`(string, ≤16B)
+  - `charge_duration`(uint16, 秒)
+  - 可选：`message_id`、`command`、`power_time`
+- power_heartbeat：同上，另包含 `cumulative_energy`(度) 与 `_raw`(0.01度)
+- charging_start / end / failed：至少包含 `order_number`、`port_number`、`message_id`
+- settlement：结算明细（详见协议 0x03），单位遵循协议约定
+
+限频与采样：
+- `notification.sampling[event_type]=N`：每N条取1条
+- `notification.throttle[event_type]=Go duration`：设备+端口维度时间窗内仅保留首条

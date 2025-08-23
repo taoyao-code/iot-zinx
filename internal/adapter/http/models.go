@@ -133,3 +133,13 @@ type DeviceLocateRequest struct {
 	DeviceID   string `json:"deviceId" binding:"required" example:"04A26CF3" swaggertype:"string" description:"设备ID"`
 	LocateTime uint8  `json:"locateTime" binding:"required" example:"10" minimum:"1" maximum:"255" swaggertype:"integer" description:"定位时间(秒)，范围1-255"`
 }
+
+// UpdateChargingPowerParams 调整过载功率/最大时长
+// @Description 调整本次订单的过载功率与(可选)最大充电时长
+type UpdateChargingPowerParams struct {
+	DeviceID                 string `json:"deviceId" binding:"required" example:"04ceaa40" swaggertype:"string" description:"设备ID"`
+	Port                     byte   `json:"port" binding:"required" example:"1" minimum:"1" maximum:"8" swaggertype:"integer" description:"端口号(1-8)"`
+	OrderNo                  string `json:"orderNo" binding:"required" example:"ORDER_20250619001" swaggertype:"string" description:"订单号(需与进行中订单一致)"`
+	OverloadPowerW           uint16 `json:"overloadPowerW" binding:"required" example:"120" swaggertype:"integer" description:"过载功率(瓦)"`
+	MaxChargeDurationSeconds uint16 `json:"maxChargeDurationSeconds" example:"0" swaggertype:"integer" description:"最大充电时长(秒), 0表示不修改"`
+}

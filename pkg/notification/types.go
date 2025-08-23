@@ -7,22 +7,25 @@ import (
 
 // NotificationEvent 通知事件
 type NotificationEvent struct {
-	EventID      string                 `json:"event_id"`      // 事件ID
-	EventType    string                 `json:"event_type"`    // 事件类型
-	DeviceID     string                 `json:"device_id"`     // 设备ID
-	PortNumber   int                    `json:"port_number"`   // 端口号
-	Timestamp    time.Time              `json:"timestamp"`     // 时间戳
-	Data         map[string]interface{} `json:"data"`          // 事件数据
-	AttemptCount int                    `json:"attempt_count"` // 重试次数
+	EventID          string                 `json:"event_id"`                    // 事件ID
+	EventType        string                 `json:"event_type"`                  // 事件类型
+	DeviceID         string                 `json:"device_id"`                   // 设备ID
+	PortNumber       int                    `json:"port_number"`                 // 端口号
+	Timestamp        time.Time              `json:"timestamp"`                   // 时间戳
+	Data             map[string]interface{} `json:"data"`                        // 事件数据
+	AttemptCount     int                    `json:"attempt_count"`               // 重试次数
+	EndpointAttempts map[string]int         `json:"endpoint_attempts,omitempty"` // 每端点重试次数
 }
 
 // NotificationConfig 通知配置
 type NotificationConfig struct {
-	Enabled   bool                   `yaml:"enabled"`    // 是否启用
-	QueueSize int                    `yaml:"queue_size"` // 队列大小
-	Workers   int                    `yaml:"workers"`    // 工作协程数
-	Endpoints []NotificationEndpoint `yaml:"endpoints"`  // 端点配置
-	Retry     RetryConfig            `yaml:"retry"`      // 重试配置
+	Enabled   bool                     `yaml:"enabled"`    // 是否启用
+	QueueSize int                      `yaml:"queue_size"` // 队列大小
+	Workers   int                      `yaml:"workers"`    // 工作协程数
+	Endpoints []NotificationEndpoint   `yaml:"endpoints"`  // 端点配置
+	Retry     RetryConfig              `yaml:"retry"`      // 重试配置
+	Sampling  map[string]int           `yaml:"sampling"`   // 事件采样率: 1=全量, N=每N条取1条
+	Throttle  map[string]time.Duration `yaml:"throttle"`   // 端点节流: 事件类型→时间间隔
 }
 
 // NotificationEndpoint 通知端点
@@ -54,6 +57,10 @@ type NotificationStats struct {
 	AvgResponseTime time.Duration             `json:"avg_response_time"` // 平均响应时间
 	LastUpdateTime  time.Time                 `json:"last_update_time"`  // 最后更新时间
 	EndpointStats   map[string]*EndpointStats `json:"endpoint_stats"`    // 端点统计
+
+	// 丢弃统计
+	DroppedBySampling int64 `json:"dropped_by_sampling"` // 采样丢弃总数
+	DroppedByThrottle int64 `json:"dropped_by_throttle"` // 节流丢弃总数
 }
 
 // EndpointStats 端点统计

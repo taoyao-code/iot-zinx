@@ -268,6 +268,19 @@ func (h *PortPowerHeartbeatHandler) sendPortPowerHeartbeatNotification(decodedFr
 		// 发送充电功率通知
 		integrator.NotifyPowerHeartbeat(deviceId, portNumber, chargingPowerData)
 
+		// 推送充电功率实时数据（charging_power）
+		if raw, ok := chargingPowerData["realtime_power_raw"].(uint16); ok {
+			integrator.NotifyChargingPower(deviceId, portNumber, map[string]interface{}{
+				"device_id":          deviceId,
+				"port_number":        portNumber,
+				"realtime_power":     notification.FormatPower(raw),
+				"realtime_power_raw": raw,
+				"charge_duration":    chargingPowerData["charge_duration"],
+				"power_time":         time.Now().Unix(),
+				"command":            "0x26",
+			})
+		}
+
 		// 智能降功率：回调控制器
 		if raw, ok := powerInfo["realtime_power_raw"].(uint16); ok {
 			orderNo := ""

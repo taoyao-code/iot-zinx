@@ -44,6 +44,18 @@ type DeviceGateway struct {
 	// AP3000 节流：同设备命令间隔≥0.5秒
 	throttleMu       sync.Mutex
 	lastSendByDevice map[string]time.Time
+
+	// 订单上下文缓存：deviceID|protocolPort(0-based) → ctx
+	orderCtxMu sync.RWMutex
+	orderCtx   map[string]OrderContext
+}
+
+// OrderContext 当前订单上下文（用于仅更新0x82时回填）
+type OrderContext struct {
+	OrderNo string
+	Mode    uint8  // 0=计时,1=包月,2=计量,3=计次
+	Value   uint16 // 时长(秒)或电量(0.1度)
+	Balance uint32 // 余额/有效期(4B)
 }
 
 // NewDeviceGateway 创建设备网关实例
@@ -66,6 +78,7 @@ func NewDeviceGateway() *DeviceGateway {
 		tcpManager:       core.GetGlobalTCPManager(),
 		tcpWriter:        network.NewTCPWriter(retryConfig, logger.GetLogger()),
 		lastSendByDevice: make(map[string]time.Time),
+		orderCtx:         make(map[string]OrderContext),
 	}
 }
 
@@ -180,7 +193,11 @@ func (g *DeviceGateway) GetDeviceDetail(deviceID string) (map[string]interface{}
 		return nil, err
 	}
 
-	fmt.Printf("✅ [DeviceGateway.GetDeviceDetail] TCPManager返回成功: deviceID=%s, keys=%d\n", deviceID, len(result))
+	logger.WithFields(logrus.Fields{
+		"action":   "GetDeviceDetail",
+		"deviceID": deviceID,
+		"keys":     len(result),
+	}).Debug("TCPManager返回成功")
 	return result, nil
 }
 
@@ -228,92 +245,85 @@ func (g *DeviceGateway) SendCommandToDevice(deviceID string, command byte, data 
 	g.lastSendByDevice[deviceID] = time.Now()
 	g.throttleMu.Unlock()
 
-	conn, exists := g.tcpManager.GetConnectionByDeviceID(deviceID)
+	// 标准化设备ID
+	processor := &utils.DeviceIDProcessor{}
+	stdDeviceID, err := processor.SmartConvertDeviceID(deviceID)
+	if err != nil {
+		return fmt.Errorf("设备ID解析失败: %v", err)
+	}
+
+	conn, exists := g.tcpManager.GetConnectionByDeviceID(stdDeviceID)
 	if !exists {
-		return fmt.Errorf("设备 %s 不在线", deviceID)
+		return fmt.Errorf("设备 %s 不在线", stdDeviceID)
 	}
 
 	// 🔧 修复：验证设备连接存在
-	_, sessionExists := g.tcpManager.GetSessionByDeviceID(deviceID)
+	_, sessionExists := g.tcpManager.GetSessionByDeviceID(stdDeviceID)
 	if !sessionExists {
 		return fmt.Errorf("设备会话不存在")
 	}
 
-	// 🔧 修复：验证设备ID与Session中的PhysicalID是否匹配
-	expectedPhysicalID, err := utils.ParseDeviceIDToPhysicalID(deviceID)
+	// 设备ID→PhysicalID
+	expectedPhysicalID, err := utils.ParseDeviceIDToPhysicalID(stdDeviceID)
 	if err != nil {
 		return fmt.Errorf("设备ID格式错误: %v", err)
 	}
 
-	// 🔧 修复：从设备信息中获取PhysicalID，而不是从ConnectionSession
-	device, deviceExists := g.tcpManager.GetDeviceByID(deviceID)
+	// 从设备信息中获取并校验PhysicalID
+	device, deviceExists := g.tcpManager.GetDeviceByID(stdDeviceID)
 	if !deviceExists {
-		return fmt.Errorf("设备 %s 不存在", deviceID)
+		return fmt.Errorf("设备 %s 不存在", stdDeviceID)
 	}
 
 	sessionPhysicalID := device.PhysicalID
-
-	// 🔧 修复：验证一致性，如果不匹配则修复Device的PhysicalID
 	if expectedPhysicalID != sessionPhysicalID {
 		logger.WithFields(logrus.Fields{
-			"deviceID":           deviceID,
+			"deviceID":           stdDeviceID,
 			"expectedPhysicalID": utils.FormatPhysicalID(expectedPhysicalID),
 			"devicePhysicalID":   utils.FormatPhysicalID(sessionPhysicalID),
 			"action":             "FIXING_PHYSICAL_ID_MISMATCH",
 		}).Warn("🔧 检测到PhysicalID不匹配，正在修复Device数据")
 
-		// 🔧 修复：使用Device的mutex保护并发更新
 		device.Lock()
 		device.PhysicalID = expectedPhysicalID
 		device.Unlock()
-
-		// 同时修复设备组中的Device数据
-		if err := g.fixDeviceGroupPhysicalID(deviceID, expectedPhysicalID); err != nil {
-			logger.WithFields(logrus.Fields{
-				"deviceID": deviceID,
-				"error":    err,
-			}).Error("修复设备组PhysicalID失败")
+		if err := g.fixDeviceGroupPhysicalID(stdDeviceID, expectedPhysicalID); err != nil {
+			logger.WithFields(logrus.Fields{"deviceID": stdDeviceID, "error": err}).Error("修复设备组PhysicalID失败")
 		}
-
-		logger.WithFields(logrus.Fields{
-			"deviceID":            deviceID,
-			"correctedPhysicalID": utils.FormatPhysicalID(expectedPhysicalID),
-		}).Info("✅ PhysicalID不匹配已修复")
+		logger.WithFields(logrus.Fields{"deviceID": stdDeviceID, "correctedPhysicalID": utils.FormatPhysicalID(expectedPhysicalID)}).Info("✅ PhysicalID不匹配已修复")
 	}
-
-	// 使用API请求的正确PhysicalID，而不是Session中可能错误的值
 	physicalID := expectedPhysicalID
 
-	// 使用统一DNY构建器，确保使用小端序（符合AP3000协议规范）
-	// 🔧 修复：使用动态MessageID避免重复，防止设备混乱
+	// 生成消息ID并构包
 	messageID := pkg.Protocol.GetNextMessageID()
 	builder := protocol.NewUnifiedDNYBuilder()
 	dnyPacket := builder.BuildDNYPacket(physicalID, messageID, command, data)
 
-	// 🔧 详细Hex数据日志 - 用于调试命令发送问题
-	logger.WithFields(logrus.Fields{
-		"deviceID":        deviceID,
-		"physicalID":      utils.FormatPhysicalID(physicalID),
-		"messageID":       fmt.Sprintf("0x%04X", messageID),
-		"command":         fmt.Sprintf("0x%02X", command),
-		"commandName":     g.getCommandName(command),
-		"dataLen":         len(data),
-		"dataHex":         fmt.Sprintf("%X", data),
-		"packetHex":       fmt.Sprintf("%X", dnyPacket),
-		"packetLen":       len(dnyPacket),
-		"msgID":           messageID,
-		"packetStructure": g.analyzePacketStructure(dnyPacket, physicalID, command, messageID),
-		"byteOrder":       "小端序(Little-Endian)",
-		"action":          "SEND_DNY_PACKET",
-	}).Info("📡 发送DNY命令数据包 - 详细Hex记录")
+	// 发送前校验
+	if err := protocol.ValidateUnifiedDNYPacket(dnyPacket); err != nil {
+		logger.WithFields(logrus.Fields{
+			"deviceID":   stdDeviceID,
+			"physicalID": utils.FormatPhysicalID(physicalID),
+			"messageID":  fmt.Sprintf("0x%04X", messageID),
+			"command":    fmt.Sprintf("0x%02X", command),
+			"reason":     err.Error(),
+		}).Error("❌ DNY数据包校验失败，拒绝发送")
+		return fmt.Errorf("DNY包校验失败: %w", err)
+	}
 
-	// 🚀 Phase 2: 使用TCPWriter发送数据包，支持重试机制
-	if err := g.tcpWriter.WriteWithRetry(conn, 0, dnyPacket); err != nil {
+	// 注册命令到 CommandManager（用于超时与重试管理）
+	cmdMgr := network.GetCommandManager()
+	if cmdMgr != nil {
+		cmdMgr.RegisterCommand(conn, physicalID, messageID, uint8(command), data)
+	}
+
+	// 通过 UnifiedSender 发送（保持唯一发送路径）
+	if err := pkg.Protocol.SendDNYPacket(conn, dnyPacket); err != nil {
 		return fmt.Errorf("发送命令失败: %v", err)
 	}
 
 	// 记录命令元数据
-	g.tcpManager.RecordDeviceCommand(deviceID, command, len(data))
+	g.tcpManager.RecordDeviceCommand(stdDeviceID, command, len(data))
 
 	return nil
 }
@@ -548,8 +558,6 @@ func (g *DeviceGateway) SendChargingCommandWithParams(deviceID string, port uint
 	// 充满功率(1字节)：0=关闭充满功率判断
 	commandData[36] = 0
 
-	// 已移除老固件兼容的最小负载裁剪，始终发送完整扩展负载（37字节）
-
 	err := g.SendCommandToDevice(deviceID, constants.CmdChargeControl, commandData)
 	if err != nil {
 		return fmt.Errorf("发送充电控制命令失败: %v", err)
@@ -577,7 +585,19 @@ func (g *DeviceGateway) SendChargingCommandWithParams(deviceID string, port uint
 		"unit":              getValueUnit(mode),
 	}).Info("🔧 修复最大充电时长后的完整参数充电控制命令发送成功")
 
+	// 写入订单上下文（开始充电且订单号存在）
+	if action == 0x01 && orderNo != "" {
+		key := g.makeOrderCtxKey(deviceID, int(port-1))
+		g.orderCtxMu.Lock()
+		g.orderCtx[key] = OrderContext{OrderNo: orderNo, Mode: mode, Value: actualValue, Balance: balance}
+		g.orderCtxMu.Unlock()
+	}
+
 	return nil
+}
+
+func (g *DeviceGateway) makeOrderCtxKey(deviceID string, protocolPort int) string {
+	return fmt.Sprintf("%s|%d", deviceID, protocolPort)
 }
 
 // getValueUnit 获取value字段的单位描述
@@ -932,23 +952,47 @@ func (g *DeviceGateway) UpdateChargingOverloadPower(deviceID string, port uint8,
 		return fmt.Errorf("设备不在线")
 	}
 
-	payload := make([]byte, 37)
-	payload[0] = 0                                              // 费率模式(保守0)
-	payload[1], payload[2], payload[3], payload[4] = 0, 0, 0, 0 // 余额/有效期
-	payload[5] = port - 1                                       // 端口(协议0基)
-	payload[6] = 0x01                                           // 充电命令=1(保持充电)
-	payload[7], payload[8] = 0, 0                               // 充电时长/电量(保守不修改语义，若固件不兼容需改为回填原值)
+	// 回填订单上下文
+	mode := uint8(0)
+	value := uint16(0)
+	balance := uint32(0)
+	if orderNo != "" {
+		key := g.makeOrderCtxKey(deviceID, int(port-1))
+		g.orderCtxMu.RLock()
+		ctx, ok := g.orderCtx[key]
+		g.orderCtxMu.RUnlock()
+		if ok && ctx.OrderNo == orderNo {
+			mode = ctx.Mode
+			value = ctx.Value
+			balance = ctx.Balance
+		}
+	}
 
+	payload := make([]byte, 37)
+	payload[0] = mode // 费率模式
+	// 余额/有效期(4B)
+	payload[1] = byte(balance)
+	payload[2] = byte(balance >> 8)
+	payload[3] = byte(balance >> 16)
+	payload[4] = byte(balance >> 24)
+	// 端口(协议0基)
+	payload[5] = port - 1
+	// 充电命令=1(保持充电)
+	payload[6] = 0x01
+	// 充电时长/电量(2B)
+	payload[7] = byte(value)
+	payload[8] = byte(value >> 8)
+	// 订单号
 	orderBytes := make([]byte, 16)
 	copy(orderBytes, []byte(orderNo))
 	copy(payload[9:25], orderBytes)
-
+	// 最大充电时长(2B)：0表示不修改
 	payload[25] = byte(maxChargeDurationSeconds)
 	payload[26] = byte(maxChargeDurationSeconds >> 8)
-
+	// 过载功率(2B) 单位瓦
 	payload[27] = byte(overloadPowerW)
 	payload[28] = byte(overloadPowerW >> 8)
-
+	// 其余按默认
 	payload[29] = 0                 // 二维码灯
 	payload[30] = 0                 // 长充模式
 	payload[31], payload[32] = 0, 0 // 额外浮充时间
@@ -967,6 +1011,9 @@ func (g *DeviceGateway) UpdateChargingOverloadPower(deviceID string, port uint8,
 		"orderNo":                  orderNo,
 		"overloadPowerW":           overloadPowerW,
 		"maxChargeDurationSeconds": maxChargeDurationSeconds,
+		"ctxMode":                  mode,
+		"ctxValue":                 value,
+		"ctxBalance":               balance,
 	}).Info("已下发0x82仅更新过载功率/最大时长")
 
 	return nil

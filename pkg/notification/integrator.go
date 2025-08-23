@@ -35,6 +35,15 @@ func NewNotificationIntegrator() *NotificationIntegrator {
 		},
 	}
 
+	// 采样与节流配置
+	notificationConfig.Sampling = gatewayConfig.Notification.Sampling
+	if gatewayConfig.Notification.Throttle != nil {
+		notificationConfig.Throttle = make(map[string]time.Duration)
+		for k, v := range gatewayConfig.Notification.Throttle {
+			notificationConfig.Throttle[k] = parseDuration(v, 0)
+		}
+	}
+
 	// 转换端点配置
 	for _, ep := range gatewayConfig.Notification.Endpoints {
 		endpoint := NotificationEndpoint{
@@ -84,6 +93,30 @@ func (n *NotificationIntegrator) Stop(ctx context.Context) error {
 // IsEnabled 检查是否启用
 func (n *NotificationIntegrator) IsEnabled() bool {
 	return n.enabled
+}
+
+// GetStats 获取通知服务统计（若未启用返回false）
+func (n *NotificationIntegrator) GetStats() (NotificationStats, bool) {
+	if n == nil || !n.enabled || n.service == nil {
+		return NotificationStats{}, false
+	}
+	return n.service.GetStats(), true
+}
+
+// GetQueueLength 获取事件队列长度（未启用返回0）
+func (n *NotificationIntegrator) GetQueueLength() int {
+	if n == nil || !n.enabled || n.service == nil {
+		return 0
+	}
+	return n.service.GetQueueLength()
+}
+
+// GetRetryQueueLength 获取重试队列长度（未启用返回0）
+func (n *NotificationIntegrator) GetRetryQueueLength() int {
+	if n == nil || !n.enabled || n.service == nil {
+		return 0
+	}
+	return n.service.GetRetryQueueLength()
 }
 
 // NotifyDeviceOnline 通知设备上线
@@ -139,9 +172,7 @@ func (n *NotificationIntegrator) NotifyChargingStart(decodedFrame *protocol.Deco
 		}
 	}
 	// 对外统一使用 1-based 端口号（协议0-based）
-	if portNumber > 0 {
-		portNumber = portNumber + 1
-	}
+	portNumber = portNumber + 1
 
 	data := map[string]interface{}{
 		"conn_id":     conn.GetConnID(),
@@ -176,9 +207,7 @@ func (n *NotificationIntegrator) NotifyChargingEnd(decodedFrame *protocol.Decode
 			portNumber = p
 		}
 	}
-	if portNumber > 0 {
-		portNumber = portNumber + 1
-	}
+	portNumber = portNumber + 1
 
 	data := map[string]interface{}{
 		"conn_id":     conn.GetConnID(),
@@ -213,9 +242,7 @@ func (n *NotificationIntegrator) NotifySettlement(decodedFrame *protocol.Decoded
 			portNumber = p
 		}
 	}
-	if portNumber > 0 {
-		portNumber = portNumber + 1
-	}
+	portNumber = portNumber + 1
 
 	data := map[string]interface{}{
 		"conn_id":     conn.GetConnID(),
@@ -302,7 +329,7 @@ func (n *NotificationIntegrator) NotifyPortStatusChange(deviceID string, portNum
 	event := &NotificationEvent{
 		EventType:  EventTypePortStatusChange,
 		DeviceID:   deviceID,
-		PortNumber: portNumber,
+		PortNumber: portNumber + 1,
 		Data: map[string]interface{}{
 			"previous_status": oldStatus,
 			"current_status":  newStatus,
@@ -330,7 +357,7 @@ func (n *NotificationIntegrator) NotifyPortError(deviceID string, portNumber int
 	event := &NotificationEvent{
 		EventType:  EventTypePortError,
 		DeviceID:   deviceID,
-		PortNumber: portNumber,
+		PortNumber: portNumber + 1,
 		Data: map[string]interface{}{
 			"error_code":    errorCode,
 			"error_message": errorMessage,
@@ -353,7 +380,7 @@ func (n *NotificationIntegrator) NotifyPortOnline(deviceID string, portNumber in
 	event := &NotificationEvent{
 		EventType:  EventTypePortOnline,
 		DeviceID:   deviceID,
-		PortNumber: portNumber,
+		PortNumber: portNumber + 1,
 		Data:       data,
 	}
 
@@ -373,7 +400,7 @@ func (n *NotificationIntegrator) NotifyPortOffline(deviceID string, portNumber i
 	event := &NotificationEvent{
 		EventType:  EventTypePortOffline,
 		DeviceID:   deviceID,
-		PortNumber: portNumber,
+		PortNumber: portNumber + 1,
 		Data: map[string]interface{}{
 			"offline_reason": reason,
 		},
@@ -415,7 +442,7 @@ func (n *NotificationIntegrator) NotifyPortHeartbeat(deviceID string, portNumber
 	event := &NotificationEvent{
 		EventType:  EventTypePortHeartbeat,
 		DeviceID:   deviceID,
-		PortNumber: portNumber,
+		PortNumber: portNumber + 1,
 		Data:       portData,
 		Timestamp:  time.Now(),
 	}
@@ -436,7 +463,7 @@ func (n *NotificationIntegrator) NotifyPowerHeartbeat(deviceID string, portNumbe
 	event := &NotificationEvent{
 		EventType:  EventTypePowerHeartbeat,
 		DeviceID:   deviceID,
-		PortNumber: portNumber,
+		PortNumber: portNumber + 1,
 		Data:       powerData,
 		Timestamp:  time.Now(),
 	}
@@ -444,6 +471,25 @@ func (n *NotificationIntegrator) NotifyPowerHeartbeat(deviceID string, portNumbe
 	// 发送通知
 	if err := n.service.SendNotification(event); err != nil {
 		logger.Error("发送功率心跳通知失败: " + err.Error())
+	}
+}
+
+// NotifyChargingPower 发送充电功率实时数据（事件类型：charging_power）
+func (n *NotificationIntegrator) NotifyChargingPower(deviceID string, portNumber int, powerData map[string]interface{}) {
+	if !n.enabled {
+		return
+	}
+
+	event := &NotificationEvent{
+		EventType:  EventTypeChargingPower,
+		DeviceID:   deviceID,
+		PortNumber: portNumber + 1,
+		Data:       powerData,
+		Timestamp:  time.Now(),
+	}
+
+	if err := n.service.SendNotification(event); err != nil {
+		logger.Error("发送充电功率实时数据失败: " + err.Error())
 	}
 }
 
@@ -482,6 +528,7 @@ func (n *NotificationIntegrator) NotifyChargingFailed(decodedFrame *protocol.Dec
 			portNumber = p
 		}
 	}
+	portNumber = portNumber + 1
 
 	data := map[string]interface{}{
 		"conn_id":     conn.GetConnID(),

@@ -179,6 +179,7 @@ func (h *PowerHeartbeatHandler) processPowerHeartbeat(decodedFrame *protocol.Dec
 		var chargeDuration uint16 = 0
 		var cumulativeEnergy uint16 = 0
 		var realtimePower uint16 = 0
+		var orderNumber string = ""
 
 		if len(data) >= 8 {
 			// 简化解析：当数据长度足够时解析功率信息
@@ -190,6 +191,19 @@ func (h *PowerHeartbeatHandler) processPowerHeartbeat(decodedFrame *protocol.Dec
 			}
 			if len(data) >= 10 {
 				realtimePower = binary.LittleEndian.Uint16(data[8:10]) // 实时功率
+			}
+			// 订单编号(16字节)位于平均功率(2字节)之后，起始大致在索引14
+			if len(data) >= 30 {
+				ordBytes := data[14:30]
+				// 去除末尾0
+				for i := len(ordBytes) - 1; i >= 0; i-- {
+					if ordBytes[i] == 0x00 {
+						ordBytes = ordBytes[:i]
+					} else {
+						break
+					}
+				}
+				orderNumber = string(ordBytes)
 			}
 		} else {
 			// 兼容旧格式：[端口号(1)][电流(2)][功率(2)][电压(2)][保留(1)]
@@ -211,6 +225,7 @@ func (h *PowerHeartbeatHandler) processPowerHeartbeat(decodedFrame *protocol.Dec
 			"realtimePower":    realtimePower,
 			"remoteAddr":       conn.RemoteAddr().String(),
 			"timestamp":        time.Now().Format(constants.TimeFormatDefault),
+			"orderNumber":      orderNumber,
 		}
 
 		// 🔧 重要：区分充电状态日志级别
@@ -262,6 +277,23 @@ func (h *PowerHeartbeatHandler) processPowerHeartbeat(decodedFrame *protocol.Dec
 		// 转换为瓦
 		realtimeW := int(notification.FormatPower(uint16(realtimePower)))
 		gateway.GetDynamicPowerController().OnPowerHeartbeat(deviceId, port1, orderNo, realtimeW, true, time.Now())
+
+		// 推送充电功率实时数据（charging_power）
+		integrator := notification.GetGlobalNotificationIntegrator()
+		if integrator.IsEnabled() {
+			chargingPowerData := map[string]interface{}{
+				"device_id":          deviceId,
+				"port_number":        port1,
+				"realtime_power":     notification.FormatPower(uint16(realtimePower)),
+				"realtime_power_raw": uint16(realtimePower),
+				"charge_duration":    logFields["chargeDuration"],
+				"message_id":         fmt.Sprintf("0x%04X", decodedFrame.MessageID),
+				"command":            fmt.Sprintf("0x%02X", decodedFrame.Command),
+				"power_time":         time.Now().Unix(),
+				"order_number":       logFields["orderNumber"],
+			}
+			integrator.NotifyChargingPower(deviceId, port1, chargingPowerData)
+		}
 	}
 }
 

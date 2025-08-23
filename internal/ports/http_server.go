@@ -57,6 +57,7 @@ func registerUnifiedAPIHandlers(r *gin.Engine) {
 		// 🚀 新架构：充电控制API - 简化调用
 		api.POST("/charging/start", gatewayHandlers.HandleStartCharging)
 		api.POST("/charging/stop", gatewayHandlers.HandleStopCharging)
+		api.POST("/charging/update_power", gatewayHandlers.HandleUpdateChargingPower)
 
 		// 🚀 新架构：系统监控API - 通过DeviceGateway获取统计
 		api.GET("/health", gatewayHandlers.HandleHealthCheck)

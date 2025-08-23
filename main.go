@@ -31,7 +31,6 @@ package main
 import (
 	"context"
 	"flag"
-	"fmt"
 	"os"
 	"os/signal"
 	"syscall"
@@ -55,7 +54,7 @@ func main() {
 
 	// 加载配置文件
 	if err := config.Load(*configFile); err != nil {
-		fmt.Printf("加载配置文件失败: %v\n", err)
+		logger.Error("加载配置文件失败: " + err.Error())
 		os.Exit(1)
 	}
 
@@ -63,14 +62,16 @@ func main() {
 	loggerConfig := config.GetConfig().Logger
 	improvedLogger := logger.NewImprovedLogger()
 	if err := improvedLogger.InitImproved(&loggerConfig); err != nil {
-		fmt.Printf("初始化日志系统失败: %v\n", err)
+		logger.Error("初始化日志系统失败: " + err.Error())
 		os.Exit(1)
 	}
 
 	// 初始化通信日志（与主日志分离），便于分析设备收发
 	if loggerConfig.EnableFile {
 		if err := improvedLogger.InitCommunicationLogger(loggerConfig.FileDir); err != nil {
-			fmt.Printf("初始化通信日志失败: %v\n", err)
+			improvedLogger.Warn("初始化通信日志失败", map[string]interface{}{
+				"error": err.Error(),
+			})
 		}
 	}
 

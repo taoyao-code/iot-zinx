@@ -264,6 +264,10 @@
           <option :value="60">60s</option>
         </select>
         <button class="btn ghost" @click="refreshAll" :disabled="loading">立即刷新</button>
+        <input class="input" style="width:220px" placeholder="API Base URL(可选，如 http://127.0.0.1:8080)"
+          v-model.trim="apiBase" />
+        <button class="btn ghost" @click="applyApiConfig">应用</button>
+        <a class="btn ghost" href="/swagger/index.html" target="_blank">Swagger</a>
       </div>
     </div>
 
@@ -333,6 +337,8 @@
         <div class="toolbar">
           <input class="input" placeholder="输入设备ID，例如 04ceaa40" v-model.trim="queryId" />
           <button class="btn" @click="loadDetail(queryId)" :disabled="!queryId || loading">查询</button>
+          <button class="btn secondary" @click="loadDetailQuery(queryId)"
+            :disabled="!queryId || loading">查询(query)</button>
         </div>
         <div v-if="detailLoading" class="muted">加载中…</div>
         <div v-else-if="!detail">
@@ -340,6 +346,9 @@
         </div>
         <div v-else class="code">
           <pre>{{ format(detail) }}</pre>
+        </div>
+        <div v-if="detailQueryResp" class="code" style="margin-top:8px;">
+          <pre>{{ format(detailQueryResp) }}</pre>
         </div>
       </div>
     </div>
@@ -380,6 +389,8 @@
             <button class="btn ghost" @click="useQueryIdFor('start')">用上方设备ID</button>
             <button class="btn ghost" @click="presetStart(1800)">预设 30 分钟</button>
             <button class="btn ghost" @click="presetStart(3600)">预设 60 分钟</button>
+            <button class="btn ghost" @click="copyStartCurl">复制 cURL</button>
+            <button class="btn ghost" @click="startResp=null">清空响应</button>
             <span class="hint">请求: POST /api/v1/charging/start</span>
           </div>
           <div v-if="startResp" class="code">
@@ -406,6 +417,8 @@
           <div class="toolbar">
             <button class="btn" @click="submitStop" :disabled="stopSubmitting">停止充电</button>
             <button class="btn ghost" @click="useQueryIdFor('stop')">用上方设备ID</button>
+            <button class="btn ghost" @click="copyStopCurl">复制 cURL</button>
+            <button class="btn ghost" @click="stopResp=null">清空响应</button>
             <span class="hint">请求: POST /api/v1/charging/stop</span>
           </div>
           <div v-if="stopResp" class="code">
@@ -415,6 +428,44 @@
       </div>
     </div>
 
+    <div class="grid" style="margin-top:16px;">
+      <div class="card">
+        <h3>操作 · 调整过载功率/最大时长 (0x82重复下发)</h3>
+        <div class="subgrid">
+          <div class="form-row">
+            <label>deviceId</label>
+            <input class="input" v-model.trim="powerForm.deviceId" placeholder="示例: 10644723 或 04A26CF3" />
+          </div>
+          <div class="form-row">
+            <label>port</label>
+            <input class="input" type="number" min="1" max="8" v-model.number="powerForm.port" />
+          </div>
+          <div class="form-row">
+            <label>orderNo</label>
+            <input class="input" v-model.trim="powerForm.orderNo" placeholder="与进行中订单一致" />
+          </div>
+          <div class="form-row">
+            <label>overloadPowerW</label>
+            <input class="input" type="number" min="0" v-model.number="powerForm.overloadPowerW" />
+          </div>
+          <div class="form-row">
+            <label>maxChargeDurationSeconds</label>
+            <input class="input" type="number" min="0" v-model.number="powerForm.maxChargeDurationSeconds"
+              placeholder="0=不修改" />
+          </div>
+          <div class="toolbar">
+            <button class="btn secondary" @click="submitUpdatePower" :disabled="updatePowerSubmitting">更新功率</button>
+            <button class="btn ghost" @click="useQueryIdFor('power')">用上方设备ID</button>
+            <button class="btn ghost" @click="copyUpdatePowerCurl">复制 cURL</button>
+            <button class="btn ghost" @click="updatePowerResp=null">清空响应</button>
+            <span class="hint">请求: POST /api/v1/charging/update_power</span>
+          </div>
+          <div v-if="updatePowerResp" class="code">
+            <pre>{{ format(updatePowerResp) }}</pre>
+          </div>
+        </div>
+      </div>
+    </div>
     <div class="grid" style="margin-top:16px;">
       <div class="card">
         <h3>操作 · 设备定位</h3>
@@ -430,11 +481,44 @@
           <div class="toolbar">
             <button class="btn secondary" @click="submitLocate" :disabled="locateSubmitting">定位设备</button>
             <button class="btn ghost" @click="useQueryIdFor('locate')">用上方设备ID</button>
+            <button class="btn ghost" @click="copyLocateCurl">复制 cURL</button>
+            <button class="btn ghost" @click="locateResp=null">清空响应</button>
             <span class="hint">请求: POST /api/v1/device/locate</span>
           </div>
           <div v-if="locateResp" class="code">
             <pre>{{ format(locateResp) }}</pre>
           </div>
+        </div>
+      </div>
+      <div class="card">
+        <h3>通知系统统计 / 限频与采样</h3>
+        <div class="subgrid">
+          <div class="form-row">
+            <label>总发送</label>
+            <div class="muted">{{ notifTotalSent ?? '-' }}</div>
+          </div>
+          <div class="form-row">
+            <label>成功 / 失败 / 重试</label>
+            <div class="muted">{{ notifTotalSuccess ?? '-' }} / {{ notifTotalFailed ?? '-' }} / {{ notifTotalRetried ??
+              '-' }}</div>
+          </div>
+          <div class="form-row">
+            <label>丢弃 · 采样</label>
+            <div class="muted">{{ droppedBySampling ?? 0 }}</div>
+          </div>
+          <div class="form-row">
+            <label>丢弃 · 节流</label>
+            <div class="muted">{{ droppedByThrottle ?? 0 }}</div>
+          </div>
+          <div class="form-row">
+            <label>平均耗时</label>
+            <div class="muted">{{ notifAvgLatency ?? '-' }}</div>
+          </div>
+          <div class="form-row">
+            <label>队列长度</label>
+            <div class="muted">{{ notifQueueLen ?? '-' }} / {{ notifRetryQueueLen ?? '-' }}</div>
+          </div>
+          <div class="hint">注：统计字段取自 /api/v1/stats，若后端未提供对应字段将显示为 “-”。</div>
         </div>
       </div>
     </div>
@@ -445,7 +529,7 @@
   <script>
     const { createApp, ref, computed, onMounted, watchEffect } = Vue;
 
-    const api = axios.create({ baseURL: '' }); // 同域
+    const api = axios.create({ baseURL: '' }); // 同域（可被动态覆盖）
 
     createApp({
       setup() {
@@ -460,6 +544,7 @@
         const lastError = ref('');
         const latency = ref(0);
         const autoRefresh = ref({ enabled: false, interval: 10, timer: null });
+        const apiBase = ref('');
 
         // 操作表单
         const startForm = ref({
@@ -472,12 +557,15 @@
         });
         const stopForm = ref({ deviceId: '', port: 255, orderNo: '' });
         const locateForm = ref({ deviceId: '', locateTime: 10 });
+        const powerForm = ref({ deviceId: '', port: 1, orderNo: '', overloadPowerW: 0, maxChargeDurationSeconds: 0 });
         const startSubmitting = ref(false);
         const stopSubmitting = ref(false);
         const locateSubmitting = ref(false);
         const startResp = ref(null);
         const stopResp = ref(null);
         const locateResp = ref(null);
+        const updatePowerResp = ref(null);
+        const detailQueryResp = ref(null);
 
         const filteredDevices = computed(() => {
           if (!filter.value) return devices.value;
@@ -491,6 +579,27 @@
           const s = stats.value || {};
           return s.totalDeviceCount ?? s.total ?? 0;
         });
+
+        // 通知系统统计（兼容不同命名）
+        const picked = (obj, keys) => {
+          for (const k of keys) {
+            const parts = Array.isArray(k) ? k : [k];
+            let cur = obj;
+            let ok = true;
+            for (const p of parts) { if (cur && p in cur) cur = cur[p]; else { ok = false; break; } }
+            if (ok && cur !== undefined && cur !== null) return cur;
+          }
+          return undefined;
+        };
+        const droppedBySampling = computed(() => picked(stats.value || {}, [["notification", "dropped_by_sampling"], "dropped_by_sampling"]) ?? 0);
+        const droppedByThrottle = computed(() => picked(stats.value || {}, [["notification", "dropped_by_throttle"], "dropped_by_throttle"]) ?? 0);
+        const notifTotalSent = computed(() => picked(stats.value || {}, [["notification", "total_sent"], "total_sent"]))
+        const notifTotalSuccess = computed(() => picked(stats.value || {}, [["notification", "total_success"], "total_success"]))
+        const notifTotalFailed = computed(() => picked(stats.value || {}, [["notification", "total_failed"], "total_failed"]))
+        const notifTotalRetried = computed(() => picked(stats.value || {}, [["notification", "total_retried"], "total_retried"]))
+        const notifAvgLatency = computed(() => picked(stats.value || {}, [["notification", "avg_response_time"], "avg_response_time"]))
+        const notifQueueLen = computed(() => picked(stats.value || {}, [["notification", "queue_length"], "queue_length"]))
+        const notifRetryQueueLen = computed(() => picked(stats.value || {}, [["notification", "retry_queue_length"], "retry_queue_length"]))
 
         function format(obj) {
           try { return JSON.stringify(obj, null, 2); } catch { return String(obj); }
@@ -529,6 +638,16 @@
             detail.value = null;
           } finally {
             detailLoading.value = false;
+          }
+        }
+
+        async function loadDetailQuery(deviceId) {
+          if (!deviceId) return;
+          try {
+            const res = await api.get(`/api/v1/device/${encodeURIComponent(deviceId)}/query`);
+            detailQueryResp.value = res.data;
+          } catch (e) {
+            detailQueryResp.value = e?.response?.data || { error: e.message };
           }
         }
 
@@ -576,6 +695,14 @@
         // 观察开关/间隔变化
         watchEffect(() => { setupAutoRefresh(); });
 
+        // 应用 API Base URL
+        function applyApiConfig() {
+          const base = (apiBase.value || '').trim();
+          try {
+            api.defaults.baseURL = base;
+          } catch { }
+        }
+
         // 表单提交：开始充电
         async function submitStart() {
           startSubmitting.value = true; startResp.value = null; lastError.value = '';
@@ -583,6 +710,9 @@
             const payload = { ...startForm.value };
             const res = await api.post('/api/v1/charging/start', payload);
             startResp.value = res.data;
+            // 成功后刷新详情与设备列表
+            await refreshDetailIfSelected();
+            await refreshDevices();
           } catch (e) {
             startResp.value = e?.response?.data || { error: e.message };
             lastError.value = e?.response?.data?.message || e.message;
@@ -598,6 +728,9 @@
             const payload = { ...stopForm.value };
             const res = await api.post('/api/v1/charging/stop', payload);
             stopResp.value = res.data;
+            // 成功后刷新详情与设备列表
+            await refreshDetailIfSelected();
+            await refreshDevices();
           } catch (e) {
             stopResp.value = e?.response?.data || { error: e.message };
             lastError.value = e?.response?.data?.message || e.message;
@@ -613,11 +746,29 @@
             const payload = { ...locateForm.value };
             const res = await api.post('/api/v1/device/locate', payload);
             locateResp.value = res.data;
+            // 成功后刷新详情
+            await refreshDetailIfSelected();
           } catch (e) {
             locateResp.value = e?.response?.data || { error: e.message };
             lastError.value = e?.response?.data?.message || e.message;
           } finally {
             locateSubmitting.value = false;
+          }
+        }
+
+        // 表单提交：调整过载功率/最大时长
+        async function submitUpdatePower() {
+          updatePowerSubmitting.value = true; updatePowerResp.value = null; lastError.value = '';
+          try {
+            const payload = { ...powerForm.value };
+            const res = await api.post('/api/v1/charging/update_power', payload);
+            updatePowerResp.value = res.data;
+            await refreshDetailIfSelected();
+          } catch (e) {
+            updatePowerResp.value = e?.response?.data || { error: e.message };
+            lastError.value = e?.response?.data?.message || e.message;
+          } finally {
+            updatePowerSubmitting.value = false;
           }
         }
 
@@ -629,13 +780,39 @@
           if (which === 'start') startForm.value.deviceId = queryId.value;
           if (which === 'stop') stopForm.value.deviceId = queryId.value;
           if (which === 'locate') locateForm.value.deviceId = queryId.value;
+          if (which === 'power') powerForm.value.deviceId = queryId.value;
         }
         function presetStart(seconds) {
           startForm.value.mode = 0; // 按时间
           startForm.value.value = seconds;
         }
 
-        return { loading, devices, stats, statsOnline, statsTotal, health, detail, detailLoading, filter, queryId, lastError, latency, filteredDevices, format, loadDetail, refreshDevices, refreshAll, autoRefresh, startForm, stopForm, locateForm, startSubmitting, stopSubmitting, locateSubmitting, startResp, stopResp, locateResp, submitStart, submitStop, submitLocate, useQueryIdFor, presetStart, selectDevice };
+        // 复制 cURL 帮助
+        function toJson(obj) { try { return JSON.stringify(obj); } catch { return '{}'; } }
+        function b() { return (api.defaults.baseURL || '').replace(/\/$/, ''); }
+        async function copy(text) { try { await navigator.clipboard.writeText(text); } catch { } }
+        function copyStartCurl() {
+          const payload = toJson(startForm.value);
+          const url = `${b()}/api/v1/charging/start`;
+          copy(`curl -X POST '${url}' -H 'Content-Type: application/json' -d '${payload}'`);
+        }
+        function copyStopCurl() {
+          const payload = toJson(stopForm.value);
+          const url = `${b()}/api/v1/charging/stop`;
+          copy(`curl -X POST '${url}' -H 'Content-Type: application/json' -d '${payload}'`);
+        }
+        function copyLocateCurl() {
+          const payload = toJson(locateForm.value);
+          const url = `${b()}/api/v1/device/locate`;
+          copy(`curl -X POST '${url}' -H 'Content-Type: application/json' -d '${payload}'`);
+        }
+        function copyUpdatePowerCurl() {
+          const payload = toJson(powerForm.value);
+          const url = `${b()}/api/v1/charging/update_power`;
+          copy(`curl -X POST '${url}' -H 'Content-Type: application/json' -d '${payload}'`);
+        }
+
+        return { loading, devices, stats, statsOnline, statsTotal, health, detail, detailLoading, filter, queryId, lastError, latency, autoRefresh, apiBase, devices: devices, filteredDevices, format, loadDetail, loadDetailQuery, refreshDevices, refreshAll, applyApiConfig, startForm, stopForm, locateForm, powerForm, startSubmitting, stopSubmitting, locateSubmitting, updatePowerSubmitting, startResp, stopResp, locateResp, updatePowerResp, detailQueryResp, submitStart, submitStop, submitLocate, submitUpdatePower, useQueryIdFor, presetStart, selectDevice, copyStartCurl, copyStopCurl, copyLocateCurl, copyUpdatePowerCurl };
       }
     }).mount('#app');
   </script>

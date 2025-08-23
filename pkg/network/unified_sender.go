@@ -132,6 +132,16 @@ func NewUnifiedSender() *UnifiedSender {
 	return sender
 }
 
+// ApplyConfig 将网关配置应用到发送器（写超时、重试退避等）
+func (s *UnifiedSender) ApplyConfig(writeTimeout time.Duration, initialDelay time.Duration, maxDelay time.Duration, backoff float64, maxRetries int) {
+	// 更新TCPWriter配置
+	s.tcpWriter.config.WriteTimeout = writeTimeout
+	s.tcpWriter.config.InitialDelay = initialDelay
+	s.tcpWriter.config.MaxDelay = maxDelay
+	s.tcpWriter.config.BackoffFactor = backoff
+	// UnifiedSender重试由sendWithAdvancedRetry控制，这里保留以兼容
+}
+
 // Start 启动统一发送器
 func (s *UnifiedSender) Start() error {
 	s.mutex.Lock()
@@ -233,6 +243,16 @@ func (s *UnifiedSender) SendRawData(conn ziface.IConnection, data []byte) error 
 func (s *UnifiedSender) SendDNYPacket(conn ziface.IConnection, packet []byte) error {
 	config := DefaultSendConfig
 	config.Type = SendTypeDNYPacket
+
+	// 发送前进行协议包校验，防止非法包下发
+	if err := protocol.ValidateUnifiedDNYPacket(packet); err != nil {
+		logger.WithFields(logrus.Fields{
+			"connID":  conn.GetConnID(),
+			"error":   err.Error(),
+			"dataLen": len(packet),
+		}).Error("DNY数据包校验失败，拒绝发送")
+		return fmt.Errorf("invalid DNY packet: %w", err)
+	}
 
 	return s.sendWithConfig(conn, packet, config, nil)
 }
