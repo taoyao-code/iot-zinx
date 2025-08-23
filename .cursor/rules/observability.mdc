@@ -1,0 +1,16 @@
+---
+alwaysApply: true
+---
+# 可观测性与日志规范
+
+- 日志：
+  - 关键命令与数据帧：必须输出结构化字段 `deviceID`、`physicalID`、`msgID`、`cmd`、`dataHex`、`packetHex`
+  - 发送/重试：`attempt`、`delay`、`writeTimeout`、`connID`、`remoteAddr`
+  - 解析异常：`reason`、`expectedLen`、`actualLen`、`header`
+- 指标（建议 Prometheus）：
+  - `iot_outbound_requests_total{endpoint,code}`、`iot_outbound_latency_seconds_bucket`、`iot_outbound_retries_total`
+  - `iot_cmd_sent_total{cmd}`、`iot_cmd_timeout_total{cmd}`、`iot_cmd_retry_total{cmd}`
+  - `iot_tcp_write_errors_total{type}`、`iot_device_online_total`
+- 追踪：为每条设备帧/下发命令生成 `trace_id` 并透传至三方（可置于 header）
+- 审计：保存最近 N 条下发与关键上报的十六进制原文（脱敏），便于追查
+- 采样：大体量场景下，对功率心跳等高频事件按比例采样；计费/结算类事件必须全量

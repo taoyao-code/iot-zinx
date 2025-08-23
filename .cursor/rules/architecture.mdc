@@ -1,0 +1,21 @@
+---
+alwaysApply: true
+---
+# 架构与依赖规范
+
+- 分层：
+  - adapter（入站适配）：`internal/adapter/http` 仅依赖 `pkg/gateway` 公共接口
+  - domain（领域协议）：`internal/domain/dny_protocol` 仅声明类型/转换，不做 IO
+  - infrastructure：`internal/infrastructure/zinx_server` 处理 TCP 收发与帧解析、路由
+  - pkg（内核能力）：protocol/network/gateway/core/constants/utils/notification
+- 依赖方向：adapter → pkg，infrastructure → pkg，禁止反向依赖 internal
+- 发送链路（唯一）：`DeviceGateway` → `UnifiedDNYBuilder` → `UnifiedSender/TCPWriter` → RAW TCP
+- 协议解析：`pkg/protocol/dny_decoder.go` 与 handlers；`dny_packet.go` 仅做基础分包，不做完整解析
+- 消息ID：统一通过 `pkg/export.go::Protocol.GetNextMessageID()` 生成；`CommandManager` 处理 15s 超时与重发
+- 节流：同设备命令 ≥0.5s（`DeviceGateway` 内部维护）；广播需顺序调用
+- 设备ID：对外 API 必走 `utils.DeviceIDProcessor.SmartConvertDeviceID`
+- 配置：全局配置由 `internal/infrastructure/config` 提供；写超时等下沉到 `TCPWriter`
+- 变更规则：
+  - 新增命令：在 `pkg/constants/*` 注册，统一通过 `DeviceGateway` 对外暴露
+  - 新设备事件：在 `pkg/notification/types.go` 定义事件常量与字段，并更新 integrator 转换
+- 图示：见 `docs/architecture/system-architecture.md`、`docs/architecture/diagrams/系统架构图.md`

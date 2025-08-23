@@ -1,23 +1,30 @@
 ---
 alwaysApply: true
 ---
-# AP3000 协议遵循规则
+# AP3000 协议强制规则
 
-- 本项目严格遵循 `AP3000-设备与服务器通信协议`。
-- 关键约束：
-  - 包头: "DNY" (0x44 0x4E 0x59)
-  - 长度字段: 2 字节，小端；长度=物理ID+消息ID+命令+数据+校验
-  - 校验: 整包字节累加和的低 2 字节（不含校验本身）
-  - 字节序: 默认小端
-  - 消息ID: 每条命令唯一（重发保持一致），超时 15 秒
-  - 发送节流: 对同一设备的命令间隔 ≥ 0.5 秒
-  - 物理ID: 小端→大端后首字节为识别码，后 3 字节为编号
-- 参考协议文档：[AP3000-设备与服务器通信协议.md](mdc:docs/协议/AP3000-设备与服务器通信协议.md)
-- 统一构包：使用 `pkg/protocol/dny_packet.go` 的构包逻辑与统一 Builder；严禁自定义偏移或非小端写入。
-- 设备ID处理：所有对外 API 必须通过 `utils.DeviceIDProcessor.SmartConvertDeviceID` 进行标准化（十进制/6位/8位十六进制均可）。
-- 日志规范：关键命令与数据帧必须输出结构化日志（含 deviceID、physicalID、msgID、cmd、dataHex、packetHex）。
+必须严格遵循 [AP3000-设备与服务器通信协议.md](mdc:docs/协议/AP3000-设备与服务器通信协议.md)。
 
-相关实现入口：
+- 协议帧格式（小端，长度含校验）：`DNY(3)` + `Length(2)` + `PhysicalID(4)` + `MessageID(2)` + `Command(1)` + `Data(n)` + `Checksum(2)`
+- 校验：从包头 `DNY` 起至校验字段前所有字节的累加和低 2 字节
+- 字节序：除文档特别标注外，均为小端；长度、物理ID、消息ID、数值字段一律小端
+- 发送节流：同一设备发送命令间隔 ≥ 0.5 秒（参见 `pkg/gateway/device_gateway.go`）
+- 消息ID：每命令唯一，重发保持一致；超时 15 秒，最多重发 2 次（参见 `pkg/network/command_manager.go`）
+- 物理ID：十六进制小端→大端后首字节为识别码，后 3 字节为编号（参见 `pkg/utils/physical_id_helper.go`）
+
+实现与约束：
+- 统一构包：仅允许使用 `pkg/protocol/unified_dny_builder.go` 或其全局方法 `BuildUnifiedDNYPacket` 进行构包；禁止手写偏移
+- 统一发送：经 `pkg/network/unified_sender.go`/`pkg/network/tcp_writer.go` 直接写入 RAW TCP，禁止二次封装
+- 设备ID对外 API：必须使用 `utils.DeviceIDProcessor.SmartConvertDeviceID` 标准化（十进制/6位/8位十六进制均可）
+- 充电控制（0x82）：字段顺序、长度、单位必须与协议一致；`余额/有效期` 为 4 字节小端；`端口号` 从 0 开始；新增字段需依据长度判断兼容
+- 时间（0x22）：时间戳 4 字节，默认小端（若固件要求不同，需在 handler 内显式转换）
+
+日志与审计：
+- 所有下发与上行帧必须输出结构化日志：`deviceID`、`physicalID`、`msgID`、`cmd`、`dataHex`、`packetHex`
+- 校验不通过、长度不符、端口越界等必须告警并拒绝发送
+
+参考入口：
+- 构包：`pkg/protocol/unified_dny_builder.go`
 - 发送：`pkg/gateway/device_gateway.go` → `SendCommandToDevice` / `SendChargingCommandWithParams`
-- 写出：`pkg/network/tcp_writer.go`
-- 构包：`pkg/protocol/dny_packet.go`
+- 写出：`pkg/network/tcp_writer.go`, `pkg/network/unified_sender.go`
+- 管理：`pkg/network/command_manager.go`

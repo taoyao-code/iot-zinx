@@ -1,0 +1,29 @@
+---
+alwaysApply: true
+---
+# 第三方通知与交付保证规则
+
+- 事件模型：使用 `pkg/notification/types.go` 中的 `NotificationEvent` 统一格式
+  - 必含字段：`event_id`、`event_type`、`device_id`、`port_number`、`timestamp`、`data`
+  - `event_id` 建议为 `UUID`，并作为三方去重/幂等键
+- 事件来源：设备帧解析→领域事件→`pkg/notification/integrator.go`→`pkg/notification/service.go`
+- 映射与单位：严格按协议单位转换
+  - 功率=原始×0.1W，电压=原始×0.1V，电量=原始×0.01度，温度=原始-65
+  - 端口号：协议从0开始，API/外显从1开始；对外事件统一使用从1开始的端口号
+- 推送策略：
+  - HTTP POST JSON，必须设置 `Content-Type: application/json`
+  - 超时、网络错误、非2xx：进入重试队列；最大重试次数、退避策略从配置 `configs/gateway.yaml` 加载
+  - 持久化重试：必须启用 Redis 持久化（`service.go` 中的 TODO 需实现）；重启后从 Redis 恢复
+  - 幂等：建议在请求头加入 `Idempotency-Key: {event_id}`；若三方提供签名机制，统一通过配置开启
+- 端点管理：
+  - 仅向订阅该 `event_type` 且 `enabled=true` 的端点发送（`NotificationConfig.GetEndpointsByEvent`）
+  - 每端点独立统计成功率、延迟、失败率，异常自动降噪与熔断（失败阈值后短时暂停）
+- 观测：
+  - 每次投递记录：端点名、URL、状态码、耗时、payload长度、attempt_count、response_body(限长)
+  - 统计可通过 `/api/v1/stats` 或内部 `GetStats()` 暴露
+
+关键文件：
+- `pkg/notification/integrator.go`
+- `pkg/notification/service.go`
+- `configs/gateway.yaml`
+- `internal/infrastructure/zinx_server/handlers/*`（事件产生地）
