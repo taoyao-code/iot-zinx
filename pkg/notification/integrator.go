@@ -138,6 +138,10 @@ func (n *NotificationIntegrator) NotifyChargingStart(decodedFrame *protocol.Deco
 			portNumber = p
 		}
 	}
+	// 对外统一使用 1-based 端口号（协议0-based）
+	if portNumber > 0 {
+		portNumber = portNumber + 1
+	}
 
 	data := map[string]interface{}{
 		"conn_id":     conn.GetConnID(),
@@ -172,6 +176,9 @@ func (n *NotificationIntegrator) NotifyChargingEnd(decodedFrame *protocol.Decode
 			portNumber = p
 		}
 	}
+	if portNumber > 0 {
+		portNumber = portNumber + 1
+	}
 
 	data := map[string]interface{}{
 		"conn_id":     conn.GetConnID(),
@@ -205,6 +212,9 @@ func (n *NotificationIntegrator) NotifySettlement(decodedFrame *protocol.Decoded
 		if p, ok := port.(int); ok {
 			portNumber = p
 		}
+	}
+	if portNumber > 0 {
+		portNumber = portNumber + 1
 	}
 
 	data := map[string]interface{}{

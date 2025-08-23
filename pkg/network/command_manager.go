@@ -305,34 +305,7 @@ func (cm *CommandManager) ConfirmCommand(physicalID uint32, messageID uint16, co
 
 	// 如果没有找到完全匹配，尝试宽松匹配（兼容旧版本）
 	if !exactMatch {
-		for _, cmdKey := range cmdKeys {
-			cmd, exists := cm.commands[cmdKey]
-			if !exists {
-				continue
-			}
-
-			// 宽松匹配（只匹配物理ID和command）
-			if cmd.Command == command && !cmd.Confirmed {
-				// 标记为已确认并更新状态
-				cmd.Confirmed = true
-				cmd.Status = CmdStatusConfirmed
-				confirmed = true
-
-				logger.WithFields(logrus.Fields{
-					"physicalID":       fmt.Sprintf("0x%08X", physicalID),
-					"messageID":        fmt.Sprintf("0x%04X (%d)", messageID, messageID),
-					"command":          fmt.Sprintf("0x%02X", command),
-					"cmdKey":           cmdKey,
-					"matchType":        "宽松匹配",
-					"originalMsgID":    fmt.Sprintf("0x%04X (%d)", cmd.MessageID, cmd.MessageID),
-					"timeSinceCreated": time.Since(cmd.CreateTime).Seconds(),
-					"retryCount":       cmd.RetryCount,
-					"status":           cmd.Status,
-					"dataHex":          hex.EncodeToString(cmd.Data),
-					"warning":          "消息ID不匹配，但仍然确认命令 - 考虑升级为严格匹配",
-				}).Warn("确认命令已完成 - 宽松匹配（兼容模式）")
-			}
-		}
+		// 已移除宽松匹配逻辑，严格要求 messageID 匹配
 	}
 
 	// 清理已确认的命令

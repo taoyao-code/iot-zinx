@@ -11,8 +11,9 @@ import (
 	"time"
 
 	"github.com/bujia-iot/iot-zinx/internal/infrastructure/logger"
-	"github.com/bujia-iot/iot-zinx/internal/infrastructure/redis"
+	infraredis "github.com/bujia-iot/iot-zinx/internal/infrastructure/redis"
 	"github.com/google/uuid"
+	redisv9 "github.com/redis/go-redis/v9"
 	"github.com/sirupsen/logrus"
 )
 
@@ -72,7 +73,7 @@ func NewNotificationService(config *NotificationConfig) (*NotificationService, e
 		httpClient:  httpClient,
 		eventQueue:  make(chan *NotificationEvent, config.QueueSize),
 		retryQueue:  make(chan *NotificationEvent, config.QueueSize),
-		redisClient: redis.GetClient(), // 复用现有Redis连接
+		redisClient: infraredis.GetClient(), // 复用现有Redis连接
 		stats:       stats,
 	}
 
@@ -328,6 +329,8 @@ func (s *NotificationService) sendToEndpoint(event *NotificationEvent, endpoint 
 
 	// 设置请求头
 	req.Header.Set("Content-Type", "application/json")
+	// 幂等键：使用事件ID
+	req.Header.Set("Idempotency-Key", event.EventID)
 	for key, value := range endpoint.Headers {
 		req.Header.Set(key, value)
 	}
@@ -454,8 +457,23 @@ func (s *NotificationService) scheduleRetry(event *NotificationEvent, endpoint N
 		"retry_delay":   delay.String(),
 	}).Warn("📤 通知推送安排重试")
 
-	// TODO: 实现Redis重试队列
-	// 暂时简化处理，直接加入内存重试队列
+	// 优先使用Redis持久化重试
+	if client, ok := s.redisClient.(*redisv9.Client); ok && client != nil {
+		// 使用ZSET，score为到期时间戳
+		key := "notify:retry:" + endpoint.Name
+		readyAt := time.Now().Add(delay).Unix()
+		payload := map[string]interface{}{
+			"event":    event,
+			"endpoint": endpoint,
+		}
+		b, err := json.Marshal(payload)
+		if err == nil {
+			_ = client.ZAdd(s.ctx, key, redisv9.Z{Score: float64(readyAt), Member: string(b)}).Err()
+			return
+		}
+	}
+
+	// 回退：加入内存重试队列
 	select {
 	case s.retryQueue <- event:
 		// 重试队列加入成功
@@ -538,8 +556,45 @@ func (s *NotificationService) updateStats(endpointName string, success bool, res
 
 // loadRetryEvents 从Redis加载重试事件
 func (s *NotificationService) loadRetryEvents() {
-	// TODO: 实现Redis重试事件加载
-	// 暂时简化处理，不从Redis加载
+	// 从Redis加载到期重试事件
+	client, ok := s.redisClient.(*redisv9.Client)
+	if !ok || client == nil {
+		return
+	}
+
+	now := time.Now().Unix()
+	for _, endpoint := range s.config.Endpoints {
+		key := "notify:retry:" + endpoint.Name
+		res := client.ZRangeByScoreWithScores(s.ctx, key, &redisv9.ZRangeBy{
+			Min:    "-inf",
+			Max:    fmt.Sprintf("%d", now),
+			Offset: 0,
+			Count:  100,
+		})
+		members, err := res.Result()
+		if err != nil || len(members) == 0 {
+			continue
+		}
+
+		// 移除这些成员（防止重复消费）
+		_, _ = client.ZRemRangeByScore(s.ctx, key, "-inf", fmt.Sprintf("%d", now)).Result()
+
+		for _, z := range members {
+			str, ok := z.Member.(string)
+			if !ok {
+				continue
+			}
+			var payload struct {
+				Event    *NotificationEvent   `json:"event"`
+				Endpoint NotificationEndpoint `json:"endpoint"`
+			}
+			if err := json.Unmarshal([]byte(str), &payload); err != nil {
+				continue
+			}
+			// 直接处理（再次进入发送流程）
+			s.processEvent(payload.Event)
+		}
+	}
 }
 
 // GetQueueLength 获取队列长度

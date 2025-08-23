@@ -444,25 +444,26 @@ func (g *DeviceGateway) SendChargingCommandWithParams(deviceID string, port uint
 		return fmt.Errorf("订单号长度超过限制：当前%d字节，最大16字节，订单号：%s", len(orderNo), orderNo)
 	}
 
-	// 充电参数验证
-	if mode == 0 && value == 0 {
-		return fmt.Errorf("按时间充电时，充电时长不能为0秒")
-	}
-	if mode == 1 && value == 0 {
-		return fmt.Errorf("按电量充电时，充电电量不能为0")
-	}
-	if mode > 1 {
-		return fmt.Errorf("充电模式无效：%d，有效值：0(按时间)或1(按电量)", mode)
-	}
+	// 充电参数验证（开始充电严格、停止充电放宽）
 	if action > 1 {
 		return fmt.Errorf("充电动作无效：%d，有效值：0(停止)或1(开始)", action)
 	}
-
-	if balance == 0 {
-		return fmt.Errorf("余额不能为0")
-	}
-	if value == 0 {
-		return fmt.Errorf("充电值不能为0")
+	if action == 0x01 {
+		if mode > 1 {
+			return fmt.Errorf("充电模式无效：%d，有效值：0(按时间)或1(按电量)", mode)
+		}
+		if mode == 0 && value == 0 {
+			return fmt.Errorf("按时间充电时，充电时长不能为0秒")
+		}
+		if mode == 1 && value == 0 {
+			return fmt.Errorf("按电量充电时，充电电量不能为0")
+		}
+		if balance == 0 {
+			return fmt.Errorf("余额不能为0")
+		}
+		if value == 0 {
+			return fmt.Errorf("充电值不能为0")
+		}
 	}
 
 	// 🔧 修复：使用正确的AP3000协议82指令格式（37字节）
@@ -499,18 +500,22 @@ func (g *DeviceGateway) SendChargingCommandWithParams(deviceID string, port uint
 	}
 	copy(commandData[9:25], orderBytes)
 
-	// 🔧 修复：最大充电时长设置逻辑
+	// 🔧 修复：最大充电时长设置逻辑（停止命令不修改）
 	// 根据协议文档：如果参数为0表示不修改，会使用设备的设置值，默认10小时
 	var maxChargeDuration uint16
-	if mode == 0 && actualValue > 0 { // 按时间充电且有具体时长
-		// 设置为充电时长的1.5倍，确保不会因为最大时长限制而提前停止
-		maxChargeDuration = actualValue + (actualValue / 2)
-		// 但不超过10小时（36000秒）
-		if maxChargeDuration > 36000 {
-			maxChargeDuration = 36000
+	if action == 0x01 {
+		if mode == 0 && actualValue > 0 { // 按时间充电且有具体时长
+			// 设置为充电时长的1.5倍，确保不会因为最大时长限制而提前停止
+			maxChargeDuration = actualValue + (actualValue / 2)
+			// 但不超过10小时（36000秒）
+			if maxChargeDuration > 36000 {
+				maxChargeDuration = 36000
+			}
+		} else {
+			// 其他情况使用设备默认值
+			maxChargeDuration = 0
 		}
 	} else {
-		// 其他情况使用设备默认值
 		maxChargeDuration = 0
 	}
 	commandData[25] = byte(maxChargeDuration)
@@ -542,6 +547,8 @@ func (g *DeviceGateway) SendChargingCommandWithParams(deviceID string, port uint
 
 	// 充满功率(1字节)：0=关闭充满功率判断
 	commandData[36] = 0
+
+	// 已移除老固件兼容的最小负载裁剪，始终发送完整扩展负载（37字节）
 
 	err := g.SendCommandToDevice(deviceID, constants.CmdChargeControl, commandData)
 	if err != nil {
@@ -892,6 +899,12 @@ func (g *DeviceGateway) analyzePacketStructure(packet []byte, physicalID uint32,
 		return "数据包长度不足"
 	}
 
-	return fmt.Sprintf("Header=DNY, Length=%d, PhysicalID=0x%08X, MessageID=, Command=0x%02X",
+	return fmt.Sprintf("Header=DNY, Length=%d, PhysicalID=0x%08X, MessageID=0x%04X, Command=0x%02X",
 		len(packet)-5, physicalID, messageID, command)
+}
+
+// SendStopChargingCommand 发送停止充电命令（0x82，action=0x00）
+// 最小负载：仅携带必要字段（端口、订单号），其余由设备忽略
+func (g *DeviceGateway) SendStopChargingCommand(deviceID string, port uint8, orderNo string) error {
+	return g.SendChargingCommandWithParams(deviceID, port, 0x00, orderNo, 0, 0, 0)
 }

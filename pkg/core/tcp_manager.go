@@ -989,8 +989,6 @@ func (m *TCPManager) GetDeviceDetail(deviceID string) (map[string]interface{}, e
 		return nil, fmt.Errorf("设备不存在")
 	}
 
-	fmt.Printf("✅ [TCPManager.GetDeviceDetail] 找到设备: deviceID=%s, physicalID=%s\n", device.DeviceID, device.PhysicalID)
-
 	// 通过设备索引找到ICCID和设备组
 	iccidInterface, exists := m.deviceIndex.Load(device.DeviceID)
 	if !exists {

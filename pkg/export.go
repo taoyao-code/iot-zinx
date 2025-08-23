@@ -135,13 +135,13 @@ func SendRegistrationResponse(conn ziface.IConnection, physicalId uint32, messag
 
 // SendTimeResponse 发送时间响应
 func SendTimeResponse(conn ziface.IConnection, physicalId uint32, messageId uint16) error {
-	// 获取当前时间戳（4字节，大端序）
+	// 获取当前时间戳（4字节，小端序）
 	timestamp := uint32(time.Now().Unix())
 	data := []byte{
-		byte(timestamp >> 24),
-		byte(timestamp >> 16),
+		byte(timestamp),
 		byte(timestamp >> 8),
-		byte(timestamp & 0xFF),
+		byte(timestamp >> 16),
+		byte(timestamp >> 24),
 	}
 	return globalUnifiedSender.SendDNYResponse(conn, physicalId, messageId, 0x22, data)
 }
