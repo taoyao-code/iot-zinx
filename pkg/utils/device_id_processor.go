@@ -86,6 +86,37 @@ func (p *DeviceIDProcessor) GetDeviceTypeName(deviceType byte) string {
 	}
 }
 
+// --- helpers (private, no behavior change) ---
+func hasHexAlpha(s string) bool {
+	for _, c := range s {
+		if c >= 'A' && c <= 'F' {
+			return true
+		}
+	}
+	return false
+}
+
+func isValidHexLen6(s string) bool {
+	if len(s) != 6 {
+		return false
+	}
+	if _, err := strconv.ParseUint(s, 16, 32); err != nil {
+		return false
+	}
+	return true
+}
+
+func tryParseAsDecimalDeviceID(s string) (uint32, bool) {
+	val, err := strconv.ParseUint(s, 10, 32)
+	if err != nil {
+		return 0, false
+	}
+	if val > 16777215 {
+		return 0, false
+	}
+	return uint32(val), true
+}
+
 // SmartConvertDeviceID 智能转换DeviceID，支持多种输入格式
 // 支持输入：
 // 1. 十进制设备编号："10644723" -> "04A26CF3"（自动添加04前缀）
@@ -94,44 +125,25 @@ func (p *DeviceIDProcessor) GetDeviceTypeName(deviceType byte) string {
 func (p *DeviceIDProcessor) SmartConvertDeviceID(input string) (string, error) {
 	input = strings.TrimSpace(strings.ToUpper(input))
 
-	// 如果已经是8位十六进制，直接验证并返回
+	// 已是8位：若包含十六进制字母，则按十六进制解析校验
 	if len(input) == 8 {
-		// 🔧 修复：验证是否为真正的十六进制字符串（包含A-F字符）
-		// 只有包含十六进制字符的才被当作十六进制处理，纯数字的交给十进制处理
-		hasHexChars := false
-		for _, char := range input {
-			if char >= 'A' && char <= 'F' {
-				hasHexChars = true
-				break
-			}
-		}
-
-		if hasHexChars {
-			// 验证格式
+		if hasHexAlpha(input) {
 			if _, _, err := p.ParseDeviceID(input); err != nil {
 				return "", err
 			}
 			return input, nil
 		}
-		// 如果是纯数字，继续下面的十进制处理逻辑
+		// 否则继续后续分支（可能是纯数字）
 	}
 
-	// 如果是6位十六进制，添加04前缀
-	if len(input) == 6 {
-		// 验证是否为有效十六进制
-		if _, err := strconv.ParseUint(input, 16, 32); err != nil {
-			return "", fmt.Errorf("无效的6位十六进制：%s", input)
-		}
+	// 6位十六进制：加 04 前缀
+	if isValidHexLen6(input) {
 		return "04" + input, nil
 	}
 
-	// 尝试作为十进制设备编号处理（不包含设备类型前缀）
-	if decimalID, err := strconv.ParseUint(input, 10, 32); err == nil {
-		// 限制在合理范围内（6位十六进制最大值：16777215）
-		if decimalID > 16777215 {
-			return "", fmt.Errorf("十进制设备编号超出范围(最大16777215)：%d", decimalID)
-		}
-		return p.ConvertDecimalToDeviceID(uint32(decimalID)), nil
+	// 十进制：限制范围并转换
+	if dec, ok := tryParseAsDecimalDeviceID(input); ok {
+		return p.ConvertDecimalToDeviceID(dec), nil
 	}
 
 	return "", fmt.Errorf("无法识别的DeviceID格式：%s，支持：十进制(10644723)、6位十六进制(A26CF3)、8位十六进制(04A26CF3)", input)
