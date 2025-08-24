@@ -31,17 +31,17 @@ func (z *ZinxLoggerAdapter) ErrorF(format string, v ...interface{}) {
 }
 
 // InfoFX 实现zinx的InfoFX日志方法
-func (z *ZinxLoggerAdapter) InfoFX(ctx context.Context, format string, v ...interface{}) {
+func (z *ZinxLoggerAdapter) InfoFX(_ context.Context, format string, v ...interface{}) {
 	logger.Infof(format, v...)
 }
 
 // DebugFX 实现zinx的DebugFX日志方法
-func (z *ZinxLoggerAdapter) DebugFX(ctx context.Context, format string, v ...interface{}) {
+func (z *ZinxLoggerAdapter) DebugFX(_ context.Context, format string, v ...interface{}) {
 	logger.Debugf(format, v...)
 }
 
 // ErrorFX 实现zinx的ErrorFX日志方法
-func (z *ZinxLoggerAdapter) ErrorFX(ctx context.Context, format string, v ...interface{}) {
+func (z *ZinxLoggerAdapter) ErrorFX(_ context.Context, format string, v ...interface{}) {
 	logger.Errorf(format, v...)
 }
 
