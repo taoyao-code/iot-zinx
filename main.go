@@ -48,25 +48,62 @@ import (
 
 var configFile = flag.String("config", "configs/gateway.yaml", "配置文件路径")
 
-func main() {
-	// 解析命令行参数
-	flag.Parse()
+const indexCheckInterval = 10 * time.Minute
 
-	// 加载配置文件
+func startHTTP(improvedLogger *logger.ImprovedLogger) {
+	if err := ports.StartHTTPServer(); err != nil {
+		improvedLogger.Warn("HTTP API服务器启动失败", map[string]interface{}{
+			"error": err.Error(),
+		})
+	}
+}
+
+func startTCP(improvedLogger *logger.ImprovedLogger) {
+	if err := ports.StartTCPServer(); err != nil {
+		improvedLogger.Error("TCP服务器启动失败", map[string]interface{}{
+			"error": err.Error(),
+		})
+		os.Exit(1)
+	}
+}
+
+func startIndexHealthChecker(ctx context.Context, improvedLogger *logger.ImprovedLogger) {
+	tcpManager := core.GetGlobalTCPManager()
+	if tcpManager == nil {
+		return
+	}
+	go func() {
+		ticker := time.NewTicker(indexCheckInterval)
+		defer ticker.Stop()
+		tcpManager.PeriodicIndexHealthCheck()
+		for {
+			select {
+			case <-ctx.Done():
+				improvedLogger.Info("索引健康检查已停止", map[string]interface{}{
+					"component": "index_health_checker",
+				})
+				return
+			case <-ticker.C:
+				tcpManager.PeriodicIndexHealthCheck()
+			}
+		}
+	}()
+}
+
+func loadConfigOrExit() {
 	if err := config.Load(*configFile); err != nil {
 		logger.Error("加载配置文件失败: " + err.Error())
 		os.Exit(1)
 	}
+}
 
-	// 初始化日志系统
+func setupLoggerOrExit() *logger.ImprovedLogger {
 	loggerConfig := config.GetConfig().Logger
 	improvedLogger := logger.NewImprovedLogger()
 	if err := improvedLogger.InitImproved(&loggerConfig); err != nil {
 		logger.Error("初始化日志系统失败: " + err.Error())
 		os.Exit(1)
 	}
-
-	// 初始化通信日志（与主日志分离），便于分析设备收发
 	if loggerConfig.EnableFile {
 		if err := improvedLogger.InitCommunicationLogger(loggerConfig.FileDir); err != nil {
 			improvedLogger.Warn("初始化通信日志失败", map[string]interface{}{
@@ -74,23 +111,40 @@ func main() {
 			})
 		}
 	}
+	return improvedLogger
+}
 
-	// 记录启动信息
-	improvedLogger.Info("充电设备网关启动中...", map[string]interface{}{
-		"component": "gateway",
-		"action":    "startup",
-	})
+func initNotification(ctx context.Context, improvedLogger *logger.ImprovedLogger) {
+	if err := notification.InitGlobalNotificationIntegrator(ctx); err != nil {
+		improvedLogger.Error("初始化通知系统失败", map[string]interface{}{
+			"error": err.Error(),
+		})
+		return
+	}
+
+	if notification.GetGlobalNotificationIntegrator().IsEnabled() {
+		portManager := core.GetPortManager()
+		portManager.RegisterStatusChangeCallback(func(deviceID string, portNumber int, oldStatus, newStatus string, data map[string]interface{}) {
+			notification.GetGlobalNotificationIntegrator().NotifyPortStatusChange(deviceID, portNumber, oldStatus, newStatus, data)
+		})
+		improvedLogger.Info("端口状态变化通知已启用", map[string]interface{}{
+			"callback_registered": true,
+		})
+	}
+}
+
+func main() {
+	// 解析命令行参数
+	flag.Parse()
+
+	loadConfigOrExit()
+	improvedLogger := setupLoggerOrExit()
 
 	// 设置Zinx框架日志
 	utils.SetupImprovedZinxLogger(improvedLogger)
 
-	// 🚀 新架构：直接初始化DeviceGateway，移除ServiceManager依赖
 	// 初始化全局DeviceGateway
 	gateway.InitializeGlobalDeviceGateway()
-	improvedLogger.Info("DeviceGateway已初始化", map[string]interface{}{
-		"architecture": "unified_gateway",
-		"version":      "2.0.0",
-	})
 
 	// 初始化Redis（非致命错误）
 	if err := redis.InitClient(); err != nil {
@@ -99,103 +153,25 @@ func main() {
 		})
 	}
 
+	// 可取消上下文（系统信号）
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer stop()
+
 	// 初始化通知系统
-	ctx := context.Background()
-	if err := notification.InitGlobalNotificationIntegrator(ctx); err != nil {
-		improvedLogger.Error("初始化通知系统失败", map[string]interface{}{
-			"error": err.Error(),
-		})
-	} else {
-		improvedLogger.Info("通知系统初始化完成", map[string]interface{}{
-			"component": "notification",
-			"status":    "initialized",
-		})
-
-		// 注册端口状态变化回调
-		if notification.GetGlobalNotificationIntegrator().IsEnabled() {
-			portManager := core.GetPortManager()
-			portManager.RegisterStatusChangeCallback(func(deviceID string, portNumber int, oldStatus, newStatus string, data map[string]interface{}) {
-				// 发送端口状态变化通知
-				notification.GetGlobalNotificationIntegrator().NotifyPortStatusChange(deviceID, portNumber, oldStatus, newStatus, data)
-			})
-
-			improvedLogger.Info("端口状态变化通知已启用", map[string]interface{}{
-				"callback_registered": true,
-			})
-		}
-	}
+	initNotification(ctx, improvedLogger)
 
 	// 初始化智能降功率控制器（按配置开关）
 	gateway.InitDynamicPowerController()
 
-	// 启动HTTP API服务器
-	go func() {
-		improvedLogger.Info("正在启动HTTP API服务器...", map[string]interface{}{
-			"component": "http_server",
-			"action":    "starting",
-		})
+	// 启动HTTP/TCP服务
+	go startHTTP(improvedLogger)
+	go startTCP(improvedLogger)
 
-		// 提示静态测试页启用
-		improvedLogger.Info("Web静态测试页已启用: / -> web/index.html, /web/*", map[string]interface{}{
-			"web_root": "./web",
-		})
-
-		if err := ports.StartHTTPServer(); err != nil {
-			improvedLogger.Warn("HTTP API服务器启动失败", map[string]interface{}{
-				"error": err.Error(),
-			})
-		}
-	}()
-
-	// 启动TCP服务器
-	go func() {
-		improvedLogger.Info("正在启动TCP服务器...", map[string]interface{}{
-			"component": "tcp_server",
-			"action":    "starting",
-		})
-
-		if err := ports.StartTCPServer(); err != nil {
-			improvedLogger.Error("TCP服务器启动失败", map[string]interface{}{
-				"error": err.Error(),
-			})
-			os.Exit(1)
-		}
-	}()
-
-	// 等待一小段时间确保服务启动
-	time.Sleep(2 * time.Second)
-
-	// 🔧 新增：启动定期索引健康检查
-	go func() {
-		tcpManager := core.GetGlobalTCPManager()
-		if tcpManager != nil {
-			// 每10分钟检查一次索引健康状态
-			ticker := time.NewTicker(10 * time.Minute)
-			defer ticker.Stop()
-
-			// 启动后立即执行一次检查
-			tcpManager.PeriodicIndexHealthCheck()
-
-			for {
-				select {
-				case <-ticker.C:
-					tcpManager.PeriodicIndexHealthCheck()
-				}
-			}
-		}
-	}()
-
-	improvedLogger.Info("充电设备网关启动完成，等待设备连接...", map[string]interface{}{
-		"component": "gateway",
-		"action":    "ready",
-		"status":    "waiting_for_connections",
-	})
+	// 启动定期索引健康检查（可取消）
+	startIndexHealthChecker(ctx, improvedLogger)
 
 	// 等待中断信号
-	c := make(chan os.Signal, 1)
-	signal.Notify(c, syscall.SIGINT, syscall.SIGTERM)
-	<-c
-
+	<-ctx.Done()
 	improvedLogger.Info("接收到停止信号，开始关闭...", nil)
 
 	// 停止通知系统
@@ -216,16 +192,4 @@ func main() {
 			"error": err.Error(),
 		})
 	}
-
-	// 🚀 新架构：DeviceGateway自动管理资源，无需手动关闭
-	improvedLogger.Info("DeviceGateway资源已清理", map[string]interface{}{
-		"architecture": "unified_gateway",
-		"action":       "cleanup",
-	})
-
-	improvedLogger.Info("充电设备网关已安全关闭", map[string]interface{}{
-		"component": "gateway",
-		"action":    "shutdown",
-		"status":    "completed",
-	})
 }
