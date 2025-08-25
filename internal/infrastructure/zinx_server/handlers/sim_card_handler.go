@@ -24,9 +24,13 @@ func (h *SimCardHandler) Handle(request ziface.IRequest) {
 	conn := request.GetConnection()
 	data := request.GetData()
 
-	// 强制性调试：输出到stderr
-	fmt.Printf("🎯 DEBUG: SimCardHandler被调用! connID=%d, dataLen=%d, dataHex=%x\n",
-		conn.GetConnID(), len(data), data)
+	// 统一使用结构化日志
+	logger.WithFields(logrus.Fields{
+		"connID":     conn.GetConnID(),
+		"remoteAddr": conn.RemoteAddr().String(),
+		"dataLen":    len(data),
+		"dataHex":    fmt.Sprintf("%x", data),
+	}).Debug("SimCardHandler invoked")
 
 	logger.WithFields(logrus.Fields{ // 添加入口日志
 		"connID":     conn.GetConnID(),

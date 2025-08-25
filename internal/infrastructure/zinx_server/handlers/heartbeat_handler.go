@@ -141,6 +141,16 @@ func (h *HeartbeatHandler) processHeartbeat(decodedFrame *protocol.DecodedDNYFra
 		}
 	}
 
+	// 若设备尚未注册，避免产生“设备不存在”告警，等待注册包到达后再处理
+	if !isRegistered {
+		logger.WithFields(logrus.Fields{
+			"connID":   conn.GetConnID(),
+			"deviceId": deviceId,
+			"reason":   "设备未注册，忽略本次心跳并等待注册",
+		}).Info("心跳暂缓处理：等待注册")
+		return
+	}
+
 	logger.WithFields(logrus.Fields{
 		"connID":            conn.GetConnID(),
 		"heartbeatDeviceId": deviceId,        // 从心跳包解析的设备ID
