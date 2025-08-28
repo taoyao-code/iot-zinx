@@ -290,7 +290,9 @@ func (h *PowerHeartbeatHandler) processPowerHeartbeat(decodedFrame *protocol.Dec
 				"message_id":         fmt.Sprintf("0x%04X", decodedFrame.MessageID),
 				"command":            fmt.Sprintf("0x%02X", decodedFrame.Command),
 				"power_time":         time.Now().Unix(),
-				"order_number":       logFields["orderNumber"],
+				"orderNo":            logFields["orderNumber"],
+				"power":              notification.FormatPower(uint16(realtimePower)),
+				"power_raw":          realtimePower,
 			}
 			integrator.NotifyChargingPower(deviceId, port1, chargingPowerData)
 		}

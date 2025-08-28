@@ -2,6 +2,8 @@ package notification
 
 import (
 	"encoding/json"
+	"fmt"
+	"strconv"
 	"sync"
 	"time"
 
@@ -123,6 +125,78 @@ func (r *EventRecorder) Recent(limit int) []*NotificationEvent {
 			if r.buffer[idx] != nil {
 				items = append(items, r.buffer[idx])
 			}
+		}
+	}
+	if limit > 0 && len(items) > limit {
+		items = items[len(items)-limit:]
+	}
+	return items
+}
+
+// Filter 事件过滤条件
+type Filter struct {
+	SinceUnix  int64
+	DeviceID   string
+	OrderNo    string
+	Port       string
+	EventTypes map[string]struct{}
+}
+
+// Matches 判断事件是否匹配过滤条件
+func (r *EventRecorder) Matches(ev *NotificationEvent, f *Filter) bool {
+	if f == nil || ev == nil {
+		return true
+	}
+	if f.SinceUnix > 0 {
+		if ev.Timestamp.Unix() < f.SinceUnix {
+			return false
+		}
+	}
+	if f.DeviceID != "" && ev.DeviceID != f.DeviceID {
+		return false
+	}
+	if f.Port != "" {
+		if f.Port != strconv.Itoa(ev.PortNumber) {
+			return false
+		}
+	}
+	if f.EventTypes != nil && len(f.EventTypes) > 0 {
+		if _, ok := f.EventTypes[ev.EventType]; !ok {
+			return false
+		}
+	}
+	if f.OrderNo != "" {
+		var order string
+		if ev.Data != nil {
+			if v, ok := ev.Data["orderNo"]; ok {
+				order = fmt.Sprint(v)
+			}
+		}
+		if order == "" || order != f.OrderNo {
+			return false
+		}
+	}
+	return true
+}
+
+// RecentFiltered 返回按过滤条件筛选后的最近事件（旧→新）
+func (r *EventRecorder) RecentFiltered(limit int, f *Filter) []*NotificationEvent {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	var items []*NotificationEvent
+	appendIfMatch := func(ev *NotificationEvent) {
+		if ev != nil && r.Matches(ev, f) {
+			items = append(items, ev)
+		}
+	}
+	if !r.filled {
+		for i := 0; i < r.next; i++ {
+			appendIfMatch(r.buffer[i])
+		}
+	} else {
+		for i := 0; i < r.capacity; i++ {
+			idx := (r.next + i) % r.capacity
+			appendIfMatch(r.buffer[idx])
 		}
 	}
 	if limit > 0 && len(items) > limit {

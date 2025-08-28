@@ -337,7 +337,7 @@
           <tbody>
             <tr v-for="(ev, idx) in filteredEvents" :key="ev.event_id">
               <td>{{ idx + 1 }}</td>
-              <td class="muted">{{ new Date(ev.timestamp).toLocaleString() }}</td>
+              <td class="muted">{{ new Date(tsToMs(ev.timestamp)).toLocaleString() }}</td>
               <td>{{ ev.event_type }}</td>
               <td>{{ ev.device_id }}</td>
               <td class="muted">{{ ev.port_number ?? '-' }}</td>
@@ -702,6 +702,20 @@
         function format(obj) {
           try { return JSON.stringify(obj, null, 2); } catch { return String(obj); }
         }
+        function tsToMs(ts) {
+          const n = Number(ts) || 0;
+          return n > 1e12 ? n : n * 1000;
+        }
+        function ensureSeconds(ts) {
+          const n = Number(ts) || 0;
+          return n > 1e12 ? Math.floor(n / 1000) : n;
+        }
+        function buildQuery(params) {
+          return Object.entries(params)
+            .filter(([k, v]) => v !== undefined && v !== null && String(v) !== '')
+            .map(([k, v]) => `${encodeURIComponent(k)}=${encodeURIComponent(v)}`)
+            .join('&');
+        }
 
         async function fetchHealth() {
           const t0 = performance.now();
@@ -985,8 +999,13 @@
           streamState.value.error = '';
           streamState.value.usePolling = false;
           const base = (api.defaults.baseURL || '').replace(/\/$/, '');
-          const types = encodeURIComponent((eventFilters.value.types || []).join(','));
-          const url = `${base}/api/v1/notifications/stream?event_types=${types}`;
+          const params = {
+            event_types: (eventFilters.value.types || []).join(','),
+            device_id: (eventFilters.value.deviceId || '').trim(),
+            orderNo: (eventFilters.value.orderNo || '').trim(),
+            port: (eventFilters.value.port === '' || eventFilters.value.port === null || eventFilters.value.port === undefined) ? '' : String(eventFilters.value.port)
+          };
+          const url = `${base}/api/v1/notifications/stream?${buildQuery(params)}`;
           try {
             sse.value = new EventSource(url);
             sse.value.onopen = () => { streamState.value.connected = true; };
@@ -1011,16 +1030,20 @@
           streamState.value.usePolling = true;
           const tick = async () => {
             try {
-              const base = '';
-              // 尝试获取最近事件（需后端实现，若未实现将落空）
+              // 获取最近事件并携带过滤参数
               const params = { limit: 100 };
-              if (streamState.value.lastSince) params.since = streamState.value.lastSince;
+              if (streamState.value.lastSince) params.since = streamState.value.lastSince; // seconds
+              const types = (eventFilters.value.types || []).join(',');
+              if (types) params.event_types = types;
+              if ((eventFilters.value.deviceId || '').trim()) params.device_id = (eventFilters.value.deviceId || '').trim();
+              if ((eventFilters.value.orderNo || '').trim()) params.orderNo = (eventFilters.value.orderNo || '').trim();
+              if (eventFilters.value.port !== '' && eventFilters.value.port !== null && eventFilters.value.port !== undefined) params.port = String(eventFilters.value.port);
               const res = await api.get('/api/v1/notifications/recent', { params });
               const list = res.data?.data || res.data || [];
               for (const it of list) {
                 const evt = normalizeEvent(it);
                 pushEvent(evt);
-                streamState.value.lastSince = Math.max(streamState.value.lastSince, Number(new Date(evt.timestamp)) || Date.now());
+                streamState.value.lastSince = Math.max(streamState.value.lastSince, ensureSeconds(evt.timestamp));
               }
             } catch { }
           };
@@ -1038,15 +1061,27 @@
 
         function copyStreamCurl() {
           const base = (api.defaults.baseURL || '').replace(/\/$/, '');
-          const types = encodeURIComponent((eventFilters.value.types || []).join(','));
-          const url = `${base}/api/v1/notifications/stream?event_types=${types}`;
+          const params = {
+            event_types: (eventFilters.value.types || []).join(','),
+            device_id: (eventFilters.value.deviceId || '').trim(),
+            orderNo: (eventFilters.value.orderNo || '').trim(),
+            port: (eventFilters.value.port === '' || eventFilters.value.port === null || eventFilters.value.port === undefined) ? '' : String(eventFilters.value.port)
+          };
+          const url = `${base}/api/v1/notifications/stream?${buildQuery(params)}`;
           const cmd = `curl '${url}'`;
           navigator.clipboard.writeText(cmd).catch(() => { });
         }
 
         function copyRecentCurl() {
           const base = (api.defaults.baseURL || '').replace(/\/$/, '');
-          const url = `${base}/api/v1/notifications/recent?limit=100`;
+          const params = { limit: 100 };
+          if (streamState.value.lastSince) params.since = streamState.value.lastSince;
+          const types = (eventFilters.value.types || []).join(',');
+          if (types) params.event_types = types;
+          if ((eventFilters.value.deviceId || '').trim()) params.device_id = (eventFilters.value.deviceId || '').trim();
+          if ((eventFilters.value.orderNo || '').trim()) params.orderNo = (eventFilters.value.orderNo || '').trim();
+          if (eventFilters.value.port !== '' && eventFilters.value.port !== null && eventFilters.value.port !== undefined) params.port = String(eventFilters.value.port);
+          const url = `${base}/api/v1/notifications/recent?${buildQuery(params)}`;
           const cmd = `curl '${url}'`;
           navigator.clipboard.writeText(cmd).catch(() => { });
         }
@@ -1068,8 +1103,10 @@
             const pw = toPowerValue(ev);
             if (pw == null) continue;
             const ts = Number(new Date(ev.timestamp)) || Date.now();
+            // use backend seconds -> ms conversion
+            const tsm = tsToMs(ev.timestamp);
             if (!seriesData[orderNo]) seriesData[orderNo] = [];
-            seriesData[orderNo].push([ts, pw]);
+            seriesData[orderNo].push([tsm, pw]);
           }
           const order = selectedOrderNo.value && seriesData[selectedOrderNo.value] ? selectedOrderNo.value : Object.keys(seriesData)[0] || '';
           if (order && !selectedOrderNo.value) selectedOrderNo.value = order;
@@ -1096,7 +1133,7 @@
           loading, devices, stats, statsOnline, statsTotal, health, detail, detailLoading, filter, queryId, lastError, latency, autoRefresh, apiBase, devices: devices, filteredDevices, format, loadDetail, loadDetailQuery, refreshDevices, refreshAll, applyApiConfig, startForm, stopForm, locateForm, powerForm, startSubmitting, stopSubmitting, locateSubmitting, updatePowerSubmitting, startResp, stopResp, locateResp, updatePowerResp, detailQueryResp, submitStart, submitStop, submitLocate, submitUpdatePower, useQueryIdFor, presetStart, selectDevice, copyStartCurl, copyStopCurl, copyLocateCurl, copyUpdatePowerCurl,
           // events
           events, eventFilters, filteredEvents, selectedEvent, eventBufferLimit, streamState, knownOrders, selectedOrderNo,
-          connectSSE, startPolling, disconnectStream, clearEvents, copyStreamCurl, copyRecentCurl, chartEl, updateChartSeries
+          connectSSE, startPolling, disconnectStream, clearEvents, copyStreamCurl, copyRecentCurl, updateChartSeries
         };
       }
     }).mount('#app');

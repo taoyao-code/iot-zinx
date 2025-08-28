@@ -143,3 +143,43 @@ type UpdateChargingPowerParams struct {
 	OverloadPowerW           uint16 `json:"overloadPowerW" binding:"required" example:"120" swaggertype:"integer" description:"过载功率(瓦)"`
 	MaxChargeDurationSeconds uint16 `json:"maxChargeDurationSeconds" example:"0" swaggertype:"integer" description:"最大充电时长(秒), 0表示不修改"`
 }
+
+// DeviceStatusURI 设备状态URI参数
+// @Description 设备状态URI参数绑定
+type DeviceStatusURI struct {
+	DeviceID string `uri:"deviceId" binding:"required" example:"04ceaa40"`
+}
+
+// DeviceListQuery 设备列表查询参数
+// @Description 设备列表查询参数绑定
+type DeviceListQuery struct {
+	Page  int `form:"page,default=1" binding:"min=1" example:"1"`
+	Limit int `form:"limit,default=50" binding:"min=1,max=200" example:"50"`
+}
+
+// NotificationQuery 通知筛选查询参数（SSE与最近列表共用）
+// @Description 通知筛选查询参数绑定
+type NotificationQuery struct {
+	EventTypes string `form:"event_types" example:"power_heartbeat,charge_started"`
+	DeviceID   string `form:"device_id" example:"04ceaa40"`
+	OrderNo    string `form:"orderNo" example:"ORDER_20250619001"`
+	Port       string `form:"port" example:"1"`
+	Since      int64  `form:"since" example:"0"`
+	Limit      int    `form:"limit,default=100" example:"100"`
+}
+
+// ChargingActionResponse 充电操作统一响应体
+// @Description 充电启动/停止/参数调整等操作返回
+type ChargingActionResponse struct {
+	DeviceID                 string `json:"deviceId"`
+	StandardID               string `json:"standardId"`
+	Port                     byte   `json:"port"`
+	OrderNo                  string `json:"orderNo,omitempty"`
+	Mode                     byte   `json:"mode,omitempty"`
+	Value                    uint16 `json:"value,omitempty"`
+	Balance                  uint32 `json:"balance,omitempty"`
+	OverloadPowerW           uint16 `json:"overloadPowerW,omitempty"`
+	MaxChargeDurationSeconds uint16 `json:"maxChargeDurationSeconds,omitempty"`
+	Action                   string `json:"action"`
+	Timestamp                int64  `json:"timestamp"`
+}
