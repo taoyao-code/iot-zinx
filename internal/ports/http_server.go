@@ -65,5 +65,9 @@ func registerUnifiedAPIHandlers(r *gin.Engine) {
 
 		// 🚀 新架构：设备查询API
 		api.GET("/device/:deviceId/query", gatewayHandlers.HandleQueryDeviceStatus)
+
+		// 推送事件调试接口（SSE与最近事件）
+		api.GET("/notifications/stream", gatewayHandlers.HandleNotificationStream)
+		api.GET("/notifications/recent", gatewayHandlers.HandleNotificationRecent)
 	}
 }

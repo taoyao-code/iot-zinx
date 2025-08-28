@@ -270,6 +270,102 @@
         <a class="btn ghost" href="/swagger/index.html" target="_blank">Swagger</a>
       </div>
     </div>
+    <div class="grid" style="margin-top:16px;">
+      <div class="card">
+        <h3>推送事件 · 调试</h3>
+        <div class="toolbar" style="flex-wrap:wrap;">
+          <input class="input" style="width:180px" placeholder="设备ID筛选" v-model.trim="eventFilters.deviceId" />
+          <input class="input" style="width:180px" placeholder="订单号筛选" v-model.trim="eventFilters.orderNo" />
+          <input class="input" style="width:120px" placeholder="端口(可选)" v-model.trim="eventFilters.port" />
+          <button class="btn" @click="connectSSE">SSE连接</button>
+          <button class="btn" @click="startPolling">轮询</button>
+          <button class="btn ghost" @click="disconnectStream">断开</button>
+          <button class="btn ghost" @click="streamState.paused=!streamState.paused">{{ streamState.paused? '继续' : '暂停'
+            }}</button>
+          <button class="btn ghost" @click="clearEvents">清空</button>
+          <button class="btn ghost" @click="copyStreamCurl">复制流 cURL</button>
+          <button class="btn ghost" @click="copyRecentCurl">复制最近 cURL</button>
+        </div>
+        <div class="muted" style="margin-bottom:8px;">
+          状态: {{ streamState.connected? '已连接' : (streamState.usePolling? '轮询中':'未连接') }}
+          <span v-if="streamState.error"> · 错误: {{ streamState.error }}</span>
+        </div>
+        <div class="subgrid">
+          <div>
+            <div class="muted" style="margin-bottom:4px;">事件类型筛选</div>
+            <div class="toolbar" style="flex-wrap:wrap;">
+              <label class="switch"><input type="checkbox" value="device_online" v-model="eventFilters.types">
+                device_online</label>
+              <label class="switch"><input type="checkbox" value="device_offline" v-model="eventFilters.types">
+                device_offline</label>
+              <label class="switch"><input type="checkbox" value="device_register" v-model="eventFilters.types">
+                device_register</label>
+              <label class="switch"><input type="checkbox" value="charging_start" v-model="eventFilters.types">
+                charging_start</label>
+              <label class="switch"><input type="checkbox" value="charging_end" v-model="eventFilters.types">
+                charging_end</label>
+              <label class="switch"><input type="checkbox" value="charging_failed" v-model="eventFilters.types">
+                charging_failed</label>
+              <label class="switch"><input type="checkbox" value="charging_power" v-model="eventFilters.types">
+                charging_power</label>
+              <label class="switch"><input type="checkbox" value="power_heartbeat" v-model="eventFilters.types">
+                power_heartbeat</label>
+              <label class="switch"><input type="checkbox" value="port_status_change" v-model="eventFilters.types">
+                port_status_change</label>
+              <label class="switch"><input type="checkbox" value="port_error" v-model="eventFilters.types">
+                port_error</label>
+            </div>
+          </div>
+          <div class="toolbar">
+            <span class="muted">缓冲条数</span>
+            <input class="input" type="number" style="width:120px" v-model.number="eventBufferLimit" />
+          </div>
+        </div>
+        <div class="muted" v-if="filteredEvents.length===0">暂无推送事件</div>
+        <table v-else>
+          <thead>
+            <tr>
+              <th>#</th>
+              <th>时间</th>
+              <th>类型</th>
+              <th>设备ID</th>
+              <th>端口</th>
+              <th>订单号</th>
+              <th>操作</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-for="(ev, idx) in filteredEvents" :key="ev.event_id">
+              <td>{{ idx + 1 }}</td>
+              <td class="muted">{{ new Date(ev.timestamp).toLocaleString() }}</td>
+              <td>{{ ev.event_type }}</td>
+              <td>{{ ev.device_id }}</td>
+              <td class="muted">{{ ev.port_number ?? '-' }}</td>
+              <td class="muted">{{ ev.data?.order_no || ev.data?.orderNo || ev.data?.order_id || ev.data?.orderId || '-'
+                }}</td>
+              <td>
+                <button class="btn secondary" @click="selectedEvent=ev">详情</button>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="card">
+        <h3>事件详情与功率曲线</h3>
+        <div class="toolbar">
+          <select class="input" style="width:220px" v-model="selectedOrderNo" @change="updateChartSeries">
+            <option :value="''">选择订单号(自动)</option>
+            <option v-for="o in knownOrders" :key="o" :value="o">{{ o }}</option>
+          </select>
+          <span class="hint">曲线来源: charging_power / power_heartbeat</span>
+        </div>
+        <div id="powerChart" style="width:100%;height:260px;margin-bottom:10px;"></div>
+        <div v-if="selectedEvent" class="code">
+          <pre>{{ format(selectedEvent) }}</pre>
+        </div>
+        <div v-else class="muted">选择上方事件查看详情</div>
+      </div>
+    </div>
 
     <div class="topbar">
       <div class="kpi">
@@ -526,6 +622,7 @@
 
   <script src="https://cdn.jsdelivr.net/npm/vue@3.4.38/dist/vue.global.prod.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/axios@1.7.8/dist/axios.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/echarts@5.5.0/dist/echarts.min.js"></script>
   <script>
     const { createApp, ref, computed, onMounted, watchEffect } = Vue;
 
@@ -813,7 +910,194 @@
           copy(`curl -X POST '${url}' -H 'Content-Type: application/json' -d '${payload}'`);
         }
 
-        return { loading, devices, stats, statsOnline, statsTotal, health, detail, detailLoading, filter, queryId, lastError, latency, autoRefresh, apiBase, devices: devices, filteredDevices, format, loadDetail, loadDetailQuery, refreshDevices, refreshAll, applyApiConfig, startForm, stopForm, locateForm, powerForm, startSubmitting, stopSubmitting, locateSubmitting, updatePowerSubmitting, startResp, stopResp, locateResp, updatePowerResp, detailQueryResp, submitStart, submitStop, submitLocate, submitUpdatePower, useQueryIdFor, presetStart, selectDevice, copyStartCurl, copyStopCurl, copyLocateCurl, copyUpdatePowerCurl };
+        // ---------------- 推送事件（SSE/轮询）与功率曲线 ----------------
+        const eventFilters = ref({
+          types: [
+            'device_online', 'device_offline', 'device_register',
+            'charging_start', 'charging_end', 'charging_failed',
+            'charging_power', 'power_heartbeat', 'port_status_change', 'port_error'
+          ],
+          deviceId: '',
+          orderNo: '',
+          port: ''
+        });
+        const events = ref([]); // {event_id,event_type,device_id,port_number,timestamp,data}
+        const eventBufferLimit = ref(500);
+        const selectedEvent = ref(null);
+        const sse = ref(null);
+        const streamState = ref({ connected: false, paused: false, error: '', usePolling: false, pollInterval: 10, pollTimer: null, lastSince: 0 });
+        const knownOrders = computed(() => {
+          const set = new Set();
+          for (const ev of events.value) {
+            const o = ev.data?.order_no || ev.data?.orderNo || ev.data?.order_id || ev.data?.orderId;
+            if (o) set.add(String(o));
+          }
+          return Array.from(set);
+        });
+        const selectedOrderNo = ref('');
+        let chart = null;
+        const chartEl = ref(null);
+
+        function normalizeEvent(payload) {
+          const e = payload || {};
+          const evt = {
+            event_id: e.event_id || e.id || e.uuid || `${Date.now()}_${Math.random().toString(16).slice(2)}`,
+            event_type: e.event_type || e.type || e.eventType || 'unknown',
+            device_id: e.device_id || e.deviceId || (e.data && (e.data.device_id || e.data.deviceId)) || '',
+            port_number: e.port_number ?? e.port ?? (e.data && (e.data.port_number ?? e.data.port)) ?? null,
+            timestamp: e.timestamp || e.ts || e.time || Date.now(),
+            data: e.data || {}
+          };
+          return evt;
+        }
+
+        function pushEvent(evt) {
+          events.value.unshift(evt);
+          if (events.value.length > eventBufferLimit.value) {
+            events.value.length = eventBufferLimit.value;
+          }
+          // 若选择的订单未设定，自动设置
+          if (!selectedOrderNo.value) {
+            const o = evt.data?.order_no || evt.data?.orderNo || evt.data?.order_id || evt.data?.orderId || '';
+            if (o) selectedOrderNo.value = String(o);
+          }
+          // 更新图表
+          updateChartSeries();
+        }
+
+        const filteredEvents = computed(() => {
+          const tset = new Set(eventFilters.value.types || []);
+          return events.value.filter(ev => {
+            if (tset.size && !tset.has(ev.event_type)) return false;
+            if (eventFilters.value.deviceId && String(ev.device_id).toLowerCase().indexOf(eventFilters.value.deviceId.toLowerCase()) === -1) return false;
+            const orderNo = ev.data?.order_no || ev.data?.orderNo || ev.data?.order_id || ev.data?.orderId || '';
+            if (eventFilters.value.orderNo && String(orderNo) !== String(eventFilters.value.orderNo)) return false;
+            if (eventFilters.value.port !== '' && eventFilters.value.port !== null && eventFilters.value.port !== undefined) {
+              const pn = ev.port_number;
+              if (String(pn) !== String(eventFilters.value.port)) return false;
+            }
+            return true;
+          });
+        });
+
+        function connectSSE() {
+          disconnectStream();
+          streamState.value.error = '';
+          streamState.value.usePolling = false;
+          const base = (api.defaults.baseURL || '').replace(/\/$/, '');
+          const types = encodeURIComponent((eventFilters.value.types || []).join(','));
+          const url = `${base}/api/v1/notifications/stream?event_types=${types}`;
+          try {
+            sse.value = new EventSource(url);
+            sse.value.onopen = () => { streamState.value.connected = true; };
+            sse.value.onerror = (e) => { streamState.value.error = 'SSE连接错误'; streamState.value.connected = false; };
+            sse.value.onmessage = (msg) => {
+              if (streamState.value.paused) return;
+              try {
+                const data = JSON.parse(msg.data);
+                const evt = normalizeEvent(data);
+                pushEvent(evt);
+              } catch (err) {
+                // 忽略解析错误
+              }
+            };
+          } catch (e) {
+            streamState.value.error = e?.message || 'SSE初始化失败';
+          }
+        }
+
+        function startPolling() {
+          disconnectStream();
+          streamState.value.usePolling = true;
+          const tick = async () => {
+            try {
+              const base = '';
+              // 尝试获取最近事件（需后端实现，若未实现将落空）
+              const params = { limit: 100 };
+              if (streamState.value.lastSince) params.since = streamState.value.lastSince;
+              const res = await api.get('/api/v1/notifications/recent', { params });
+              const list = res.data?.data || res.data || [];
+              for (const it of list) {
+                const evt = normalizeEvent(it);
+                pushEvent(evt);
+                streamState.value.lastSince = Math.max(streamState.value.lastSince, Number(new Date(evt.timestamp)) || Date.now());
+              }
+            } catch { }
+          };
+          tick();
+          streamState.value.pollTimer = setInterval(() => { if (!streamState.value.paused) tick(); }, streamState.value.pollInterval * 1000);
+        }
+
+        function disconnectStream() {
+          if (sse.value) { try { sse.value.close(); } catch { } sse.value = null; }
+          if (streamState.value.pollTimer) { clearInterval(streamState.value.pollTimer); streamState.value.pollTimer = null; }
+          streamState.value.connected = false;
+        }
+
+        function clearEvents() { events.value = []; selectedEvent.value = null; updateChartSeries(); }
+
+        function copyStreamCurl() {
+          const base = (api.defaults.baseURL || '').replace(/\/$/, '');
+          const types = encodeURIComponent((eventFilters.value.types || []).join(','));
+          const url = `${base}/api/v1/notifications/stream?event_types=${types}`;
+          const cmd = `curl '${url}'`;
+          navigator.clipboard.writeText(cmd).catch(() => { });
+        }
+
+        function copyRecentCurl() {
+          const base = (api.defaults.baseURL || '').replace(/\/$/, '');
+          const url = `${base}/api/v1/notifications/recent?limit=100`;
+          const cmd = `curl '${url}'`;
+          navigator.clipboard.writeText(cmd).catch(() => { });
+        }
+
+        function toPowerValue(ev) {
+          const d = ev?.data || {};
+          const v = d.power_w ?? d.powerW ?? d.power ?? d.p ?? null;
+          if (v == null) return null;
+          return Number(v);
+        }
+
+        function updateChartSeries() {
+          if (!chart) return;
+          const seriesData = {};
+          for (const ev of events.value) {
+            if (!(ev.event_type === 'charging_power' || ev.event_type === 'power_heartbeat')) continue;
+            const orderNo = ev.data?.order_no || ev.data?.orderNo || ev.data?.order_id || ev.data?.orderId || '';
+            if (!orderNo) continue;
+            const pw = toPowerValue(ev);
+            if (pw == null) continue;
+            const ts = Number(new Date(ev.timestamp)) || Date.now();
+            if (!seriesData[orderNo]) seriesData[orderNo] = [];
+            seriesData[orderNo].push([ts, pw]);
+          }
+          const order = selectedOrderNo.value && seriesData[selectedOrderNo.value] ? selectedOrderNo.value : Object.keys(seriesData)[0] || '';
+          if (order && !selectedOrderNo.value) selectedOrderNo.value = order;
+          const data = order ? (seriesData[order] || []).slice().sort((a, b) => a[0] - b[0]) : [];
+          chart.setOption({
+            tooltip: { trigger: 'axis', valueFormatter: (v) => `${v} W` },
+            xAxis: { type: 'time' },
+            yAxis: { type: 'value', name: '功率(W)' },
+            series: [{ type: 'line', name: '功率', showSymbol: false, data }]
+          });
+        }
+
+        onMounted(() => {
+          // 初始化图表
+          const el = document.getElementById('powerChart');
+          if (el && window.echarts) {
+            chart = echarts.init(el);
+            updateChartSeries();
+            window.addEventListener('resize', () => { chart && chart.resize(); });
+          }
+        });
+
+        return {
+          loading, devices, stats, statsOnline, statsTotal, health, detail, detailLoading, filter, queryId, lastError, latency, autoRefresh, apiBase, devices: devices, filteredDevices, format, loadDetail, loadDetailQuery, refreshDevices, refreshAll, applyApiConfig, startForm, stopForm, locateForm, powerForm, startSubmitting, stopSubmitting, locateSubmitting, updatePowerSubmitting, startResp, stopResp, locateResp, updatePowerResp, detailQueryResp, submitStart, submitStop, submitLocate, submitUpdatePower, useQueryIdFor, presetStart, selectDevice, copyStartCurl, copyStopCurl, copyLocateCurl, copyUpdatePowerCurl,
+          // events
+          events, eventFilters, filteredEvents, selectedEvent, eventBufferLimit, streamState, knownOrders, selectedOrderNo,
+          connectSSE, startPolling, disconnectStream, clearEvents, copyStreamCurl, copyRecentCurl, chartEl, updateChartSeries
+        };
       }
     }).mount('#app');
   </script>

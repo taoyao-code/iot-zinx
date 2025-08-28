@@ -141,6 +141,17 @@ notification:
   queue_size: 10000 # 通知队列大小
   workers: 5 # 工作协程数
 
+  # 调试/观测：本地推送事件流与内存记录（仅用于开发调试，默认关闭）
+  # debug_stream:
+  #   enabled: false           # 是否开启内置SSE调试事件流 /api/v1/notifications/stream
+  #   buffer_size: 1000        # 内部事件环形缓冲最大条数
+  #   allowed_origins: ["*"]   # 允许的跨域来源（若HTTP层启用CORS）
+  # recorder:
+  #   enabled: false           # 是否开启最近事件内存记录 /api/v1/notifications/recent
+  #   max_items: 2000          # 记录的最大事件条数
+  #   log_payloads: true       # 是否将推送payload以结构化日志输出（注意敏感字段脱敏）
+  #   log_sample_rate: 1       # 日志采样，1=全量，N=每N条记录1条
+
   # 端口状态实时同步配置
   port_status_sync:
     enabled: true # 是否启用端口状态实时同步

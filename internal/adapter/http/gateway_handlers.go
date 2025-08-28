@@ -1,6 +1,7 @@
 package http
 
 import (
+	"encoding/json"
 	"net/http"
 	"strconv"
 	"sync"
@@ -670,4 +671,85 @@ func (h *DeviceGatewayHandlers) HandleUpdateChargingPower(c *gin.Context) {
 		"overloadPowerW":           req.OverloadPowerW,
 		"maxChargeDurationSeconds": req.MaxChargeDurationSeconds,
 	}})
+}
+
+// HandleNotificationStream SSE推送流
+// GET /api/v1/notifications/stream
+func (h *DeviceGatewayHandlers) HandleNotificationStream(c *gin.Context) {
+	c.Writer.Header().Set("Content-Type", "text/event-stream")
+	c.Writer.Header().Set("Cache-Control", "no-cache")
+	c.Writer.Header().Set("Connection", "keep-alive")
+	c.Writer.Flush()
+
+	_, ch, cancel := notification.GetGlobalRecorder().Subscribe(200)
+	defer cancel()
+
+	recent := notification.GetGlobalRecorder().Recent(50)
+	for _, ev := range recent {
+		b, _ := json.Marshal(map[string]interface{}{
+			"event_id":    ev.EventID,
+			"event_type":  ev.EventType,
+			"device_id":   ev.DeviceID,
+			"port_number": ev.PortNumber,
+			"timestamp":   ev.Timestamp.Unix(),
+			"data":        ev.Data,
+		})
+		_, _ = c.Writer.Write([]byte("data: "))
+		_, _ = c.Writer.Write(b)
+		_, _ = c.Writer.Write([]byte("\n\n"))
+		c.Writer.Flush()
+	}
+
+	notify := c.Writer.CloseNotify()
+	for {
+		select {
+		case <-notify:
+			return
+		case ev, ok := <-ch:
+			if !ok {
+				return
+			}
+			b, _ := json.Marshal(map[string]interface{}{
+				"event_id":    ev.EventID,
+				"event_type":  ev.EventType,
+				"device_id":   ev.DeviceID,
+				"port_number": ev.PortNumber,
+				"timestamp":   ev.Timestamp.Unix(),
+				"data":        ev.Data,
+			})
+			_, _ = c.Writer.Write([]byte("data: "))
+			_, _ = c.Writer.Write(b)
+			_, _ = c.Writer.Write([]byte("\n\n"))
+			c.Writer.Flush()
+		case <-c.Request.Context().Done():
+			return
+		}
+	}
+}
+
+// HandleNotificationRecent 获取最近事件
+// GET /api/v1/notifications/recent?limit=100
+func (h *DeviceGatewayHandlers) HandleNotificationRecent(c *gin.Context) {
+	limitStr := c.DefaultQuery("limit", "100")
+	limit, _ := strconv.Atoi(limitStr)
+	if limit <= 0 {
+		limit = 100
+	}
+	items := notification.GetGlobalRecorder().Recent(limit)
+	var out []map[string]interface{}
+	for _, ev := range items {
+		out = append(out, map[string]interface{}{
+			"event_id":    ev.EventID,
+			"event_type":  ev.EventType,
+			"device_id":   ev.DeviceID,
+			"port_number": ev.PortNumber,
+			"timestamp":   ev.Timestamp.Unix(),
+			"data":        ev.Data,
+		})
+	}
+	c.JSON(http.StatusOK, gin.H{
+		"code":    0,
+		"message": "成功",
+		"data":    out,
+	})
 }

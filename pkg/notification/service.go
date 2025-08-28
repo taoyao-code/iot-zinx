@@ -288,6 +288,8 @@ func (s *NotificationService) retryWorker() {
 
 // processEvent 处理事件
 func (s *NotificationService) processEvent(event *NotificationEvent) {
+	// 记录事件到内存记录器并广播给订阅者（用于SSE/调试）
+	GetGlobalRecorder().Record(event)
 	// 获取订阅该事件的端点
 	endpoints := s.config.GetEndpointsByEvent(event.EventType)
 	if len(endpoints) == 0 {
