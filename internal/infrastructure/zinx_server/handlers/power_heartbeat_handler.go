@@ -294,7 +294,10 @@ func (h *PowerHeartbeatHandler) processPowerHeartbeat(decodedFrame *protocol.Dec
 				"power":              notification.FormatPower(uint16(realtimePower)),
 				"power_raw":          realtimePower,
 			}
-			integrator.NotifyChargingPower(deviceId, port1, chargingPowerData)
+			// 传入0-based端口给集成器
+			port0 := port1 - 1
+			if port0 < 0 { port0 = 0 }
+			integrator.NotifyChargingPower(deviceId, port0, chargingPowerData)
 		}
 	}
 }
@@ -307,7 +310,8 @@ func (h *PowerHeartbeatHandler) sendPowerHeartbeatNotification(decodedFrame *pro
 	}
 
 	// 从logFields中提取数据
-	portNumber, _ := logFields["portNumber"].(int)
+	portNumber, _ := logFields["portNumber"].(int) // 1-based for logs
+	protoPort := portNumber - 1                      // 0-based for integrator
 	chargingStatus, _ := logFields["chargingStatus"].(string)
 	chargeDuration, _ := logFields["chargeDuration"].(uint16)
 	cumulativeEnergy, _ := logFields["cumulativeEnergy"].(uint16)
@@ -332,6 +336,6 @@ func (h *PowerHeartbeatHandler) sendPowerHeartbeatNotification(decodedFrame *pro
 	}
 
 	// 发送功率心跳通知
-	integrator.NotifyPowerHeartbeat(deviceId, portNumber, powerData)
+	integrator.NotifyPowerHeartbeat(deviceId, protoPort, powerData)
 
 }
