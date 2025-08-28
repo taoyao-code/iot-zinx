@@ -7,6 +7,8 @@ import (
 	"github.com/aceld/zinx/ziface"
 	"github.com/bujia-iot/iot-zinx/internal/infrastructure/logger"
 	"github.com/bujia-iot/iot-zinx/pkg/core"
+	"github.com/bujia-iot/iot-zinx/pkg/network"
+	"github.com/bujia-iot/iot-zinx/pkg/notification"
 	"github.com/bujia-iot/iot-zinx/pkg/protocol"
 	"github.com/bujia-iot/iot-zinx/pkg/utils"
 	"github.com/sirupsen/logrus"
@@ -239,4 +241,43 @@ func (h *ChargeControlHandler) processChargeControl(result *protocol.DNYParseRes
 		"ack":       false,
 		"reason":    "per protocol, no server ack for 0x82 to avoid mis-trigger stop",
 	}).Debug("ChargeControlHandler: skip sending 0x82 ack")
+
+	// 确认命令，停止 CommandManager 的重试/超时
+	if cmdMgr := network.GetCommandManager(); cmdMgr != nil {
+		confirmed := cmdMgr.ConfirmCommand(physicalID, messageID, 0x82)
+		logger.WithFields(logrus.Fields{
+			"deviceId":  fmt.Sprintf("%08X", physicalID),
+			"messageID": fmt.Sprintf("0x%04X", messageID),
+			"command":   "0x82",
+			"confirmed": confirmed,
+		}).Info("确认 0x82 命令完成")
+	}
+
+	// 成功与失败回调第三方
+	integrator := notification.GetGlobalNotificationIntegrator()
+	if integrator != nil && integrator.IsEnabled() {
+		// 协议端口为0-based，集成器内部会+1对外
+
+		sessionData := notification.ChargeResponse{
+			Port:        portNumber,
+			Status:      fmt.Sprintf("0x%02X", status),
+			StatusDesc:  description,
+			OrderNumber: orderNumber,
+		}
+
+		decoded := &protocol.DecodedDNYFrame{
+			FrameType: protocol.FrameTypeStandard,
+			RawData:   result.RawData,
+			DeviceID:  utils.FormatPhysicalID(physicalID),
+			MessageID: result.MessageID,
+			Command:   result.Command,
+			Payload:   result.Data,
+		}
+
+		if isExecuted && status == ChargeStatusSuccess {
+			integrator.NotifyChargingStart(decoded, conn, sessionData)
+		} else {
+			integrator.NotifyChargingFailed(decoded, conn, sessionData)
+		}
+	}
 }

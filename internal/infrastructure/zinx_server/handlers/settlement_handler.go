@@ -163,15 +163,15 @@ func (h *SettlementHandler) processSettlement(decodedFrame *protocol.DecodedDNYF
 
 		// 发送充电结束通知（结算通常意味着充电结束）
 		chargeDuration := int64(settlementData.EndTime.Sub(settlementData.StartTime).Seconds())
-		chargingEndData := map[string]interface{}{
-			"port_number":          settlementData.GunNumber,
-			"orderNo":              settlementData.OrderID,
-			"total_energy":         settlementData.ElectricEnergy,
-			"charge_duration":      chargeDuration,
-			"start_time":           settlementData.StartTime.Format(constants.TimeFormatDefault),
-			"end_time":             settlementData.EndTime.Format(constants.TimeFormatDefault),
-			"stop_reason":          settlementData.StopReason,
-			"settlement_triggered": true,
+		chargingEndData := notification.ChargeResponse{
+			Port:                 settlementData.GunNumber,
+			OrderNo:              settlementData.OrderID,
+			TotalEnergy:          settlementData.ElectricEnergy,
+			ChargeDuration:       chargeDuration,
+			StartTime:            settlementData.StartTime.Format(constants.TimeFormatDefault),
+			EndTime:              settlementData.EndTime.Format(constants.TimeFormatDefault),
+			StopReason:           settlementData.StopReason,
+			SettlementTriggered:  true,
 		}
 		integrator.NotifyChargingEnd(decodedFrame, conn, chargingEndData)
 	}

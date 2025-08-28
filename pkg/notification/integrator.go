@@ -157,7 +157,7 @@ func (n *NotificationIntegrator) NotifyDeviceOffline(conn ziface.IConnection, de
 }
 
 // NotifyChargingStart 通知充电开始
-func (n *NotificationIntegrator) NotifyChargingStart(decodedFrame *protocol.DecodedDNYFrame, conn ziface.IConnection, sessionData map[string]interface{}) {
+func (n *NotificationIntegrator) NotifyChargingStart(decodedFrame *protocol.DecodedDNYFrame, conn ziface.IConnection, sessionData ChargeResponse) {
 	if !n.enabled {
 		return
 	}
@@ -165,26 +165,17 @@ func (n *NotificationIntegrator) NotifyChargingStart(decodedFrame *protocol.Deco
 	deviceID := decodedFrame.DeviceID
 
 	// 从会话数据中提取端口号
-	portNumber := 0
-	if port, ok := sessionData["port_number"]; ok {
-		if p, ok := port.(int); ok {
-			portNumber = p
-		}
-	}
-	// 对外统一使用 1-based 端口号（协议0-based）
-	portNumber = portNumber + 1
+	portNumber := sessionData.Port
 
-	data := map[string]interface{}{
-		"conn_id":     conn.GetConnID(),
-		"remote_addr": conn.RemoteAddr().String(),
-		"message_id":  fmt.Sprintf("0x%04X", decodedFrame.MessageID),
-		"command":     fmt.Sprintf("0x%02X", decodedFrame.Command),
-		"timestamp":   time.Now().Unix(),
-	}
-
-	// 合并会话数据
-	for k, v := range sessionData {
-		data[k] = v
+	data := ChargeResponse{
+		Port:        sessionData.Port,
+		Status:      sessionData.Status,
+		StatusDesc:  sessionData.StatusDesc,
+		OrderNumber: sessionData.OrderNumber,
+		RemoteAddr:  conn.RemoteAddr().String(),
+		MessageID:   fmt.Sprintf("0x%04X", decodedFrame.MessageID),
+		Command:     fmt.Sprintf("0x%02X", decodedFrame.Command),
+		FailedTime:  time.Now().Unix(),
 	}
 
 	if err := n.service.SendChargingStartNotification(deviceID, portNumber, data); err != nil {
@@ -193,7 +184,7 @@ func (n *NotificationIntegrator) NotifyChargingStart(decodedFrame *protocol.Deco
 }
 
 // NotifyChargingEnd 通知充电结束
-func (n *NotificationIntegrator) NotifyChargingEnd(decodedFrame *protocol.DecodedDNYFrame, conn ziface.IConnection, endData map[string]interface{}) {
+func (n *NotificationIntegrator) NotifyChargingEnd(decodedFrame *protocol.DecodedDNYFrame, conn ziface.IConnection, endData ChargeResponse) {
 	if !n.enabled {
 		return
 	}
@@ -201,25 +192,17 @@ func (n *NotificationIntegrator) NotifyChargingEnd(decodedFrame *protocol.Decode
 	deviceID := decodedFrame.DeviceID
 
 	// 从结束数据中提取端口号
-	portNumber := 0
-	if port, ok := endData["port_number"]; ok {
-		if p, ok := port.(int); ok {
-			portNumber = p
-		}
-	}
-	portNumber = portNumber + 1
+	portNumber := endData.Port
 
-	data := map[string]interface{}{
-		"conn_id":     conn.GetConnID(),
-		"remote_addr": conn.RemoteAddr().String(),
-		"message_id":  fmt.Sprintf("0x%04X", decodedFrame.MessageID),
-		"command":     fmt.Sprintf("0x%02X", decodedFrame.Command),
-		"timestamp":   time.Now().Unix(),
-	}
-
-	// 合并结束数据
-	for k, v := range endData {
-		data[k] = v
+	data := ChargeResponse{
+		Port:        endData.Port,
+		Status:      endData.Status,
+		StatusDesc:  endData.StatusDesc,
+		OrderNumber: endData.OrderNumber,
+		RemoteAddr:  conn.RemoteAddr().String(),
+		MessageID:   fmt.Sprintf("0x%04X", decodedFrame.MessageID),
+		Command:     fmt.Sprintf("0x%02X", decodedFrame.Command),
+		FailedTime:  time.Now().Unix(),
 	}
 
 	if err := n.service.SendChargingEndNotification(deviceID, portNumber, data); err != nil {
@@ -514,7 +497,7 @@ func (n *NotificationIntegrator) NotifyDeviceRegister(deviceID string, registerD
 }
 
 // NotifyChargingFailed 发送充电失败通知
-func (n *NotificationIntegrator) NotifyChargingFailed(decodedFrame *protocol.DecodedDNYFrame, conn ziface.IConnection, chargingFailedData map[string]interface{}) {
+func (n *NotificationIntegrator) NotifyChargingFailed(decodedFrame *protocol.DecodedDNYFrame, conn ziface.IConnection, chargingFailedData ChargeResponse) {
 	if !n.enabled {
 		return
 	}
@@ -522,28 +505,19 @@ func (n *NotificationIntegrator) NotifyChargingFailed(decodedFrame *protocol.Dec
 	deviceID := decodedFrame.DeviceID
 
 	// 从充电失败数据中提取端口号
-	portNumber := 0
-	if port, ok := chargingFailedData["port_number"]; ok {
-		if p, ok := port.(int); ok {
-			portNumber = p
-		}
-	}
-	portNumber = portNumber + 1
 
-	data := map[string]interface{}{
-		"conn_id":     conn.GetConnID(),
-		"remote_addr": conn.RemoteAddr().String(),
-		"message_id":  fmt.Sprintf("0x%04X", decodedFrame.MessageID),
-		"command":     fmt.Sprintf("0x%02X", decodedFrame.Command),
-		"failed_time": time.Now().Unix(),
+	data := ChargeResponse{
+		Port:        chargingFailedData.Port,
+		Status:      chargingFailedData.Status,
+		StatusDesc:  chargingFailedData.StatusDesc,
+		OrderNumber: chargingFailedData.OrderNumber,
+		RemoteAddr:  conn.RemoteAddr().String(),
+		MessageID:   fmt.Sprintf("0x%04X", decodedFrame.MessageID),
+		Command:     fmt.Sprintf("0x%02X", decodedFrame.Command),
+		FailedTime:  time.Now().Unix(),
 	}
 
-	// 合并充电失败数据
-	for k, v := range chargingFailedData {
-		data[k] = v
-	}
-
-	if err := n.service.SendChargingFailedNotification(deviceID, portNumber, data); err != nil {
+	if err := n.service.SendChargingFailedNotification(deviceID, chargingFailedData.Port, data); err != nil {
 		logger.Error("发送充电失败通知失败: " + err.Error())
 	}
 }

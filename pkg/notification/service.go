@@ -196,37 +196,55 @@ func (s *NotificationService) SendDeviceOfflineNotification(deviceID string, dat
 }
 
 // SendChargingStartNotification 发送充电开始通知
-func (s *NotificationService) SendChargingStartNotification(deviceID string, portNumber int, data map[string]interface{}) error {
+func (s *NotificationService) SendChargingStartNotification(deviceID string, portNumber uint8, data ChargeResponse) error {
 	event := &NotificationEvent{
 		EventType:  EventTypeChargingStart,
 		DeviceID:   deviceID,
-		PortNumber: portNumber,
-		Data:       data,
-		Timestamp:  time.Now(),
+		PortNumber: int(portNumber),
+		Data: map[string]interface{}{
+			"port":         data.Port,
+			"status":       data.Status,
+			"status_desc":  data.StatusDesc,
+			"order_number": data.OrderNumber,
+			"remote_addr":  data.RemoteAddr,
+		},
+		Timestamp: time.Now(),
 	}
 	return s.SendNotification(event)
 }
 
 // SendChargingEndNotification 发送充电结束通知
-func (s *NotificationService) SendChargingEndNotification(deviceID string, portNumber int, data map[string]interface{}) error {
+func (s *NotificationService) SendChargingEndNotification(deviceID string, portNumber uint8, data ChargeResponse) error {
 	event := &NotificationEvent{
 		EventType:  EventTypeChargingEnd,
 		DeviceID:   deviceID,
-		PortNumber: portNumber,
-		Data:       data,
-		Timestamp:  time.Now(),
+		PortNumber: int(portNumber),
+		Data: map[string]interface{}{
+			"port":         data.Port,
+			"status":       data.Status,
+			"status_desc":  data.StatusDesc,
+			"order_number": data.OrderNumber,
+			"remote_addr":  data.RemoteAddr,
+		},
+		Timestamp: time.Now(),
 	}
 	return s.SendNotification(event)
 }
 
 // SendChargingFailedNotification 发送充电失败通知
-func (s *NotificationService) SendChargingFailedNotification(deviceID string, portNumber int, data map[string]interface{}) error {
+func (s *NotificationService) SendChargingFailedNotification(deviceID string, portNumber uint8, data ChargeResponse) error {
 	event := &NotificationEvent{
 		EventType:  EventTypeChargingFailed,
 		DeviceID:   deviceID,
-		PortNumber: portNumber,
-		Data:       data,
-		Timestamp:  time.Now(),
+		PortNumber: int(portNumber),
+		Data: map[string]interface{}{
+			"port":         data.Port,
+			"status":       data.Status,
+			"status_desc":  data.StatusDesc,
+			"order_number": data.OrderNumber,
+			"remote_addr":  data.RemoteAddr,
+		},
+		Timestamp: time.Now(),
 	}
 	return s.SendNotification(event)
 }
