@@ -116,7 +116,7 @@ func (h *SettlementHandler) processSettlement(decodedFrame *protocol.DecodedDNYF
 		"physicalId":     utils.FormatPhysicalID(physicalId),
 		"messageID":      fmt.Sprintf("0x%04X", messageID),
 		"deviceId":       deviceId,
-		"orderId":        settlementData.OrderID,
+		"orderNo":        settlementData.OrderID,
 		"cardNumber":     settlementData.CardNumber,
 		"gunNumber":      settlementData.GunNumber,
 		"electricEnergy": settlementData.ElectricEnergy,
@@ -152,7 +152,7 @@ func (h *SettlementHandler) processSettlement(decodedFrame *protocol.DecodedDNYF
 			"service_fee":   settlementData.ServiceFee,
 			"start_time":    settlementData.StartTime.Unix(),
 			"end_time":      settlementData.EndTime.Unix(),
-			"order_id":      settlementData.OrderID,
+			"orderNo":       settlementData.OrderID,
 			"card_number":   settlementData.CardNumber,
 			"stop_reason":   settlementData.StopReason,
 			"settlement_id": fmt.Sprintf("SETTLE_%s_%d", deviceId, time.Now().Unix()),
@@ -165,7 +165,7 @@ func (h *SettlementHandler) processSettlement(decodedFrame *protocol.DecodedDNYF
 		chargeDuration := int64(settlementData.EndTime.Sub(settlementData.StartTime).Seconds())
 		chargingEndData := map[string]interface{}{
 			"port_number":          settlementData.GunNumber,
-			"order_id":             settlementData.OrderID,
+			"orderNo":              settlementData.OrderID,
 			"total_energy":         settlementData.ElectricEnergy,
 			"charge_duration":      chargeDuration,
 			"start_time":           settlementData.StartTime.Format(constants.TimeFormatDefault),
