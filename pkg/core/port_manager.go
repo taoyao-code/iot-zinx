@@ -35,7 +35,7 @@ type PortState struct {
 	PortNumber         int    `json:"port_number"`           // 端口号(0-based)
 	Status             string `json:"status"`                // 端口状态
 	DeviceID           string `json:"device_id"`             // 关联设备ID
-	OrderNumber        string `json:"order_number"`          // 当前订单号
+	OrderNo            string `json:"orderNo"`               // 当前订单号
 	LastRealtimePowerW int    `json:"last_realtime_power_w"` // 最近一次实时功率(瓦，取0x06/0x26)
 	LastUpdateAt       int64  `json:"last_update_at"`        // 最近一次更新(秒)
 	IsCharging         bool   `json:"is_charging"`           // 是否正在充电
@@ -191,7 +191,7 @@ func (pm *PortManager) GetPortState(protocolPort int) (PortState, error) {
 }
 
 // UpdatePortState 更新端口状态
-func (pm *PortManager) UpdatePortState(protocolPort int, status string, deviceID, orderNumber string) error {
+func (pm *PortManager) UpdatePortState(protocolPort int, status string, deviceID, orderNo string) error {
 	pm.mutex.Lock()
 	defer pm.mutex.Unlock()
 
@@ -207,7 +207,7 @@ func (pm *PortManager) UpdatePortState(protocolPort int, status string, deviceID
 	newState := oldState
 	newState.Status = status
 	newState.DeviceID = deviceID
-	newState.OrderNumber = orderNumber
+	newState.OrderNo = orderNo
 	newState.IsCharging = (status == PortStatusCharging)
 	newState.LastActivity = time.Now().Unix()
 
@@ -224,14 +224,14 @@ func (pm *PortManager) UpdatePortState(protocolPort int, status string, deviceID
 		"old_status":    oldStatus,
 		"new_status":    status,
 		"device_id":     deviceID,
-		"order_number":  orderNumber,
+		"orderNo":       orderNo,
 		"is_charging":   newState.IsCharging,
 	}).Info("端口状态已更新")
 
 	// 检测状态变化并触发回调
 	if oldStatus != status {
 		pm.triggerStatusChangeCallbacks(deviceID, protocolPort, oldStatus, status, map[string]interface{}{
-			"order_number":  orderNumber,
+			"orderNo":       orderNo,
 			"is_charging":   newState.IsCharging,
 			"last_activity": newState.LastActivity,
 		})

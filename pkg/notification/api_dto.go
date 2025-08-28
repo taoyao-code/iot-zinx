@@ -75,15 +75,14 @@ func toFloat64(v interface{}) float64 {
 
 // 充电响应数据结构
 type ChargeResponse struct {
-	Port                uint8  `json:"port_number"`
+	Port                uint8  `json:"port"`
 	Status              string `json:"status"`
 	StatusDesc          string `json:"status_desc"`
-	OrderNumber         string `json:"order_number,omitempty"`
+	OrderNo             string `json:"orderNo,omitempty"`
 	RemoteAddr          string `json:"remote_addr"`
 	MessageID           string `json:"message_id"`
 	Command             string `json:"command"`
 	FailedTime          int64  `json:"failed_time"`
-	OrderNo             string `json:"order_no"`
 	TotalEnergy         uint32 `json:"total_energy"`
 	ChargeDuration      int64  `json:"charge_duration"`
 	StartTime           string `json:"start_time"`

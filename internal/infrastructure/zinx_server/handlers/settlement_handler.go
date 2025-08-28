@@ -145,17 +145,17 @@ func (h *SettlementHandler) processSettlement(decodedFrame *protocol.DecodedDNYF
 	if integrator.IsEnabled() {
 		// 转换结算数据为通知格式
 		notificationData := map[string]interface{}{
-			"port_number":   settlementData.GunNumber,
-			"total_energy":  settlementData.ElectricEnergy,
-			"total_fee":     settlementData.TotalFee,
-			"charge_fee":    settlementData.ChargeFee,
-			"service_fee":   settlementData.ServiceFee,
-			"start_time":    settlementData.StartTime.Unix(),
-			"end_time":      settlementData.EndTime.Unix(),
-			"orderNo":       settlementData.OrderID,
-			"card_number":   settlementData.CardNumber,
-			"stop_reason":   settlementData.StopReason,
-			"settlement_id": fmt.Sprintf("SETTLE_%s_%d", deviceId, time.Now().Unix()),
+		"port_number":   settlementData.GunNumber,
+		"total_energy":  settlementData.ElectricEnergy,
+		"total_fee":     settlementData.TotalFee,
+		"charge_fee":    settlementData.ChargeFee,
+		"service_fee":   settlementData.ServiceFee,
+		"start_time":    settlementData.StartTime.Unix(),
+		"end_time":      settlementData.EndTime.Unix(),
+		"orderNo":       settlementData.OrderID,
+		"card_number":   settlementData.CardNumber,
+		"stop_reason":   settlementData.StopReason,
+		"settlement_id": fmt.Sprintf("SETTLE_%s_%d", deviceId, time.Now().Unix()),
 		}
 
 		// 发送结算通知

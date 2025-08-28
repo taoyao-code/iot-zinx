@@ -284,7 +284,7 @@ func (h *PortPowerHeartbeatHandler) sendPortPowerHeartbeatNotification(decodedFr
 		// 智能降功率：回调控制器
 		if raw, ok := powerInfo["realtime_power_raw"].(uint16); ok {
 			orderNo := ""
-			if v, ok2 := powerInfo["order_number"].(string); ok2 {
+			if v, ok2 := powerInfo["orderNo"].(string); ok2 {
 				orderNo = v
 			}
 			realtimeW := int(notification.FormatPower(raw))

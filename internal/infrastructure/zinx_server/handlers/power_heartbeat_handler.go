@@ -334,21 +334,4 @@ func (h *PowerHeartbeatHandler) sendPowerHeartbeatNotification(decodedFrame *pro
 	// 发送功率心跳通知
 	integrator.NotifyPowerHeartbeat(deviceId, portNumber, powerData)
 
-	// 如果正在充电，同时发送充电功率通知
-	if isCharging {
-		chargingPowerData := map[string]interface{}{
-			"device_id":             deviceId,
-			"port_number":           portNumber,
-			"realtime_power":        notification.FormatPower(realtimePower),
-			"realtime_power_raw":    realtimePower,
-			"cumulative_energy":     notification.FormatEnergy(cumulativeEnergy),
-			"cumulative_energy_raw": cumulativeEnergy,
-			"charge_duration":       chargeDuration,
-			"charging_status":       chargingStatus,
-			"power_time":            time.Now().Unix(),
-		}
-
-		// 发送充电功率通知
-		integrator.NotifyPowerHeartbeat(deviceId, portNumber, chargingPowerData)
-	}
 }

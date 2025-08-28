@@ -168,14 +168,14 @@ func (n *NotificationIntegrator) NotifyChargingStart(decodedFrame *protocol.Deco
 	portNumber := sessionData.Port
 
 	data := ChargeResponse{
-		Port:        sessionData.Port,
-		Status:      sessionData.Status,
-		StatusDesc:  sessionData.StatusDesc,
-		OrderNumber: sessionData.OrderNumber,
-		RemoteAddr:  conn.RemoteAddr().String(),
-		MessageID:   fmt.Sprintf("0x%04X", decodedFrame.MessageID),
-		Command:     fmt.Sprintf("0x%02X", decodedFrame.Command),
-		FailedTime:  time.Now().Unix(),
+		Port:       sessionData.Port,
+		Status:     sessionData.Status,
+		StatusDesc: sessionData.StatusDesc,
+		OrderNo:    sessionData.OrderNo,
+		RemoteAddr: conn.RemoteAddr().String(),
+		MessageID:  fmt.Sprintf("0x%04X", decodedFrame.MessageID),
+		Command:    fmt.Sprintf("0x%02X", decodedFrame.Command),
+		FailedTime: time.Now().Unix(),
 	}
 
 	if err := n.service.SendChargingStartNotification(deviceID, portNumber, data); err != nil {
@@ -195,14 +195,14 @@ func (n *NotificationIntegrator) NotifyChargingEnd(decodedFrame *protocol.Decode
 	portNumber := endData.Port
 
 	data := ChargeResponse{
-		Port:        endData.Port,
-		Status:      endData.Status,
-		StatusDesc:  endData.StatusDesc,
-		OrderNumber: endData.OrderNumber,
-		RemoteAddr:  conn.RemoteAddr().String(),
-		MessageID:   fmt.Sprintf("0x%04X", decodedFrame.MessageID),
-		Command:     fmt.Sprintf("0x%02X", decodedFrame.Command),
-		FailedTime:  time.Now().Unix(),
+		Port:       endData.Port,
+		Status:     endData.Status,
+		StatusDesc: endData.StatusDesc,
+		OrderNo:    endData.OrderNo,
+		RemoteAddr: conn.RemoteAddr().String(),
+		MessageID:  fmt.Sprintf("0x%04X", decodedFrame.MessageID),
+		Command:    fmt.Sprintf("0x%02X", decodedFrame.Command),
+		FailedTime: time.Now().Unix(),
 	}
 
 	if err := n.service.SendChargingEndNotification(deviceID, portNumber, data); err != nil {
@@ -507,14 +507,14 @@ func (n *NotificationIntegrator) NotifyChargingFailed(decodedFrame *protocol.Dec
 	// 从充电失败数据中提取端口号
 
 	data := ChargeResponse{
-		Port:        chargingFailedData.Port,
-		Status:      chargingFailedData.Status,
-		StatusDesc:  chargingFailedData.StatusDesc,
-		OrderNumber: chargingFailedData.OrderNumber,
-		RemoteAddr:  conn.RemoteAddr().String(),
-		MessageID:   fmt.Sprintf("0x%04X", decodedFrame.MessageID),
-		Command:     fmt.Sprintf("0x%02X", decodedFrame.Command),
-		FailedTime:  time.Now().Unix(),
+		Port:       chargingFailedData.Port,
+		Status:     chargingFailedData.Status,
+		StatusDesc: chargingFailedData.StatusDesc,
+		OrderNo:    chargingFailedData.OrderNo,
+		RemoteAddr: conn.RemoteAddr().String(),
+		MessageID:  fmt.Sprintf("0x%04X", decodedFrame.MessageID),
+		Command:    fmt.Sprintf("0x%02X", decodedFrame.Command),
+		FailedTime: time.Now().Unix(),
 	}
 
 	if err := n.service.SendChargingFailedNotification(deviceID, chargingFailedData.Port, data); err != nil {

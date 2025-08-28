@@ -200,15 +200,17 @@ func (s *NotificationService) SendChargingStartNotification(deviceID string, por
 	event := &NotificationEvent{
 		EventType:  EventTypeChargingStart,
 		DeviceID:   deviceID,
-		PortNumber: int(portNumber),
+		PortNumber: int(portNumber) + 1,
 		Data: map[string]interface{}{
-			"port":         data.Port,
+			"port_number":  int(portNumber) + 1,
 			"status":       data.Status,
 			"status_desc":  data.StatusDesc,
-			"order_number": data.OrderNumber,
+			"orderNo":      data.OrderNo,
 			"remote_addr":  data.RemoteAddr,
+			"message_id":   data.MessageID,
+			"command":      data.Command,
 		},
-		Timestamp: time.Now(),
+		Timestamp:  time.Now(),
 	}
 	return s.SendNotification(event)
 }
@@ -218,15 +220,23 @@ func (s *NotificationService) SendChargingEndNotification(deviceID string, portN
 	event := &NotificationEvent{
 		EventType:  EventTypeChargingEnd,
 		DeviceID:   deviceID,
-		PortNumber: int(portNumber),
+		PortNumber: int(portNumber) + 1,
 		Data: map[string]interface{}{
-			"port":         data.Port,
-			"status":       data.Status,
-			"status_desc":  data.StatusDesc,
-			"order_number": data.OrderNumber,
-			"remote_addr":  data.RemoteAddr,
+			"port_number":         int(portNumber) + 1,
+			"status":              data.Status,
+			"status_desc":         data.StatusDesc,
+			"orderNo":             data.OrderNo,
+			"remote_addr":         data.RemoteAddr,
+			"message_id":          data.MessageID,
+			"command":             data.Command,
+			"total_energy":        data.TotalEnergy,
+			"charge_duration":     data.ChargeDuration,
+			"start_time":          data.StartTime,
+			"end_time":            data.EndTime,
+			"stop_reason":         data.StopReason,
+			"settlement_triggered": data.SettlementTriggered,
 		},
-		Timestamp: time.Now(),
+		Timestamp:  time.Now(),
 	}
 	return s.SendNotification(event)
 }
@@ -236,15 +246,18 @@ func (s *NotificationService) SendChargingFailedNotification(deviceID string, po
 	event := &NotificationEvent{
 		EventType:  EventTypeChargingFailed,
 		DeviceID:   deviceID,
-		PortNumber: int(portNumber),
+		PortNumber: int(portNumber) + 1,
 		Data: map[string]interface{}{
-			"port":         data.Port,
+			"port_number":  int(portNumber) + 1,
 			"status":       data.Status,
 			"status_desc":  data.StatusDesc,
-			"order_number": data.OrderNumber,
+			"orderNo":      data.OrderNo,
 			"remote_addr":  data.RemoteAddr,
+			"message_id":   data.MessageID,
+			"command":      data.Command,
+			"failed_time":  data.FailedTime,
 		},
-		Timestamp: time.Now(),
+		Timestamp:  time.Now(),
 	}
 	return s.SendNotification(event)
 }

@@ -133,11 +133,11 @@ sequenceDiagram
 关键事件负载：
 - charging_power：
   - `realtime_power`(float, 单位W)；`realtime_power_raw`(uint16, 0.1W)
-  - `order_number`(string, ≤16B)
+  - `orderNo`(string, ≤16B)
   - `charge_duration`(uint16, 秒)
   - 可选：`message_id`、`command`、`power_time`
 - power_heartbeat：同上，另包含 `cumulative_energy`(度) 与 `_raw`(0.01度)
-- charging_start / end / failed：至少包含 `order_number`、`port_number`、`message_id`
+- charging_start / end / failed：至少包含 `orderNo`、`port_number`、`message_id`
 - settlement：结算明细（详见协议 0x03），单位遵循协议约定
 
 限频与采样：
