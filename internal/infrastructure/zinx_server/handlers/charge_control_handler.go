@@ -259,10 +259,10 @@ func (h *ChargeControlHandler) processChargeControl(result *protocol.DNYParseRes
 		// 协议端口为0-based，集成器内部会+1对外
 
 		sessionData := notification.ChargeResponse{
-			Port:        portNumber,
-			Status:      fmt.Sprintf("0x%02X", status),
-			StatusDesc:  description,
-			OrderNumber: orderNumber,
+			Port:       portNumber,
+			Status:     fmt.Sprintf("0x%02X", status),
+			StatusDesc: description,
+			OrderNo:    orderNumber,
 		}
 
 		decoded := &protocol.DecodedDNYFrame{
