@@ -20,9 +20,15 @@ type DeviceGateway struct {
 	throttleMu       sync.Mutex
 	lastSendByDevice map[string]time.Time
 
-	// 订单上下文缓存：deviceID|protocolPort(0-based) → ctx
-	orderCtxMu sync.RWMutex
-	orderCtx   map[string]OrderContext
+	// 🔧 修复CVE-Critical-001: 使用完整的订单管理器替换简单的OrderContext映射
+	orderManager *OrderManager
+
+	// 🔧 修复CVE-Critical-002: 使用完整的充电状态机管理器
+	stateMachineManager *StateMachineManager
+
+	// 🚫 弃用: 旧的订单上下文缓存，由OrderManager替换
+	// orderCtxMu sync.RWMutex
+	// orderCtx   map[string]OrderContext
 }
 
 // NewDeviceGateway 创建设备网关实例
@@ -42,10 +48,13 @@ func NewDeviceGateway() *DeviceGateway {
 	}
 
 	return &DeviceGateway{
-		tcpManager:       core.GetGlobalTCPManager(),
-		tcpWriter:        network.NewTCPWriter(retryConfig, logger.GetLogger()),
-		lastSendByDevice: make(map[string]time.Time),
-		orderCtx:         make(map[string]OrderContext),
+		tcpManager:          core.GetGlobalTCPManager(),
+		tcpWriter:           network.NewTCPWriter(retryConfig, logger.GetLogger()),
+		lastSendByDevice:    make(map[string]time.Time),
+		// 🔧 修复CVE-Critical-001: 初始化订单管理器
+		orderManager:        NewOrderManager(),
+		// 🔧 修复CVE-Critical-002: 初始化状态机管理器
+		stateMachineManager: NewStateMachineManager(),
 	}
 }
 
@@ -68,4 +77,18 @@ func GetGlobalDeviceGateway() *DeviceGateway {
 func InitializeGlobalDeviceGateway() {
 	globalDeviceGateway = NewDeviceGateway()
 	logger.Info("全局设备网关初始化完成")
+}
+
+// ===============================
+// 访问器方法 - 修复CVE-High-001 & CVE-High-003
+// ===============================
+
+// GetOrderManager 获取订单管理器
+func (g *DeviceGateway) GetOrderManager() *OrderManager {
+	return g.orderManager
+}
+
+// GetStateMachineManager 获取状态机管理器
+func (g *DeviceGateway) GetStateMachineManager() *StateMachineManager {
+	return g.stateMachineManager
 }

@@ -20,7 +20,10 @@ func (g *DeviceGateway) SendChargingCommand(deviceID string, port uint8, action 
 		return fmt.Errorf("端口号不能为0")
 	}
 
-	commandData := []byte{port, action}
+	// 🔧 修复CVE-Critical-003: 统一端口转换策略
+	// 协议要求使用0-based端口号，外部传入1-based，需要转换为port-1
+	protocolPort := port - 1
+	commandData := []byte{protocolPort, action}
 
 	actionStr := "STOP_CHARGING"
 	actionDesc := actionDescStop
@@ -29,42 +32,33 @@ func (g *DeviceGateway) SendChargingCommand(deviceID string, port uint8, action 
 		actionDesc = actionDescStart
 	}
 
-	logger.WithFields(logrus.Fields{
-		"deviceID":   deviceID,
-		"command":    "CHARGE_CONTROL",
-		"commandID":  fmt.Sprintf("0x%02X", constants.CmdChargeControl),
-		"port":       port,
-		"action":     actionStr,
-		"actionCode": fmt.Sprintf("0x%02X", action),
-		"actionDesc": actionDesc,
-		"dataLen":    len(commandData),
-		"timestamp":  time.Now().Format("2006-01-02 15:04:05"),
-	}).Info("🔌 准备发送充电控制命令")
-
 	if err := g.SendCommandToDevice(deviceID, constants.CmdChargeControl, commandData); err != nil {
 		logger.WithFields(logrus.Fields{
-			"deviceID":   deviceID,
-			"command":    "CHARGE_CONTROL",
-			"commandID":  fmt.Sprintf("0x%02X", constants.CmdChargeControl),
-			"port":       port,
-			"action":     actionStr,
-			"actionCode": fmt.Sprintf("0x%02X", action),
-			"error":      err.Error(),
-			"timestamp":  time.Now().Format("2006-01-02 15:04:05"),
+			"deviceID":     deviceID,
+			"command":      "CHARGE_CONTROL",
+			"commandID":    fmt.Sprintf("0x%02X", constants.CmdChargeControl),
+			"port":         port,
+			"protocolPort": protocolPort,
+			"action":       actionStr,
+			"actionCode":   fmt.Sprintf("0x%02X", action),
+			"error":        err.Error(),
+			"timestamp":    time.Now().Format("2006-01-02 15:04:05"),
 		}).Error("❌ 充电控制命令发送失败")
 		return fmt.Errorf("发送充电控制命令失败: %v", err)
 	}
 
 	logger.WithFields(logrus.Fields{
-		"deviceID":   deviceID,
-		"command":    "CHARGE_CONTROL",
-		"commandID":  fmt.Sprintf("0x%02X", constants.CmdChargeControl),
-		"port":       port,
-		"action":     actionStr,
-		"actionCode": fmt.Sprintf("0x%02X", action),
-		"actionDesc": actionDesc,
-		"status":     "SENT",
-		"timestamp":  time.Now().Format("2006-01-02 15:04:05"),
+		"deviceID":     deviceID,
+		"command":      "CHARGE_CONTROL",
+		"commandID":    fmt.Sprintf("0x%02X", constants.CmdChargeControl),
+		"port":         port,
+		"protocolPort": protocolPort,
+		"action":       actionStr,
+		"actionCode":   fmt.Sprintf("0x%02X", action),
+		"actionDesc":   actionDesc,
+		"status":       "SENT",
+		"timestamp":    time.Now().Format("2006-01-02 15:04:05"),
+		"dataLen":      len(commandData),
 	}).Info("⚡ 充电控制命令发送成功")
 
 	return nil
@@ -171,11 +165,21 @@ func (g *DeviceGateway) SendChargingCommandWithParams(deviceID string, port uint
 		"unit":              getValueUnit(mode),
 	}).Info("🔧 修复最大充电时长后的完整参数充电控制命令发送成功")
 
+	// 🔧 修复CVE-Critical-001: 使用订单管理器替换简单的OrderContext
 	if action == 0x01 && orderNo != "" {
-		key := g.makeOrderCtxKey(deviceID, int(port-1))
-		g.orderCtxMu.Lock()
-		g.orderCtx[key] = OrderContext{OrderNo: orderNo, Mode: mode, Value: actualValue, Balance: balance}
-		g.orderCtxMu.Unlock()
+		// 创建订单记录到订单管理器
+		if err := g.orderManager.CreateOrder(deviceID, int(port), orderNo, mode, actualValue, balance); err != nil {
+			logger.WithFields(logrus.Fields{
+				"deviceID": deviceID,
+				"port":     port,
+				"orderNo":  orderNo,
+				"error":    err.Error(),
+			}).Warn("订单管理器创建订单失败，但充电命令已发送")
+			// 不返回错误，因为充电命令已经发送成功
+		} else {
+			// 订单创建成功，更新状态为充电中
+			g.orderManager.UpdateOrderStatus(deviceID, int(port), OrderStatusCharging, "充电命令发送成功")
+		}
 	}
 
 	return nil
@@ -204,18 +208,19 @@ func (g *DeviceGateway) UpdateChargingOverloadPower(deviceID string, port uint8,
 		return fmt.Errorf("设备不在线")
 	}
 
+	// 🔧 修复CVE-Critical-001: 使用订单管理器获取订单信息
 	mode := uint8(0)
 	value := uint16(0)
 	balance := uint32(0)
 	if orderNo != "" {
-		key := g.makeOrderCtxKey(deviceID, int(port-1))
-		g.orderCtxMu.RLock()
-		ctx, ok := g.orderCtx[key]
-		g.orderCtxMu.RUnlock()
-		if ok && ctx.OrderNo == orderNo {
-			mode = ctx.Mode
-			value = ctx.Value
-			balance = ctx.Balance
+		if order := g.orderManager.GetOrder(deviceID, int(port)); order != nil && order.OrderNo == orderNo {
+			mode = order.Mode
+			value = order.Value
+			balance = order.Balance
+		} else if order != nil {
+			return fmt.Errorf("订单号不匹配，当前订单: %s，请求更新订单: %s", order.OrderNo, orderNo)
+		} else {
+			return fmt.Errorf("未找到端口 %s:%d 上的进行中订单", deviceID, port)
 		}
 	}
 

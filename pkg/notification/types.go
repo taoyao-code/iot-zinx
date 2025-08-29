@@ -15,6 +15,7 @@ type NotificationEvent struct {
 	Data             map[string]interface{} `json:"data"`                        // 事件数据
 	AttemptCount     int                    `json:"attempt_count"`               // 重试次数
 	EndpointAttempts map[string]int         `json:"endpoint_attempts,omitempty"` // 每端点重试次数
+	IsCritical       bool                   `json:"is_critical,omitempty"`       // 是否为关键事件（进入DLQ持久化）
 }
 
 // NotificationConfig 通知配置
@@ -103,6 +104,20 @@ const (
 	// 状态事件 (废弃，使用更具体的端口状态事件)
 	EventTypeStatusChange = "status_change" // 状态变化
 )
+
+// IsCriticalEvent 判断事件是否为关键事件（需要可靠投递）
+func IsCriticalEvent(eventType string) bool {
+	switch eventType {
+	case EventTypeChargingStart,
+		EventTypeChargingEnd,
+		EventTypeChargingFailed,
+		EventTypeSettlement,
+		EventTypeDeviceOffline:
+		return true
+	default:
+		return false
+	}
+}
 
 // 端点类型常量
 const (

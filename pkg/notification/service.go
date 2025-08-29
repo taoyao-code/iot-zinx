@@ -25,6 +25,8 @@ type NotificationService struct {
 	// 队列和工作协程
 	eventQueue chan *NotificationEvent
 	retryQueue chan retryPayload
+	// 死信队列（内存回退）
+	dlqQueue chan dlqPayload
 
 	// 生命周期
 	running bool
@@ -51,6 +53,13 @@ type NotificationService struct {
 type retryPayload struct {
 	Event    *NotificationEvent   `json:"event"`
 	Endpoint NotificationEndpoint `json:"endpoint"`
+}
+
+// dlqPayload 表示死信队列任务
+type dlqPayload struct {
+	Event    *NotificationEvent   `json:"event"`
+	Endpoint NotificationEndpoint `json:"endpoint"`
+	Attempt  int                  `json:"attempt"`
 }
 
 // NewNotificationService 创建通知服务
@@ -86,6 +95,7 @@ func NewNotificationService(config *NotificationConfig) (*NotificationService, e
 		httpClient:  httpClient,
 		eventQueue:  make(chan *NotificationEvent, config.QueueSize),
 		retryQueue:  make(chan retryPayload, config.QueueSize),
+		dlqQueue:    make(chan dlqPayload, config.QueueSize),
 		redisClient: infraredis.GetClient(), // 复用现有Redis连接
 		stats:       stats,
 		sampling:    config.Sampling,
@@ -118,6 +128,10 @@ func (s *NotificationService) Start(ctx context.Context) error {
 	s.wg.Add(1)
 	go s.retryWorker()
 
+	// 启动死信处理协程
+	s.wg.Add(1)
+	go s.dlqWorker()
+
 	s.running = true
 
 	logger.WithFields(logrus.Fields{
@@ -140,6 +154,7 @@ func (s *NotificationService) Stop(ctx context.Context) error {
 	// 停止接收新事件
 	close(s.eventQueue)
 	close(s.retryQueue)
+	close(s.dlqQueue)
 
 	// 等待工作协程完成
 	s.cancel()
@@ -202,15 +217,15 @@ func (s *NotificationService) SendChargingStartNotification(deviceID string, por
 		DeviceID:   deviceID,
 		PortNumber: int(portNumber) + 1,
 		Data: map[string]interface{}{
-			"port_number":  int(portNumber) + 1,
-			"status":       data.Status,
-			"status_desc":  data.StatusDesc,
-			"orderNo":      data.OrderNo,
-			"remote_addr":  data.RemoteAddr,
-			"message_id":   data.MessageID,
-			"command":      data.Command,
+			"port_number": int(portNumber) + 1,
+			"status":      data.Status,
+			"status_desc": data.StatusDesc,
+			"orderNo":     data.OrderNo,
+			"remote_addr": data.RemoteAddr,
+			"message_id":  data.MessageID,
+			"command":     data.Command,
 		},
-		Timestamp:  time.Now(),
+		Timestamp: time.Now(),
 	}
 	return s.SendNotification(event)
 }
@@ -222,21 +237,21 @@ func (s *NotificationService) SendChargingEndNotification(deviceID string, portN
 		DeviceID:   deviceID,
 		PortNumber: int(portNumber) + 1,
 		Data: map[string]interface{}{
-			"port_number":         int(portNumber) + 1,
-			"status":              data.Status,
-			"status_desc":         data.StatusDesc,
-			"orderNo":             data.OrderNo,
-			"remote_addr":         data.RemoteAddr,
-			"message_id":          data.MessageID,
-			"command":             data.Command,
-			"total_energy":        data.TotalEnergy,
-			"charge_duration":     data.ChargeDuration,
-			"start_time":          data.StartTime,
-			"end_time":            data.EndTime,
-			"stop_reason":         data.StopReason,
+			"port_number":          int(portNumber) + 1,
+			"status":               data.Status,
+			"status_desc":          data.StatusDesc,
+			"orderNo":              data.OrderNo,
+			"remote_addr":          data.RemoteAddr,
+			"message_id":           data.MessageID,
+			"command":              data.Command,
+			"total_energy":         data.TotalEnergy,
+			"charge_duration":      data.ChargeDuration,
+			"start_time":           data.StartTime,
+			"end_time":             data.EndTime,
+			"stop_reason":          data.StopReason,
 			"settlement_triggered": data.SettlementTriggered,
 		},
-		Timestamp:  time.Now(),
+		Timestamp: time.Now(),
 	}
 	return s.SendNotification(event)
 }
@@ -248,16 +263,16 @@ func (s *NotificationService) SendChargingFailedNotification(deviceID string, po
 		DeviceID:   deviceID,
 		PortNumber: int(portNumber) + 1,
 		Data: map[string]interface{}{
-			"port_number":  int(portNumber) + 1,
-			"status":       data.Status,
-			"status_desc":  data.StatusDesc,
-			"orderNo":      data.OrderNo,
-			"remote_addr":  data.RemoteAddr,
-			"message_id":   data.MessageID,
-			"command":      data.Command,
-			"failed_time":  data.FailedTime,
+			"port_number": int(portNumber) + 1,
+			"status":      data.Status,
+			"status_desc": data.StatusDesc,
+			"orderNo":     data.OrderNo,
+			"remote_addr": data.RemoteAddr,
+			"message_id":  data.MessageID,
+			"command":     data.Command,
+			"failed_time": data.FailedTime,
 		},
-		Timestamp:  time.Now(),
+		Timestamp: time.Now(),
 	}
 	return s.SendNotification(event)
 }
@@ -311,6 +326,32 @@ func (s *NotificationService) retryWorker() {
 		case <-ticker.C:
 			// 从Redis加载重试事件
 			s.loadRetryEvents()
+			// 从Redis加载死信事件（用于重试DLQ，延迟更长）
+			s.loadDeadLetters()
+		case <-s.ctx.Done():
+			return
+		}
+	}
+}
+
+// dlqWorker 处理死信队列
+func (s *NotificationService) dlqWorker() {
+	defer s.wg.Done()
+
+	ticker := time.NewTicker(30 * time.Second)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case payload, ok := <-s.dlqQueue:
+			if !ok {
+				return
+			}
+			// 对死信事件采用更保守的退避（在 header 里保留 Idempotency-Key）
+			s.sendToEndpoint(payload.Event, payload.Endpoint)
+		case <-ticker.C:
+			// 定期从Redis加载DLQ任务
+			s.loadDeadLetters()
 		case <-s.ctx.Done():
 			return
 		}
@@ -366,6 +407,83 @@ func (s *NotificationService) processEvent(event *NotificationEvent) {
 	// 向每个端点发送通知
 	for _, endpoint := range endpoints {
 		s.sendToEndpoint(event, endpoint)
+	}
+}
+
+// enqueueDeadLetter 将事件放入死信队列（Redis优先，内存回退）
+func (s *NotificationService) enqueueDeadLetter(event *NotificationEvent, endpoint NotificationEndpoint, attempt int) {
+	// 标记关键事件
+	event.IsCritical = true
+
+	// 记录日志
+	logger.WithFields(logrus.Fields{
+		"component":     "notification",
+		"action":        "enqueue_dead_letter",
+		"event_id":      event.EventID,
+		"event_type":    event.EventType,
+		"endpoint":      endpoint.Name,
+		"attempt_count": attempt,
+	}).Warn("📤 关键事件进入死信队列")
+
+	// 使用Redis ZSET 进行持久化（延迟固定较长，比如5分钟后再尝试）
+	if client, ok := s.redisClient.(*redisv9.Client); ok && client != nil {
+		key := "notify:dlq:" + endpoint.Name
+		readyAt := time.Now().Add(5 * time.Minute).Unix()
+		payload := dlqPayload{Event: event, Endpoint: endpoint, Attempt: attempt}
+		if b, err := json.Marshal(payload); err == nil {
+			_ = client.ZAdd(s.ctx, key, redisv9.Z{Score: float64(readyAt), Member: string(b)}).Err()
+		}
+		return
+	}
+
+	// 回退到内存队列
+	select {
+	case s.dlqQueue <- dlqPayload{Event: event, Endpoint: endpoint, Attempt: attempt}:
+	default:
+		logger.WithFields(logrus.Fields{
+			"component":  "notification",
+			"action":     "dlq_full",
+			"event_id":   event.EventID,
+			"event_type": event.EventType,
+			"endpoint":   endpoint.Name,
+		}).Error("📤 死信队列已满，事件可能丢失（请检查容量/Redis）")
+	}
+}
+
+// loadDeadLetters 从Redis加载到期的死信事件
+func (s *NotificationService) loadDeadLetters() {
+	client, ok := s.redisClient.(*redisv9.Client)
+	if !ok || client == nil {
+		return
+	}
+
+	now := time.Now().Unix()
+	for _, endpoint := range s.config.Endpoints {
+		key := "notify:dlq:" + endpoint.Name
+		res := client.ZRangeByScoreWithScores(s.ctx, key, &redisv9.ZRangeBy{
+			Min:    "-inf",
+			Max:    fmt.Sprintf("%d", now),
+			Offset: 0,
+			Count:  100,
+		})
+		members, err := res.Result()
+		if err != nil || len(members) == 0 {
+			continue
+		}
+		for _, z := range members {
+			str, ok := z.Member.(string)
+			if !ok {
+				continue
+			}
+			var payload dlqPayload
+			if err := json.Unmarshal([]byte(str), &payload); err != nil {
+				continue
+			}
+			// 移除已到期的成员
+			_, _ = client.ZRem(s.ctx, key, str).Result()
+			// 再次尝试发送（仍用 sendToEndpoint，内部有重试与指数退避）
+			s.sendToEndpoint(payload.Event, payload.Endpoint)
+		}
 	}
 }
 
@@ -538,6 +656,11 @@ func (s *NotificationService) scheduleRetry(event *NotificationEvent, endpoint N
 			"attempt_count": attemptForEndpoint,
 			"max_attempts":  s.config.Retry.MaxAttempts,
 		}).Error("📤 通知推送失败 - 重试次数已用尽")
+
+		// 关键事件进入死信队列（持久化）
+		if event.IsCritical || IsCriticalEvent(event.EventType) {
+			s.enqueueDeadLetter(event, endpoint, attemptForEndpoint)
+		}
 		return
 	}
 

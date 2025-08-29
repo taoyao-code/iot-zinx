@@ -3,7 +3,6 @@ package handlers
 import (
 	"encoding/binary"
 	"fmt"
-	"sync"
 	"time"
 
 	"github.com/aceld/zinx/ziface"
@@ -17,46 +16,53 @@ import (
 	"github.com/sirupsen/logrus"
 )
 
-// PowerHeartbeatHandler 处理功率心跳 (命令ID: 0x06)
+// PowerHeartbeatHandler 处理功率心跳 (命令ID: 0x06) - 修复CVE-Medium-001
 type PowerHeartbeatHandler struct {
 	protocol.SimpleHandlerBase
-	// 🔧 修复：添加心跳去重机制，解决重复请求导致的写缓冲区堆积
-	lastHeartbeatTime    map[string]time.Time // deviceID -> 最后心跳时间
-	heartbeatMutex       sync.RWMutex         // 保护心跳时间映射
-	minHeartbeatInterval time.Duration        // 最小心跳间隔，用于去重
+	// 🔧 修复CVE-Medium-001: 使用自适应心跳过滤器替换简单的去重机制
+	adaptiveFilter *gateway.AdaptiveHeartbeatFilter
+
+	// 🚫 弃用: 旧的简单去重机制
+	// lastHeartbeatTime    map[string]time.Time
+	// heartbeatMutex       sync.RWMutex
+	// minHeartbeatInterval time.Duration
 }
 
-// NewPowerHeartbeatHandler 创建功率心跳处理器
+// NewPowerHeartbeatHandler 创建功率心跳处理器 - 修复CVE-Medium-001
 func NewPowerHeartbeatHandler() *PowerHeartbeatHandler {
 	return &PowerHeartbeatHandler{
-		lastHeartbeatTime:    make(map[string]time.Time),
-		minHeartbeatInterval: 5 * time.Second, // 最小5秒间隔，防止频繁心跳
+		// 🔧 修复CVE-Medium-001: 初始化自适应心跳过滤器
+		adaptiveFilter: gateway.NewAdaptiveHeartbeatFilter(),
 	}
 }
 
-// shouldProcessHeartbeat 检查是否应该处理心跳（去重机制）
-func (h *PowerHeartbeatHandler) shouldProcessHeartbeat(deviceID string) bool {
-	h.heartbeatMutex.Lock()
-	defer h.heartbeatMutex.Unlock()
-
-	now := time.Now()
-	lastTime, exists := h.lastHeartbeatTime[deviceID]
-
-	if !exists || now.Sub(lastTime) >= h.minHeartbeatInterval {
-		h.lastHeartbeatTime[deviceID] = now
-		return true
+// shouldProcessHeartbeat 检查是否应该处理心跳 - 修复CVE-Medium-001
+func (h *PowerHeartbeatHandler) shouldProcessHeartbeat(deviceID string, port int, power int, status uint8, isCritical bool) (bool, string) {
+	// 构建心跳数据
+	heartbeatData := gateway.HeartbeatData{
+		DeviceID:   deviceID,
+		Port:       port,
+		EventType:  gateway.EventTypePowerHeartbeat,
+		Power:      power,
+		Status:     status,
+		Timestamp:  time.Now(),
+		IsCritical: isCritical,
 	}
 
-	// 记录被去重的心跳
-	logger.WithFields(logrus.Fields{
-		"deviceID":    deviceID,
-		"lastTime":    lastTime.Format(constants.TimeFormatDefault),
-		"currentTime": now.Format(constants.TimeFormatDefault),
-		"interval":    now.Sub(lastTime).String(),
-		"minInterval": h.minHeartbeatInterval.String(),
-	}).Debug("心跳被去重，间隔过短")
+	// 使用自适应过滤器检查
+	shouldProcess, reason := h.adaptiveFilter.ShouldProcess(heartbeatData)
 
-	return false
+	if !shouldProcess {
+		logger.WithFields(logrus.Fields{
+			"deviceID": deviceID,
+			"port":     port,
+			"power":    power,
+			"status":   status,
+			"reason":   reason,
+		}).Debug("📋 心跳被自适应过滤器过滤")
+	}
+
+	return shouldProcess, reason
 }
 
 // Handle 处理功率心跳包
@@ -96,17 +102,40 @@ func (h *PowerHeartbeatHandler) Handle(request ziface.IRequest) {
 		}).Warn("更新设备会话失败")
 	}
 
-	// 4. 🔧 修复：心跳去重检查，避免频繁处理
+	// 4. 🔧 修复CVE-Medium-001: 使用自适应心跳过滤器
 	physicalId := binary.LittleEndian.Uint32(decodedFrame.RawPhysicalID)
 	deviceID := utils.FormatPhysicalID(physicalId)
 
-	if !h.shouldProcessHeartbeat(deviceID) {
-		// 心跳被去重，但仍需更新活动时间 - 🚀 统一架构：使用TCPManager
+	// 预解析基础数据用于过滤器判断
+	var portNumber int = 0
+	var realtimePower int = 0
+	var portStatus uint8 = 0
+	var isCritical bool = false
+
+	if len(decodedFrame.Payload) >= 8 {
+		portNumber = int(decodedFrame.Payload[0]) + 1 // 转为1-based
+		if len(decodedFrame.Payload) >= 3 {
+			portStatus = decodedFrame.Payload[1]
+		}
+		if len(decodedFrame.Payload) >= 10 {
+			realtimePower = int(binary.LittleEndian.Uint16(decodedFrame.Payload[8:10]))
+			// 转换为瓦
+			realtimePower = int(notification.FormatPower(uint16(realtimePower)))
+		}
+		// 检查是否为关键状态（故障、紧急停止等）
+		isCritical = portStatus >= 10 // 假设状态码>=10为关键状态
+	}
+
+	// 使用自适应过滤器检查是否应该处理
+	shouldProcess, reason := h.shouldProcessHeartbeat(deviceID, portNumber, realtimePower, portStatus, isCritical)
+	if !shouldProcess {
+		// 心跳被过滤，但仍需更新活动时间 - 🚀 统一架构：使用TCPManager
 		if tcpManager := core.GetGlobalTCPManager(); tcpManager != nil {
 			if err := tcpManager.UpdateHeartbeat(deviceID); err != nil {
 				logger.WithFields(logrus.Fields{
 					"connID":   conn.GetConnID(),
 					"deviceID": deviceID,
+					"reason":   reason,
 					"error":    err,
 				}).Warn("更新TCPManager心跳失败")
 			}
@@ -296,7 +325,9 @@ func (h *PowerHeartbeatHandler) processPowerHeartbeat(decodedFrame *protocol.Dec
 			}
 			// 传入0-based端口给集成器
 			port0 := port1 - 1
-			if port0 < 0 { port0 = 0 }
+			if port0 < 0 {
+				port0 = 0
+			}
 			integrator.NotifyChargingPower(deviceId, port0, chargingPowerData)
 		}
 	}
@@ -311,7 +342,7 @@ func (h *PowerHeartbeatHandler) sendPowerHeartbeatNotification(decodedFrame *pro
 
 	// 从logFields中提取数据
 	portNumber, _ := logFields["portNumber"].(int) // 1-based for logs
-	protoPort := portNumber - 1                      // 0-based for integrator
+	protoPort := portNumber - 1                    // 0-based for integrator
 	chargingStatus, _ := logFields["chargingStatus"].(string)
 	chargeDuration, _ := logFields["chargeDuration"].(uint16)
 	cumulativeEnergy, _ := logFields["cumulativeEnergy"].(uint16)
@@ -337,5 +368,4 @@ func (h *PowerHeartbeatHandler) sendPowerHeartbeatNotification(decodedFrame *pro
 
 	// 发送功率心跳通知
 	integrator.NotifyPowerHeartbeat(deviceId, protoPort, powerData)
-
 }
