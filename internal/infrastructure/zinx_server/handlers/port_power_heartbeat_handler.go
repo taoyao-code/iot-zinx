@@ -115,6 +115,18 @@ func (h *PortPowerHeartbeatHandler) processPortPowerHeartbeat(decodedFrame *prot
 	// 生成设备ID
 	deviceId := utils.FormatPhysicalID(physicalId)
 
+	// 🔒 仅对已注册设备处理并下发功率心跳通知，未注册设备直接忽略（避免对外推送）
+	if tm := core.GetGlobalTCPManager(); tm != nil {
+		if _, exists := tm.GetDeviceByID(deviceId); !exists {
+			logger.WithFields(logrus.Fields{
+				"connID":   conn.GetConnID(),
+				"deviceId": deviceId,
+				"reason":   "设备未注册，忽略功率心跳并不推送对外通知",
+			}).Info("功率心跳暂缓处理：等待注册")
+			return
+		}
+	}
+
 	// 更新心跳时间：统一通过TCPManager并维护本地去重时钟
 	if tm := core.GetGlobalTCPManager(); tm != nil {
 		_ = tm.UpdateHeartbeat(deviceId)

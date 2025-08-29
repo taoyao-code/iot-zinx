@@ -285,6 +285,18 @@ func (h *HeartbeatHandler) parseSimplifiedHeartbeatPortStatus(data []byte, devic
 		return
 	}
 
+	// 🔒 仅对已注册设备处理并下发端口心跳通知，未注册设备直接忽略（避免对外推送）
+	if tm := core.GetGlobalTCPManager(); tm != nil {
+		if _, exists := tm.GetDeviceByID(deviceId); !exists {
+			logger.WithFields(logrus.Fields{
+				"connID":   conn.GetConnID(),
+				"deviceId": deviceId,
+				"reason":   "设备未注册，忽略端口心跳并不推送对外通知",
+			}).Info("端口心跳暂缓处理：等待注册")
+			return
+		}
+	}
+
 	// 解析基础数据
 	voltage := binary.LittleEndian.Uint16(data[0:2]) // 电压
 	portCount := data[2]                             // 端口数量

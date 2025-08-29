@@ -13,7 +13,10 @@ import (
 	"gopkg.in/natefinch/lumberjack.v2"
 )
 
-var globalImprovedLogger *ImprovedLogger
+var (
+	globalImprovedLogger *ImprovedLogger
+	initOnce             bool
+)
 
 func init() {
 	globalImprovedLogger = NewImprovedLogger()
@@ -73,6 +76,11 @@ func NewImprovedLogger() *ImprovedLogger {
 
 // InitImproved 改进的日志初始化，尊重配置文件设置
 func (il *ImprovedLogger) InitImproved(cfg *config.LoggerConfig) error {
+	// 防重入：避免重复初始化导致的重复日志与多重输出
+	if initOnce {
+		il.logger.WithField("once", true).Debug("跳过重复的日志初始化")
+		return nil
+	}
 	il.config = cfg
 
 	// 1. 尊重配置文件的日志级别设置，不再强制覆盖
@@ -190,6 +198,7 @@ func (il *ImprovedLogger) InitImproved(cfg *config.LoggerConfig) error {
 	}
 
 	il.logger.WithFields(logFields).Info("统一日志系统初始化完成")
+	initOnce = true
 
 	return nil
 }
