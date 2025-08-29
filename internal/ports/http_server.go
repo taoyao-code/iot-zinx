@@ -5,16 +5,11 @@ import (
 	"github.com/bujia-iot/iot-zinx/internal/infrastructure/config"
 	"github.com/bujia-iot/iot-zinx/internal/infrastructure/logger"
 	"github.com/bujia-iot/iot-zinx/internal/router"
-	"github.com/bujia-iot/iot-zinx/pkg/gateway"
 	"github.com/gin-gonic/gin"
 )
 
 // StartHTTPServer 启动HTTP API服务器
 func StartHTTPServer() error {
-	// 🚀 新架构：初始化DeviceGateway
-	gateway.InitializeGlobalDeviceGateway()
-	logger.Info("DeviceGateway已初始化，使用统一架构")
-
 	// 设置Gin模式
 	gin.SetMode(gin.ReleaseMode)
 
