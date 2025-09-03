@@ -13,13 +13,13 @@ import (
 type ChargingState int
 
 const (
-	StateIdle           ChargingState = iota // 空闲状态
-	StatePlugged                             // 已插枪，等待充电
-	StateCharging                            // 正在充电
-	StateFloatCharging                       // 浮充状态
-	StateCompleted                           // 充电完成
-	StateFault                               // 故障状态
-	StateEmergencyStop                       // 紧急停止
+	StateIdle          ChargingState = iota // 空闲状态
+	StatePlugged                            // 已插枪，等待充电
+	StateCharging                           // 正在充电
+	StateFloatCharging                      // 浮充状态
+	StateCompleted                          // 充电完成
+	StateFault                              // 故障状态
+	StateEmergencyStop                      // 紧急停止
 )
 
 // String 返回充电状态的字符串表示
@@ -48,27 +48,27 @@ func (s ChargingState) String() string {
 type StateChangeReason string
 
 const (
-	ReasonUserRequest     StateChangeReason = "user_request"
-	ReasonDeviceResponse  StateChangeReason = "device_response"
-	ReasonHeartbeat       StateChangeReason = "heartbeat"
-	ReasonTimeout         StateChangeReason = "timeout"
-	ReasonFault           StateChangeReason = "fault"
-	ReasonEmergency       StateChangeReason = "emergency"
-	ReasonPowerAbnormal   StateChangeReason = "power_abnormal"
-	ReasonSettlement      StateChangeReason = "settlement"
+	ReasonUserRequest    StateChangeReason = "user_request"
+	ReasonDeviceResponse StateChangeReason = "device_response"
+	ReasonHeartbeat      StateChangeReason = "heartbeat"
+	ReasonTimeout        StateChangeReason = "timeout"
+	ReasonFault          StateChangeReason = "fault"
+	ReasonEmergency      StateChangeReason = "emergency"
+	ReasonPowerAbnormal  StateChangeReason = "power_abnormal"
+	ReasonSettlement     StateChangeReason = "settlement"
 )
 
 // StateChange 状态变更事件
 type StateChange struct {
-	DeviceID    string            `json:"device_id"`
-	Port        int               `json:"port"`
-	FromState   ChargingState     `json:"from_state"`
-	ToState     ChargingState     `json:"to_state"`
-	Reason      StateChangeReason `json:"reason"`
-	Timestamp   time.Time         `json:"timestamp"`
-	OrderNo     string            `json:"order_no,omitempty"`
+	DeviceID    string                 `json:"device_id"`
+	Port        int                    `json:"port"`
+	FromState   ChargingState          `json:"from_state"`
+	ToState     ChargingState          `json:"to_state"`
+	Reason      StateChangeReason      `json:"reason"`
+	Timestamp   time.Time              `json:"timestamp"`
+	OrderNo     string                 `json:"orderNo,omitempty"`
 	Data        map[string]interface{} `json:"data,omitempty"`
-	ErrorDetail string            `json:"error_detail,omitempty"`
+	ErrorDetail string                 `json:"error_detail,omitempty"`
 }
 
 // ChargingStateMachine 充电状态机 - 修复CVE-Critical-002
@@ -96,27 +96,27 @@ func NewChargingStateMachine(deviceID string, port int) *ChargingStateMachine {
 		transitions: map[ChargingState][]ChargingState{
 			// 空闲状态可以转换到：已插枪、故障
 			StateIdle: {StatePlugged, StateFault},
-			
+
 			// 已插枪可以转换到：正在充电、空闲、故障
 			StatePlugged: {StateCharging, StateIdle, StateFault},
-			
+
 			// 正在充电可以转换到：浮充、完成、故障、紧急停止、空闲（拔枪）
 			StateCharging: {StateFloatCharging, StateCompleted, StateFault, StateEmergencyStop, StateIdle},
-			
+
 			// 浮充可以转换到：完成、故障、紧急停止
 			StateFloatCharging: {StateCompleted, StateFault, StateEmergencyStop},
-			
+
 			// 完成可以转换到：空闲、故障
 			StateCompleted: {StateIdle, StateFault},
-			
+
 			// 故障可以转换到：空闲（故障修复后）
 			StateFault: {StateIdle},
-			
+
 			// 紧急停止可以转换到：空闲、故障
 			StateEmergencyStop: {StateIdle, StateFault},
 		},
 	}
-	
+
 	return csm
 }
 
@@ -145,20 +145,20 @@ func (csm *ChargingStateMachine) SetOrderNo(orderNo string) {
 func (csm *ChargingStateMachine) TransitionTo(newState ChargingState, reason StateChangeReason, data map[string]interface{}) error {
 	csm.mutex.Lock()
 	defer csm.mutex.Unlock()
-	
+
 	oldState := csm.currentState
-	
+
 	// 相同状态不需要转换
 	if oldState == newState {
 		return nil
 	}
-	
+
 	// 验证状态转换的合法性
 	allowedTransitions, exists := csm.transitions[oldState]
 	if !exists {
 		return fmt.Errorf("未定义状态 %v 的转换规则", oldState)
 	}
-	
+
 	allowed := false
 	for _, allowedState := range allowedTransitions {
 		if allowedState == newState {
@@ -166,15 +166,15 @@ func (csm *ChargingStateMachine) TransitionTo(newState ChargingState, reason Sta
 			break
 		}
 	}
-	
+
 	if !allowed {
 		return fmt.Errorf("不允许从 %v 转换到 %v", oldState, newState)
 	}
-	
+
 	// 执行状态转换
 	csm.currentState = newState
 	csm.lastUpdate = time.Now()
-	
+
 	// 创建状态变更事件
 	change := StateChange{
 		DeviceID:  csm.deviceID,
@@ -186,10 +186,10 @@ func (csm *ChargingStateMachine) TransitionTo(newState ChargingState, reason Sta
 		OrderNo:   csm.orderNo,
 		Data:      data,
 	}
-	
+
 	// 记录到历史
 	csm.addToHistoryUnsafe(change)
-	
+
 	// 记录日志
 	logger.WithFields(logrus.Fields{
 		"deviceID":  csm.deviceID,
@@ -200,7 +200,7 @@ func (csm *ChargingStateMachine) TransitionTo(newState ChargingState, reason Sta
 		"reason":    string(reason),
 		"data":      data,
 	}).Info("🔄 充电状态机状态转换")
-	
+
 	// 异步发送状态变更事件
 	go func() {
 		select {
@@ -214,14 +214,14 @@ func (csm *ChargingStateMachine) TransitionTo(newState ChargingState, reason Sta
 			}).Warn("状态变更队列已满，丢弃事件")
 		}
 	}()
-	
+
 	return nil
 }
 
 // ProcessProtocolStatus 处理协议状态码 - 从心跳包解析状态
 func (csm *ChargingStateMachine) ProcessProtocolStatus(protocolStatus uint8, reason StateChangeReason, data map[string]interface{}) error {
 	var targetState ChargingState
-	
+
 	// 根据协议解析充电状态
 	switch protocolStatus {
 	case 0:
@@ -242,7 +242,7 @@ func (csm *ChargingStateMachine) ProcessProtocolStatus(protocolStatus uint8, rea
 		}
 		data["unknown_protocol_status"] = protocolStatus
 	}
-	
+
 	return csm.TransitionTo(targetState, reason, data)
 }
 
@@ -252,7 +252,7 @@ func (csm *ChargingStateMachine) HandleEmergencyStop(reason string, data map[str
 		data = make(map[string]interface{})
 	}
 	data["emergency_reason"] = reason
-	
+
 	return csm.TransitionTo(StateEmergencyStop, ReasonEmergency, data)
 }
 
@@ -262,7 +262,7 @@ func (csm *ChargingStateMachine) HandleFault(faultCode string, data map[string]i
 		data = make(map[string]interface{})
 	}
 	data["fault_code"] = faultCode
-	
+
 	return csm.TransitionTo(StateFault, ReasonFault, data)
 }
 
@@ -270,7 +270,7 @@ func (csm *ChargingStateMachine) HandleFault(faultCode string, data map[string]i
 func (csm *ChargingStateMachine) GetStateHistory() []StateChange {
 	csm.mutex.RLock()
 	defer csm.mutex.RUnlock()
-	
+
 	// 返回历史副本
 	history := make([]StateChange, len(csm.stateHistory))
 	copy(history, csm.stateHistory)
@@ -281,7 +281,7 @@ func (csm *ChargingStateMachine) GetStateHistory() []StateChange {
 func (csm *ChargingStateMachine) addToHistoryUnsafe(change StateChange) {
 	// 添加到历史
 	csm.stateHistory = append(csm.stateHistory, change)
-	
+
 	// 保持历史记录数量限制
 	if len(csm.stateHistory) > 50 {
 		// 移除最老的记录
@@ -324,11 +324,11 @@ func (csm *ChargingStateMachine) Close() {
 	if csm.stateChanges != nil {
 		close(csm.stateChanges)
 	}
-	
+
 	logger.WithFields(logrus.Fields{
-		"deviceID": csm.deviceID,
-		"port":     csm.port,
+		"deviceID":   csm.deviceID,
+		"port":       csm.port,
 		"finalState": csm.GetCurrentState().String(),
-		"orderNo": csm.orderNo,
+		"orderNo":    csm.orderNo,
 	}).Info("🔚 充电状态机已关闭")
 }

@@ -145,17 +145,17 @@ func (h *SettlementHandler) processSettlement(decodedFrame *protocol.DecodedDNYF
 	if integrator.IsEnabled() {
 		// 转换结算数据为通知格式
 		notificationData := map[string]interface{}{
-		"port_number":   settlementData.GunNumber,
-		"total_energy":  settlementData.ElectricEnergy,
-		"total_fee":     settlementData.TotalFee,
-		"charge_fee":    settlementData.ChargeFee,
-		"service_fee":   settlementData.ServiceFee,
-		"start_time":    settlementData.StartTime.Unix(),
-		"end_time":      settlementData.EndTime.Unix(),
-		"orderNo":       settlementData.OrderID,
-		"card_number":   settlementData.CardNumber,
-		"stop_reason":   settlementData.StopReason,
-		"settlement_id": fmt.Sprintf("SETTLE_%s_%d", deviceId, time.Now().Unix()),
+			"port_number":   settlementData.GunNumber,
+			"total_energy":  settlementData.ElectricEnergy,
+			"total_fee":     settlementData.TotalFee,
+			"charge_fee":    settlementData.ChargeFee,
+			"service_fee":   settlementData.ServiceFee,
+			"start_time":    settlementData.StartTime.Unix(),
+			"end_time":      settlementData.EndTime.Unix(),
+			"orderNo":       settlementData.OrderID,
+			"card_number":   settlementData.CardNumber,
+			"stop_reason":   settlementData.StopReason,
+			"settlement_id": fmt.Sprintf("SETTLE_%s_%d", deviceId, time.Now().Unix()),
 		}
 
 		// 发送结算通知
@@ -164,16 +164,23 @@ func (h *SettlementHandler) processSettlement(decodedFrame *protocol.DecodedDNYF
 		// 发送充电结束通知（结算通常意味着充电结束）
 		chargeDuration := int64(settlementData.EndTime.Sub(settlementData.StartTime).Seconds())
 		chargingEndData := notification.ChargeResponse{
-			Port:                 settlementData.GunNumber,
-			OrderNo:              settlementData.OrderID,
-			TotalEnergy:          settlementData.ElectricEnergy,
-			ChargeDuration:       chargeDuration,
-			StartTime:            settlementData.StartTime.Format(constants.TimeFormatDefault),
-			EndTime:              settlementData.EndTime.Format(constants.TimeFormatDefault),
-			StopReason:           settlementData.StopReason,
-			SettlementTriggered:  true,
+			Port:                settlementData.GunNumber,
+			OrderNo:             settlementData.OrderID,
+			TotalEnergy:         settlementData.ElectricEnergy,
+			ChargeDuration:      chargeDuration,
+			StartTime:           settlementData.StartTime.Format(constants.TimeFormatDefault),
+			EndTime:             settlementData.EndTime.Format(constants.TimeFormatDefault),
+			StopReason:          settlementData.StopReason,
+			SettlementTriggered: true,
 		}
 		integrator.NotifyChargingEnd(decodedFrame, conn, chargingEndData)
+	}
+
+	// 💡 结算完成后，清理该端口的订单与状态机，释放以便下一单
+	if deviceGateway != nil {
+		// 协议端口为0-based，SettlementData.GunNumber 即协议端口
+		port := int(settlementData.GunNumber)
+		deviceGateway.FinalizeChargingSession(deviceId, port, settlementData.OrderID, "settlement received (0x03)")
 	}
 
 	// 构建响应数据

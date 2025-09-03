@@ -264,6 +264,22 @@ func (h *PowerHeartbeatHandler) processPowerHeartbeat(decodedFrame *protocol.Dec
 			logger.WithFields(logFields).Info("🔌 设备充电状态：未充电")
 		}
 
+		// 💡 若心跳显示端口空闲或已完成，且仍有进行中订单，则执行清理以防阻塞下一单
+		if !isCharging {
+			// 仅在明确空闲(0)或完成(3)状态时触发
+			if portStatus == 0 || portStatus == 3 {
+				protoPort := int(portNumber) // 协议0-based
+				gw := gateway.GetGlobalDeviceGateway()
+				if gw != nil {
+					if order := gw.GetOrderManager().GetOrder(deviceId, protoPort); order != nil {
+						if order.Status == gateway.OrderStatusCharging || order.Status == gateway.OrderStatusPending {
+							gw.FinalizeChargingSession(deviceId, protoPort, orderNumber, "heartbeat indicates idle/completed")
+						}
+					}
+				}
+			}
+		}
+
 		// 🔧 新增：充电状态变化通知
 		if isCharging {
 			logger.WithFields(logrus.Fields{

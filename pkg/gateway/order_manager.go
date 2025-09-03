@@ -40,7 +40,7 @@ func (s OrderStatus) String() string {
 
 // OrderState 订单状态信息
 type OrderState struct {
-	OrderNo     string      `json:"order_no"`
+	OrderNo     string      `json:"orderNo"`
 	Status      OrderStatus `json:"status"`
 	DeviceID    string      `json:"device_id"`
 	Port        int         `json:"port"`
@@ -67,10 +67,10 @@ func NewOrderManager() *OrderManager {
 		orders:      make(map[string]*OrderState),
 		stopCleanup: make(chan struct{}),
 	}
-	
+
 	// 启动定期清理过期订单的goroutine
 	om.startCleanupWorker()
-	
+
 	return om
 }
 
@@ -83,9 +83,9 @@ func (om *OrderManager) makeOrderKey(deviceID string, port int) string {
 func (om *OrderManager) CreateOrder(deviceID string, port int, orderNo string, mode uint8, value uint16, balance uint32) error {
 	om.mutex.Lock()
 	defer om.mutex.Unlock()
-	
+
 	key := om.makeOrderKey(deviceID, port)
-	
+
 	// 检查是否已有进行中的订单
 	if existing, exists := om.orders[key]; exists {
 		if existing.Status == OrderStatusCharging || existing.Status == OrderStatusPending {
@@ -96,11 +96,11 @@ func (om *OrderManager) CreateOrder(deviceID string, port int, orderNo string, m
 				"newOrder":       orderNo,
 				"existingStatus": existing.Status.String(),
 			}).Warn("端口已有进行中的订单")
-			return fmt.Errorf("端口 %s:%d 已有进行中的订单: %s (状态: %s)", 
+			return fmt.Errorf("端口 %s:%d 已有进行中的订单: %s (状态: %s)",
 				deviceID, port, existing.OrderNo, existing.Status.String())
 		}
 	}
-	
+
 	// 创建新订单
 	now := time.Now()
 	om.orders[key] = &OrderState{
@@ -114,7 +114,7 @@ func (om *OrderManager) CreateOrder(deviceID string, port int, orderNo string, m
 		StartTime:  now,
 		LastUpdate: now,
 	}
-	
+
 	logger.WithFields(logrus.Fields{
 		"deviceID": deviceID,
 		"port":     port,
@@ -123,7 +123,7 @@ func (om *OrderManager) CreateOrder(deviceID string, port int, orderNo string, m
 		"value":    value,
 		"balance":  balance,
 	}).Info("✅ 订单创建成功")
-	
+
 	return nil
 }
 
@@ -131,35 +131,35 @@ func (om *OrderManager) CreateOrder(deviceID string, port int, orderNo string, m
 func (om *OrderManager) UpdateOrderStatus(deviceID string, port int, status OrderStatus, reason string) error {
 	om.mutex.Lock()
 	defer om.mutex.Unlock()
-	
+
 	key := om.makeOrderKey(deviceID, port)
 	order, exists := om.orders[key]
 	if !exists {
 		return fmt.Errorf("订单不存在: %s", key)
 	}
-	
+
 	oldStatus := order.Status
 	order.Status = status
 	order.LastUpdate = time.Now()
 	if reason != "" {
 		order.ErrorReason = reason
 	}
-	
+
 	// 如果订单结束，设置结束时间
 	if status == OrderStatusCompleted || status == OrderStatusCancelled || status == OrderStatusFailed {
 		endTime := time.Now()
 		order.EndTime = &endTime
 	}
-	
+
 	logger.WithFields(logrus.Fields{
-		"deviceID":   deviceID,
-		"port":       port,
-		"orderNo":    order.OrderNo,
-		"oldStatus":  oldStatus.String(),
-		"newStatus":  status.String(),
-		"reason":     reason,
+		"deviceID":  deviceID,
+		"port":      port,
+		"orderNo":   order.OrderNo,
+		"oldStatus": oldStatus.String(),
+		"newStatus": status.String(),
+		"reason":    reason,
 	}).Info("📝 订单状态已更新")
-	
+
 	return nil
 }
 
@@ -167,7 +167,7 @@ func (om *OrderManager) UpdateOrderStatus(deviceID string, port int, status Orde
 func (om *OrderManager) GetOrder(deviceID string, port int) *OrderState {
 	om.mutex.RLock()
 	defer om.mutex.RUnlock()
-	
+
 	key := om.makeOrderKey(deviceID, port)
 	if order, exists := om.orders[key]; exists {
 		// 返回副本，避免外部修改
@@ -181,7 +181,7 @@ func (om *OrderManager) GetOrder(deviceID string, port int) *OrderState {
 func (om *OrderManager) GetOrderByOrderNo(orderNo string) *OrderState {
 	om.mutex.RLock()
 	defer om.mutex.RUnlock()
-	
+
 	for _, order := range om.orders {
 		if order.OrderNo == orderNo {
 			// 返回副本，避免外部修改
@@ -198,18 +198,18 @@ func (om *OrderManager) ValidateOrderForStop(deviceID string, port int, orderNo 
 	if order == nil {
 		return fmt.Errorf("端口 %s:%d 上没有进行中的订单", deviceID, port)
 	}
-	
+
 	if order.Status != OrderStatusCharging && order.Status != OrderStatusPending {
-		return fmt.Errorf("端口 %s:%d 上的订单 %s 状态不允许停止 (当前状态: %s)", 
+		return fmt.Errorf("端口 %s:%d 上的订单 %s 状态不允许停止 (当前状态: %s)",
 			deviceID, port, order.OrderNo, order.Status.String())
 	}
-	
+
 	// 如果提供了订单号，必须匹配
 	if orderNo != "" && order.OrderNo != orderNo {
-		return fmt.Errorf("端口 %s:%d 上的订单号不匹配，当前订单: %s，请求停止订单: %s", 
+		return fmt.Errorf("端口 %s:%d 上的订单号不匹配，当前订单: %s，请求停止订单: %s",
 			deviceID, port, order.OrderNo, orderNo)
 	}
-	
+
 	return nil
 }
 
@@ -217,18 +217,18 @@ func (om *OrderManager) ValidateOrderForStop(deviceID string, port int, orderNo 
 func (om *OrderManager) CleanupOrder(deviceID string, port int, reason string) {
 	om.mutex.Lock()
 	defer om.mutex.Unlock()
-	
+
 	key := om.makeOrderKey(deviceID, port)
 	if order, exists := om.orders[key]; exists {
 		logger.WithFields(logrus.Fields{
-			"deviceID":     deviceID,
-			"port":         port,
-			"orderNo":      order.OrderNo,
-			"status":       order.Status.String(),
-			"duration":     time.Since(order.StartTime).String(),
+			"deviceID":      deviceID,
+			"port":          port,
+			"orderNo":       order.OrderNo,
+			"status":        order.Status.String(),
+			"duration":      time.Since(order.StartTime).String(),
 			"cleanupReason": reason,
 		}).Info("🧹 订单已清理")
-		
+
 		delete(om.orders, key)
 	}
 }
@@ -237,7 +237,7 @@ func (om *OrderManager) CleanupOrder(deviceID string, port int, reason string) {
 func (om *OrderManager) ListActiveOrders() []*OrderState {
 	om.mutex.RLock()
 	defer om.mutex.RUnlock()
-	
+
 	var activeOrders []*OrderState
 	for _, order := range om.orders {
 		if order.Status == OrderStatusCharging || order.Status == OrderStatusPending {
@@ -246,7 +246,7 @@ func (om *OrderManager) ListActiveOrders() []*OrderState {
 			activeOrders = append(activeOrders, &orderCopy)
 		}
 	}
-	
+
 	return activeOrders
 }
 
@@ -254,7 +254,7 @@ func (om *OrderManager) ListActiveOrders() []*OrderState {
 func (om *OrderManager) GetOrderStats() map[string]int {
 	om.mutex.RLock()
 	defer om.mutex.RUnlock()
-	
+
 	stats := map[string]int{
 		"total":     len(om.orders),
 		"pending":   0,
@@ -263,7 +263,7 @@ func (om *OrderManager) GetOrderStats() map[string]int {
 		"cancelled": 0,
 		"failed":    0,
 	}
-	
+
 	for _, order := range om.orders {
 		switch order.Status {
 		case OrderStatusPending:
@@ -278,7 +278,7 @@ func (om *OrderManager) GetOrderStats() map[string]int {
 			stats["failed"]++
 		}
 	}
-	
+
 	return stats
 }
 
@@ -286,10 +286,10 @@ func (om *OrderManager) GetOrderStats() map[string]int {
 func (om *OrderManager) startCleanupWorker() {
 	// 每5分钟清理一次过期订单
 	om.cleanupTicker = time.NewTicker(5 * time.Minute)
-	
+
 	go func() {
 		defer om.cleanupTicker.Stop()
-		
+
 		for {
 			select {
 			case <-om.cleanupTicker.C:
@@ -305,31 +305,31 @@ func (om *OrderManager) startCleanupWorker() {
 func (om *OrderManager) cleanupExpiredOrders() {
 	om.mutex.Lock()
 	defer om.mutex.Unlock()
-	
+
 	now := time.Now()
 	expiredKeys := make([]string, 0)
 	cleanupCount := 0
-	
+
 	// 找出需要清理的订单
 	for key, order := range om.orders {
 		shouldCleanup := false
-		
+
 		// 完成/取消/失败的订单，保留1小时后清理
-		if order.Status == OrderStatusCompleted || 
-		   order.Status == OrderStatusCancelled || 
-		   order.Status == OrderStatusFailed {
+		if order.Status == OrderStatusCompleted ||
+			order.Status == OrderStatusCancelled ||
+			order.Status == OrderStatusFailed {
 			if order.EndTime != nil && now.Sub(*order.EndTime) > time.Hour {
 				shouldCleanup = true
 			}
 		}
-		
+
 		// 长时间没有更新的pending订单，超过30分钟清理
 		if order.Status == OrderStatusPending {
 			if now.Sub(order.LastUpdate) > 30*time.Minute {
 				shouldCleanup = true
 			}
 		}
-		
+
 		// 异常长时间的充电订单，超过24小时强制清理
 		if order.Status == OrderStatusCharging {
 			if now.Sub(order.StartTime) > 24*time.Hour {
@@ -342,12 +342,12 @@ func (om *OrderManager) cleanupExpiredOrders() {
 				}).Warn("⚠️ 强制清理异常长时间的充电订单")
 			}
 		}
-		
+
 		if shouldCleanup {
 			expiredKeys = append(expiredKeys, key)
 		}
 	}
-	
+
 	// 清理过期订单
 	for _, key := range expiredKeys {
 		if order, exists := om.orders[key]; exists {
@@ -358,16 +358,16 @@ func (om *OrderManager) cleanupExpiredOrders() {
 				"status":   order.Status.String(),
 				"age":      now.Sub(order.LastUpdate).String(),
 			}).Debug("🧹 清理过期订单")
-			
+
 			delete(om.orders, key)
 			cleanupCount++
 		}
 	}
-	
+
 	if cleanupCount > 0 {
 		stats := om.getStatsUnsafe() // 已在锁内，使用unsafe版本
 		logger.WithFields(logrus.Fields{
-			"cleanedCount": cleanupCount,
+			"cleanedCount":    cleanupCount,
 			"remainingOrders": stats["total"],
 			"activeOrders":    stats["pending"] + stats["charging"],
 		}).Info("🧹 自动清理过期订单完成")
@@ -384,7 +384,7 @@ func (om *OrderManager) getStatsUnsafe() map[string]int {
 		"cancelled": 0,
 		"failed":    0,
 	}
-	
+
 	for _, order := range om.orders {
 		switch order.Status {
 		case OrderStatusPending:
@@ -399,7 +399,7 @@ func (om *OrderManager) getStatsUnsafe() map[string]int {
 			stats["failed"]++
 		}
 	}
-	
+
 	return stats
 }
 
@@ -408,7 +408,7 @@ func (om *OrderManager) Shutdown() {
 	if om.stopCleanup != nil {
 		close(om.stopCleanup)
 	}
-	
+
 	// 记录最终统计
 	stats := om.GetOrderStats()
 	logger.WithFields(logrus.Fields{

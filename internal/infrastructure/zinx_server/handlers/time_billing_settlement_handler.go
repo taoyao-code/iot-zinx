@@ -8,6 +8,7 @@ import (
 	"github.com/aceld/zinx/ziface"
 	"github.com/bujia-iot/iot-zinx/internal/infrastructure/logger"
 	"github.com/bujia-iot/iot-zinx/pkg/constants"
+	"github.com/bujia-iot/iot-zinx/pkg/gateway"
 	"github.com/bujia-iot/iot-zinx/pkg/notification"
 	"github.com/bujia-iot/iot-zinx/pkg/protocol"
 	"github.com/bujia-iot/iot-zinx/pkg/utils"
@@ -105,6 +106,24 @@ func (h *TimeBillingSettlementHandler) processTimeBillingSettlement(decodedFrame
 
 	// 发送结算响应
 	h.sendSettlementResponse(deviceId, physicalId, messageID, conn)
+
+	// 💡 分时收费结算完成后，同样清理订单与状态机，释放端口
+	if gw := gateway.GetGlobalDeviceGateway(); gw != nil {
+		// parseTimeBillingSettlementData 中 port_number 为显示1-based，这里需要转换回0-based协议端口
+		var protocolPort int
+		if v, ok := settlementInfo["port_number"]; ok {
+			if displayPort, ok2 := v.(int); ok2 && displayPort > 0 {
+				protocolPort = displayPort - 1
+			}
+		}
+		orderNo := ""
+		if v, ok := settlementInfo["orderNo"]; ok {
+			if s, ok2 := v.(string); ok2 {
+				orderNo = s
+			}
+		}
+		gw.FinalizeChargingSession(deviceId, protocolPort, orderNo, "time-billing settlement received (0x23)")
+	}
 }
 
 // parseTimeBillingSettlementData 解析分时收费结算数据
