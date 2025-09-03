@@ -11,18 +11,18 @@
 - 发送节流: 同一设备命令之间 ≥ 0.5 秒
 - 物理ID编码: 文档 1.0.2 第7条，严格遵循
 
-实现文件：
-- 构包与拆包：`pkg/protocol/dny_packet.go`
-- 发送通道：`pkg/network/tcp_writer.go`
-- 网关接口：`pkg/gateway/device_gateway.go`
-- HTTP 层：`internal/adapter/http/gateway_handlers.go`
+实现文件（统一实现）：
+- 构包：`pkg/protocol/unified_dny_builder.go::BuildUnifiedDNYPacket`
+- 发送：`pkg/network/unified_sender.go`、`pkg/network/tcp_writer.go`
+- 网关接口：`pkg/gateway/send.go`、`pkg/gateway/control.go`、`pkg/gateway/charging.go`
+- HTTP 层：`internal/adapter/http/*`
 
 ## 2. API ↔ 指令映射
 - 充电控制（开始/停止）
   - HTTP：
     - `POST /api/v1/charging/start` → 0x82（开始充电）
     - `POST /api/v1/charging/stop` → 0x82（停止充电）
-  - 网关：`SendChargingCommandWithParams`
+  - 网关：`DeviceGateway.SendChargingCommandWithParams` 或 `DeviceGateway.SendChargingCommand`
   - 字段与单位：
     - 端口: API 1-based，协议 0-based（0x00=第1路）
     - 订单号: 16 字节
@@ -35,7 +35,6 @@
   - 参数：定位时间 1 字节（秒）
 - 状态与详情
   - HTTP：`GET /api/v1/device/{id}/status` / `/detail`
-  - 网关：`IsDeviceOnline` / `GetDeviceDetail`
   - 数据源：`core.TCPManager` 单一数据源
 
 ## 3. 设备ID与 PhysicalID 一致性
@@ -51,8 +50,8 @@
 - 超时与重试：`TCPWriter` 统一写超时与重试（见 `configs/gateway.yaml`）
 
 ## 5. 日志与可观测性
-- 命令发送需输出结构化日志字段：`deviceID, physicalID, msgID, cmd, dataHex, packetHex, packetLen`
-- 建议关闭 `fmt.Printf`，统一使用结构化日志（logrus）
+- 命令发送必须输出结构化日志字段：`deviceID, physicalID, msgID, cmd, dataHex, packetHex`
+- 统一使用结构化日志（logrus），业务路径移除 `fmt.Printf`
 
 ## 6. 架构一致性与数据源
 - `core.TCPManager` 是设备数据的单一来源
@@ -70,22 +69,25 @@
 sequenceDiagram
   participant API as HTTP API
   participant GW as DeviceGateway
-  participant TW as TCPWriter
+  participant B as UnifiedDNYBuilder
+  participant S as UnifiedSender/TCPWriter
   participant DEV as 设备
   API->>GW: POST /charging/start (deviceId, port, orderNo, mode, value, balance)
   GW->>GW: DeviceID 标准化 + PhysicalID 校验
-  GW->>TW: 构建 0x82 DNY 包(小端) + 消息ID
-  TW->>DEV: 发送数据帧
-  DEV-->>TW: 执行/应答(设备侧)
-  TW-->>GW: 写入结果
+  GW->>B: BuildUnifiedDNYPacket(0x82, 小端, 含校验/长度)
+  B-->>GW: DNY 数据帧
+  GW->>S: SendDNYPacket(packet)
+  S->>DEV: RAW TCP 写出
+  DEV-->>S: 执行/可选应答(设备侧)
+  S-->>GW: 写入结果
   GW-->>API: 200 OK
 ```
 
 ## 9. 参考
 - 协议文档：`docs/协议/AP3000-设备与服务器通信协议.md`
 - 配置：`configs/gateway.yaml`
-- 发送：`pkg/gateway/device_gateway.go`、`pkg/network/tcp_writer.go`
-- 构包：`pkg/protocol/dny_packet.go`
+- 发送：`pkg/network/unified_sender.go`、`pkg/network/tcp_writer.go`
+- 构包：`pkg/protocol/unified_dny_builder.go`
 
 ## 10. 智能降功率（基于 0x82 过载功率）
 

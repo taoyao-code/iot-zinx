@@ -22,8 +22,8 @@ TCP连接建立 → OnConnStart回调 → tcpManager.RegisterConnection()
 
 **关键组件**：
 - `internal/ports/tcp_server.go` - TCP服务器配置和连接钩子
-- `pkg/core/tcp_manager.go` - 连接注册和管理
-- `pkg/network/connection_hooks.go` - 连接生命周期回调
+- `pkg/core/tcp_manager.go` - 连接注册和管理（单一数据源：connections/deviceGroups/deviceIndex）
+- `internal/infrastructure/zinx_server/handlers/*` - 协议帧解析入口
 
 **数据结构**：
 ```go
@@ -89,7 +89,7 @@ type Device struct {
 → 连接会话活动时间更新 → 设备状态：在线
 ```
 
-**支持的心跳类型**：
+**支持的心跳类型（对齐 AP3000）**：
 - 标准心跳包 (0x01)
 - 主机心跳包 (0x11) 
 - 简化心跳包 (0x21)
@@ -112,8 +112,8 @@ API请求 → 智能DeviceID处理 → tcpManager.GetDeviceByID()
 - 支持8位十六进制：`04A26CF3`
 
 **API端点**：
-- `GET /api/v1/device/{id}/status` - 设备状态查询
-- `GET /api/v1/device/{id}/detail` - 设备详情查询
+- `GET /api/v1/device/{id}/status` - 设备状态查询（数据源：`core.TCPManager`）
+- `GET /api/v1/device/{id}/detail` - 设备详情查询（数据源：`core.TCPManager`）
 - `POST /api/v1/charging/start` - 开始充电 → 指令 0x82
 - `POST /api/v1/charging/stop` - 停止充电 → 指令 0x82
 - `POST /api/v1/device/locate` - 设备定位 → 指令 0x96
@@ -126,13 +126,14 @@ API请求 → 智能DeviceID处理 → tcpManager.GetDeviceByID()
 ```
 
 **关键组件**：
-- `pkg/gateway/device_gateway.go` - 设备网关接口（含 0x82/0x96 构包）
-- `pkg/network/tcp_writer.go` - 统一发送通道（重试/写超时）
-- `pkg/protocol/dny_packet.go` - DNY协议构建（小端、校验）
+- `pkg/gateway/send.go` - 统一发送入口（节流≥0.5s、消息ID）
+- `pkg/gateway/control.go` - 业务命令封装（0x96 等）
+- `pkg/protocol/unified_dny_builder.go` - DNY统一构建（小端、长度含校验）
+- `pkg/network/unified_sender.go`/`pkg/network/tcp_writer.go` - 统一发送（RAW TCP、写超时、重试/退避）
 
 ## 数据存储架构
 
-### 三层映射结构
+### 三层映射结构（来自 `core.TCPManager` 单一数据源）
 
 ```go
 type TCPManager struct {
@@ -161,7 +162,12 @@ type TCPManager struct {
 2. **数据一致性**：Device作为设备信息的单一来源
 3. **并发安全**：所有共享数据都有适当的保护机制
 4. **接口统一**：所有模块通过TCPManager访问数据
-5. **错误处理**：完善的错误处理和日志记录机制
+5. **错误处理**：完善的错误处理和日志记录机制；DNY包校验失败/长度不符/端口越界必须拒发
+
+## 唯一发送链路（删除过时引用）
+
+- 统一链路：HTTP API → DeviceGateway → UnifiedDNYBuilder → UnifiedSender/TCPWriter → RAW TCP → 设备
+- 删除过时引用：原 `pkg/protocol/dny_packet.go` 作为基础类型保留，构包以 `unified_dny_builder.go` 为唯一来源；发送仅经 `unified_sender.go`/`tcp_writer.go`，禁止二次封装。
 
 ## 性能优化
 
