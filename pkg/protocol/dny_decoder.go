@@ -80,6 +80,41 @@ func (d *DNY_Decoder) Intercept(chain ziface.IChain) ziface.IcResp {
 		"dataString": d.safeStringConvert(rawData),
 	}).Debug("解码器：接收到原始数据")
 
+	// 先快速检测非DNY直传报文：ICCID 与 link 心跳（AP3000 规定）
+	if iccid := d.tryParseICCIDDirect(rawData, connID); iccid != nil {
+		// 记录到通信日志
+		logger.LogReceiveData(connID, len(iccid), "ICCID", string(iccid), 0)
+		logger.WithFields(logrus.Fields{
+			"connID": connID,
+			"iccid":  string(iccid),
+		}).Info("解码器：成功解析ICCID消息")
+
+		iMessage.SetMsgID(constants.MsgIDICCID)
+		iMessage.SetData(iccid)
+		iMessage.SetDataLen(uint32(len(iccid)))
+		return chain.ProceedWithIMessage(iMessage, &dny_protocol.Message{
+			MessageType: "iccid",
+			RawData:     iccid,
+			ICCIDValue:  string(iccid),
+		})
+	}
+
+	if link := d.tryParseLinkHeartbeatDirect(rawData, connID); link != nil {
+		logger.LogReceiveData(connID, len(link), "LINK_HEARTBEAT", "", 0)
+		logger.WithFields(logrus.Fields{
+			"connID":  connID,
+			"content": string(link),
+		}).Info("解码器：成功解析link心跳包")
+
+		iMessage.SetMsgID(constants.MsgIDLinkHeartbeat)
+		iMessage.SetData(link)
+		iMessage.SetDataLen(uint32(len(link)))
+		return chain.ProceedWithIMessage(iMessage, &dny_protocol.Message{
+			MessageType: "heartbeat_link",
+			RawData:     link,
+		})
+	}
+
 	// 🔧 新实现：使用多包分割器处理TCP流数据
 	messages, remaining, err := ParseMultiplePackets(rawData)
 	if err != nil {
