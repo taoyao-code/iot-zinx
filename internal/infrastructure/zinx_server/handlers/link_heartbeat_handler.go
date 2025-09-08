@@ -8,7 +8,7 @@ import (
 	"github.com/bujia-iot/iot-zinx/internal/infrastructure/config"
 	"github.com/bujia-iot/iot-zinx/internal/infrastructure/logger"
 	"github.com/bujia-iot/iot-zinx/pkg/constants"
-	"github.com/bujia-iot/iot-zinx/pkg/core"
+	"github.com/bujia-iot/iot-zinx/pkg/network"
 	"github.com/bujia-iot/iot-zinx/pkg/protocol"
 	"github.com/sirupsen/logrus"
 )
@@ -77,19 +77,8 @@ func (h *LinkHeartbeatHandler) Handle(request ziface.IRequest) {
 		return
 	}
 
-	// 🚀 统一架构：使用TCPManager统一的心跳更新机制，移除冗余网络调用
-	if decodedFrame.DeviceID != "" {
-		tcpManager := core.GetGlobalTCPManager()
-		if tcpManager != nil {
-			if err := tcpManager.UpdateHeartbeat(decodedFrame.DeviceID); err != nil {
-				logger.WithFields(logrus.Fields{
-					"connID":   conn.GetConnID(),
-					"deviceID": decodedFrame.DeviceID,
-					"error":    err,
-				}).Warn("更新TCPManager心跳失败")
-			}
-		}
-	}
+	// 连接级 keepalive：仅更新连接活跃度，不更新设备心跳（一个ICCID可对应多设备）
+	network.UpdateConnectionActivity(conn)
 
 	// 2. 重置TCP ReadDeadline - 使用优化后的配置
 	defaultReadDeadlineSeconds := config.GetConfig().TCPServer.DefaultReadDeadlineSeconds

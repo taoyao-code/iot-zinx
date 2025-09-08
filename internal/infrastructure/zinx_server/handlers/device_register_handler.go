@@ -437,10 +437,10 @@ func (h *DeviceRegisterHandler) analyzeRegistrationRequest(deviceId string, conn
 		decision.TimeSinceLastReg = timeSinceLastActivity
 
 	case timeSinceLastActivity > 5*time.Minute:
-		// 超过5分钟的重新注册 - 正常的周期性注册
-		decision.Action = "accept"
-		decision.Reason = "周期性重新注册"
-		decision.ShouldNotifyBusiness = true
+		// 同连接超过5分钟的再次注册：视为周期性状态更新，避免对外重复推送
+		decision.Action = "update"
+		decision.Reason = "同连接周期性注册，视为状态更新"
+		decision.ShouldNotifyBusiness = false
 		decision.TimeSinceLastReg = timeSinceLastActivity
 
 	default:

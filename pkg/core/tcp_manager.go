@@ -326,16 +326,29 @@ func (m *TCPManager) RegisterDevice(conn ziface.IConnection, deviceID, physicalI
 				deviceGroup.Devices = make(map[string]*Device)
 			}
 
-			// 🔧 修复：只存储设备信息，不存储Session映射
-			deviceGroup.Devices[deviceID] = &Device{
-				DeviceID:     deviceID,
-				PhysicalID:   expectedPhysicalID,
-				ICCID:        iccid,
-				Status:       constants.DeviceStatusOnline,
-				State:        constants.StateRegistered,
-				RegisteredAt: time.Now(),
-				LastActivity: time.Now(),
-				Properties:   make(map[string]interface{}),
+			// 就地更新已有设备，避免覆盖历史字段；不存在则创建
+			if existing, ok := deviceGroup.Devices[deviceID]; ok && existing != nil {
+				existing.Lock()
+				existing.PhysicalID = expectedPhysicalID
+				existing.ICCID = iccid
+				existing.Status = constants.DeviceStatusOnline
+				existing.State = constants.StateRegistered
+				existing.LastActivity = time.Now()
+				if existing.Properties == nil {
+					existing.Properties = make(map[string]interface{})
+				}
+				existing.Unlock()
+			} else {
+				deviceGroup.Devices[deviceID] = &Device{
+					DeviceID:     deviceID,
+					PhysicalID:   expectedPhysicalID,
+					ICCID:        iccid,
+					Status:       constants.DeviceStatusOnline,
+					State:        constants.StateRegistered,
+					RegisteredAt: time.Now(),
+					LastActivity: time.Now(),
+					Properties:   make(map[string]interface{}),
+				}
 			}
 			deviceGroup.LastActivity = time.Now()
 		} else {

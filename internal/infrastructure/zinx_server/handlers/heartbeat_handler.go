@@ -8,6 +8,7 @@ import (
 
 	"github.com/aceld/zinx/ziface"
 	"github.com/bujia-iot/iot-zinx/internal/domain/dny_protocol"
+	"github.com/bujia-iot/iot-zinx/internal/infrastructure/config"
 	"github.com/bujia-iot/iot-zinx/internal/infrastructure/logger"
 	"github.com/bujia-iot/iot-zinx/pkg/constants"
 	"github.com/bujia-iot/iot-zinx/pkg/core"
@@ -252,6 +253,15 @@ func (h *HeartbeatHandler) processHeartbeat(decodedFrame *protocol.DecodedDNYFra
 
 	// 发送设备心跳通知
 	h.sendDeviceHeartbeatNotification(decodedFrame, conn, deviceId, iccid, data)
+
+	// 重置TCP ReadDeadline，避免读超时导致误断连
+	if tcpConn := conn.GetConnection(); tcpConn != nil {
+		defaultReadDeadlineSeconds := config.GetConfig().TCPServer.DefaultReadDeadlineSeconds
+		if defaultReadDeadlineSeconds <= 0 {
+			defaultReadDeadlineSeconds = 300
+		}
+		_ = tcpConn.SetReadDeadline(time.Now().Add(time.Duration(defaultReadDeadlineSeconds) * time.Second))
+	}
 }
 
 // updateHeartbeatTime 更新心跳时间 - 使用统一架构
